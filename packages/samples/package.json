@@ -1,0 +1,20 @@
+{
+  "name": "@veliche/samples",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "run:cart": "ts-node -r tsconfig-paths/register src/cart/main.ts --watch",
+    "build": "tsc",
+    "lint": "eslint . --max-warnings 0"
+  },
+  "dependencies": {
+    "@veliche/core": "workspace:*"
+  },
+  "devDependencies": {
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3",
+    "ts-node": "^10.9.2",
+    "@types/node": "^20.11.17",
+    "tsconfig-paths": "^4.2.0"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "@veliche/core",
+  "version": "0.0.0",
+  "private": true,
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "lint": "eslint . --max-warnings 0",
+    "build": "tsc",
+    "build:watch": "tsc --watch"
+  },
+  "devDependencies": {
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3"
+  }
+}
