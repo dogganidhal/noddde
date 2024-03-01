@@ -1,6 +1,6 @@
 import { Cart } from "./aggregate";
 import { CartCreatedEvent, CartItemsAddedEvent } from "./events";
-import { CommandHandler, TargetedCommand } from "@veliche/core";
+import { CommandHandler, TargetedCommand } from "@noddde/core";
 
 export interface CreateCartCommand {}
 

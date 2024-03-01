@@ -1,5 +1,5 @@
 {
-  "extends": "@veliche/typescript-config/base.json",
+  "extends": "@noddde/typescript-config/base.json",
   "compilerOptions": {
     "target": "es2017",
     "outDir": "dist"

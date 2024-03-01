@@ -1,5 +1,5 @@
 import { Event } from "./event";
-import { VInfrastructure } from "../infrastructure";
+import { CQRSInfrastructure } from "../infrastructure";
 import {
   AggregateRoot,
   ExtractAggregateInfrastructure,
@@ -12,7 +12,8 @@ export type EventHandler<
 > = (
   event: TEvent,
   state: ExtractAggregateState<TAggregate>,
-  infrastructure: ExtractAggregateInfrastructure<TAggregate> & VInfrastructure,
+  infrastructure: ExtractAggregateInfrastructure<TAggregate> &
+    CQRSInfrastructure,
 ) =>
   | ExtractAggregateState<TAggregate>
   | Promise<ExtractAggregateState<TAggregate>>;

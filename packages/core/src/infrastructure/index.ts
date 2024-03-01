@@ -4,7 +4,7 @@ import { AggregateRoot, ExtractAggregateState } from "../ddd";
 
 export type Infrastructure = {};
 
-export interface VInfrastructure {
+export interface CQRSInfrastructure {
   commandBus: CommandBus;
   eventBus: EventBus;
 }

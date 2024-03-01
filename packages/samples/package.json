@@ -1,5 +1,5 @@
 {
-  "name": "@veliche/samples",
+  "name": "@noddde/samples",
   "version": "0.0.0",
   "private": true,
   "scripts": {
@@ -8,7 +8,6 @@
     "lint": "eslint . --max-warnings 0"
   },
   "dependencies": {
-    "@veliche/core": "workspace:*"
   },
   "devDependencies": {
     "eslint": "^8.56.0",

@@ -4,7 +4,7 @@ export interface CommandBus {
   dispatch: <TCommand extends Command>(
     name: string,
     command: TCommand,
-  ) => TCommand extends TargetedCommand ? void : Promise<string>;
+  ) => Promise<TCommand extends TargetedCommand ? void : string>;
 }
 
 export const getCommandBus = (): CommandBus => {

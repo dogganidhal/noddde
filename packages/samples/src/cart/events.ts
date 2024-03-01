@@ -1,5 +1,5 @@
 import { Cart } from "./aggregate";
-import { Event, EventHandler } from "@veliche/core";
+import { Event, EventHandler } from "@noddde/core";
 
 export interface CartCreatedEvent extends Event {}
 

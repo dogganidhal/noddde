@@ -1,57 +1,80 @@
-import { Infrastructure, VInfrastructure } from "../infrastructure";
-import { AggregateRoot } from "../ddd";
-import { EventBus } from "../edd";
-import { CommandBus } from "../cqrs";
+import { CQRSInfrastructure, Infrastructure } from "../infrastructure";
 import { EventEmitterEventBus } from "./implementations/ee-event-bus";
 import { InMemoryCommandBus } from "./implementations/in-memory-command-bus";
+import {
+  DomainConfig,
+  PerAggregatePersistenceConfig,
+  PersistenceConfig,
+} from "./types";
+import { InMemoryAggregatePersistence } from "./implementations/in-memory-aggregate-persistence";
+import { AggregateLoader } from "./aggregate-loader";
 
-type AggregateMap<TInfrastructure extends Infrastructure> = Record<
-  string | symbol,
-  AggregateRoot<any, TInfrastructure>
->;
+export class Domain<TInfrastructure extends Infrastructure> {
+  private _infrastructure!: TInfrastructure & CQRSInfrastructure;
+  private _persistence!: PersistenceConfig;
 
-interface VConfig<TInfrastructure extends Infrastructure> {
-  aggregates: AggregateMap<TInfrastructure>;
-  createInfrastructure?: () => Promise<TInfrastructure> | TInfrastructure;
-  eventBus?: () => EventBus;
-  commandBus?: () => CommandBus;
-}
-
-export class VEngine<TInfrastructure extends Infrastructure = Infrastructure> {
-  public readonly infrastructure: VInfrastructure & TInfrastructure;
-
-  private constructor(
-    public readonly aggregates: AggregateMap<TInfrastructure>,
-    userProvidedInfrastructure: TInfrastructure,
-    config: VConfig<TInfrastructure>,
-  ) {
-    this.infrastructure = {
-      eventBus: config.eventBus
-        ? config.eventBus()
-        : new EventEmitterEventBus(this),
-      commandBus: config.commandBus
-        ? config.commandBus()
-        : new InMemoryCommandBus(this),
-      ...userProvidedInfrastructure,
-    };
+  public get infrastructure(): TInfrastructure & CQRSInfrastructure {
+    return this._infrastructure;
   }
 
-  public static async create<TInfrastructure extends Infrastructure>(
-    config: VConfig<TInfrastructure>,
-  ) {
-    const userProvidedInfrastructure = config.createInfrastructure
-      ? await config.createInfrastructure()
-      : {};
-    return new VEngine(config.aggregates, userProvidedInfrastructure, config);
+  public get aggregateDefinitions() {
+    return this.config.aggregates;
+  }
+
+  constructor(private readonly config: DomainConfig<TInfrastructure>) {}
+
+  public async init(): Promise<void> {
+    const providedInfrastructure = this.config.createInfrastructure
+      ? await this.config.createInfrastructure()
+      : ({} as TInfrastructure);
+    this._infrastructure = {
+      eventBus: this.config.eventBus
+        ? await this.config.eventBus(providedInfrastructure)
+        : new EventEmitterEventBus(this),
+      commandBus: this.config.commandBus
+        ? await this.config.commandBus(providedInfrastructure)
+        : new InMemoryCommandBus(this),
+      ...providedInfrastructure,
+    };
+    this.config.persistence
+      ? (this._persistence = await this.config.persistence(
+          this._infrastructure,
+        ))
+      : new InMemoryAggregatePersistence();
+  }
+
+  public async loadAggregate<TState = {}>(
+    aggregateName: string,
+    id: string,
+  ): Promise<TState | null> {
+    let loader: AggregateLoader;
+
+    if (typeof this._persistence === "object") {
+      const aggregateSpecificLoader = (
+        this._persistence as PerAggregatePersistenceConfig
+      )[aggregateName];
+
+      if (!aggregateSpecificLoader) {
+        throw new Error(
+          `No persistence loader found for aggregate ${aggregateName}`,
+        );
+      }
+
+      loader = aggregateSpecificLoader;
+    } else {
+      loader = this._persistence as AggregateLoader;
+    }
+
+    return loader.load(aggregateName, id);
   }
 }
 
 declare global {
-  var v: VEngine<any>;
+  var domain: Domain<any>;
 }
 
-export const initV = async <TInfrastructure extends Infrastructure>(
-  config: VConfig<TInfrastructure>,
+export const initDomain = async <TInfrastructure extends Infrastructure>(
+  config: DomainConfig<TInfrastructure>,
 ) => {
-  global.v = await VEngine.create(config);
+  global.domain = new Domain(config);
 };

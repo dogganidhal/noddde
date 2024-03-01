@@ -1,7 +1,7 @@
 import { DemoInfrastructure } from "./infrastructure";
 import { addItemCommandHandler, createCartCommandHandler } from "./commands";
 import { cartCreatedEventHandler, cartItemsAddedEventHandler } from "./events";
-import { AggregateRoot } from "@veliche/core";
+import { AggregateRoot } from "@noddde/core";
 
 export interface CartState {
   id: string;

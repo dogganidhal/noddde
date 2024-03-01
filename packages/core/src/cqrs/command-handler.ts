@@ -1,21 +1,31 @@
 import { ExtractAggregateInfrastructure, ExtractAggregateState } from "../ddd";
 import { AggregateRoot, Command, TargetedCommand } from "..";
-import { VInfrastructure } from "../infrastructure";
+import { CQRSInfrastructure } from "../infrastructure";
+
+export type TargetedCommandHandler<
+  TCommand extends Command,
+  TAggregate extends AggregateRoot<any>,
+> = (
+  command: TCommand,
+  state: ExtractAggregateState<TAggregate>,
+  infrastructure: ExtractAggregateInfrastructure<TAggregate> &
+    CQRSInfrastructure,
+) => void | Promise<void>;
+
+export type CreationCommandHandler<
+  TCommand extends Command,
+  TAggregate extends AggregateRoot<any>,
+> = (
+  command: TCommand,
+  infrastructure: ExtractAggregateInfrastructure<TAggregate> &
+    CQRSInfrastructure,
+) =>
+  | ExtractAggregateState<TAggregate>
+  | Promise<ExtractAggregateState<TAggregate>>;
 
 export type CommandHandler<
   TCommand extends Command,
-  TAggregate extends AggregateRoot<any, any>,
+  TAggregate extends AggregateRoot<any>,
 > = TCommand extends TargetedCommand
-  ? (
-      command: TCommand,
-      state: ExtractAggregateState<TAggregate>,
-      infrastructure: ExtractAggregateInfrastructure<TAggregate> &
-        VInfrastructure,
-    ) => void | Promise<void>
-  : (
-      command: TCommand,
-      infrastructure: ExtractAggregateInfrastructure<TAggregate> &
-        VInfrastructure,
-    ) =>
-      | ExtractAggregateState<TAggregate>
-      | Promise<ExtractAggregateState<TAggregate>>;
+  ? TargetedCommandHandler<TCommand, TAggregate>
+  : CreationCommandHandler<TCommand, TAggregate>;

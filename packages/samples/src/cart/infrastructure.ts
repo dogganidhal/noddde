@@ -1,4 +1,4 @@
-import { Infrastructure } from "@veliche/core";
+import { Infrastructure } from "@noddde/core";
 
 export interface DemoRepository {
   save: (id: string, state: any) => Promise<void>;

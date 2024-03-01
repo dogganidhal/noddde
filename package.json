@@ -1,5 +1,5 @@
 {
-  "name": "veliche",
+  "name": "noddde",
   "private": true,
   "scripts": {
     "build": "turbo build",
@@ -8,8 +8,8 @@
     "format": "prettier --write \"**/*.{ts,tsx,md}\""
   },
   "devDependencies": {
-    "@veliche/eslint-config": "*",
-    "@veliche/typescript-config": "*",
+    "@noddde/eslint-config": "*",
+    "@noddde/typescript-config": "*",
     "prettier": "^3.1.1",
     "turbo": "latest"
   },

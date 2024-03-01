@@ -1,32 +1,55 @@
-import { Command, CommandBus, TargetedCommand } from "../../cqrs";
-import { VEngine } from "../index";
+import {
+  Command,
+  CommandBus,
+  CommandHandler,
+  CreationCommandHandler,
+  isCreationCommand,
+  TargetedCommand,
+  TargetedCommandHandler,
+} from "../../cqrs";
+import { Domain } from "../index";
 
 export class InMemoryCommandBus implements CommandBus {
-  private readonly commandHandlerMap: Map<
-    string,
-    (command: Command) => void | Promise<string>
-  > = new Map();
+  private readonly commandHandlerMap: Map<string, CommandHandler<any, any>> =
+    new Map();
 
-  constructor(private readonly engine: VEngine) {}
+  constructor(private readonly domain: Domain<any>) {}
 
-  public dispatch<TCommand extends Command>(
+  public async dispatch<TCommand extends Command>(
     name: string,
     command: TCommand,
-  ): TCommand extends TargetedCommand ? void : Promise<string> {
+  ): Promise<TCommand extends TargetedCommand ? void : string> {
     const handler = this.commandHandlerMap.get(name);
 
     if (!handler) {
       throw new Error(`No handler found for command ${name}`);
     }
 
-    const result = handler(command);
-
-    if (!("targetAggregateId" in command)) {
-      return undefined as TCommand extends TargetedCommand
-        ? void
-        : Promise<string>;
+    if (isCreationCommand(command)) {
+      return (await (handler as CreationCommandHandler<TCommand, any>)(
+        command,
+        this.domain.infrastructure,
+      )) as TCommand extends TargetedCommand ? void : string;
     }
 
-    return result as TCommand extends TargetedCommand ? void : Promise<string>;
+    const { targetAggregateId: aggregateId } = command as TargetedCommand;
+
+    const aggregate = this.domain.aggregateDefinitions[name];
+
+    if (!aggregate) {
+      throw new Error(`Aggregate ${name} not recognized`);
+    }
+
+    const state = await this.domain.loadAggregate(name, aggregateId);
+
+    if (!state) {
+      throw new Error(`Aggregate ${name} with id ${aggregateId} not found`);
+    }
+
+    return (await (handler as TargetedCommandHandler<TCommand, any>)(
+      command,
+      state,
+      this.domain.infrastructure,
+    )) as TCommand extends TargetedCommand ? void : string;
   }
 }

@@ -1,6 +1,6 @@
-import { getCommandBus, initV } from "@veliche/core";
+import { getCommandBus, initDomain } from "@noddde/core";
 import { Cart } from "./aggregate";
-import { DemoRepository, DemoInfrastructure } from "./infrastructure";
+import { DemoInfrastructure, DemoRepository } from "./infrastructure";
 
 class InMemoryDemoRepository implements DemoRepository {
   private storage: Record<string, any> = {};
@@ -14,7 +14,7 @@ class InMemoryDemoRepository implements DemoRepository {
   }
 }
 
-initV<DemoInfrastructure>({
+initDomain<DemoInfrastructure>({
   aggregates: {
     Cart,
   },
