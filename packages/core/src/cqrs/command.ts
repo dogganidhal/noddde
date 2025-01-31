@@ -1,15 +1,31 @@
-export interface TargetedCommand {
-  targetAggregateId: string;
+import {
+  AggregateRoot,
+  InferAggregateCommandNames,
+  InferAggregateID,
+} from "../ddd";
+
+export interface Command<TCommandNames extends string | symbol = string> {
+  name: TCommandNames;
+  payload?: any;
 }
 
-export interface CreationCommand {}
+export interface LiveAggregateCommand<TAggregate extends AggregateRoot>
+  extends Command<InferAggregateCommandNames<TAggregate>> {
+  targetAggregateId: InferAggregateID<TAggregate>;
+}
 
-export type Command = TargetedCommand | CreationCommand;
+export interface CreateAggregateCommand<TAggregate extends AggregateRoot>
+  extends Command<InferAggregateCommandNames<TAggregate>> {}
 
-export const isTargetedCommand = (
-  command: Command,
-): command is TargetedCommand => "targetAggregateId" in command;
+export type RoutedCommand<TAggregate extends AggregateRoot> =
+  | LiveAggregateCommand<TAggregate>
+  | CreateAggregateCommand<TAggregate>;
 
-export const isCreationCommand = (
-  command: Command,
-): command is CreationCommand => !("targetAggregateId" in command);
+export type ExternalCommand = Command;
+
+export type CommandResult<TCommand extends Command> =
+  TCommand extends RoutedCommand<infer TAggregate>
+    ? TCommand extends CreateAggregateCommand<TAggregate>
+      ? InferAggregateID<TAggregate>
+      : void
+    : void;

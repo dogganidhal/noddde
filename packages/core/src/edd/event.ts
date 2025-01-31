@@ -1,5 +1,4 @@
-// @ts-ignore
 export type Event = {
-  aggregateName: string;
-  aggregateId: string;
+  name: string;
+  payload: any;
 };

@@ -1,31 +1,47 @@
-import { ExtractAggregateInfrastructure, ExtractAggregateState } from "../ddd";
-import { AggregateRoot, Command, TargetedCommand } from "..";
+import {
+  InferAggregateID,
+  InferAggregateInfrastructure,
+  InferAggregateState,
+} from "../ddd";
+import {
+  AggregateRoot,
+  RoutedCommand,
+  Infrastructure,
+  LiveAggregateCommand,
+  ExternalCommand,
+  CreateAggregateCommand,
+} from "..";
 import { CQRSInfrastructure } from "../infrastructure";
 
-export type TargetedCommandHandler<
-  TCommand extends Command,
-  TAggregate extends AggregateRoot<any>,
+export type LiveAggregateCommandHandler<
+  TCommand extends LiveAggregateCommand<TAggregate>,
+  TAggregate extends AggregateRoot,
 > = (
-  command: TCommand,
-  state: ExtractAggregateState<TAggregate>,
-  infrastructure: ExtractAggregateInfrastructure<TAggregate> &
-    CQRSInfrastructure,
+  command: TCommand["payload"],
+  state: InferAggregateState<TAggregate>,
+  infrastructure: InferAggregateInfrastructure<TAggregate> & CQRSInfrastructure,
 ) => void | Promise<void>;
 
-export type CreationCommandHandler<
-  TCommand extends Command,
-  TAggregate extends AggregateRoot<any>,
+export type CreateAggregateCommandHandler<
+  TCommand extends CreateAggregateCommand<TAggregate>,
+  TAggregate extends AggregateRoot,
+> = (
+  command: TCommand["payload"],
+  infrastructure: InferAggregateInfrastructure<TAggregate> & CQRSInfrastructure,
+) => InferAggregateID<TAggregate> | Promise<InferAggregateID<TAggregate>>;
+
+export type RoutedCommandHandler<
+  TCommand extends RoutedCommand<TAggregate>,
+  TAggregate extends AggregateRoot,
+> =
+  TCommand extends LiveAggregateCommand<TAggregate>
+    ? LiveAggregateCommandHandler<TCommand, TAggregate>
+    : CreateAggregateCommandHandler<TCommand, TAggregate>;
+
+export type ExternalCommandHandler<
+  TInfrastructure extends Infrastructure,
+  TCommand extends ExternalCommand,
 > = (
   command: TCommand,
-  infrastructure: ExtractAggregateInfrastructure<TAggregate> &
-    CQRSInfrastructure,
-) =>
-  | ExtractAggregateState<TAggregate>
-  | Promise<ExtractAggregateState<TAggregate>>;
-
-export type CommandHandler<
-  TCommand extends Command,
-  TAggregate extends AggregateRoot<any>,
-> = TCommand extends TargetedCommand
-  ? TargetedCommandHandler<TCommand, TAggregate>
-  : CreationCommandHandler<TCommand, TAggregate>;
+  infrastructure: TInfrastructure & CQRSInfrastructure,
+) => void | Promise<void>;

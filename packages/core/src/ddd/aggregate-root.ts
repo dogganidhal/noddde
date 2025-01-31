@@ -1,31 +1,55 @@
 import { Infrastructure } from "../index";
-import { CommandHandler } from "../cqrs";
-import { EventHandler } from "../edd";
+import { RoutedCommandHandler } from "../cqrs";
+import { EventHandler, EventSourcingHandler } from "../edd";
 
-type EventHandlerMap<TAggregate extends AggregateRoot<any, any>> = Record<
-  string | symbol,
-  EventHandler<any, TAggregate>
->;
-type CommandHandlerMap<TAggregate extends AggregateRoot<any, any>> = Record<
-  string | symbol,
-  CommandHandler<any, TAggregate>
->;
+type EventHandlerMap<
+  TAggregate extends AggregateRoot,
+  TEventName extends string | symbol = string | symbol,
+> = {
+  [EventName in TEventName]?: EventHandler<any, TAggregate>;
+};
+type EventSourcingHandlerMap<
+  TAggregate extends AggregateRoot,
+  TEventName extends string | symbol = string | symbol,
+> = {
+  [EventName in TEventName]?: EventSourcingHandler<any, TAggregate>;
+};
+type CommandHandlerMap<
+  TAggregate extends AggregateRoot,
+  TEventName extends string | symbol = string | symbol,
+> = {
+  [CommandName in TEventName]?: RoutedCommandHandler<any, TAggregate>;
+};
 
-export interface AggregateRoot<
-  TState,
-  TInfrastructure extends Infrastructure = Infrastructure,
-> {
-  initialState: () => TState;
-  eventHandlers?: EventHandlerMap<this>;
-  commandHandlers?: CommandHandlerMap<this>;
-}
+export type InferAggregateID<TAggregate extends AggregateRoot> =
+  TAggregate extends AggregateRoot<infer TID> ? TID : never;
 
-export type ExtractAggregateState<TAggregate extends AggregateRoot<any, any>> =
-  TAggregate extends AggregateRoot<infer TState, any> ? TState : never;
+export type InferAggregateState<TAggregate extends AggregateRoot> =
+  TAggregate extends AggregateRoot<any, infer TState> ? TState : never;
 
-export type ExtractAggregateInfrastructure<
-  TAggregate extends AggregateRoot<any, any>,
-> =
-  TAggregate extends AggregateRoot<any, infer TInfrastructure>
+export type InferAggregateInfrastructure<TAggregate extends AggregateRoot> =
+  TAggregate extends AggregateRoot<any, any, infer TInfrastructure>
     ? TInfrastructure
     : never;
+
+export type InferAggregateEventNames<TAggregate extends AggregateRoot> =
+  TAggregate extends AggregateRoot<any, any, any, infer TEventNames>
+    ? TEventNames
+    : never;
+
+export type InferAggregateCommandNames<TAggregate extends AggregateRoot> =
+  TAggregate extends AggregateRoot<any, any, any, any, infer TCommandNames>
+    ? TCommandNames
+    : never;
+
+export interface AggregateRoot<
+  TID = string,
+  TState = any,
+  TInfrastructure extends Infrastructure = Infrastructure,
+  TEventNames extends string | symbol = string | symbol,
+  TCommandNames extends string | symbol = string | symbol,
+> {
+  commandHandlers?: CommandHandlerMap<this, TCommandNames>;
+  eventHandlers?: EventHandlerMap<this, TEventNames>;
+  eventSourcingHandlers?: EventSourcingHandlerMap<this, TEventNames>;
+}

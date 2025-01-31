@@ -3,11 +3,11 @@ import EventEmitter from "node:events";
 import { Domain } from "../index";
 
 export class EventEmitterEventBus extends EventEmitter implements EventBus {
-  constructor(private readonly engine: Domain<any>) {
+  constructor(private readonly domain: Domain<any>) {
     super();
   }
 
-  public dispatch<TEvent extends Event>(name: string, event: TEvent): void {
-    this.emit(name, event);
+  public async dispatch<TEvent extends Event>(event: TEvent): Promise<void> {
+    this.emit(event.name, event.payload);
   }
 }

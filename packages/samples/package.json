@@ -8,6 +8,7 @@
     "lint": "eslint . --max-warnings 0"
   },
   "dependencies": {
+    "@noddde/core": "0.0.0"
   },
   "devDependencies": {
     "eslint": "^8.56.0",

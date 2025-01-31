@@ -6,11 +6,11 @@ import {
   InferAggregateState,
 } from "../ddd";
 
-export type EventHandler<
+export type EventSourcingHandler<
   TEvent extends Event,
   TAggregate extends AggregateRoot,
 > = (
   event: TEvent["payload"],
   state: InferAggregateState<TAggregate>,
   infrastructure: InferAggregateInfrastructure<TAggregate> & CQRSInfrastructure,
-) => void | Promise<void>;
+) => InferAggregateState<TAggregate> | Promise<InferAggregateState<TAggregate>>;

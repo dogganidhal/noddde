@@ -1,12 +1,7 @@
-import { Command, TargetedCommand } from "./command";
+import { Command, CommandResult } from "./command";
 
 export interface CommandBus {
-  dispatch: <TCommand extends Command>(
-    name: string,
+  dispatch<TCommand extends Command>(
     command: TCommand,
-  ) => Promise<TCommand extends TargetedCommand ? void : string>;
+  ): Promise<CommandResult<TCommand>>;
 }
-
-export const getCommandBus = (): CommandBus => {
-  throw new Error("Not implemented");
-};
