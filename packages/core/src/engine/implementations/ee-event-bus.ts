@@ -1,9 +1,8 @@
 import { Event, EventBus } from "../../edd";
 import EventEmitter from "node:events";
-import { Domain } from "../index";
 
 export class EventEmitterEventBus extends EventEmitter implements EventBus {
-  constructor(private readonly domain: Domain<any>) {
+  constructor() {
     super();
   }
 

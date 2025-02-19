@@ -1,12 +1,12 @@
 import { Infrastructure } from "../index";
 import { RoutedCommandHandler } from "../cqrs";
-import { EventHandler, EventSourcingHandler } from "../edd";
+import { StatefulEventHandler, EventSourcingHandler } from "../edd";
 
 type EventHandlerMap<
   TAggregate extends AggregateRoot,
   TEventName extends string | symbol = string | symbol,
 > = {
-  [EventName in TEventName]?: EventHandler<any, TAggregate>;
+  [EventName in TEventName]?: StatefulEventHandler<any, TAggregate>;
 };
 type EventSourcingHandlerMap<
   TAggregate extends AggregateRoot,

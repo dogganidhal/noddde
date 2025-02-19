@@ -1,7 +1,10 @@
 import { Event } from "../../edd";
-import { EventSourcedAggregatePersistence } from "../domain";
+import {
+  EventSourcedAggregatePersistence,
+  StateStoredAggregatePersistence,
+} from "../domain";
 
-export class InMemoryAggregatePersistence
+export class InMemoryEventSourcedAggregatePersistence
   implements EventSourcedAggregatePersistence
 {
   public async load(aggregateName: string, aggregateId: any): Promise<Event[]> {
@@ -11,6 +14,21 @@ export class InMemoryAggregatePersistence
     aggregateName: string,
     aggregateId: string,
     events: Event[],
+  ): Promise<void> {
+    throw new Error("Not implemented");
+  }
+}
+
+export class InMemoryStateStoredAggregatePersistence
+  implements StateStoredAggregatePersistence
+{
+  public async load(aggregateName: string, aggregateId: any): Promise<any> {
+    throw new Error("Not implemented");
+  }
+  public async save(
+    aggregateName: string,
+    aggregateId: string,
+    state: any,
   ): Promise<void> {
     throw new Error("Not implemented");
   }

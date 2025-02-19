@@ -1,5 +1,5 @@
 import { BankAccount } from "./aggregate";
-import { Event, EventHandler } from "@noddde/core";
+import { Event, StatefulEventHandler } from "@noddde/core";
 
 export enum BankAccountEvents {
   BankAccountCreated = "BankAccountCreated",
@@ -45,28 +45,28 @@ export interface TransactionProcessedEvent extends Event {
   };
 }
 
-export const bankAccountCreatedEventHandler: EventHandler<
+export const bankAccountCreatedStatefulEventHandler: StatefulEventHandler<
   BankAccountCreatedEvent,
   typeof BankAccount
 > = (event, state, { logger }) => {
   logger.info(`Bank account ${event.id} created`);
 };
 
-export const transactionAuthorizedEventHandler: EventHandler<
+export const transactionAuthorizedStatefulEventHandler: StatefulEventHandler<
   TransactionAuthorizedEvent,
   typeof BankAccount
 > = (event, state, { logger }) => {
   logger.info(`Transaction ${event.id} authorized`);
 };
 
-export const transactionDeclinedEventHandler: EventHandler<
+export const transactionDeclinedStatefulEventHandler: StatefulEventHandler<
   TransactionDeclinedEvent,
   typeof BankAccount
 > = (event, state, { logger }) => {
   logger.warn(`Transaction ${event.id} declined`);
 };
 
-export const transactionProcessedEventHandler: EventHandler<
+export const transactionProcessedStatefulEventHandler: StatefulEventHandler<
   TransactionProcessedEvent,
   typeof BankAccount
 > = (event, state, { logger }) => {

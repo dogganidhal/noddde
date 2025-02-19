@@ -1,14 +1,16 @@
 import { CQRSInfrastructure, Infrastructure } from "../infrastructure";
-import { EventEmitterEventBus } from "./implementations/ee-event-bus";
-import { InMemoryCommandBus } from "./implementations/in-memory-command-bus";
-import { InMemoryAggregatePersistence } from "./implementations/in-memory-aggregate-persistence";
-import { AggregateRoot, InferAggregateID, InferAggregateState } from "../ddd";
-import { CommandBus, ExternalCommandHandler } from "../cqrs";
-import { Event, EventBus } from "../edd";
+import { AggregateRoot, Projection } from "../ddd";
+import { Command, CommandResult, StandaloneCommandHandler } from "../cqrs";
+import { Event } from "../edd";
+import { QueryHandler } from "../cqrs/query/query-handler";
 
 type AggregateMap<TInfrastructure extends Infrastructure> = Record<
   string | symbol,
   AggregateRoot<any, any, TInfrastructure>
+>;
+type ProjectionMap<TInfrastructure extends Infrastructure> = Record<
+  string | symbol,
+  Projection<TInfrastructure>
 >;
 
 export interface StateStoredAggregatePersistence {
@@ -32,31 +34,48 @@ type CreatePersistenceConfiguration<TInfrastructure extends Infrastructure> = (
   infrastructure: TInfrastructure,
 ) => Promise<PersistenceConfiguration> | PersistenceConfiguration;
 
-type ExternalCommandHandlerMap<
+type StandaloneCommandHandlerMap<
   TInfrastructure extends Infrastructure,
-  TExternalCommandNames extends string | symbol = string | symbol,
+  TStandaloneCommandNames extends string | symbol = string | symbol,
 > = {
-  [CommandName in TExternalCommandNames]?: ExternalCommandHandler<
+  [CommandName in TStandaloneCommandNames]?: StandaloneCommandHandler<
     TInfrastructure,
     any
   >;
 };
+type StandaloneQueryHandlerMap<
+  TInfrastructure extends Infrastructure,
+  TStandaloneQueryNames extends string | symbol = string | symbol,
+> = {
+  [QueryName in TStandaloneQueryNames]?: QueryHandler<TInfrastructure, any>;
+};
 
 export type DomainConfiguration<
   TInfrastructure extends Infrastructure,
-  TExternalCommandNames extends string | symbol = string | symbol,
+  TStandaloneCommandNames extends string | symbol = string | symbol,
+  TStandaloneQueryNames extends string | symbol = string | symbol,
 > = {
-  aggregates: AggregateMap<TInfrastructure>;
-  externalCommandHandlers?: ExternalCommandHandlerMap<
-    TInfrastructure,
-    TExternalCommandNames
-  >;
-  persistence?: CreatePersistenceConfiguration<TInfrastructure>;
-  createInfrastructure?: () => Promise<TInfrastructure> | TInfrastructure;
-  eventBus?: (infrastructure: TInfrastructure) => Promise<EventBus> | EventBus;
-  commandBus?: (
-    infrastructure: TInfrastructure,
-  ) => Promise<CommandBus> | CommandBus;
+  writeModel: {
+    aggregates: AggregateMap<TInfrastructure>;
+    standaloneCommandHandlers?: StandaloneCommandHandlerMap<
+      TInfrastructure,
+      TStandaloneCommandNames
+    >;
+  };
+  readModel: {
+    projections: ProjectionMap<TInfrastructure>;
+    standaloneQueryHandlers?: StandaloneQueryHandlerMap<
+      TInfrastructure,
+      TStandaloneQueryNames
+    >;
+  };
+  infrastructure: {
+    aggregatePersistence?: CreatePersistenceConfiguration<TInfrastructure>;
+    provideInfrastructure?: () => Promise<TInfrastructure> | TInfrastructure;
+    cqrsInfrastructure?: (
+      infrastructure: TInfrastructure,
+    ) => CQRSInfrastructure | Promise<CQRSInfrastructure>;
+  };
 };
 
 export class Domain<TInfrastructure extends Infrastructure> {
@@ -64,19 +83,11 @@ export class Domain<TInfrastructure extends Infrastructure> {
   private _persistence!: PersistenceConfiguration;
 
   private get aggregateDefinitions() {
-    return this.configuration.aggregates;
+    return this.configuration.writeModel.aggregates;
   }
 
   public get infrastructure(): TInfrastructure & CQRSInfrastructure {
     return this._infrastructure;
-  }
-
-  public get commandBus(): CommandBus {
-    return this._infrastructure.commandBus;
-  }
-
-  public get eventBus(): EventBus {
-    return this._infrastructure.eventBus;
   }
 
   constructor(
@@ -84,37 +95,21 @@ export class Domain<TInfrastructure extends Infrastructure> {
   ) {}
 
   public async init(): Promise<void> {
-    const providedInfrastructure =
-      (this.configuration.createInfrastructure?.() ?? {}) as TInfrastructure;
-    this._infrastructure = {
-      eventBus: this.configuration.eventBus
-        ? await this.configuration.eventBus(providedInfrastructure)
-        : new EventEmitterEventBus(this),
-      commandBus: this.configuration.commandBus
-        ? await this.configuration.commandBus(providedInfrastructure)
-        : new InMemoryCommandBus(this),
-      ...providedInfrastructure,
-    };
-    this.configuration.persistence
-      ? (this._persistence = await this.configuration.persistence(
-          this._infrastructure,
-        ))
-      : new InMemoryAggregatePersistence();
+    throw new Error("Not implemented");
   }
 
-  public async loadAggregate<TAggregate extends AggregateRoot>(
-    aggregateName: string,
-    id: InferAggregateID<TAggregate>,
-  ): Promise<InferAggregateState<TAggregate> | null> {
+  public async dispatchCommand<TCommand extends Command>(
+    command: TCommand,
+  ): Promise<CommandResult<TCommand>> {
     throw new Error("Not implemented");
   }
 }
 
 export const configureDomain = async <
   TInfrastructure extends Infrastructure,
-  TExternalCommandNames extends string | symbol = string | symbol,
+  TStandaloneCommandNames extends string | symbol = string | symbol,
 >(
-  configuration: DomainConfiguration<TInfrastructure, TExternalCommandNames>,
+  configuration: DomainConfiguration<TInfrastructure, TStandaloneCommandNames>,
 ): Promise<Domain<TInfrastructure>> => {
   const domain = new Domain(configuration);
   await domain.init();

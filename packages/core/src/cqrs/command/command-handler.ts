@@ -2,16 +2,16 @@ import {
   InferAggregateID,
   InferAggregateInfrastructure,
   InferAggregateState,
-} from "../ddd";
+} from "../../ddd";
 import {
   AggregateRoot,
   RoutedCommand,
   Infrastructure,
   LiveAggregateCommand,
-  ExternalCommand,
+  StandaloneCommand,
   CreateAggregateCommand,
-} from "..";
-import { CQRSInfrastructure } from "../infrastructure";
+} from "../../index";
+import { CQRSInfrastructure } from "../../infrastructure";
 
 export type LiveAggregateCommandHandler<
   TCommand extends LiveAggregateCommand<TAggregate>,
@@ -38,9 +38,9 @@ export type RoutedCommandHandler<
     ? LiveAggregateCommandHandler<TCommand, TAggregate>
     : CreateAggregateCommandHandler<TCommand, TAggregate>;
 
-export type ExternalCommandHandler<
+export type StandaloneCommandHandler<
   TInfrastructure extends Infrastructure,
-  TCommand extends ExternalCommand,
+  TCommand extends StandaloneCommand,
 > = (
   command: TCommand,
   infrastructure: TInfrastructure & CQRSInfrastructure,

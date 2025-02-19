@@ -1,8 +1,7 @@
-import { Command, CommandBus, CommandResult } from "../../cqrs";
-import { Domain } from "../index";
+import { Command, CommandBus, CommandResult } from "../../cqrs/command";
 
 export class InMemoryCommandBus implements CommandBus {
-  constructor(private readonly domain: Domain<any>) {}
+  constructor() {}
 
   public async dispatch<TCommand extends Command>(
     command: TCommand,
