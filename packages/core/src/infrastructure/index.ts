@@ -1,7 +1,6 @@
-import { CommandBus } from "../cqrs";
+import { CommandBus, QueryBus } from "../cqrs";
 import { EventBus } from "../edd";
 import { AggregateRoot, InferAggregateState } from "../ddd";
-import { QueryBus } from "../cqrs/query/query-bus";
 
 export type Infrastructure = {};
 

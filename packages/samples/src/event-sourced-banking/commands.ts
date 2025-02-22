@@ -1,29 +1,37 @@
 import { BankAccount } from "./aggregate";
 import { BankAccountEvents } from "./events";
-import { RoutedCommandHandler } from "@noddde/core";
+import {
+  CreateAggregateCommand,
+  RoutedCommandHandler,
+  LiveAggregateCommand,
+} from "@noddde/core";
 
 export enum BankAccountCommands {
   CreateBankAccount = "CreateBankAccount",
   AuthorizeTransaction = "AuthorizeTransaction",
 }
 
-export interface CreateBankAccountCommand {
+export interface CreateBankAccountCommand extends CreateAggregateCommand {
   name: BankAccountCommands.CreateBankAccount;
 }
 
-export interface AuthorizeTransactionCommand {
+export interface AuthorizeTransactionCommand
+  extends LiveAggregateCommand<typeof BankAccount> {
   name: BankAccountCommands.AuthorizeTransaction;
-  targetAggregateId: string;
   payload: {
     amount: number;
     merchant: string;
   };
 }
 
+export type BankAccountCommand =
+  | CreateBankAccountCommand
+  | AuthorizeTransactionCommand;
+
 export const createBankAccountCommandHandler: RoutedCommandHandler<
   CreateBankAccountCommand,
   typeof BankAccount
-> = async (_, { eventBus }) => {
+> = async (command, { eventBus }) => {
   const id = "00000000-0000-0000-0000-000000000000";
 
   await eventBus.dispatch({

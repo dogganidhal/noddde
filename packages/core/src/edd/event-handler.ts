@@ -1,18 +1,14 @@
 import { Event } from "./event";
 import { CQRSInfrastructure, Infrastructure } from "../infrastructure";
-import {
-  AggregateRoot,
-  InferAggregateInfrastructure,
-  InferAggregateState,
-} from "../ddd";
 
 export type StatefulEventHandler<
   TEvent extends Event,
-  TAggregate extends AggregateRoot,
+  TState,
+  TInfrastructure extends Infrastructure,
 > = (
   event: TEvent["payload"],
-  state: InferAggregateState<TAggregate>,
-  infrastructure: InferAggregateInfrastructure<TAggregate> & CQRSInfrastructure,
+  state: TState,
+  infrastructure: TInfrastructure & CQRSInfrastructure,
 ) => void | Promise<void>;
 
 export type EventHandler<

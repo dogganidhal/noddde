@@ -1,4 +1,5 @@
 import { BankAccountView, TransactionView } from "./queries";
+import { SetRequired } from "type-fest";
 
 export type Logger = {
   info: (message: string) => void;
@@ -8,12 +9,26 @@ export type Logger = {
 
 export interface BankAccountViewRepository {
   getById(id: string): Promise<BankAccountView>;
+  insert(bankAccount: BankAccountView): Promise<void>;
+  update(
+    bankAccount: SetRequired<Partial<BankAccountView>, "id">,
+  ): Promise<void>;
 }
 
 export class InMemoryBankAccountViewRepository
   implements BankAccountViewRepository
 {
   getById(id: string): Promise<BankAccountView> {
+    throw new Error("Method not implemented.");
+  }
+
+  insert(bankAccount: BankAccountView): Promise<void> {
+    throw new Error("Method not implemented.");
+  }
+
+  update(
+    bankAccount: SetRequired<Partial<BankAccountView>, "id">,
+  ): Promise<void> {
     throw new Error("Method not implemented.");
   }
 }

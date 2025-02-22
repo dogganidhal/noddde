@@ -1,16 +1,12 @@
+import { CQRSInfrastructure, Infrastructure } from "../infrastructure";
 import { Event } from "./event";
-import { CQRSInfrastructure } from "../infrastructure";
-import {
-  AggregateRoot,
-  InferAggregateInfrastructure,
-  InferAggregateState,
-} from "../ddd";
 
 export type EventSourcingHandler<
   TEvent extends Event,
-  TAggregate extends AggregateRoot,
+  TState,
+  TInfrastructure extends Infrastructure,
 > = (
   event: TEvent["payload"],
-  state: InferAggregateState<TAggregate>,
-  infrastructure: InferAggregateInfrastructure<TAggregate> & CQRSInfrastructure,
-) => InferAggregateState<TAggregate> | Promise<InferAggregateState<TAggregate>>;
+  state: TState,
+  infrastructure: TInfrastructure & CQRSInfrastructure,
+) => TState;

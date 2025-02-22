@@ -23,7 +23,7 @@ export type LiveAggregateCommandHandler<
 ) => void | Promise<void>;
 
 export type CreateAggregateCommandHandler<
-  TCommand extends CreateAggregateCommand<TAggregate>,
+  TCommand extends CreateAggregateCommand,
   TAggregate extends AggregateRoot,
 > = (
   command: TCommand["payload"],
@@ -31,7 +31,7 @@ export type CreateAggregateCommandHandler<
 ) => InferAggregateID<TAggregate> | Promise<InferAggregateID<TAggregate>>;
 
 export type RoutedCommandHandler<
-  TCommand extends RoutedCommand<TAggregate>,
+  TCommand extends RoutedCommand,
   TAggregate extends AggregateRoot,
 > =
   TCommand extends LiveAggregateCommand<TAggregate>

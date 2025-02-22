@@ -1,12 +1,12 @@
 import { BankingInfrastructure } from "./infrastructure";
 import {
   authorizeTransactionCommandHandler,
-  BankAccountCommands,
+  BankAccountCommand,
   createBankAccountCommandHandler,
 } from "./commands";
 import {
   bankAccountCreatedEventHandler,
-  BankAccountEvents,
+  BankAccountEvent,
   transactionAuthorizedEventHandler,
   transactionDeclinedEventHandler,
   transactionProcessedEventHandler,
@@ -28,6 +28,7 @@ export interface BankAccountState {
     timestamp: Date;
     amount: number;
     merchant: string;
+    status: "pending" | "processed" | "declined";
   }>;
 }
 
@@ -35,8 +36,8 @@ export const BankAccount: AggregateRoot<
   string,
   BankAccountState,
   BankingInfrastructure,
-  BankAccountEvents,
-  BankAccountCommands
+  BankAccountEvent,
+  BankAccountCommand
 > = {
   commandHandlers: {
     CreateBankAccount: createBankAccountCommandHandler,

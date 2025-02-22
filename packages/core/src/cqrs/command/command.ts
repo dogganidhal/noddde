@@ -1,31 +1,21 @@
-import {
-  AggregateRoot,
-  InferAggregateCommandNames,
-  InferAggregateID,
-} from "../../ddd";
-
-export interface Command<TCommandNames extends string | symbol = string> {
-  name: TCommandNames;
+export interface Command {
+  name: string;
   payload?: any;
 }
 
-export interface LiveAggregateCommand<TAggregate extends AggregateRoot>
-  extends Command<InferAggregateCommandNames<TAggregate>> {
-  targetAggregateId: InferAggregateID<TAggregate>;
+export interface LiveAggregateCommand<TID> extends Command {
+  targetAggregateId: TID;
 }
 
-export interface CreateAggregateCommand<TAggregate extends AggregateRoot>
-  extends Command<InferAggregateCommandNames<TAggregate>> {}
+export type CreateAggregateCommand = Command;
 
-export type RoutedCommand<TAggregate extends AggregateRoot> =
-  | LiveAggregateCommand<TAggregate>
-  | CreateAggregateCommand<TAggregate>;
+export type RoutedCommand = LiveAggregateCommand<any> | CreateAggregateCommand;
 
 export type StandaloneCommand = Command;
 
 export type CommandResult<TCommand extends Command> =
-  TCommand extends RoutedCommand<infer TAggregate>
-    ? TCommand extends CreateAggregateCommand<TAggregate>
-      ? InferAggregateID<TAggregate>
+  TCommand extends RoutedCommand
+    ? TCommand extends LiveAggregateCommand<infer TID>
+      ? TID
       : void
     : void;

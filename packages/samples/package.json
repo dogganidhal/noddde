@@ -8,13 +8,14 @@
     "lint": "eslint . --max-warnings 0"
   },
   "dependencies": {
-    "@noddde/core": "0.0.0"
+    "@noddde/core": "0.0.0",
+    "type-fest": "^4.35.0"
   },
   "devDependencies": {
-    "eslint": "^8.56.0",
-    "typescript": "^5.3.3",
-    "ts-node": "^10.9.2",
     "@types/node": "^20.11.17",
-    "tsconfig-paths": "^4.2.0"
+    "eslint": "^8.56.0",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "^5.3.3"
   }
 }

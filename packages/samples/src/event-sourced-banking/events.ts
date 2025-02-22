@@ -1,5 +1,6 @@
-import { BankAccount } from "./aggregate";
+import { BankAccountState } from "./aggregate";
 import { Event, StatefulEventHandler } from "@noddde/core";
+import { BankingInfrastructure } from "./infrastructure";
 
 export enum BankAccountEvents {
   BankAccountCreated = "BankAccountCreated",
@@ -45,30 +46,40 @@ export interface TransactionProcessedEvent extends Event {
   };
 }
 
-export const bankAccountCreatedStatefulEventHandler: StatefulEventHandler<
+export type BankAccountEvent =
+  | BankAccountCreatedEvent
+  | TransactionAuthorizedEvent
+  | TransactionDeclinedEvent
+  | TransactionProcessedEvent;
+
+export const bankAccountCreatedEventHandler: StatefulEventHandler<
   BankAccountCreatedEvent,
-  typeof BankAccount
+  BankAccountState,
+  BankingInfrastructure
 > = (event, state, { logger }) => {
   logger.info(`Bank account ${event.id} created`);
 };
 
-export const transactionAuthorizedStatefulEventHandler: StatefulEventHandler<
+export const transactionAuthorizedEventHandler: StatefulEventHandler<
   TransactionAuthorizedEvent,
-  typeof BankAccount
+  BankAccountState,
+  BankingInfrastructure
 > = (event, state, { logger }) => {
   logger.info(`Transaction ${event.id} authorized`);
 };
 
-export const transactionDeclinedStatefulEventHandler: StatefulEventHandler<
+export const transactionDeclinedEventHandler: StatefulEventHandler<
   TransactionDeclinedEvent,
-  typeof BankAccount
+  BankAccountState,
+  BankingInfrastructure
 > = (event, state, { logger }) => {
   logger.warn(`Transaction ${event.id} declined`);
 };
 
-export const transactionProcessedStatefulEventHandler: StatefulEventHandler<
+export const transactionProcessedEventHandler: StatefulEventHandler<
   TransactionProcessedEvent,
-  typeof BankAccount
+  BankAccountState,
+  BankingInfrastructure
 > = (event, state, { logger }) => {
   logger.info(`Transaction ${event.id} processed`);
 };

@@ -1,6 +1,6 @@
 import { Infrastructure } from "../infrastructure";
-import { EventHandler } from "../edd";
-import { QueryHandler } from "../cqrs/query/query-handler";
+import { EventHandler, Event } from "../edd";
+import { QueryHandler } from "../cqrs";
 
 type EventHandlerMap<
   TInfrastructure extends Infrastructure,
@@ -23,4 +23,8 @@ export type Projection<
 > = {
   eventHandlers: EventHandlerMap<TInfrastructure, TEventNames>;
   queryHandlers: QueryHandlerMap<TInfrastructure, TQueryNames>;
+};
+
+export type ProjectionV2<TEvent extends Event, TView = any> = {
+  reducer: (view: TView, event: TEvent) => TView;
 };

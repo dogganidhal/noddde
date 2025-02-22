@@ -1,4 +1,4 @@
-import { Command, CommandBus, CommandResult } from "../../cqrs/command";
+import { Command, CommandBus, CommandResult } from "../../cqrs";
 
 export class InMemoryCommandBus implements CommandBus {
   constructor() {}
