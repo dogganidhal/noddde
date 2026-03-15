@@ -12,8 +12,8 @@ import {
   InMemoryBankAccountViewRepository,
   InMemoryTransactionViewRepository,
 } from "./infrastructure";
-import { BankAccountCommands } from "./commands";
 import { BankAccount as BankAccountProjection } from "./projection";
+import { randomUUID } from "crypto";
 
 const main = async () => {
   const domain = await configureDomain<BankingInfrastructure>({
@@ -43,30 +43,35 @@ const main = async () => {
     },
   });
 
-  const bankAccountId = await domain.dispatchCommand({
-    name: BankAccountCommands.CreateBankAccount,
+  const bankAccountId = randomUUID();
+
+  await domain.dispatchCommand({
+    name: "CreateBankAccount",
+    targetAggregateId: bankAccountId,
   });
 
   await domain.dispatchCommand({
-    name: BankAccountCommands.AuthorizeTransaction,
+    name: "AuthorizeTransaction",
+    targetAggregateId: bankAccountId,
     payload: {
-      targetAggregateId: bankAccountId,
       amount: +100,
       merchant: "Internal transfer",
     },
   });
+
   await domain.dispatchCommand({
-    name: BankAccountCommands.AuthorizeTransaction,
+    name: "AuthorizeTransaction",
+    targetAggregateId: bankAccountId,
     payload: {
-      targetAggregateId: bankAccountId,
       amount: -50,
       merchant: "Amazon",
     },
   });
+
   await domain.dispatchCommand({
-    name: BankAccountCommands.AuthorizeTransaction,
+    name: "AuthorizeTransaction",
+    targetAggregateId: bankAccountId,
     payload: {
-      targetAggregateId: bankAccountId,
       amount: -60,
       merchant: "Fnac",
     },

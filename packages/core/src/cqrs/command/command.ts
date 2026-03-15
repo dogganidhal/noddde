@@ -3,19 +3,25 @@ export interface Command {
   payload?: any;
 }
 
-export interface LiveAggregateCommand<TID> extends Command {
+export interface AggregateCommand<TID = string> extends Command {
   targetAggregateId: TID;
 }
 
-export type CreateAggregateCommand = Command;
-
-export type RoutedCommand = LiveAggregateCommand<any> | CreateAggregateCommand;
-
 export type StandaloneCommand = Command;
 
-export type CommandResult<TCommand extends Command> =
-  TCommand extends RoutedCommand
-    ? TCommand extends LiveAggregateCommand<infer TID>
-      ? TID
-      : void
-    : void;
+// Builds a command union from a payload map.
+// Use `void` for commands with no payload.
+//
+//   type MyCommands = DefineCommands<{
+//     CreateThing: void;
+//     UpdateThing: { value: number };
+//   }>;
+//
+export type DefineCommands<
+  TPayloads extends Record<string, any>,
+  TID = string,
+> = {
+  [K in keyof TPayloads & string]: TPayloads[K] extends void
+    ? { name: K; targetAggregateId: TID }
+    : { name: K; targetAggregateId: TID; payload: TPayloads[K] };
+}[keyof TPayloads & string];

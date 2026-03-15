@@ -1,15 +1,5 @@
 import { Event } from "./event";
-import { CQRSInfrastructure, Infrastructure } from "../infrastructure";
-
-export type StatefulEventHandler<
-  TEvent extends Event,
-  TState,
-  TInfrastructure extends Infrastructure,
-> = (
-  event: TEvent["payload"],
-  state: TState,
-  infrastructure: TInfrastructure & CQRSInfrastructure,
-) => void | Promise<void>;
+import { Infrastructure } from "../infrastructure";
 
 export type EventHandler<
   TEvent extends Event,

@@ -1,12 +1,6 @@
-import { CQRSInfrastructure, Infrastructure } from "../infrastructure";
 import { Event } from "./event";
 
-export type EventSourcingHandler<
-  TEvent extends Event,
-  TState,
-  TInfrastructure extends Infrastructure,
-> = (
+export type ApplyHandler<TEvent extends Event, TState> = (
   event: TEvent["payload"],
   state: TState,
-  infrastructure: TInfrastructure & CQRSInfrastructure,
 ) => TState;

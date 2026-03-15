@@ -1,7 +1,6 @@
 import { Projection, ProjectionV2 } from "@noddde/core";
 import { BankingInfrastructure } from "./infrastructure";
-import { BankAccountEvent, BankAccountEvents } from "./events";
-import { BankAccount as BankAccountAggregate } from "./aggregate";
+import { BankAccountEvent } from "./events";
 import {
   BankAccountQueries,
   getBankAccountByIdQueryHandler,
@@ -10,7 +9,7 @@ import {
 
 export const BankAccount: Projection<
   BankingInfrastructure,
-  BankAccountEvents,
+  BankAccountEvent["name"],
   BankAccountQueries
 > = {
   queryHandlers: {
@@ -21,9 +20,9 @@ export const BankAccount: Projection<
     BankAccountCreated: (event, { bankAccountViewRepository }) => {
       bankAccountViewRepository.insert(event);
     },
-    TransactionProcessed: (event, infrastructure) => {},
-    TransactionDeclined: (event, infrastructure) => {},
-    TransactionAuthorized: (event, infrastructure) => {},
+    TransactionProcessed: (_event, _infrastructure) => {},
+    TransactionDeclined: (_event, _infrastructure) => {},
+    TransactionAuthorized: (_event, _infrastructure) => {},
   },
 };
 
@@ -41,13 +40,13 @@ export type BankAccountView = {
 export const BankAccountV2: ProjectionV2<BankAccountEvent, BankAccountView> = {
   reducer: (view, event) => {
     switch (event.name) {
-      case BankAccountEvents.BankAccountCreated:
+      case "BankAccountCreated":
         return {
           id: event.payload.id,
           balance: 0,
           transactions: [],
         };
-      case BankAccountEvents.TransactionProcessed:
+      case "TransactionProcessed":
         return {
           ...view,
           balance: view.balance + event.payload.amount,
@@ -61,8 +60,8 @@ export const BankAccountV2: ProjectionV2<BankAccountEvent, BankAccountView> = {
             },
           ],
         };
-      case BankAccountEvents.TransactionDeclined:
-      case BankAccountEvents.TransactionAuthorized:
+      case "TransactionDeclined":
+      case "TransactionAuthorized":
         return view;
     }
   },

@@ -1,11 +1,7 @@
-import { Command, CommandBus, CommandResult } from "../../cqrs";
+import { Command, CommandBus } from "../../cqrs";
 
 export class InMemoryCommandBus implements CommandBus {
-  constructor() {}
-
-  public async dispatch<TCommand extends Command>(
-    command: TCommand,
-  ): Promise<CommandResult<TCommand>> {
+  public async dispatch(command: Command): Promise<void> {
     throw new Error("Method not implemented.");
   }
 }
