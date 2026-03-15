@@ -1,0 +1,127 @@
+---
+title: "Why DefineCommands / DefineEvents?"
+description: Why noddde uses mapped type utilities instead of enum + interface declarations.
+---
+
+## The Decision
+
+noddde provides `DefineCommands` and `DefineEvents` utility types that build discriminated unions from a simple payload map, eliminating the need for separate enum and interface declarations.
+
+## The Problem
+
+The traditional approach to typed commands/events requires three things for each message:
+
+```ts
+// Step 1: Enum for names
+enum BankAccountEvents {
+  BankAccountCreated = "BankAccountCreated",
+  TransactionAuthorized = "TransactionAuthorized",
+}
+
+// Step 2: Interfaces for each event
+interface BankAccountCreated extends Event {
+  name: BankAccountEvents.BankAccountCreated;
+  payload: { id: string };
+}
+
+interface TransactionAuthorized extends Event {
+  name: BankAccountEvents.TransactionAuthorized;
+  payload: { id: string; amount: number; merchant: string };
+}
+
+// Step 3: Union type
+type BankAccountEvent = BankAccountCreated | TransactionAuthorized;
+```
+
+This is:
+- **Verbose** — Three declarations for what is logically one thing
+- **Redundant** — The name appears in the enum AND the interface
+- **Error-prone** — Forgetting to add a new event to the union type
+- **Scattered** — The "shape" of your events is spread across multiple declarations
+
+## Alternatives Considered
+
+- **Enum + interface pairs** — The traditional approach shown above
+- **String constants + factory functions** — `const CREATED = "BankAccountCreated" as const`
+- **Class hierarchies** — `class BankAccountCreated extends BaseEvent { ... }`
+- **Zod schemas** — Runtime validation with inferred types
+
+## Why This Approach
+
+`DefineEvents` collapses all three declarations into one:
+
+```ts
+type BankAccountEvent = DefineEvents<{
+  BankAccountCreated: { id: string };
+  TransactionAuthorized: { id: string; amount: number; merchant: string };
+}>;
+```
+
+This single declaration:
+- **Defines the names** — Keys of the payload map become the `name` discriminant
+- **Defines the payloads** — Values become the `payload` type
+- **Builds the union** — The mapped type automatically constructs the discriminated union
+- **Guarantees consistency** — Name and payload are always paired
+
+`DefineCommands` works the same way, with the addition of `targetAggregateId`:
+
+```ts
+type BankAccountCommand = DefineCommands<{
+  CreateBankAccount: void;           // void = no payload
+  AuthorizeTransaction: { amount: number; merchant: string };
+}>;
+```
+
+## How It Works
+
+The mapped type transformation step by step:
+
+```ts
+// Input: payload map
+{ BankAccountCreated: { id: string }; TransactionAuthorized: { ... }; }
+
+// Step 1: Map each key to a full event type
+{
+  BankAccountCreated: { name: "BankAccountCreated"; payload: { id: string } };
+  TransactionAuthorized: { name: "TransactionAuthorized"; payload: { ... } };
+}
+
+// Step 2: Index to extract the union
+{ name: "BankAccountCreated"; payload: { id: string } }
+| { name: "TransactionAuthorized"; payload: { ... } }
+```
+
+The result is a proper discriminated union where `name` is the discriminant. TypeScript narrows the type in `switch` statements:
+
+```ts
+switch (event.name) {
+  case "BankAccountCreated":
+    // TypeScript knows event.payload is { id: string }
+    break;
+  case "TransactionAuthorized":
+    // TypeScript knows event.payload is { id: string; amount: number; merchant: string }
+    break;
+}
+```
+
+## Trade-offs
+
+- **Learning curve** — Developers need to understand mapped types (but only to use them, not to write them)
+- **IDE experience** — Hovering over the type shows the expanded union, which can be large
+- **No runtime validation** — These are compile-time types only (use Zod or similar if you need runtime validation)
+
+## Example: Before and After
+
+```ts
+// Before: ~30 lines, 3 declarations, name appears 3 times
+enum Events { Created = "Created", Updated = "Updated" }
+interface Created extends Event { name: Events.Created; payload: { id: string } }
+interface Updated extends Event { name: Events.Updated; payload: { value: number } }
+type MyEvent = Created | Updated;
+
+// After: 4 lines, 1 declaration, name appears once
+type MyEvent = DefineEvents<{
+  Created: { id: string };
+  Updated: { value: number };
+}>;
+```

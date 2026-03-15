@@ -1,0 +1,256 @@
+---
+title: "Example: Auction Domain"
+description: Complete walkthrough of an auction aggregate with time-based validation and the Clock pattern.
+---
+
+This example walks through the auction domain sample. It demonstrates infrastructure injection via the Clock pattern, multi-validation command handlers, rejection events, and no-op apply handlers.
+
+## Domain Overview
+
+The auction domain models a simple auction that supports:
+- **Auction creation** — Creating an auction with an item, starting price, and end time
+- **Bidding** — Placing bids with multiple validation rules
+- **Closing** — Closing the auction and determining the winner
+
+## Events
+
+```ts
+import { DefineEvents } from "@noddde/core";
+
+export type AuctionEvent = DefineEvents<{
+  AuctionCreated: { item: string; startingPrice: number; endsAt: Date };
+  BidPlaced: { bidderId: string; amount: number; timestamp: Date };
+  BidRejected: { bidderId: string; amount: number; reason: string };
+  AuctionClosed: { winnerId: string | null; winningBid: number | null };
+}>;
+```
+
+Note `BidRejected` — this is a rejection event, not an exception. The domain explicitly records that a bid was attempted and rejected, including the reason.
+
+## Commands
+
+```ts
+import { DefineCommands } from "@noddde/core";
+
+export type AuctionCommand = DefineCommands<{
+  CreateAuction: { item: string; startingPrice: number; endsAt: Date };
+  PlaceBid: { bidderId: string; amount: number };
+  CloseAuction: void;
+}>;
+```
+
+## State
+
+```ts
+export interface AuctionState {
+  item: string;
+  startingPrice: number;
+  endsAt: Date;
+  status: "open" | "closed";
+  highestBid: { bidderId: string; amount: number } | null;
+  bidCount: number;
+}
+```
+
+`highestBid` is nullable — no bids have been placed initially. `bidCount` is a derived counter maintained for convenience.
+
+## Infrastructure: The Clock Pattern
+
+The auction needs to check the current time. Instead of calling `new Date()` directly (which would be non-deterministic), we inject a `Clock`:
+
+```ts
+export interface Clock {
+  now(): Date;
+}
+
+export class SystemClock implements Clock {
+  now(): Date { return new Date(); }
+}
+
+export interface AuctionInfrastructure {
+  clock: Clock;
+}
+```
+
+See [The Clock Pattern](/docs/patterns/clock-pattern) for the full rationale.
+
+## The Aggregate
+
+```ts
+import { defineAggregate } from "@noddde/core";
+
+type AuctionDef = {
+  state: AuctionState;
+  events: AuctionEvent;
+  commands: AuctionCommand;
+  infrastructure: AuctionInfrastructure;
+};
+
+export const Auction = defineAggregate<AuctionDef>({
+  initialState: {
+    item: "",
+    startingPrice: 0,
+    endsAt: new Date(0),
+    status: "open",
+    highestBid: null,
+    bidCount: 0,
+  },
+
+  commands: {
+    CreateAuction: (command) => ({
+      name: "AuctionCreated",
+      payload: command.payload,
+    }),
+
+    PlaceBid: (command, state, { clock }) => {
+      const { bidderId, amount } = command.payload;
+      const now = clock.now();
+
+      // Validation 1: auction must be open
+      if (state.status === "closed") {
+        return {
+          name: "BidRejected",
+          payload: { bidderId, amount, reason: "Auction is closed" },
+        };
+      }
+
+      // Validation 2: auction must not have ended
+      if (now > state.endsAt) {
+        return {
+          name: "BidRejected",
+          payload: { bidderId, amount, reason: "Auction has ended" },
+        };
+      }
+
+      // Validation 3: bid must exceed current highest (or starting price)
+      const minimumBid = state.highestBid?.amount ?? state.startingPrice;
+      if (amount <= minimumBid) {
+        return {
+          name: "BidRejected",
+          payload: { bidderId, amount, reason: `Bid must exceed ${minimumBid}` },
+        };
+      }
+
+      return {
+        name: "BidPlaced",
+        payload: { bidderId, amount, timestamp: now },
+      };
+    },
+
+    CloseAuction: (_command, state) => ({
+      name: "AuctionClosed",
+      payload: {
+        winnerId: state.highestBid?.bidderId ?? null,
+        winningBid: state.highestBid?.amount ?? null,
+      },
+    }),
+  },
+
+  apply: {
+    AuctionCreated: (event) => ({
+      item: event.item,
+      startingPrice: event.startingPrice,
+      endsAt: event.endsAt,
+      status: "open" as const,
+      highestBid: null,
+      bidCount: 0,
+    }),
+
+    BidPlaced: (event, state) => ({
+      ...state,
+      highestBid: { bidderId: event.bidderId, amount: event.amount },
+      bidCount: state.bidCount + 1,
+    }),
+
+    BidRejected: (_event, state) => state, // No state change
+
+    AuctionClosed: (_event, state) => ({
+      ...state,
+      status: "closed" as const,
+    }),
+  },
+});
+```
+
+## Key Patterns Demonstrated
+
+### Multi-Validation Command Handlers
+
+The `PlaceBid` handler checks three conditions in sequence. Each validation path returns a different event. This is the recommended pattern — validate early, return rejection events for failures.
+
+### Rejection Events vs. Exceptions
+
+Instead of throwing `new Error("Auction is closed")`, the handler returns a `BidRejected` event with a `reason` field. This approach:
+
+- Records the rejection in the event stream (useful for auditing)
+- Keeps the handler as a pure decision-maker (no exceptions)
+- Allows downstream consumers (projections, notifications) to react to rejections
+
+### No-Op Apply Handlers
+
+`BidRejected` does not change state:
+
+```ts
+BidRejected: (_event, state) => state,
+```
+
+The aggregate records that the bid happened (as an event) but the state remains unchanged. This is perfectly valid — not every event represents a state change.
+
+### Nullable State Fields
+
+`highestBid` starts as `null` and becomes populated after the first valid bid. The command handler uses optional chaining (`state.highestBid?.amount ?? state.startingPrice`) to handle both cases cleanly.
+
+## Running the Example
+
+```ts
+const domain = await configureDomain<AuctionInfrastructure>({
+  writeModel: { aggregates: { Auction } },
+  readModel: { projections: {} },
+  infrastructure: {
+    aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
+    provideInfrastructure: () => ({ clock: new SystemClock() }),
+    cqrsInfrastructure: () => ({
+      commandBus: new InMemoryCommandBus(),
+      eventBus: new EventEmitterEventBus(),
+      queryBus: new InMemoryQueryBus(),
+    }),
+  },
+});
+
+const auctionId = randomUUID();
+
+await domain.dispatchCommand({
+  name: "CreateAuction",
+  targetAggregateId: auctionId,
+  payload: {
+    item: "Vintage Guitar",
+    startingPrice: 500,
+    endsAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+  },
+});
+
+await domain.dispatchCommand({
+  name: "PlaceBid",
+  targetAggregateId: auctionId,
+  payload: { bidderId: "alice", amount: 550 },
+});
+
+await domain.dispatchCommand({
+  name: "PlaceBid",
+  targetAggregateId: auctionId,
+  payload: { bidderId: "bob", amount: 600 },
+});
+
+// This bid will be rejected — below current highest
+await domain.dispatchCommand({
+  name: "PlaceBid",
+  targetAggregateId: auctionId,
+  payload: { bidderId: "charlie", amount: 580 },
+});
+
+await domain.dispatchCommand({
+  name: "CloseAuction",
+  targetAggregateId: auctionId,
+});
+// Winner: bob with $600
+```

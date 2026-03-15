@@ -1,0 +1,4 @@
+{
+  "title": "Events",
+  "pages": ["defining-events", "apply-handlers", "event-handlers", "event-bus", "event-sourcing"]
+}

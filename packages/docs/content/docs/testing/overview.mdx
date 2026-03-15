@@ -1,0 +1,92 @@
+---
+title: Testing Overview
+description: How noddde's functional design makes testing natural and straightforward.
+---
+
+noddde's functional architecture is built for testability. Command handlers are functions. Apply handlers are pure functions. Projections are either functions with injectable dependencies or pure reducers. There is no framework to boot, no container to configure, and no decorators to mock.
+
+## What to Test
+
+A typical noddde application has four layers worth testing:
+
+### 1. Command Handlers (Business Logic)
+
+The most important layer. Command handlers contain your business rules — the decisions about what events to produce given a command and the current state.
+
+```ts
+// Call the handler directly
+const events = BankAccount.commands.AuthorizeTransaction(
+  { name: "AuthorizeTransaction", targetAggregateId: "acc-1", payload: { amount: 100, merchant: "Store" } },
+  { balance: 500, availableBalance: 500, transactions: [] },
+  mockInfrastructure,
+);
+```
+
+### 2. Apply Handlers (State Transitions)
+
+Pure functions — no infrastructure, no async. Test them by calling directly with an event payload and state:
+
+```ts
+const newState = BankAccount.apply.TransactionAuthorized(
+  { id: "txn-1", timestamp: new Date(), amount: 100, merchant: "Store" },
+  { balance: 500, availableBalance: 500, transactions: [] },
+);
+```
+
+### 3. Projections (Read Model Building)
+
+For `ProjectionV2`, call the reducer directly. For legacy `Projection`, call event handlers with mock infrastructure.
+
+### 4. Integration (Full Dispatch Cycle)
+
+Use `configureDomain` with in-memory implementations to test the full command-to-event-to-projection pipeline.
+
+## Testing Stack
+
+noddde does not require any special test utilities. Use any test runner you prefer:
+
+- **Vitest** (recommended) — Fast, TypeScript-native, ESM-first
+- **Jest** — Widely used, mature ecosystem
+- **Node.js test runner** — Built-in, zero dependencies
+
+No test fixtures, no special matchers, no framework test utilities. Just call functions and assert results.
+
+## The Given-When-Then Pattern
+
+For aggregate testing, the Given-When-Then pattern maps naturally:
+
+- **Given** — An initial state (or: initial state + events replayed through apply handlers)
+- **When** — A command is dispatched to the command handler
+- **Then** — The expected event(s) are returned
+
+```ts
+// Given: a bank account with $500 available
+const state: BankAccountState = {
+  balance: 500,
+  availableBalance: 500,
+  transactions: [],
+};
+
+// When: a $600 transaction is authorized
+const events = BankAccount.commands.AuthorizeTransaction(
+  {
+    name: "AuthorizeTransaction",
+    targetAggregateId: "acc-1",
+    payload: { amount: 600, merchant: "Store" },
+  },
+  state,
+  mockInfrastructure,
+);
+
+// Then: the transaction is declined
+expect(events).toEqual({
+  name: "TransactionDeclined",
+  payload: expect.objectContaining({ amount: 600 }),
+});
+```
+
+## Next Steps
+
+- [Testing Aggregates](/docs/testing/testing-aggregates) — Detailed aggregate testing patterns
+- [Testing Projections](/docs/testing/testing-projections) — Testing both projection styles
+- [Testing Infrastructure](/docs/testing/testing-infrastructure) — Mocking infrastructure, Clock pattern

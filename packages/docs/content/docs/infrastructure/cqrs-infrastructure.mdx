@@ -1,0 +1,106 @@
+---
+title: CQRS Infrastructure
+description: The CommandBus, EventBus, and QueryBus that form the communication backbone of noddde.
+---
+
+The `CQRSInfrastructure` interface defines the three message buses that connect the components of your domain:
+
+```ts
+interface CQRSInfrastructure {
+  commandBus: CommandBus;
+  eventBus: EventBus;
+  queryBus: QueryBus;
+}
+```
+
+These buses are provided via the `cqrsInfrastructure` factory in the [domain configuration](/docs/domain-configuration/infrastructure) and are automatically wired into the domain's internal plumbing.
+
+## CommandBus
+
+```ts
+interface CommandBus {
+  dispatch(command: Command): Promise<void>;
+}
+```
+
+The `CommandBus` routes commands to their handlers. When `domain.dispatchCommand()` is called, the command eventually flows through the `CommandBus`.
+
+For aggregate commands, the bus resolves the target aggregate, loads its state, calls the appropriate command handler, persists resulting events, and publishes them.
+
+## EventBus
+
+```ts
+interface EventBus {
+  dispatch<TEvent extends Event>(event: TEvent): Promise<void>;
+}
+```
+
+The `EventBus` publishes events to projection event handlers. After an aggregate command handler produces events and they are persisted, each event is dispatched through the `EventBus`.
+
+The built-in `EventEmitterEventBus` uses Node.js `EventEmitter` for synchronous, in-process delivery. For distributed systems, implement a custom `EventBus` backed by Kafka, RabbitMQ, or similar.
+
+## QueryBus
+
+```ts
+interface QueryBus {
+  dispatch<TQuery extends Query<any>>(query: TQuery): Promise<QueryResult<TQuery>>;
+}
+```
+
+The `QueryBus` routes queries to their handlers. Note the typed return value — `QueryResult<TQuery>` is inferred from the query's `TResult` generic parameter, giving you type-safe query responses.
+
+## Providing CQRS Infrastructure
+
+```ts
+import {
+  InMemoryCommandBus,
+  EventEmitterEventBus,
+  InMemoryQueryBus,
+} from "@noddde/core";
+
+infrastructure: {
+  cqrsInfrastructure: (customInfra) => ({
+    commandBus: new InMemoryCommandBus(),
+    eventBus: new EventEmitterEventBus(),
+    queryBus: new InMemoryQueryBus(),
+  }),
+},
+```
+
+The factory receives your custom infrastructure as a parameter. This allows buses to be configured based on your infrastructure (e.g., using the same database connection for the event bus that your repositories use).
+
+## Accessing Buses
+
+### From Standalone Command Handlers
+
+Standalone command handlers receive `TInfrastructure & CQRSInfrastructure`, giving them access to all three buses:
+
+```ts
+const orchestrateSettlement: StandaloneCommandHandler<MyInfra, SettleCommand> =
+  async (command, { commandBus, eventBus, queryBus, logger }) => {
+    // Can dispatch commands, publish events, and query the read model
+    const account = await queryBus.dispatch({
+      name: "GetBankAccountById",
+      payload: { id: command.payload.accountId },
+    });
+    // ...
+  };
+```
+
+### From the Domain Instance
+
+After configuration, buses are available on `domain.infrastructure`:
+
+```ts
+const domain = await configureDomain<MyInfra>({ /* ... */ });
+
+// Access buses directly
+const { commandBus, eventBus, queryBus } = domain.infrastructure;
+```
+
+## Next Steps
+
+- [In-Memory Implementations](/docs/infrastructure/in-memory-implementations) — Built-in bus implementations
+- [Command Dispatching](/docs/commands/dispatching) — The full command dispatch flow
+- [Event Bus](/docs/events/event-bus) — EventBus in detail
+- [Query Bus](/docs/queries/query-bus) — QueryBus in detail

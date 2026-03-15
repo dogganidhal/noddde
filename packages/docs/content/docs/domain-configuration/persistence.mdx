@@ -1,0 +1,126 @@
+---
+title: Persistence
+description: Choosing between event-sourced and state-stored persistence strategies for your aggregates.
+---
+
+noddde supports two persistence strategies for aggregates: **event sourcing** (store events, replay to rebuild state) and **state storage** (store final state directly). Both use the same aggregate definition — the persistence strategy is a deployment concern, not a modeling concern.
+
+## Event-Sourced Persistence
+
+```ts
+interface EventSourcedAggregatePersistence {
+  save(aggregateName: string, aggregateId: string, events: Event[]): Promise<void>;
+  load(aggregateName: string, aggregateId: string): Promise<Event[]>;
+}
+```
+
+With event sourcing:
+- **`save`** appends new events to the aggregate's event stream
+- **`load`** returns all events for an aggregate instance
+- The framework replays events through [apply handlers](/docs/events/apply-handlers) to reconstruct current state
+
+Events are the source of truth. State is ephemeral — derived on every load by replaying the complete event history.
+
+### Configuration
+
+```ts
+import { InMemoryEventSourcedAggregatePersistence } from "@noddde/core";
+
+infrastructure: {
+  aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
+},
+```
+
+### When to Use
+
+Event sourcing is ideal when you need:
+
+- **Complete audit trail** — Every change is recorded as an immutable event
+- **Temporal queries** — "What was the balance at 3pm on Tuesday?"
+- **Event replay** — Rebuild projections, fix bugs in event handlers, populate new read models
+- **Event-driven architecture** — Events are already first-class citizens
+- **Debugging** — See exactly what happened, in order
+
+## State-Stored Persistence
+
+```ts
+interface StateStoredAggregatePersistence {
+  save(aggregateName: string, aggregateId: string, state: any): Promise<void>;
+  load(aggregateName: string, aggregateId: string): Promise<any>;
+}
+```
+
+With state storage:
+- **`save`** overwrites the current state snapshot
+- **`load`** returns the last saved state (or `null` for new aggregates)
+- No event replay is needed — the loaded state is used directly
+
+### Configuration
+
+```ts
+import { InMemoryStateStoredAggregatePersistence } from "@noddde/core";
+
+infrastructure: {
+  aggregatePersistence: () => new InMemoryStateStoredAggregatePersistence(),
+},
+```
+
+### When to Use
+
+State storage is simpler and appropriate when:
+
+- **No audit trail needed** — You only care about current state
+- **Simple CRUD** — The domain does not benefit from event history
+- **Performance** — Loading state is O(1) instead of O(n) where n is event count
+- **Storage efficiency** — One record per aggregate instead of growing event streams
+
+## Decision Matrix
+
+| Factor | Event Sourcing | State Storage |
+|---|---|---|
+| Audit trail | Full history | Current state only |
+| Storage growth | Grows with events | Constant per aggregate |
+| Load performance | Slower (replay) | Faster (direct read) |
+| Projection rebuild | Possible | Not possible |
+| Temporal queries | Supported | Not supported |
+| Complexity | Higher | Lower |
+| Debugging | Excellent | Standard |
+
+## Same Aggregate, Different Strategy
+
+The same aggregate definition works with either strategy. The `defineAggregate` function does not know or care about persistence — it defines `initialState`, `commands`, and `apply` regardless.
+
+This means you can:
+- Start with state storage for simplicity
+- Migrate to event sourcing later without changing your aggregate
+- Use event sourcing in production and state storage in tests
+
+The strategy is a configuration choice, not a modeling choice.
+
+## Implementing Custom Persistence
+
+To implement production persistence, implement either interface:
+
+```ts
+class PostgresEventStore implements EventSourcedAggregatePersistence {
+  async save(aggregateName: string, aggregateId: string, events: Event[]) {
+    // INSERT INTO events (aggregate_name, aggregate_id, event_name, payload, sequence)
+    // VALUES ($1, $2, $3, $4, nextval('events_seq'))
+  }
+
+  async load(aggregateName: string, aggregateId: string): Promise<Event[]> {
+    // SELECT * FROM events
+    // WHERE aggregate_name = $1 AND aggregate_id = $2
+    // ORDER BY sequence ASC
+  }
+}
+```
+
+The interface is deliberately minimal — `save` and `load` are the only two operations. This makes it straightforward to implement for any storage backend (PostgreSQL, MongoDB, DynamoDB, Redis, etc.).
+
+## Next Steps
+
+- [Event Sourcing Concepts](/docs/concepts/event-sourcing) — Theoretical foundation
+- [Apply Handlers](/docs/events/apply-handlers) — How events rebuild state
+- [In-Memory Implementations](/docs/infrastructure/in-memory-implementations) — Built-in persistence for testing
+- [Why Two Strategies](/docs/design-decisions/why-two-persistence-strategies) — Design rationale

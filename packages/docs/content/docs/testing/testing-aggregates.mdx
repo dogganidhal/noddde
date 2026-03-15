@@ -1,0 +1,223 @@
+---
+title: Testing Aggregates
+description: Patterns for testing command handlers and apply handlers in noddde aggregates.
+---
+
+Aggregates contain your core business logic. Testing them thoroughly ensures your domain rules are correct. Because noddde uses plain functions (not classes with internal state), aggregate testing is straightforward.
+
+## Testing Command Handlers
+
+Command handlers are the decision-makers. Access them directly on the aggregate object:
+
+```ts
+import { describe, it, expect } from "vitest";
+import { BankAccount, BankAccountState } from "./aggregate";
+
+const mockInfrastructure = {
+  logger: { info: () => {}, error: () => {}, warn: () => {} },
+  bankAccountViewRepository: {} as any,
+  transactionViewRepository: {} as any,
+};
+
+describe("BankAccount.commands", () => {
+  describe("CreateBankAccount", () => {
+    it("returns a BankAccountCreated event", () => {
+      const result = BankAccount.commands.CreateBankAccount(
+        { name: "CreateBankAccount", targetAggregateId: "acc-123" },
+        BankAccount.initialState,
+        mockInfrastructure,
+      );
+
+      expect(result).toEqual({
+        name: "BankAccountCreated",
+        payload: { id: "acc-123" },
+      });
+    });
+  });
+
+  describe("AuthorizeTransaction", () => {
+    const stateWithBalance: BankAccountState = {
+      balance: 1000,
+      availableBalance: 1000,
+      transactions: [],
+    };
+
+    it("authorizes when sufficient funds", () => {
+      const result = BankAccount.commands.AuthorizeTransaction(
+        {
+          name: "AuthorizeTransaction",
+          targetAggregateId: "acc-123",
+          payload: { amount: 500, merchant: "Amazon" },
+        },
+        stateWithBalance,
+        mockInfrastructure,
+      );
+
+      expect(result).toMatchObject({
+        name: "TransactionAuthorized",
+        payload: expect.objectContaining({ amount: 500, merchant: "Amazon" }),
+      });
+    });
+
+    it("declines when insufficient funds", () => {
+      const result = BankAccount.commands.AuthorizeTransaction(
+        {
+          name: "AuthorizeTransaction",
+          targetAggregateId: "acc-123",
+          payload: { amount: 2000, merchant: "Luxury Store" },
+        },
+        stateWithBalance,
+        mockInfrastructure,
+      );
+
+      expect(result).toMatchObject({
+        name: "TransactionDeclined",
+        payload: expect.objectContaining({ amount: 2000 }),
+      });
+    });
+  });
+});
+```
+
+### Key Points
+
+- **No framework setup** — Just import the aggregate and call handlers
+- **Mock infrastructure minimally** — Only provide what the handler actually uses
+- **Test both success and failure paths** — Commands can return different event types
+- **Use `initialState`** — The aggregate exports its initial state for convenience
+
+## Testing Apply Handlers
+
+Apply handlers are pure functions — they take event payload + state and return new state. No infrastructure, no mocking:
+
+```ts
+describe("BankAccount.apply", () => {
+  it("initializes state on BankAccountCreated", () => {
+    const result = BankAccount.apply.BankAccountCreated(
+      { id: "acc-123" },
+      BankAccount.initialState,
+    );
+
+    expect(result).toEqual({
+      balance: 0,
+      availableBalance: 0,
+      transactions: [],
+    });
+  });
+
+  it("reduces available balance on TransactionAuthorized", () => {
+    const state: BankAccountState = {
+      balance: 1000,
+      availableBalance: 1000,
+      transactions: [],
+    };
+
+    const result = BankAccount.apply.TransactionAuthorized(
+      { id: "txn-1", timestamp: new Date(), amount: 200, merchant: "Store" },
+      state,
+    );
+
+    expect(result.availableBalance).toBe(800);
+    expect(result.transactions).toHaveLength(1);
+    expect(result.transactions[0].status).toBe("pending");
+  });
+
+  it("does not mutate original state", () => {
+    const state: BankAccountState = {
+      balance: 1000,
+      availableBalance: 1000,
+      transactions: [],
+    };
+
+    BankAccount.apply.TransactionAuthorized(
+      { id: "txn-1", timestamp: new Date(), amount: 200, merchant: "Store" },
+      state,
+    );
+
+    // Original state is unchanged
+    expect(state.availableBalance).toBe(1000);
+    expect(state.transactions).toHaveLength(0);
+  });
+});
+```
+
+### Testing No-Op Handlers
+
+Some events intentionally do not change state (like `BidRejected` in the auction domain):
+
+```ts
+it("BidRejected does not change state", () => {
+  const state = { /* auction state */ };
+  const result = Auction.apply.BidRejected(
+    { bidderId: "alice", amount: 100, reason: "Too low" },
+    state,
+  );
+  expect(result).toBe(state); // Same reference
+});
+```
+
+## Given-When-Then with Event Replay
+
+For more realistic tests, build state by replaying events rather than constructing state manually:
+
+```ts
+function replayEvents(
+  aggregate: typeof BankAccount,
+  events: Array<{ name: string; payload: any }>,
+) {
+  return events.reduce(
+    (state, event) => {
+      const handler = aggregate.apply[event.name as keyof typeof aggregate.apply];
+      return handler(event.payload, state);
+    },
+    aggregate.initialState,
+  );
+}
+
+describe("AuthorizeTransaction after multiple events", () => {
+  it("tracks cumulative available balance", () => {
+    // Given: account created + one authorized transaction
+    const state = replayEvents(BankAccount, [
+      { name: "BankAccountCreated", payload: { id: "acc-1" } },
+      { name: "TransactionAuthorized", payload: { id: "txn-1", timestamp: new Date(), amount: 300, merchant: "A" } },
+    ]);
+
+    // Available balance should be -300 (started at 0)
+    expect(state.availableBalance).toBe(-300);
+
+    // When: another transaction
+    const result = BankAccount.commands.AuthorizeTransaction(
+      {
+        name: "AuthorizeTransaction",
+        targetAggregateId: "acc-1",
+        payload: { amount: 100, merchant: "B" },
+      },
+      state,
+      mockInfrastructure,
+    );
+
+    // Then: declined (insufficient funds)
+    expect(result).toMatchObject({ name: "TransactionDeclined" });
+  });
+});
+```
+
+## Testing Async Command Handlers
+
+If a command handler is async (returns a `Promise`), await it:
+
+```ts
+it("handles async command handler", async () => {
+  const result = await SomeAggregate.commands.SomeAsyncCommand(
+    command,
+    state,
+    infrastructure,
+  );
+  expect(result).toMatchObject({ name: "SomeEvent" });
+});
+```
+
+## Next Steps
+
+- [Testing Projections](/docs/testing/testing-projections) — Testing read model builders
+- [Testing Infrastructure](/docs/testing/testing-infrastructure) — Mocking patterns, Clock

@@ -1,0 +1,332 @@
+---
+title: Event Sourcing
+description: How noddde stores events as the source of truth and reconstructs state by replaying them through apply handlers
+---
+
+## What is Event Sourcing?
+
+In most applications, the database stores the **current state** of each entity. When you update a bank account balance, the old value is overwritten with the new one. The history of how you got to that value is lost.
+
+**Event Sourcing** takes a different approach: instead of storing the current state, you store the **sequence of events** that produced it. The current state is derived by replaying all events from the beginning through a series of pure functions.
+
+```
+Traditional (state-stored):
+  Account #123  ->  { balance: 750, status: "active" }
+
+Event-sourced:
+  Account #123  ->  [
+    { name: "BankAccountCreated", payload: { id: "123" } },
+    { name: "FundsDeposited",     payload: { amount: 1000 } },
+    { name: "TransactionAuthorized", payload: { amount: 200, merchant: "Store A" } },
+    { name: "TransactionAuthorized", payload: { amount: 50,  merchant: "Store B" } },
+  ]
+
+  Current state = replay all events -> { balance: 750, status: "active" }
+```
+
+The event stream is an append-only log. Events are never modified or deleted. Each event represents an immutable fact — something that happened in the past. The current state is always a function of the complete event history.
+
+## Event Sourcing in noddde
+
+noddde supports event sourcing through the `EventSourcedAggregatePersistence` interface. When this persistence strategy is configured, the framework stores and loads events rather than state.
+
+### The Persistence Interface
+
+```typescript
+interface EventSourcedAggregatePersistence {
+  save(aggregateName: string, aggregateId: string, events: Event[]): Promise<void>;
+  load(aggregateName: string, aggregateId: string): Promise<Event[]>;
+}
+```
+
+- **`save`** — Appends new events to the event stream for a given aggregate instance.
+- **`load`** — Returns the complete event history for a given aggregate instance.
+
+### How State is Reconstructed
+
+When a command arrives for an aggregate instance, the framework follows this sequence:
+
+1. **Load events** — Call `persistence.load(aggregateName, aggregateId)` to retrieve the full event history.
+2. **Replay** — Start with `initialState` and fold each event through the matching apply handler to reconstruct the current state.
+3. **Handle command** — Pass the reconstructed state (along with the command and infrastructure) to the command handler.
+4. **Save new events** — Call `persistence.save(aggregateName, aggregateId, newEvents)` to append the events produced by the command handler.
+5. **Apply new events** — Fold the new events into the state for any subsequent commands in the same session.
+
+```typescript
+// Conceptual replay logic (performed by the framework)
+function replayState<T extends AggregateTypes>(
+  aggregate: Aggregate<T>,
+  events: Event[],
+): T["state"] {
+  return events.reduce((state, event) => {
+    const handler = aggregate.apply[event.name];
+    return handler(event.payload, state);
+  }, aggregate.initialState);
+}
+```
+
+This is why the apply handlers in a noddde aggregate are so important. They are not just updating state after a command — they are the **canonical definition** of how state is derived from events. Every time an aggregate instance is loaded, the apply handlers run over the entire event history.
+
+### Configuring Event-Sourced Persistence
+
+In the domain configuration, you provide a factory for the persistence strategy:
+
+```typescript
+import {
+  configureDomain,
+  InMemoryEventSourcedAggregatePersistence,
+} from "@noddde/core";
+
+const domain = await configureDomain({
+  writeModel: { aggregates: { BankAccount } },
+  readModel: { projections: {} },
+  infrastructure: {
+    aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
+    provideInfrastructure: () => ({}),
+    cqrsInfrastructure: () => ({
+      commandBus: new InMemoryCommandBus(),
+      eventBus: new EventEmitterEventBus(),
+      queryBus: new InMemoryQueryBus(),
+    }),
+  },
+});
+```
+
+The `InMemoryEventSourcedAggregatePersistence` is provided for development and testing. In production, you would implement the `EventSourcedAggregatePersistence` interface against a durable event store (a database, EventStoreDB, etc.).
+
+### Apply Handlers are the Replay Engine
+
+Consider the apply handlers for a bank account:
+
+```typescript
+apply: {
+  BankAccountCreated: (_event, _state) => ({
+    balance: 0,
+    status: "active" as const,
+  }),
+
+  TransactionAuthorized: (event, state) => ({
+    ...state,
+    balance: state.balance - event.amount,
+  }),
+
+  FundsDeposited: (event, state) => ({
+    ...state,
+    balance: state.balance + event.amount,
+  }),
+
+  TransactionDeclined: (_event, state) => state,
+}
+```
+
+If the event history for account `"acc-1"` is:
+
+```typescript
+[
+  { name: "BankAccountCreated", payload: { id: "acc-1" } },
+  { name: "FundsDeposited", payload: { amount: 1000 } },
+  { name: "TransactionAuthorized", payload: { amount: 200, merchant: "Store A" } },
+  { name: "TransactionAuthorized", payload: { amount: 50, merchant: "Store B" } },
+]
+```
+
+The replay proceeds as follows:
+
+```
+initialState                              -> { balance: 0,    status: "active" }
+apply BankAccountCreated({ id: "acc-1" }) -> { balance: 0,    status: "active" }
+apply FundsDeposited({ amount: 1000 })    -> { balance: 1000, status: "active" }
+apply TransactionAuthorized({ amount: 200, ... }) -> { balance: 800,  status: "active" }
+apply TransactionAuthorized({ amount: 50,  ... }) -> { balance: 750,  status: "active" }
+```
+
+The final state is `{ balance: 750, status: "active" }` — the same result every time, regardless of when the replay happens.
+
+## The State-Stored Alternative
+
+Not every aggregate needs event sourcing. noddde also supports **state-stored persistence**, where the framework saves and loads the final state directly, just like a traditional database.
+
+### The Persistence Interface
+
+```typescript
+interface StateStoredAggregatePersistence {
+  save(aggregateName: string, aggregateId: string, state: any): Promise<void>;
+  load(aggregateName: string, aggregateId: string): Promise<any>;
+}
+```
+
+- **`save`** — Stores the aggregate's current state (overwriting the previous state).
+- **`load`** — Returns the stored state for a given aggregate instance.
+
+### How It Works
+
+With state-stored persistence, the framework:
+
+1. **Load state** — Call `persistence.load(aggregateName, aggregateId)` to retrieve the last saved state (or use `initialState` if none exists).
+2. **Handle command** — Pass the loaded state to the command handler.
+3. **Apply events** — Fold the new events through apply handlers to produce the new state.
+4. **Save state** — Call `persistence.save(aggregateName, aggregateId, newState)` to overwrite the stored state.
+
+Events are still produced by command handlers and still flow through the event bus to projections. The difference is that events are not persisted in an event store — only the resulting state is saved. Once the state is saved, the events that produced it are only available to downstream consumers (projections) via the event bus.
+
+### Configuring State-Stored Persistence
+
+```typescript
+import {
+  configureDomain,
+  InMemoryStateStoredAggregatePersistence,
+} from "@noddde/core";
+
+const domain = await configureDomain({
+  writeModel: { aggregates: { BankAccount } },
+  readModel: { projections: {} },
+  infrastructure: {
+    aggregatePersistence: () => new InMemoryStateStoredAggregatePersistence(),
+    // ... rest of infrastructure
+  },
+});
+```
+
+### The Aggregate Definition is the Same
+
+An important design choice in noddde: **the aggregate definition does not change** between event-sourced and state-stored persistence. The same `defineAggregate` with the same `commands` and `apply` handlers works with either strategy. The persistence strategy is a deployment decision, not a domain modeling decision:
+
+```typescript
+// This aggregate works identically with either persistence strategy
+const BankAccount = defineAggregate<BankAccountTypes>({
+  initialState: { balance: 0, status: "active" },
+  commands: { /* ... */ },
+  apply: { /* ... */ },
+});
+```
+
+You could start with state-stored persistence for simplicity and switch to event sourcing later without changing a single line of domain code.
+
+## When to Use Which
+
+### Choose Event Sourcing When
+
+- **Audit trail is required** — Regulatory or business requirements demand a complete history of every change. Financial systems, healthcare records, and compliance-heavy domains are natural fits.
+
+- **Temporal queries matter** — You need to answer questions like "What was the account balance on March 1st?" or "What was the state of this order before it was cancelled?" With event sourcing, you replay events up to the desired point in time.
+
+- **Event-driven architecture** — Your system is built around reacting to events. Event sourcing ensures that every event is durably stored and can be replayed to rebuild projections, feed analytics, or populate new read models.
+
+- **Debugging and forensics** — When something goes wrong, the event stream tells you exactly what happened, in what order. There is no guesswork about how the state ended up the way it did.
+
+- **Schema evolution** — As your domain model changes, you can write upcasters or versioned apply handlers to transform old events into new shapes, preserving the full history.
+
+### Choose State-Stored Persistence When
+
+- **Simplicity is the priority** — The domain is straightforward and does not benefit from event history. Simple CRUD entities, configuration settings, or non-critical domain objects.
+
+- **Performance sensitivity** — Replaying a long event history for every command can be expensive. While snapshots can mitigate this, state-stored persistence avoids the problem entirely.
+
+- **No audit requirements** — There is no regulatory or business need to preserve the full history of changes.
+
+- **Prototyping** — You are exploring the domain and want to iterate quickly. State-stored persistence has less conceptual overhead.
+
+### You Can Mix and Match
+
+Different aggregates in the same domain can use different persistence strategies. A `BankAccount` aggregate might use event sourcing (for audit trail), while a `UserPreferences` aggregate uses state-stored persistence (for simplicity). The `DomainConfiguration` allows you to configure persistence at the domain level — in the current design, all aggregates share the same persistence strategy, but the aggregate definition itself remains persistence-agnostic.
+
+## The Replay Guarantee
+
+Event sourcing works only if replaying the same events always produces the same state. This is the **replay guarantee**, and it imposes a strict requirement on apply handlers:
+
+**Apply handlers must be pure functions.**
+
+A pure function:
+- Depends only on its inputs (the event payload and the current state)
+- Produces no side effects (no database writes, no API calls, no logging)
+- Returns the same output for the same inputs, every time
+
+### What Purity Means in Practice
+
+Apply handlers must **not**:
+
+```typescript
+// BAD: Uses current time (not deterministic)
+TransactionAuthorized: (event, state) => ({
+  ...state,
+  balance: state.balance - event.amount,
+  lastUpdated: new Date(),  // Different result on each replay!
+})
+
+// BAD: Uses random values
+AccountCreated: (event, state) => ({
+  ...state,
+  internalId: crypto.randomUUID(),  // Different on each replay!
+})
+
+// BAD: Reads from external source
+TransactionAuthorized: async (event, state) => {
+  const rate = await fetchExchangeRate();  // May return different values!
+  return { ...state, balance: state.balance - event.amount * rate };
+}
+```
+
+Apply handlers **should**:
+
+```typescript
+// GOOD: Pure computation from event payload and state
+TransactionAuthorized: (event, state) => ({
+  ...state,
+  balance: state.balance - event.amount,
+})
+
+// GOOD: Timestamps come from the event, not from the clock
+TransactionProcessed: (event, state) => ({
+  ...state,
+  lastTransactionAt: event.processedAt,  // Stored in the event
+})
+```
+
+If you need a timestamp or a generated ID, compute it in the **command handler** (which has access to infrastructure) and include it in the event payload. The apply handler then reads it from the event, ensuring deterministic replay.
+
+This is why noddde passes infrastructure to command handlers but never to apply handlers. The type system enforces this boundary — the `ApplyHandler` type signature accepts only the event payload and the current state:
+
+```typescript
+type ApplyHandler<TEvent extends Event, TState> = (
+  event: TEvent["payload"],
+  state: TState,
+) => TState;
+```
+
+There is no infrastructure parameter. If you try to access infrastructure in an apply handler, the compiler will prevent it.
+
+## Event Sourcing and CQRS Together
+
+Event sourcing and CQRS are independent patterns, but they complement each other naturally in noddde:
+
+- **Event sourcing** provides the durable event stream on the write side.
+- **CQRS** provides the separation that allows the read side to consume that event stream and build query-optimized views.
+
+Without CQRS, event sourcing would require you to replay events every time you want to read data — which is slow for complex queries. With CQRS, projections pre-compute the views you need, and queries are served from those pre-computed views.
+
+Without event sourcing, CQRS would require a separate mechanism to propagate changes from the write model to the read model. With event sourcing, events are the natural propagation mechanism — they are already produced by command handlers and can be directly consumed by projections.
+
+```
+  Command -> Aggregate -> Events -> Event Store (write side, event sourcing)
+                                 |
+                                 +-> EventBus -> Projection -> Read Database (read side, CQRS)
+                                                                     |
+                                                            Query -> QueryBus -> Response
+```
+
+## Summary
+
+| Concept | Description |
+|---------|-------------|
+| Event Sourcing | Store events instead of state; derive state by replay |
+| `EventSourcedAggregatePersistence` | Interface for saving/loading event streams |
+| `StateStoredAggregatePersistence` | Interface for saving/loading final state |
+| Apply handlers | Pure functions that evolve state from events; serve as the replay engine |
+| Replay guarantee | Same events, same order, same apply handlers = same state, always |
+| Aggregate definition | Identical for both persistence strategies |
+
+## Next Steps
+
+- Learn how to write apply handlers in the [Events guide](/docs/guides/events)
+- Understand persistence configuration in the [Domain Configuration guide](/docs/guides/domain-configuration)
+- Learn why apply handlers must be pure in [Why Pure Apply Handlers](/docs/design-decisions/why-pure-apply-handlers)

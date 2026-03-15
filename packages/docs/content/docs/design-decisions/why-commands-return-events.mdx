@@ -1,0 +1,101 @@
+---
+title: "Why Commands Return Events?"
+description: Why command handlers return events instead of calling eventBus.dispatch() directly.
+---
+
+## The Decision
+
+In noddde, command handlers return the event(s) they produce as a return value. The framework handles persistence and publishing.
+
+```ts
+commands: {
+  AuthorizeTransaction: (command, state, infra) => {
+    return { name: "TransactionAuthorized", payload: { ... } };
+  },
+},
+```
+
+## The Problem
+
+In many frameworks, command handlers call `this.apply()` or `eventBus.dispatch()` directly:
+
+```ts
+// Traditional approach (NOT how noddde works)
+class BankAccount {
+  authorizeTransaction(command, eventBus) {
+    const event = new TransactionAuthorized(command);
+    eventBus.dispatch(event);          // Side effect!
+    this.state.balance -= command.amount; // Mutation!
+  }
+}
+```
+
+This creates problems:
+- **Hidden side effects** — The handler modifies external state (event bus, aggregate state)
+- **Ordering issues** — Events are published before persistence; if persistence fails, events were already dispatched
+- **Difficult testing** — Need to mock the event bus and verify calls
+- **Mixed concerns** — The handler decides AND publishes AND mutates
+
+## Alternatives Considered
+
+- **`this.apply(event)`** — The Axon/Eventuate pattern where the handler calls a framework method
+- **Event bus injection** — Handler receives `eventBus` in infrastructure and calls `dispatch`
+- **Callback pattern** — Handler receives a `publish` callback
+
+## Why This Approach
+
+Returning events makes the handler a pure decision function:
+
+```ts
+// The handler only decides WHAT happened
+commands: {
+  AuthorizeTransaction: (command, state) => {
+    if (state.availableBalance < command.payload.amount) {
+      return { name: "TransactionDeclined", payload: { ... } };
+    }
+    return { name: "TransactionAuthorized", payload: { ... } };
+  },
+},
+```
+
+The framework then handles the rest in the correct order:
+
+1. Persist events first (guarantee durability)
+2. Apply events to rebuild state
+3. Publish events to the event bus (for projections)
+
+Benefits:
+- **Pure functions** — Handlers are decision-makers, not orchestrators
+- **Correct ordering** — Framework controls persist-then-publish
+- **Easy testing** — Call the function, assert the returned events
+- **Single responsibility** — Handler decides; framework persists and publishes
+- **Multiple events** — Return an array for multiple events: `return [event1, event2]`
+
+## Trade-offs
+
+- **No mid-handler publishing** — You cannot publish an event, wait for a projection to update, then publish another. All events from a single command are batched.
+- **No conditional async side effects** — You cannot call an external service and conditionally produce more events based on its response within the same handler invocation. (Use a saga/process manager instead.)
+
+These limitations are intentional — they enforce the Decider pattern where each command invocation is a single, atomic decision.
+
+## Example
+
+```ts
+// Handler returns single event
+commands: {
+  CreateBankAccount: (command) => ({
+    name: "BankAccountCreated",
+    payload: { id: command.targetAggregateId },
+  }),
+
+  // Handler returns one of two possible events
+  AuthorizeTransaction: (command, state) => {
+    if (state.availableBalance < command.payload.amount) {
+      return { name: "TransactionDeclined", payload: { ... } };
+    }
+    return { name: "TransactionAuthorized", payload: { ... } };
+  },
+},
+```
+
+The framework persists whichever event(s) are returned, applies them to update state, and publishes them for projections.

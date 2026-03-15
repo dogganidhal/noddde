@@ -1,4 +1,29 @@
 {
   "title": "Documentation",
-  "pages": ["---Getting Started---", "...getting-started", "---Guides---", "...guides"]
+  "pages": [
+    "---Getting Started---",
+    "...getting-started",
+    "---Concepts---",
+    "...concepts",
+    "---Aggregates---",
+    "...aggregates",
+    "---Commands---",
+    "...commands",
+    "---Events---",
+    "...events",
+    "---Queries---",
+    "...queries",
+    "---Projections---",
+    "...projections",
+    "---Domain Configuration---",
+    "...domain-configuration",
+    "---Infrastructure---",
+    "...infrastructure",
+    "---Testing---",
+    "...testing",
+    "---Patterns & Examples---",
+    "...patterns",
+    "---Design Decisions---",
+    "...design-decisions"
+  ]
 }

@@ -1,0 +1,270 @@
+---
+title: State Design
+description: Best practices for designing aggregate state, including initialState, immutability in apply handlers, derived vs stored fields, and why the aggregate ID is not part of the state
+---
+
+## initialState
+
+Every aggregate must declare an `initialState`. This is the state that a brand-new aggregate instance starts with -- before any events have been applied. When the framework loads an aggregate for the first time (or when there are no stored events), this is what the command handler receives as `state`.
+
+```typescript
+export const BankAccount = defineAggregate<BankAccountDef>({
+  initialState: {
+    balance: 0,
+    availableBalance: 0,
+    transactions: [],
+  },
+  // ...
+});
+```
+
+The type of `initialState` must match the `state` field in your `AggregateTypes` bundle exactly. TypeScript enforces this at compile time.
+
+### Designing a Good Initial State
+
+The initial state should represent a **valid starting point** for the aggregate. A few guidelines:
+
+- Use zero values for numeric fields (`0`, not `null`)
+- Use empty arrays or maps for collections (`[]`, `{}`)
+- Use `null` for optional reference-type fields that genuinely have no value yet
+- Use literal types or `as const` for status fields when TypeScript needs help narrowing
+
+```typescript
+initialState: {
+  status: "pending" as const,
+  highestBid: null as { bidderId: string; amount: number } | null,
+  item: "",
+  startingPrice: 0,
+  endsAt: null as Date | null,
+}
+```
+
+The `as const` assertion on `"pending"` ensures TypeScript narrows the type to the literal `"pending"` rather than widening it to `string`. This is important when your state has a union-typed status field like `"pending" | "open" | "closed"`.
+
+## State Shape Design
+
+Your aggregate state should contain **only the data needed to make decisions in command handlers**. It is the minimum information required to enforce business rules.
+
+### Keep State Flat
+
+Prefer flat structures over deeply nested objects. This makes apply handlers simpler and state easier to reason about:
+
+```typescript
+// Preferred: flat state
+interface AuctionState {
+  item: string;
+  startingPrice: number;
+  status: "pending" | "open" | "closed";
+  highestBidderId: string | null;
+  highestBidAmount: number;
+}
+
+// Avoid: unnecessary nesting
+interface AuctionState {
+  item: { name: string; details: { startingPrice: number } };
+  bidding: { highest: { bidder: { id: string }; amount: number } | null };
+}
+```
+
+### Use Discriminated Status Fields
+
+When an aggregate goes through lifecycle phases, use a string literal union for the status. This lets command handlers make clear decisions:
+
+```typescript
+interface OrderState {
+  status: "draft" | "submitted" | "shipped" | "delivered" | "cancelled";
+  // ...
+}
+
+// In a command handler:
+commands: {
+  ShipOrder: (command, state) => {
+    if (state.status !== "submitted") {
+      return {
+        name: "ShipmentRejected",
+        payload: { reason: "Order is not in submitted state" },
+      };
+    }
+    return { name: "OrderShipped", payload: { /* ... */ } };
+  },
+}
+```
+
+### Collections in State
+
+When your aggregate tracks a list of sub-items (like transactions in a bank account), store them as arrays in state:
+
+```typescript
+interface BankAccountState {
+  balance: number;
+  availableBalance: number;
+  transactions: Array<{
+    id: string;
+    timestamp: Date;
+    amount: number;
+    merchant: string;
+    status: "pending" | "processed" | "declined";
+  }>;
+}
+```
+
+Keep in mind that in event sourcing, the full state is rebuilt from events on every command. If the collection can grow unboundedly, consider whether the aggregate boundary is correct or whether older items should be archived via a process manager.
+
+## Immutability in Apply Handlers
+
+Apply handlers must be **pure functions**. They receive the event payload and the current state, and they return a new state object. They must never mutate the existing state.
+
+### Always Return a New Object
+
+```typescript
+apply: {
+  // Correct: returns a new object via spread
+  TransactionAuthorized: (event, state) => ({
+    ...state,
+    availableBalance: state.availableBalance - event.amount,
+    transactions: [
+      ...state.transactions,
+      { ...event, status: "pending" as const },
+    ],
+  }),
+
+  // WRONG: mutates state in place
+  // TransactionAuthorized: (event, state) => {
+  //   state.availableBalance -= event.amount;
+  //   state.transactions.push({ ...event, status: "pending" });
+  //   return state;
+  // },
+}
+```
+
+### Updating Items in Arrays
+
+When you need to update a specific item in a collection, use `map` to produce a new array:
+
+```typescript
+apply: {
+  TransactionProcessed: (event, state) => ({
+    ...state,
+    balance: state.balance - event.amount,
+    transactions: state.transactions.map((t) =>
+      t.id === event.id
+        ? { ...t, status: "processed" as const }
+        : t,
+    ),
+  }),
+}
+```
+
+### Full State Replacement
+
+Some events represent a complete reset. In those cases, return a fresh state object without spreading the old one:
+
+```typescript
+apply: {
+  BankAccountCreated: (_event, _state) => ({
+    balance: 0,
+    availableBalance: 0,
+    transactions: [],
+  }),
+}
+```
+
+### No-Op Apply Handlers
+
+Sometimes an event is recorded but does not change the state. This is valid -- the event is still a fact worth persisting (for audit trails, projections, or analytics), even if the aggregate state is unaffected:
+
+```typescript
+apply: {
+  BidRejected: (_event, state) => state,
+}
+```
+
+## Derived vs Stored Fields
+
+A key design decision is whether a value should be **stored in state** or **derived on-the-fly** in a command handler.
+
+### Store Fields the Aggregate Needs for Decisions
+
+If a value is used in a business rule check inside a command handler, it should be in the state:
+
+```typescript
+// availableBalance is used to decide whether to authorize
+commands: {
+  AuthorizeTransaction: (command, state) => {
+    if (state.availableBalance < command.payload.amount) {
+      return { name: "TransactionDeclined", payload: { /* ... */ } };
+    }
+    // ...
+  },
+}
+```
+
+Both `balance` and `availableBalance` are stored in the `BankAccountState` because they are needed for authorization decisions. Even though `availableBalance` could theoretically be computed from the transaction list, storing it explicitly makes command handlers simpler and avoids recomputation.
+
+### Derive Fields That Are Only for Display
+
+If a value is only needed for read models or queries, compute it in a [projection](/docs/guides/projections) rather than storing it in aggregate state. Aggregate state is for **write-side decisions**, not for serving read queries.
+
+```typescript
+// Don't store display-only data in aggregate state
+interface BankAccountState {
+  balance: number;
+  availableBalance: number;
+  transactions: Array<{ /* ... */ }>;
+  // Avoid: these are read-model concerns
+  // formattedBalance: string;
+  // transactionCount: number;
+  // lastTransactionDate: Date;
+}
+```
+
+### Rule of Thumb
+
+Ask yourself: **"Does a command handler need this value to make a decision?"**
+
+- **Yes** -- store it in state, update it in apply handlers
+- **No** -- compute it in a projection or query handler
+
+## Why the Aggregate ID Is Not in State
+
+You may notice that the aggregate ID (`targetAggregateId`) is not part of the aggregate state. This is by design.
+
+The aggregate ID is a **routing concern**, not a domain state concern. It identifies *which instance* of the aggregate a command targets, and the framework uses it to load the correct event stream and persist events under the correct key.
+
+The ID is always available in the command object via `command.targetAggregateId`:
+
+```typescript
+commands: {
+  CreateBankAccount: (command, _state) => ({
+    name: "BankAccountCreated",
+    payload: { id: command.targetAggregateId },
+  }),
+}
+```
+
+If your event payloads need the ID (for example, to identify the aggregate in read models), pass it from the command into the event payload. But do not store it as a field in the aggregate state object.
+
+This separation has several benefits:
+
+- **State is identity-free**: the same state type and apply handlers work regardless of the specific instance
+- **Serialization is simpler**: the ID is managed by the persistence layer, not duplicated in the state blob
+- **Testing is easier**: you can test apply handlers with any state snapshot without worrying about matching IDs
+
+For more on how `targetAggregateId` is used for routing, see [Command Routing](/docs/aggregates/command-routing).
+
+## Summary
+
+| Guideline | Recommendation |
+|---|---|
+| `initialState` | Use zero values, empty collections, `null` for absent references |
+| State shape | Keep it flat, use status unions, store only decision-relevant data |
+| Apply handlers | Always return a new object, never mutate |
+| Array updates | Use `map` or spread, not `push` or direct assignment |
+| Derived values | Compute in projections, not in aggregate state |
+| Aggregate ID | Not stored in state; available via `command.targetAggregateId` |
+
+## Next Steps
+
+- [Command Routing](/docs/aggregates/command-routing) -- How the framework routes commands to the correct aggregate instance
+- [Type Inference Helpers](/docs/aggregates/type-inference) -- Extracting types from your aggregate definition
+- [Projections](/docs/guides/projections) -- Building read models from events

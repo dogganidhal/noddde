@@ -1,0 +1,252 @@
+---
+title: Command Routing
+description: How targetAggregateId routes commands to the correct aggregate instance, how aggregate names are derived from the writeModel configuration, and how to work with multiple aggregate types and custom ID types
+---
+
+## How Command Routing Works
+
+When you dispatch a command in noddde, the framework needs to answer two questions:
+
+1. **Which aggregate type** should handle this command?
+2. **Which instance** of that aggregate type is the target?
+
+The answer to the first question comes from the command's `name` -- the framework matches it against the `commands` map of each registered aggregate. The answer to the second question comes from `targetAggregateId` -- the unique identifier of the specific aggregate instance.
+
+```typescript
+await domain.dispatchCommand({
+  name: "AuthorizeTransaction",     // -> which aggregate type
+  targetAggregateId: "acct-001",    // -> which instance
+  payload: { amount: 50, merchant: "Coffee Shop" },
+});
+```
+
+The framework will:
+
+1. Look through the registered aggregates to find one with a `commands.AuthorizeTransaction` handler
+2. Load the event stream for aggregate instance `"acct-001"`
+3. Replay events to reconstruct the current state
+4. Execute the `AuthorizeTransaction` command handler with that state
+5. Persist the resulting events under `"acct-001"`
+
+## targetAggregateId
+
+Every command that targets an aggregate includes a `targetAggregateId` field. This is the primary routing key.
+
+When you define commands with `DefineCommands`, the `targetAggregateId` field is automatically included:
+
+```typescript
+type BankAccountCommand = DefineCommands<{
+  CreateBankAccount: void;
+  AuthorizeTransaction: { amount: number; merchant: string };
+}>;
+
+// Resulting union type:
+// | { name: "CreateBankAccount"; targetAggregateId: string }
+// | { name: "AuthorizeTransaction"; targetAggregateId: string;
+//     payload: { amount: number; merchant: string } }
+```
+
+For `void` payloads, the command has only `name` and `targetAggregateId`. For non-void payloads, it also includes `payload`.
+
+When dispatching, the caller provides the ID:
+
+```typescript
+// Creating a new instance -- the caller chooses the ID
+await domain.dispatchCommand({
+  name: "CreateBankAccount",
+  targetAggregateId: "acct-001",
+});
+
+// Targeting an existing instance
+await domain.dispatchCommand({
+  name: "AuthorizeTransaction",
+  targetAggregateId: "acct-001",
+  payload: { amount: 100, merchant: "Electronics Store" },
+});
+```
+
+The `targetAggregateId` is the responsibility of the caller. The framework does not generate IDs -- you decide the ID strategy (UUIDs, sequential IDs, natural keys, etc.) based on your domain requirements.
+
+## Aggregate Name from the writeModel Key
+
+The framework derives the **aggregate name** from the key you use in the `writeModel.aggregates` map of your domain configuration:
+
+```typescript
+const domain = await configureDomain({
+  writeModel: {
+    aggregates: {
+      BankAccount,  // aggregate name: "BankAccount"
+      Auction,      // aggregate name: "Auction"
+    },
+  },
+  readModel: { projections: {} },
+  infrastructure: { /* ... */ },
+});
+```
+
+The aggregate name is used internally for:
+
+- **Persistence namespacing** -- events are stored under `aggregateName + aggregateId` (e.g., `BankAccount:acct-001`)
+- **Command routing** -- matching command names to the correct aggregate definition
+- **Logging and diagnostics** -- identifying which aggregate processed a command
+
+You can use a different key name than the variable name if needed:
+
+```typescript
+writeModel: {
+  aggregates: {
+    Account: BankAccount,  // aggregate name becomes "Account"
+  },
+}
+```
+
+## Routing with Multiple Aggregate Types
+
+When your domain has multiple aggregate types, each command name must be unique across all registered aggregates. The framework uses the command name to determine which aggregate type handles it.
+
+```typescript
+// BankAccount handles: CreateBankAccount, AuthorizeTransaction
+// Auction handles: CreateAuction, PlaceBid, CloseAuction
+
+const domain = await configureDomain({
+  writeModel: {
+    aggregates: {
+      BankAccount,
+      Auction,
+    },
+  },
+  // ...
+});
+
+// Routed to BankAccount aggregate
+await domain.dispatchCommand({
+  name: "AuthorizeTransaction",
+  targetAggregateId: "acct-001",
+  payload: { amount: 50, merchant: "Coffee Shop" },
+});
+
+// Routed to Auction aggregate
+await domain.dispatchCommand({
+  name: "PlaceBid",
+  targetAggregateId: "auction-42",
+  payload: { bidderId: "user-7", amount: 1500 },
+});
+```
+
+Each aggregate type has its own ID space. `"acct-001"` and `"auction-42"` are completely independent -- they have separate event streams, separate state, and are handled by different aggregate definitions.
+
+### Command Name Uniqueness
+
+If two aggregate types define a handler for the same command name, the framework cannot determine which aggregate should handle it. This is a configuration error. Keep command names globally unique, typically by prefixing with the aggregate context:
+
+```typescript
+// Good: unique command names
+type BankAccountCommand = DefineCommands<{
+  CreateBankAccount: void;
+  AuthorizeTransaction: { amount: number; merchant: string };
+}>;
+
+type AuctionCommand = DefineCommands<{
+  CreateAuction: { item: string; startingPrice: number };
+  PlaceBid: { bidderId: string; amount: number };
+  CloseAuction: void;
+}>;
+
+// Problematic: "Create" is ambiguous
+// type BankAccountCommand = DefineCommands<{ Create: void }>;
+// type AuctionCommand = DefineCommands<{ Create: { item: string } }>;
+```
+
+## Custom ID Types
+
+By default, `DefineCommands` uses `string` for the `targetAggregateId` type. You can override this with the second type parameter to use branded types, UUIDs, or any custom type:
+
+```typescript
+// Branded ID type for type safety
+type BankAccountId = string & { __brand: "BankAccountId" };
+
+type BankAccountCommand = DefineCommands<
+  {
+    CreateBankAccount: void;
+    AuthorizeTransaction: { amount: number; merchant: string };
+  },
+  BankAccountId
+>;
+
+// Now targetAggregateId must be a BankAccountId
+// This prevents accidentally passing an auction ID
+// to a bank account command
+```
+
+With a branded type, TypeScript will reject attempts to use a raw string where a `BankAccountId` is expected:
+
+```typescript
+// Helper to create branded IDs
+function bankAccountId(id: string): BankAccountId {
+  return id as BankAccountId;
+}
+
+await domain.dispatchCommand({
+  name: "CreateBankAccount",
+  targetAggregateId: bankAccountId("acct-001"),
+});
+
+// Type error: string is not assignable to BankAccountId
+// await domain.dispatchCommand({
+//   name: "CreateBankAccount",
+//   targetAggregateId: "acct-001",
+// });
+```
+
+You can extract the ID type from an aggregate definition using the `InferAggregateID` helper. See [Type Inference Helpers](/docs/aggregates/type-inference) for details.
+
+## Accessing the ID in Command Handlers
+
+Inside a command handler, the target aggregate ID is always available on the command object:
+
+```typescript
+commands: {
+  CreateBankAccount: (command, _state) => {
+    // command.targetAggregateId is the instance ID
+    return {
+      name: "BankAccountCreated",
+      payload: { id: command.targetAggregateId },
+    };
+  },
+}
+```
+
+This is how events can include the aggregate ID in their payload when downstream consumers (projections, read models) need it.
+
+## The Routing Lifecycle
+
+Here is the full sequence of what happens when a command is dispatched:
+
+```
+dispatchCommand({ name, targetAggregateId, payload })
+  |
+  |--> CommandBus receives the command
+  |
+  |--> Framework looks up aggregate type by command name
+  |      (scans writeModel.aggregates for a matching handler)
+  |
+  |--> Persistence layer loads events for (aggregateName, targetAggregateId)
+  |
+  |--> Events are replayed through apply handlers starting from initialState
+  |      state = initialState
+  |      for each event: state = apply[event.name](event.payload, state)
+  |
+  |--> Command handler is called: commands[name](command, state, infrastructure)
+  |
+  |--> Returned events are applied to get the new state
+  |
+  |--> New events are persisted under (aggregateName, targetAggregateId)
+  |
+  |--> Events are published to the EventBus for projections and side effects
+```
+
+## Next Steps
+
+- [Type Inference Helpers](/docs/aggregates/type-inference) -- Extract the ID type and other types from aggregate definitions
+- [Defining Aggregates](/docs/aggregates/defining-aggregates) -- Full walkthrough of building an aggregate
+- [Domain Configuration](/docs/guides/domain-configuration) -- Setting up the writeModel and infrastructure

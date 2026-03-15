@@ -1,0 +1,4 @@
+{
+  "title": "Projections",
+  "pages": ["overview", "legacy-projections", "functional-projections", "connecting-events"]
+}

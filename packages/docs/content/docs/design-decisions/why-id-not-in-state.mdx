@@ -1,0 +1,100 @@
+---
+title: "Why Is the Aggregate ID Not in State?"
+description: Why noddde keeps the aggregate identifier on commands rather than in aggregate state.
+---
+
+## The Decision
+
+In noddde, the aggregate identifier lives on the command as `targetAggregateId`, not inside the aggregate's state object.
+
+```ts
+// The ID is on the command
+{ name: "CreateBankAccount", targetAggregateId: "acc-123" }
+
+// NOT in the state
+interface BankAccountState {
+  balance: number;           // No `id` field
+  availableBalance: number;
+  transactions: Array<...>;
+}
+```
+
+## The Problem
+
+If the ID is part of aggregate state, `initialState` becomes awkward:
+
+```ts
+// Problematic: what goes in the id field?
+initialState: {
+  id: ???,         // Empty string? null? placeholder?
+  balance: 0,
+  transactions: [],
+},
+```
+
+Every aggregate instance needs a different ID, but `initialState` is shared across all instances. This creates a contradiction — `initialState` is a constant, but the ID varies per instance.
+
+## Alternatives Considered
+
+- **Include `id` in state, populate from first event** — The traditional OOP approach. The `BankAccountCreated` event includes the `id`, and the apply handler sets it. But `initialState` still has a placeholder.
+- **Separate ID from state at the type level** — `Aggregate<TState, TID>` with separate `id` property. Adds another generic parameter.
+- **ID as a constructor argument** — Requires class-based aggregates.
+
+## Why This Approach
+
+The aggregate definition is a **template**, not an instance. It defines behavior (how to handle commands, how to apply events) that applies to all instances. The ID is an **instance-level concern** — it identifies which bank account, not how bank accounts work.
+
+Keeping the ID on commands:
+
+- **Clean `initialState`** — No placeholder IDs, no optionality
+- **No extra generics** — The ID type is inferred from `DefineCommands<TPayloads, TID>`
+- **Consistent routing** — The framework uses `command.targetAggregateId` to load the right state
+- **Template vs. instance** — Clear separation between aggregate definition (shared) and aggregate identity (per-instance)
+
+## Accessing the ID in Handlers
+
+When a command handler needs the aggregate ID (e.g., to include it in event payloads), it reads it from the command:
+
+```ts
+commands: {
+  CreateBankAccount: (command) => ({
+    name: "BankAccountCreated",
+    payload: { id: command.targetAggregateId }, // ID from command
+  }),
+},
+```
+
+## Trade-offs
+
+- **ID in event payloads** — If your events need the aggregate ID, you must include it explicitly in each event payload. This is slightly more verbose but makes events self-contained.
+- **No `state.id`** — Apply handlers cannot access the aggregate ID (they only see event payloads and current state). This is by design — apply handlers should not need the ID for state transitions.
+
+## Example
+
+```ts
+// Commands carry the ID
+await domain.dispatchCommand({
+  name: "AuthorizeTransaction",
+  targetAggregateId: "acc-123",  // ← ID is here
+  payload: { amount: 100, merchant: "Store" },
+});
+
+// Handler reads ID from command, puts it in event payload
+commands: {
+  AuthorizeTransaction: (command, state) => ({
+    name: "TransactionAuthorized",
+    payload: {
+      id: command.targetAggregateId,  // ← propagated to event
+      amount: command.payload.amount,
+      merchant: command.payload.merchant,
+    },
+  }),
+},
+
+// State does not contain the ID
+initialState: {
+  balance: 0,
+  availableBalance: 0,
+  transactions: [],  // Clean, no placeholder ID
+},
+```

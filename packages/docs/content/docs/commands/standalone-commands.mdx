@@ -1,0 +1,194 @@
+---
+title: Standalone Commands
+description: Commands that operate outside of aggregates for cross-cutting concerns, sagas, and process managers
+---
+
+## What Are Standalone Commands?
+
+Most commands in noddde target a specific aggregate instance via `targetAggregateId`. But some operations do not belong to any single aggregate. **Standalone commands** handle these cases: cross-cutting workflows, process managers, sagas, and integration points.
+
+A standalone command is a plain `Command` -- it has a `name` and an optional `payload`, but no `targetAggregateId`.
+
+## The StandaloneCommand Type
+
+`StandaloneCommand` is an alias for the base `Command` interface:
+
+```typescript
+type StandaloneCommand = Command;
+
+// Which is:
+interface Command {
+  name: string;
+  payload?: any;
+}
+```
+
+The naming distinction exists to make intent clear in your codebase. When you see `StandaloneCommand`, you know the command is not routed to an aggregate.
+
+## StandaloneCommandHandler
+
+Standalone command handlers have a different signature from aggregate command handlers. Instead of receiving aggregate state, they receive the full CQRS infrastructure:
+
+```typescript
+type StandaloneCommandHandler<
+  TInfrastructure extends Infrastructure,
+  TCommand extends StandaloneCommand,
+> = (
+  command: TCommand,
+  infrastructure: TInfrastructure & CQRSInfrastructure,
+) => void | Promise<void>;
+```
+
+| Parameter | Description |
+|---|---|
+| `command` | The incoming standalone command |
+| `infrastructure` | Your domain infrastructure merged with `CQRSInfrastructure` (commandBus, eventBus, queryBus) |
+
+Key differences from aggregate command handlers:
+
+- **No state parameter.** Standalone handlers do not have an aggregate state to inspect.
+- **No event return value.** The handler returns `void`. If it needs to produce side effects, it does so explicitly through the infrastructure (e.g., dispatching commands to other aggregates via the command bus).
+- **Access to CQRSInfrastructure.** The handler receives `commandBus`, `eventBus`, and `queryBus` directly, enabling it to orchestrate across aggregates.
+
+## Registering Standalone Command Handlers
+
+Standalone command handlers are registered in the `writeModel.standaloneCommandHandlers` map of your domain configuration:
+
+```typescript
+import { configureDomain } from "@noddde/core";
+
+const domain = await configureDomain<MyInfrastructure>({
+  writeModel: {
+    aggregates: {
+      BankAccount,
+    },
+    standaloneCommandHandlers: {
+      TransferFunds: async (command, infrastructure) => {
+        const { fromAccountId, toAccountId, amount } = command.payload;
+
+        // Debit the source account
+        await infrastructure.commandBus.dispatch({
+          name: "AuthorizeTransaction",
+          targetAggregateId: fromAccountId,
+          payload: { amount: -amount, merchant: `Transfer to ${toAccountId}` },
+        });
+
+        // Credit the destination account
+        await infrastructure.commandBus.dispatch({
+          name: "AuthorizeTransaction",
+          targetAggregateId: toAccountId,
+          payload: { amount, merchant: `Transfer from ${fromAccountId}` },
+        });
+      },
+    },
+  },
+  readModel: {
+    projections: {},
+  },
+  infrastructure: {
+    // ...
+  },
+});
+```
+
+## Use Cases
+
+### Sagas and Process Managers
+
+Standalone commands are ideal for orchestrating multi-step business processes that span multiple aggregates:
+
+```typescript
+standaloneCommandHandlers: {
+  ProcessCheckout: async (command, { commandBus }) => {
+    const { cartId, paymentMethod, shippingAddress } = command.payload;
+
+    // Step 1: Reserve inventory
+    await commandBus.dispatch({
+      name: "ReserveInventory",
+      targetAggregateId: cartId,
+    });
+
+    // Step 2: Charge payment
+    await commandBus.dispatch({
+      name: "ChargePayment",
+      targetAggregateId: cartId,
+      payload: { method: paymentMethod },
+    });
+
+    // Step 3: Create shipment
+    await commandBus.dispatch({
+      name: "CreateShipment",
+      targetAggregateId: cartId,
+      payload: { address: shippingAddress },
+    });
+  },
+},
+```
+
+### Integration Commands
+
+Use standalone handlers to bridge your domain with external systems:
+
+```typescript
+standaloneCommandHandlers: {
+  SyncWithExternalCRM: async (command, infrastructure) => {
+    const { customerId, data } = command.payload;
+
+    // Call external system through infrastructure
+    await infrastructure.crmClient.syncCustomer(customerId, data);
+
+    // Dispatch a domain command if the sync triggers domain logic
+    await infrastructure.commandBus.dispatch({
+      name: "MarkCustomerSynced",
+      targetAggregateId: customerId,
+    });
+  },
+},
+```
+
+### Notification Dispatching
+
+Standalone handlers can coordinate notifications that pull data from multiple sources:
+
+```typescript
+standaloneCommandHandlers: {
+  SendOrderConfirmation: async (command, infrastructure) => {
+    const { orderId, customerId } = command.payload;
+
+    // Query read model for display data
+    const orderDetails = await infrastructure.queryBus.dispatch({
+      name: "GetOrderDetails",
+      payload: { orderId },
+    });
+
+    // Send via infrastructure
+    await infrastructure.emailService.send({
+      to: orderDetails.customerEmail,
+      template: "order-confirmation",
+      data: orderDetails,
+    });
+  },
+},
+```
+
+## Standalone vs Aggregate Commands
+
+| Aspect | Aggregate Command | Standalone Command |
+|---|---|---|
+| Has `targetAggregateId` | Yes | No |
+| Handler receives state | Yes | No |
+| Handler returns events | Yes (one or more) | No (returns void) |
+| Has access to CQRSInfrastructure | No (only domain infrastructure) | Yes (commandBus, eventBus, queryBus) |
+| Purpose | Domain logic within a single aggregate | Cross-aggregate orchestration |
+
+## Guidelines
+
+- Use standalone commands for **orchestration**, not for domain logic. Business rules and invariants should live in aggregate command handlers where they have access to consistent state.
+- Keep standalone handlers **thin**. They should coordinate and delegate, not contain complex logic.
+- When a standalone handler dispatches multiple aggregate commands, consider what happens if one of them fails. Compensating actions or retry strategies may be needed depending on your consistency requirements.
+- Standalone handlers are a good fit for reacting to external triggers (webhooks, scheduled jobs) that need to dispatch commands into the domain.
+
+## Next Steps
+
+- See how commands flow from dispatch to execution in [Dispatching Commands](/docs/commands/dispatching).
+- Learn about the [CommandBus infrastructure](/docs/commands/infrastructure) that standalone handlers use for cross-aggregate communication.

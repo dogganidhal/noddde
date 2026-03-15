@@ -1,0 +1,290 @@
+---
+title: Type Inference Helpers
+description: Using InferAggregateID, InferAggregateState, InferAggregateEvents, InferAggregateCommands, and InferAggregateInfrastructure to extract types from aggregate definitions
+---
+
+## Overview
+
+noddde provides five type-level helpers that extract specific types from an aggregate definition. These are useful when you need to reference an aggregate's types outside of its definition file -- for example, in tests, projections, API layers, or shared utility types.
+
+All five helpers are exported from `@noddde/core`:
+
+```typescript
+import {
+  InferAggregateID,
+  InferAggregateState,
+  InferAggregateEvents,
+  InferAggregateCommands,
+  InferAggregateInfrastructure,
+} from "@noddde/core";
+```
+
+## InferAggregateState
+
+Extracts the state type from an `Aggregate` instance.
+
+```typescript
+type InferAggregateState<T extends Aggregate> =
+  T extends Aggregate<infer U> ? U["state"] : never;
+```
+
+### Usage
+
+```typescript
+import { InferAggregateState } from "@noddde/core";
+import { BankAccount } from "./bank-account";
+
+type BankAccountState = InferAggregateState<typeof BankAccount>;
+// {
+//   balance: number;
+//   availableBalance: number;
+//   transactions: Array<{
+//     id: string;
+//     timestamp: Date;
+//     amount: number;
+//     merchant: string;
+//     status: "pending" | "processed" | "declined";
+//   }>;
+// }
+```
+
+### When to Use
+
+- **Tests**: Assert that applying events produces the expected state shape
+- **Projections**: Type your read model transformations against the source aggregate state
+- **API responses**: Derive response types from aggregate state without duplicating the interface
+
+```typescript
+// In a test file
+import { InferAggregateState } from "@noddde/core";
+import { BankAccount } from "./bank-account";
+
+type State = InferAggregateState<typeof BankAccount>;
+
+function assertState(actual: State, expected: Partial<State>) {
+  expect(actual).toMatchObject(expected);
+}
+```
+
+## InferAggregateEvents
+
+Extracts the event union type from an `Aggregate` instance.
+
+```typescript
+type InferAggregateEvents<T extends Aggregate> =
+  T extends Aggregate<infer U> ? U["events"] : never;
+```
+
+### Usage
+
+```typescript
+import { InferAggregateEvents } from "@noddde/core";
+import { BankAccount } from "./bank-account";
+
+type BankAccountEvent = InferAggregateEvents<typeof BankAccount>;
+// | { name: "BankAccountCreated"; payload: { id: string } }
+// | { name: "TransactionAuthorized"; payload: { id: string; ... } }
+// | { name: "TransactionDeclined"; payload: { id: string; ... } }
+// | { name: "TransactionProcessed"; payload: { id: string; ... } }
+```
+
+### When to Use
+
+- **Event handlers**: Type standalone event handlers or projection handlers that react to this aggregate's events
+- **Event bus subscribers**: Ensure subscribers handle the correct event shapes
+- **Narrowing**: Use discriminated union narrowing on the `name` field
+
+```typescript
+type BankEvent = InferAggregateEvents<typeof BankAccount>;
+
+function handleEvent(event: BankEvent) {
+  switch (event.name) {
+    case "TransactionAuthorized":
+      // event.payload is narrowed to
+      // { id: string; timestamp: Date; amount: number; merchant: string }
+      console.log(`Authorized: ${event.payload.amount}`);
+      break;
+    case "TransactionDeclined":
+      console.log(`Declined: ${event.payload.merchant}`);
+      break;
+  }
+}
+```
+
+## InferAggregateCommands
+
+Extracts the command union type from an `Aggregate` instance.
+
+```typescript
+type InferAggregateCommands<T extends Aggregate> =
+  T extends Aggregate<infer U> ? U["commands"] : never;
+```
+
+### Usage
+
+```typescript
+import { InferAggregateCommands } from "@noddde/core";
+import { BankAccount } from "./bank-account";
+
+type BankAccountCommand = InferAggregateCommands<typeof BankAccount>;
+// | { name: "CreateBankAccount"; targetAggregateId: string }
+// | { name: "AuthorizeTransaction"; targetAggregateId: string;
+//     payload: { amount: number; merchant: string } }
+```
+
+### When to Use
+
+- **API layer**: Type your command DTOs to match the aggregate's command shapes
+- **Command factories**: Build helper functions that construct valid commands
+- **Validation**: Ensure incoming requests match the expected command structure
+
+```typescript
+type BankCommand = InferAggregateCommands<typeof BankAccount>;
+
+// A typed command factory
+function authorizeTransaction(
+  accountId: string,
+  amount: number,
+  merchant: string,
+): Extract<BankCommand, { name: "AuthorizeTransaction" }> {
+  return {
+    name: "AuthorizeTransaction",
+    targetAggregateId: accountId,
+    payload: { amount, merchant },
+  };
+}
+```
+
+## InferAggregateID
+
+Extracts the type of `targetAggregateId` from the aggregate's command types. This operates on the `AggregateTypes` bundle rather than the `Aggregate` instance.
+
+```typescript
+type InferAggregateID<T extends AggregateTypes> =
+  T["commands"]["targetAggregateId"];
+```
+
+### Usage
+
+```typescript
+import { InferAggregateID } from "@noddde/core";
+
+// Using the AggregateTypes bundle directly
+type BankAccountId = InferAggregateID<BankAccountDef>;
+// string (default)
+
+// With a custom ID type
+type BrandedId = string & { __brand: "AuctionId" };
+type AuctionDef = {
+  state: AuctionState;
+  events: AuctionEvent;
+  commands: DefineCommands<{ /* ... */ }, BrandedId>;
+  infrastructure: {};
+};
+
+type AuctionId = InferAggregateID<AuctionDef>;
+// string & { __brand: "AuctionId" }
+```
+
+### When to Use
+
+- **Repository interfaces**: Type the ID parameter of load/save methods
+- **URL parameters**: Ensure route handlers parse the correct ID type
+- **Cross-aggregate references**: Type references between aggregates
+
+```typescript
+type AccountId = InferAggregateID<BankAccountDef>;
+
+interface BankAccountRepository {
+  getById(id: AccountId): Promise<BankAccountView>;
+  listByCustomer(customerId: string): Promise<BankAccountView[]>;
+}
+```
+
+Note that `InferAggregateID` takes an `AggregateTypes` bundle (the type you pass to `defineAggregate<T>`), not the result of `defineAggregate`. This is because the ID type lives on the command definitions, which are part of the types bundle.
+
+## InferAggregateInfrastructure
+
+Extracts the infrastructure type from an `Aggregate` instance.
+
+```typescript
+type InferAggregateInfrastructure<T extends Aggregate> =
+  T extends Aggregate<infer U> ? U["infrastructure"] : never;
+```
+
+### Usage
+
+```typescript
+import { InferAggregateInfrastructure } from "@noddde/core";
+import { Auction } from "./auction";
+
+type AuctionInfra = InferAggregateInfrastructure<typeof Auction>;
+// { clock: { now(): Date } }
+```
+
+### When to Use
+
+- **Test setup**: Know exactly which infrastructure services to mock
+- **Infrastructure factories**: Type helper functions that build the infrastructure object for a specific aggregate
+
+```typescript
+type AuctionInfra = InferAggregateInfrastructure<typeof Auction>;
+
+function createTestInfrastructure(): AuctionInfra {
+  return {
+    clock: {
+      now: () => new Date("2025-01-15T10:00:00Z"),
+    },
+  };
+}
+```
+
+## Quick Reference
+
+| Helper | Input | Extracts |
+|---|---|---|
+| `InferAggregateState<typeof Agg>` | `Aggregate` instance | The state type |
+| `InferAggregateEvents<typeof Agg>` | `Aggregate` instance | The event union type |
+| `InferAggregateCommands<typeof Agg>` | `Aggregate` instance | The command union type |
+| `InferAggregateID<Def>` | `AggregateTypes` bundle | The `targetAggregateId` type |
+| `InferAggregateInfrastructure<typeof Agg>` | `Aggregate` instance | The infrastructure type |
+
+The first four helpers work with `typeof YourAggregate` (the value returned by `defineAggregate`). `InferAggregateID` works with the `AggregateTypes` type alias you pass as the generic parameter to `defineAggregate`.
+
+## Combining Helpers
+
+You can combine these helpers to build comprehensive utility types:
+
+```typescript
+import {
+  InferAggregateState,
+  InferAggregateEvents,
+  InferAggregateCommands,
+} from "@noddde/core";
+import { BankAccount } from "./bank-account";
+
+// A complete type map for external consumers
+interface BankAccountTypes {
+  state: InferAggregateState<typeof BankAccount>;
+  events: InferAggregateEvents<typeof BankAccount>;
+  commands: InferAggregateCommands<typeof BankAccount>;
+}
+
+// Extract a specific command by name
+type AuthorizeCmd = Extract<
+  InferAggregateCommands<typeof BankAccount>,
+  { name: "AuthorizeTransaction" }
+>;
+
+// Extract a specific event by name
+type AuthorizedEvent = Extract<
+  InferAggregateEvents<typeof BankAccount>,
+  { name: "TransactionAuthorized" }
+>;
+```
+
+## Next Steps
+
+- [Defining Aggregates](/docs/aggregates/defining-aggregates) -- How to build the aggregate these helpers extract from
+- [Command Routing](/docs/aggregates/command-routing) -- How `targetAggregateId` and custom ID types affect routing
+- [Defining Queries](/docs/queries/defining-queries) -- Type-safe query definitions for the read side

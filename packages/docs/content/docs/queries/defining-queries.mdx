@@ -1,0 +1,209 @@
+---
+title: Defining Queries
+description: How to define type-safe queries using the Query interface, the QueryResult type extractor, and best practices for query naming and payload design
+---
+
+## Queries in CQRS
+
+In a CQRS architecture, the **read side** is separate from the write side. While commands express intent to change state (handled by [aggregates](/docs/aggregates/overview)), queries express a request to **read data** without side effects.
+
+noddde provides a lightweight type system for queries that ensures type safety from the query definition through dispatch and handler execution.
+
+## The Query Interface
+
+A query is defined by extending the `Query<TResult>` interface:
+
+```typescript
+import { Query } from "@noddde/core";
+
+interface GetBankAccountByIdQuery extends Query<BankAccountView> {
+  name: "GetBankAccountById";
+  payload: { id: string };
+}
+```
+
+The `Query` interface has two type parameters:
+
+```typescript
+interface Query<TResult, TQueryNames extends string | symbol = string> {
+  name: TQueryNames;
+  payload?: any;
+}
+```
+
+| Parameter | Purpose |
+|---|---|
+| `TResult` | The return type of this query. This is the key type-safety feature -- it links the query to its expected result type. |
+| `TQueryNames` | Optional constraint on the `name` field. Defaults to `string`. Can be narrowed with an enum or string literal union. |
+
+The `TResult` type parameter does not appear as a field on the query object -- it is a **phantom type** used purely at the type level to connect the query to its result type.
+
+## Defining Query Types
+
+### Basic Query with Payload
+
+```typescript
+import { Query } from "@noddde/core";
+
+// The view model this query returns
+interface BankAccountView {
+  id: string;
+  balance: number;
+  availableBalance: number;
+  ownerName: string;
+}
+
+// The query definition
+interface GetBankAccountByIdQuery extends Query<BankAccountView> {
+  name: "GetBankAccountById";
+  payload: { id: string };
+}
+```
+
+### Query Without Payload
+
+Some queries do not need parameters (e.g., fetching all items or a system-wide summary):
+
+```typescript
+interface GetSystemStatsQuery extends Query<SystemStats> {
+  name: "GetSystemStats";
+}
+```
+
+When no `payload` field is defined, the query handler receives `undefined` for the payload parameter.
+
+### Using Enums for Query Names
+
+For domains with many queries, use an enum to centralize query names and prevent typos:
+
+```typescript
+enum BankAccountQueries {
+  GetBankAccountById = "GetBankAccountById",
+  ListBankAccountTransactions = "ListBankAccountTransactions",
+  GetAccountSummary = "GetAccountSummary",
+}
+
+interface GetBankAccountByIdQuery
+  extends Query<BankAccountView, BankAccountQueries> {
+  name: BankAccountQueries.GetBankAccountById;
+  payload: { id: string };
+}
+
+interface ListBankAccountTransactionsQuery
+  extends Query<TransactionView[], BankAccountQueries> {
+  name: BankAccountQueries.ListBankAccountTransactions;
+  payload: { accountId: string; limit?: number; offset?: number };
+}
+
+interface GetAccountSummaryQuery
+  extends Query<AccountSummary, BankAccountQueries> {
+  name: BankAccountQueries.GetAccountSummary;
+  payload: { accountId: string };
+}
+```
+
+The second type parameter on `Query` narrows the `name` field to only accept values from the enum, providing an additional layer of type safety.
+
+## The QueryResult Type Extractor
+
+`QueryResult<TQuery>` extracts the result type from a query definition:
+
+```typescript
+import { QueryResult } from "@noddde/core";
+
+type Result = QueryResult<GetBankAccountByIdQuery>;
+// BankAccountView
+```
+
+It works by inferring the `TResult` phantom type from the `Query` interface:
+
+```typescript
+type QueryResult<TQuery extends Query<any>> =
+  TQuery extends Query<infer TResult> ? TResult : never;
+```
+
+### When to Use QueryResult
+
+Use `QueryResult` when you need the result type of a query but do not want to reference the view type directly:
+
+```typescript
+import { QueryResult } from "@noddde/core";
+
+// In an API controller
+async function handleGetAccount(
+  req: Request,
+): Promise<QueryResult<GetBankAccountByIdQuery>> {
+  const result = await queryBus.dispatch<GetBankAccountByIdQuery>({
+    name: "GetBankAccountById",
+    payload: { id: req.params.id },
+  });
+  return result;
+}
+```
+
+This keeps the return type coupled to the query definition. If the query's result type changes, all consumers update automatically.
+
+## Query Naming Conventions
+
+Consistent naming helps teams navigate query definitions:
+
+| Pattern | Example | Use Case |
+|---|---|---|
+| `Get[Entity]By[Field]` | `GetBankAccountById` | Single entity lookup |
+| `List[Entities]` | `ListBankAccountTransactions` | Collection queries |
+| `Get[Entity][Aspect]` | `GetAccountSummary` | Derived or computed views |
+| `Search[Entities]` | `SearchTransactions` | Free-text or filtered searches |
+| `Count[Entities]` | `CountPendingTransactions` | Aggregate count queries |
+
+## Query Payload Design
+
+Query payloads should contain only the parameters needed to locate and filter the requested data:
+
+```typescript
+// Good: focused payload
+interface ListTransactionsQuery extends Query<TransactionView[]> {
+  name: "ListTransactions";
+  payload: {
+    accountId: string;
+    status?: "pending" | "processed" | "declined";
+    fromDate?: Date;
+    toDate?: Date;
+    limit?: number;
+    offset?: number;
+  };
+}
+```
+
+Use optional fields for filters and pagination. Required fields should be the minimum needed to scope the query (e.g., the parent entity ID).
+
+## View Models
+
+The result type (`TResult`) of a query is typically a **view model** -- a read-optimized data structure tailored for the consumer. View models are distinct from aggregate state:
+
+```typescript
+// Aggregate state (write side) -- minimal, decision-focused
+interface BankAccountState {
+  balance: number;
+  availableBalance: number;
+  transactions: Array<{ /* ... */ }>;
+}
+
+// View model (read side) -- enriched, display-focused
+interface BankAccountView {
+  id: string;
+  balance: number;
+  availableBalance: number;
+  ownerName: string;
+  createdAt: Date;
+  lastTransactionDate: Date | null;
+  transactionCount: number;
+}
+```
+
+View models can include derived data, joined data from multiple sources, and formatted fields that would be inappropriate in aggregate state. They are built and maintained by [projections](/docs/guides/projections).
+
+## Next Steps
+
+- [Query Handlers](/docs/queries/query-handlers) -- Implementing handlers that execute queries
+- [Query Bus](/docs/queries/query-bus) -- Dispatching queries through the bus
+- [Projections](/docs/guides/projections) -- Building the read models that queries return
