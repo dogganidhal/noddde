@@ -33,6 +33,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Generated docs (rebuilt from source)
+packages/docs/src/content/docs/api/
+
 # Misc
 .DS_Store
 *.pem

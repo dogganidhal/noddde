@@ -1,0 +1,20 @@
+{
+  "name": "@noddde/docs",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "astro": "^5.5.0",
+    "@astrojs/starlight": "^0.37.0",
+    "starlight-typedoc": "^0.21.0",
+    "typedoc": "^0.28.0",
+    "typedoc-plugin-markdown": "^4.6.0"
+  },
+  "devDependencies": {
+    "@noddde/typescript-config": "0.0.0"
+  }
+}

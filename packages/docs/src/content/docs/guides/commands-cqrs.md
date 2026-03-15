@@ -1,0 +1,23 @@
+---
+title: Commands & CQRS
+description: Defining commands and implementing the CQRS pattern
+---
+
+## Overview
+
+Commands express intent to change state. noddde provides utility types to define commands concisely and a command bus to dispatch them.
+
+## DefineCommands
+
+Use `DefineCommands` to declare your command types as a simple payload map:
+
+```typescript
+import { DefineCommands } from "@noddde/core";
+
+type MyCommands = DefineCommands<{
+  DoSomething: { data: string };
+  DoSomethingElse: void;
+}>;
+```
+
+<!-- TODO: CommandBus, StandaloneCommandHandler, routing -->
