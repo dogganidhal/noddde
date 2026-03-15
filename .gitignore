@@ -33,6 +33,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Fumadocs generated source
+.source/
+
 # Misc
 .DS_Store
 *.pem

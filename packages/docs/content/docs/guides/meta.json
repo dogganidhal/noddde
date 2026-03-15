@@ -1,0 +1,10 @@
+{
+  "title": "Guides",
+  "pages": [
+    "aggregates",
+    "commands-cqrs",
+    "events",
+    "projections",
+    "domain-configuration"
+  ]
+}

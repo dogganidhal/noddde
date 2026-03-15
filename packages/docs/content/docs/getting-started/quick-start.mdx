@@ -1,0 +1,116 @@
+---
+title: Quick Start
+description: Build your first noddde application
+---
+
+This guide walks you through building a simple auction system using noddde.
+
+## 1. Define your events
+
+```typescript
+import { DefineEvents } from "@noddde/core";
+
+export type AuctionEvent = DefineEvents<{
+  AuctionCreated: { item: string; startingPrice: number };
+  BidPlaced: { bidderId: string; amount: number };
+  AuctionClosed: { winnerId: string | null };
+}>;
+```
+
+## 2. Define your commands
+
+```typescript
+import { DefineCommands } from "@noddde/core";
+
+export type AuctionCommand = DefineCommands<{
+  CreateAuction: { item: string; startingPrice: number };
+  PlaceBid: { bidderId: string; amount: number };
+  CloseAuction: void;
+}>;
+```
+
+## 3. Define your aggregate
+
+```typescript
+import { defineAggregate } from "@noddde/core";
+
+export const Auction = defineAggregate({
+  initialState: {
+    item: "",
+    startingPrice: 0,
+    status: "open" as const,
+    highestBid: null as { bidderId: string; amount: number } | null,
+  },
+
+  commands: {
+    CreateAuction: (command) => ({
+      name: "AuctionCreated",
+      payload: command.payload,
+    }),
+
+    PlaceBid: (command, state) => {
+      const minimum = state.highestBid?.amount ?? state.startingPrice;
+      if (command.payload.amount <= minimum) {
+        return { name: "BidRejected", payload: { reason: "Too low" } };
+      }
+      return { name: "BidPlaced", payload: command.payload };
+    },
+
+    CloseAuction: (_command, state) => ({
+      name: "AuctionClosed",
+      payload: { winnerId: state.highestBid?.bidderId ?? null },
+    }),
+  },
+
+  apply: {
+    AuctionCreated: (event) => ({
+      item: event.item,
+      startingPrice: event.startingPrice,
+      status: "open" as const,
+      highestBid: null,
+    }),
+
+    BidPlaced: (event, state) => ({
+      ...state,
+      highestBid: { bidderId: event.bidderId, amount: event.amount },
+    }),
+
+    AuctionClosed: (_event, state) => ({
+      ...state,
+      status: "closed" as const,
+    }),
+  },
+});
+```
+
+## 4. Configure and run
+
+```typescript
+import {
+  configureDomain,
+  InMemoryCommandBus,
+  EventEmitterEventBus,
+  InMemoryQueryBus,
+  InMemoryEventSourcedAggregatePersistence,
+} from "@noddde/core";
+
+const domain = await configureDomain({
+  writeModel: { aggregates: { Auction } },
+  readModel: { projections: {} },
+  infrastructure: {
+    aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
+    provideInfrastructure: () => ({}),
+    cqrsInfrastructure: () => ({
+      commandBus: new InMemoryCommandBus(),
+      eventBus: new EventEmitterEventBus(),
+      queryBus: new InMemoryQueryBus(),
+    }),
+  },
+});
+
+await domain.dispatchCommand({
+  name: "CreateAuction",
+  targetAggregateId: "auction-1",
+  payload: { item: "Vintage Guitar", startingPrice: 500 },
+});
+```
