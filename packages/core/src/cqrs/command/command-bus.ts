@@ -1,7 +1,5 @@
-import { Command, CommandResult } from "./command";
+import { Command } from "./command";
 
 export interface CommandBus {
-  dispatch<TCommand extends Command>(
-    command: TCommand,
-  ): Promise<CommandResult<TCommand>>;
+  dispatch(command: Command): Promise<void>;
 }

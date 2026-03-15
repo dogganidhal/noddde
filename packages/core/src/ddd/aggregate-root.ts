@@ -1,52 +1,84 @@
-import { Event, Infrastructure, RoutedCommand } from "..";
-import { RoutedCommandHandler } from "../cqrs";
-import { StatefulEventHandler, EventSourcingHandler } from "../edd";
+import { Event } from "../edd/event";
+import { ApplyHandler } from "../edd/event-sourcing-handler";
+import { AggregateCommand } from "../cqrs/command/command";
+import { Infrastructure } from "../infrastructure";
 
-type EventHandlerMap<TAggregate extends AggregateRoot> = {
-  [EventName in InferAggregateEvents<TAggregate>["name"]]?: StatefulEventHandler<
-    TAggregate,
-    any
-  >;
-};
-type EventSourcingHandlerMap<TAggregate extends AggregateRoot> = {
-  [EventName in InferAggregateEvents<TAggregate>["name"]]?: EventSourcingHandler<
-    TAggregate,
-    any
-  >;
-};
-type CommandHandlerMap<TCommand extends RoutedCommand> = {
-  [CommandName in TCommand["name"]]: RoutedCommandHandler<TCommand, any>;
+// ---- Types bundle ----
+// Instead of 5 positional generic parameters, users declare a single
+// named type that bundles their aggregate's type universe.
+
+export type AggregateTypes = {
+  state: any;
+  events: Event;
+  commands: AggregateCommand;
+  infrastructure: Infrastructure;
 };
 
-export type InferAggregateID<TAggregate extends AggregateRoot> =
-  TAggregate extends AggregateRoot<infer TID> ? TID : never;
+// ---- Command handler ----
+// Command handlers are pure decision-makers: they receive the command,
+// the current state, and infrastructure, then return the event(s) that
+// represent what happened. The framework handles persistence and dispatch.
 
-export type InferAggregateState<TAggregate extends AggregateRoot> =
-  TAggregate extends AggregateRoot<any, infer TState> ? TState : never;
-
-export type InferAggregateInfrastructure<TAggregate extends AggregateRoot> =
-  TAggregate extends AggregateRoot<any, any, infer TInfrastructure>
-    ? TInfrastructure
-    : never;
-
-export type InferAggregateEvents<TAggregate extends AggregateRoot> =
-  TAggregate extends AggregateRoot<any, any, any, infer TEvents>
-    ? TEvents
-    : never;
-
-export type InferAggregateCommands<TAggregate extends AggregateRoot> =
-  TAggregate extends AggregateRoot<any, any, any, any, infer TCommands>
-    ? TCommands
-    : never;
-
-export interface AggregateRoot<
-  TID = string,
-  TState = any,
+export type CommandHandler<
+  TCommand extends AggregateCommand,
+  TState,
+  TEvents extends Event,
   TInfrastructure extends Infrastructure = Infrastructure,
-  TEvents extends Event = Event,
-  TCommands extends RoutedCommand = RoutedCommand,
-> {
-  commandHandlers?: CommandHandlerMap<TCommands>;
-  eventHandlers?: EventHandlerMap<this>;
-  eventSourcingHandlers?: EventSourcingHandlerMap<this>;
+> = (
+  command: TCommand,
+  state: TState,
+  infrastructure: TInfrastructure,
+) => TEvents | TEvents[] | Promise<TEvents | TEvents[]>;
+
+// ---- Handler maps ----
+
+type CommandHandlerMap<T extends AggregateTypes> = {
+  [K in T["commands"]["name"]]: CommandHandler<
+    Extract<T["commands"], { name: K }>,
+    T["state"],
+    T["events"],
+    T["infrastructure"]
+  >;
+};
+
+type ApplyHandlerMap<T extends AggregateTypes> = {
+  [K in T["events"]["name"]]: ApplyHandler<
+    Extract<T["events"], { name: K }>,
+    T["state"]
+  >;
+};
+
+// ---- Aggregate definition ----
+// An aggregate is a Decider: initialState + command handlers + apply handlers.
+// No base classes, no decorators — just a typed object.
+
+export interface Aggregate<T extends AggregateTypes = AggregateTypes> {
+  initialState: T["state"];
+  commands: CommandHandlerMap<T>;
+  apply: ApplyHandlerMap<T>;
 }
+
+// Factory function that provides full type inference across
+// the command/event/state/infrastructure boundaries.
+export function defineAggregate<T extends AggregateTypes>(
+  config: Aggregate<T>,
+): Aggregate<T> {
+  return config;
+}
+
+// ---- Type inference helpers ----
+
+export type InferAggregateID<T extends AggregateTypes> =
+  T["commands"]["targetAggregateId"];
+
+export type InferAggregateState<T extends Aggregate> =
+  T extends Aggregate<infer U> ? U["state"] : never;
+
+export type InferAggregateEvents<T extends Aggregate> =
+  T extends Aggregate<infer U> ? U["events"] : never;
+
+export type InferAggregateCommands<T extends Aggregate> =
+  T extends Aggregate<infer U> ? U["commands"] : never;
+
+export type InferAggregateInfrastructure<T extends Aggregate> =
+  T extends Aggregate<infer U> ? U["infrastructure"] : never;

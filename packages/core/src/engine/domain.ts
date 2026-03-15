@@ -1,38 +1,34 @@
 import { CQRSInfrastructure, Infrastructure } from "../infrastructure";
-import { AggregateRoot, Projection } from "../ddd";
-import { Command, CommandResult, StandaloneCommandHandler } from "../cqrs";
+import { Aggregate, Projection } from "../ddd";
+import { StandaloneCommandHandler } from "../cqrs";
+import { AggregateCommand } from "../cqrs/command/command";
 import { Event } from "../edd";
 import { QueryHandler } from "../cqrs/query/query-handler";
 
-type AggregateMap<TInfrastructure extends Infrastructure> = Record<
-  string | symbol,
-  AggregateRoot<any, any, TInfrastructure>
->;
+type AggregateMap = Record<string | symbol, Aggregate<any>>;
+
 type ProjectionMap<TInfrastructure extends Infrastructure> = Record<
   string | symbol,
   Projection<TInfrastructure>
 >;
 
 export interface StateStoredAggregatePersistence {
-  save(aggregateName: string, aggregateId: any, state: any): Promise<void>;
-  load(aggregateName: string, aggregateId: any): Promise<any>;
+  save(aggregateName: string, aggregateId: string, state: any): Promise<void>;
+  load(aggregateName: string, aggregateId: string): Promise<any>;
 }
+
 export interface EventSourcedAggregatePersistence {
   save(
     aggregateName: string,
     aggregateId: string,
     events: Event[],
   ): Promise<void>;
-  load(aggregateName: string, aggregateId: any): Promise<Event[]>;
+  load(aggregateName: string, aggregateId: string): Promise<Event[]>;
 }
 
 type PersistenceConfiguration =
   | StateStoredAggregatePersistence
   | EventSourcedAggregatePersistence;
-
-type CreatePersistenceConfiguration<TInfrastructure extends Infrastructure> = (
-  infrastructure: TInfrastructure,
-) => Promise<PersistenceConfiguration> | PersistenceConfiguration;
 
 type StandaloneCommandHandlerMap<
   TInfrastructure extends Infrastructure,
@@ -43,6 +39,7 @@ type StandaloneCommandHandlerMap<
     any
   >;
 };
+
 type StandaloneQueryHandlerMap<
   TInfrastructure extends Infrastructure,
   TStandaloneQueryNames extends string | symbol = string | symbol,
@@ -56,7 +53,7 @@ export type DomainConfiguration<
   TStandaloneQueryNames extends string | symbol = string | symbol,
 > = {
   writeModel: {
-    aggregates: AggregateMap<TInfrastructure>;
+    aggregates: AggregateMap;
     standaloneCommandHandlers?: StandaloneCommandHandlerMap<
       TInfrastructure,
       TStandaloneCommandNames
@@ -70,7 +67,9 @@ export type DomainConfiguration<
     >;
   };
   infrastructure: {
-    aggregatePersistence?: CreatePersistenceConfiguration<TInfrastructure>;
+    aggregatePersistence?: () =>
+      | PersistenceConfiguration
+      | Promise<PersistenceConfiguration>;
     provideInfrastructure?: () => Promise<TInfrastructure> | TInfrastructure;
     cqrsInfrastructure?: (
       infrastructure: TInfrastructure,
@@ -81,10 +80,6 @@ export type DomainConfiguration<
 export class Domain<TInfrastructure extends Infrastructure> {
   private _infrastructure!: TInfrastructure & CQRSInfrastructure;
   private _persistence!: PersistenceConfiguration;
-
-  private get aggregateDefinitions() {
-    return this.configuration.writeModel.aggregates;
-  }
 
   public get infrastructure(): TInfrastructure & CQRSInfrastructure {
     return this._infrastructure;
@@ -98,9 +93,9 @@ export class Domain<TInfrastructure extends Infrastructure> {
     throw new Error("Not implemented");
   }
 
-  public async dispatchCommand<TCommand extends Command>(
+  public async dispatchCommand<TCommand extends AggregateCommand<any>>(
     command: TCommand,
-  ): Promise<CommandResult<TCommand>> {
+  ): Promise<TCommand["targetAggregateId"]> {
     throw new Error("Not implemented");
   }
 }
