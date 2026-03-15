@@ -3,16 +3,101 @@ title: Introduction
 description: What is noddde and why use it
 ---
 
-## What is noddde?
+## What is noDDDe?
 
-noddde is a TypeScript framework for building applications using Domain-Driven Design (DDD), Command Query Responsibility Segregation (CQRS), and Event Sourcing patterns.
+noDDDe is a TypeScript framework for building applications using **Domain-Driven Design (DDD)**, **Command Query Responsibility Segregation (CQRS)**, and **Event Sourcing** patterns.
 
-It provides a declarative way to express domain aggregates in terms of state, behaviour (commands and command handlers), and events — following the Decider pattern.
+It provides building blocks — not an opinionated runtime. You define your domain as typed objects and pure functions, and noDDDe gives you the type infrastructure to wire them together safely.
 
-## Core Concepts
+## Core Ideas
 
-- **Aggregates** — Define your domain entities with state, command handlers, and event apply handlers
-- **Commands** — Express intent to change state, routed to the appropriate aggregate
-- **Events** — Represent facts that have occurred, used to rebuild state and trigger side effects
-- **Projections** — Build read models by reacting to events
-- **Domain Configuration** — Wire everything together with infrastructure (buses, persistence)
+### Aggregates
+
+Aggregates are consistency boundaries — the units that process commands and enforce business rules. In noDDDe, an aggregate is defined using the functional [Decider pattern](/docs/concepts/decider-pattern):
+
+```ts
+const BankAccount = defineAggregate<BankAccountDef>({
+  initialState: { balance: 0, transactions: [] },
+  commands: {
+    AuthorizeTransaction: (command, state, infra) => { /* return events */ },
+  },
+  apply: {
+    TransactionAuthorized: (event, state) => { /* return new state */ },
+  },
+});
+```
+
+No base class. No decorators. No `this`. Just an object with handler maps.
+
+### Commands
+
+Commands express **intent to change state**. They are typed messages with a `name`, a `targetAggregateId` (for routing), and an optional `payload`:
+
+```ts
+type BankAccountCommand = DefineCommands<{
+  CreateBankAccount: void;
+  AuthorizeTransaction: { amount: number; merchant: string };
+}>;
+```
+
+### Events
+
+Events are **immutable facts about what happened**. They use past tense and are produced by command handlers:
+
+```ts
+type BankAccountEvent = DefineEvents<{
+  BankAccountCreated: { id: string };
+  TransactionAuthorized: { id: string; amount: number; merchant: string };
+}>;
+```
+
+### Projections
+
+Projections build **read-optimized views** from event streams. They are the query side of CQRS:
+
+```ts
+const BankAccountView: ProjectionV2<BankAccountEvent, ViewType> = {
+  reducer: (view, event) => { /* build view from events */ },
+};
+```
+
+### Domain Configuration
+
+`configureDomain` wires aggregates, projections, and infrastructure into a running domain:
+
+```ts
+const domain = await configureDomain<MyInfrastructure>({
+  writeModel: { aggregates: { BankAccount } },
+  readModel: { projections: { BankAccount: BankAccountProjection } },
+  infrastructure: { /* persistence, buses, custom infra */ },
+});
+```
+
+## How noDDDe Differs
+
+| | Traditional DDD | noDDDe |
+|---|---|---|
+| Aggregates | Classes extending `AggregateRoot` | Plain objects via `defineAggregate` |
+| State changes | `this.apply(event)` mutates state | Apply handlers return new state (immutable) |
+| Command handling | Decorated methods | Typed handler maps |
+| Type safety | Manual generic parameters | Inferred from `AggregateTypes` bundle |
+| Event definitions | Enum + interface + union | `DefineEvents<{ ... }>` single declaration |
+| Testing | Requires framework setup | Call functions directly |
+| Infrastructure | Decorator-based injection | Function parameter injection |
+
+noDDDe draws inspiration from modern TypeScript API design (Zod, tRPC, Drizzle) — declarative, inference-heavy, zero-boilerplate.
+
+## Who Is This For?
+
+noDDDe is for TypeScript developers building **event-driven** or **domain-rich** applications who want:
+
+- Type-safe domain modeling without class hierarchies
+- Testable business logic without mock frameworks
+- Flexible persistence (event sourcing or state storage)
+- A functional approach to DDD patterns
+
+## Next Steps
+
+- [Installation](/docs/getting-started/installation) — Install `@noddde/core`
+- [Quick Start](/docs/getting-started/quick-start) — Build your first aggregate
+- [Concepts](/docs/concepts/messaging) — Understand the foundations

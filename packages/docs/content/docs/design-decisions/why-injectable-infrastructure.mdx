@@ -1,0 +1,144 @@
+---
+title: "Why Injectable Infrastructure?"
+description: Why noddde uses function parameter injection instead of dependency injection containers.
+---
+
+## The Decision
+
+noddde injects infrastructure into handlers as function parameters. No DI container, no decorators, no service locator, no global state.
+
+```ts
+commands: {
+  PlaceBid: (command, state, { clock }) => {
+    const now = clock.now();
+    // ...
+  },
+},
+```
+
+## The Problem
+
+Domain logic that directly imports its dependencies is hard to test:
+
+```ts
+// Problematic: direct import
+import { db } from "./database";
+import { logger } from "./logger";
+
+function authorizeTransaction(command, state) {
+  logger.info("Authorizing...");           // How do you silence this in tests?
+  const rate = db.getExchangeRate("USD");  // How do you mock this?
+  // ...
+}
+```
+
+To test this handler, you need to:
+- Mock the `./database` module
+- Mock the `./logger` module
+- Deal with module caching, import ordering, and test isolation
+- Use testing-framework-specific module mocking APIs (`jest.mock`, `vi.mock`)
+
+## Alternatives Considered
+
+- **Global singletons** — `Logger.instance`, `Database.instance`. Hard to test, hidden dependencies.
+- **Service locator** — `container.get<Logger>()`. Hides dependencies, runtime errors for missing registrations.
+- **Decorator-based injection** — `@Inject() logger: Logger`. Requires reflect-metadata, experimental decorators.
+- **Class constructor injection** — `constructor(private logger: Logger)`. Requires classes, constructors.
+
+## Why This Approach
+
+Function parameter injection is the simplest possible dependency injection:
+
+```ts
+// Infrastructure is declared as a type
+interface AuctionInfrastructure {
+  clock: Clock;
+}
+
+// ...and passed as a parameter
+commands: {
+  PlaceBid: (command, state, { clock }) => {
+    // clock is injected, not imported
+  },
+},
+```
+
+Benefits:
+- **No container** — No IoC container, no registration phase, no runtime reflection
+- **No decorators** — Works with any TypeScript version and configuration
+- **Visible dependencies** — The parameter signature shows exactly what the handler needs
+- **Trivial testing** — Pass a mock object; no module mocking required
+- **Type-safe** — TypeScript checks that the infrastructure matches the declared type
+- **No framework lock-in** — Infrastructure types are plain TypeScript interfaces
+
+## Testing Comparison
+
+```ts
+// With module mocking (complex)
+jest.mock("./database", () => ({ getRate: () => 1.5 }));
+jest.mock("./logger", () => ({ info: jest.fn() }));
+import { authorizeTransaction } from "./handler";
+// Must manage mock lifecycle, module cache, test isolation...
+
+// With parameter injection (simple)
+const result = BankAccount.commands.AuthorizeTransaction(
+  command,
+  state,
+  {
+    logger: { info: () => {}, error: () => {}, warn: () => {} },
+    bankAccountViewRepository: {} as any,
+    transactionViewRepository: {} as any,
+  },
+);
+// No module mocking. No lifecycle. No cache issues.
+```
+
+## The Provider Pattern
+
+Infrastructure is created once in the domain configuration and injected everywhere:
+
+```ts
+infrastructure: {
+  provideInfrastructure: () => ({
+    clock: new SystemClock(),        // Production: real clock
+    // OR
+    clock: new FixedClock(testTime), // Testing: deterministic clock
+  }),
+},
+```
+
+This is the [Factory pattern](/docs/domain-configuration/infrastructure) — create once, inject everywhere.
+
+## Trade-offs
+
+- **Must thread through configuration** — Infrastructure is explicitly provided, not automatically resolved
+- **No automatic resolution** — You must build the infrastructure object yourself (no container auto-wiring)
+- **Verbose for large infrastructure** — If you have many dependencies, the infrastructure object is large
+
+These trade-offs are intentional. Explicit wiring is easier to understand, debug, and test than automatic resolution. If your infrastructure object is large, it may indicate that your aggregate has too many responsibilities.
+
+## Example
+
+```ts
+// Define what you need
+interface BankingInfrastructure {
+  logger: Logger;
+  bankAccountViewRepository: BankAccountViewRepository;
+  transactionViewRepository: TransactionViewRepository;
+}
+
+// Use it in handlers — destructure only what you need
+commands: {
+  CreateBankAccount: (command, _state, { logger }) => {
+    logger.info(`Creating ${command.targetAggregateId}`);
+    return { name: "BankAccountCreated", payload: { id: command.targetAggregateId } };
+  },
+},
+
+// Provide it in configuration
+provideInfrastructure: () => ({
+  logger: new ConsoleLogger(),
+  bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
+  transactionViewRepository: new InMemoryTransactionViewRepository(),
+}),
+```

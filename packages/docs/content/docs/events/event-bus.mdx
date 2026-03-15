@@ -1,0 +1,242 @@
+---
+title: EventBus
+description: The event transport layer, built-in EventEmitterEventBus implementation, and how to build custom event buses
+---
+
+## The EventBus Interface
+
+The `EventBus` is the transport mechanism that delivers events from aggregates to projections and other subscribers. It defines a single method:
+
+```typescript
+interface EventBus {
+  dispatch<TEvent extends Event>(event: TEvent): Promise<void>;
+}
+```
+
+The event bus is part of `CQRSInfrastructure`:
+
+```typescript
+interface CQRSInfrastructure {
+  commandBus: CommandBus;
+  eventBus: EventBus;
+  queryBus: QueryBus;
+}
+```
+
+## Event Publishing Flow
+
+When a command handler returns events, the framework orchestrates the following sequence:
+
+1. **Events produced** -- The command handler returns one or more events.
+2. **Events applied** -- Each event is passed through the aggregate's apply handler to update state.
+3. **Events persisted** -- Events (or the resulting state) are saved to storage.
+4. **Events dispatched** -- Each event is sent to the `EventBus` via `eventBus.dispatch(event)`.
+5. **Handlers invoked** -- The event bus delivers the event to all registered event handlers in projections.
+
+The event bus is called **after** persistence, so handlers can assume the event is durably stored.
+
+## EventEmitterEventBus
+
+noddde ships with `EventEmitterEventBus`, an in-process implementation built on Node.js `EventEmitter`:
+
+```typescript
+import { Event, EventBus } from "@noddde/core";
+import { EventEmitter } from "node:events";
+
+class EventEmitterEventBus implements EventBus {
+  private readonly underlying = new EventEmitter();
+
+  public async dispatch<TEvent extends Event>(event: TEvent): Promise<void> {
+    this.underlying.emit(event.name, event.payload);
+  }
+}
+```
+
+### How It Works
+
+- When `dispatch` is called, it emits a Node.js event using the event's `name` as the event type and the `payload` as the data.
+- The framework subscribes projection event handlers to the underlying `EventEmitter` during domain configuration, matching each handler's key to the event name.
+- Delivery is synchronous within the Node.js event loop -- handlers run in the same process, one after another.
+
+### Characteristics
+
+| Property | Behavior |
+|---|---|
+| Delivery | In-process, synchronous emit |
+| Ordering | Handlers run in registration order |
+| Durability | None -- if the process crashes, unprocessed events are lost |
+| At-least-once | No -- events are delivered exactly once within the process |
+| Scalability | Single process only |
+
+`EventEmitterEventBus` is well-suited for development, testing, and single-process applications.
+
+### Using EventEmitterEventBus
+
+```typescript
+import {
+  configureDomain,
+  EventEmitterEventBus,
+  InMemoryCommandBus,
+  InMemoryQueryBus,
+  InMemoryEventSourcedAggregatePersistence,
+} from "@noddde/core";
+
+const domain = await configureDomain<MyInfrastructure>({
+  writeModel: {
+    aggregates: { BankAccount },
+  },
+  readModel: {
+    projections: {
+      BankAccount: BankAccountProjection,
+    },
+  },
+  infrastructure: {
+    aggregatePersistence: () =>
+      new InMemoryEventSourcedAggregatePersistence(),
+    provideInfrastructure: () => ({
+      logger: new ConsoleLogger(),
+      bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
+      transactionViewRepository: new InMemoryTransactionViewRepository(),
+    }),
+    cqrsInfrastructure: () => ({
+      commandBus: new InMemoryCommandBus(),
+      eventBus: new EventEmitterEventBus(),
+      queryBus: new InMemoryQueryBus(),
+    }),
+  },
+});
+```
+
+When `domain.dispatchCommand()` produces events, they flow through the `EventEmitterEventBus` to the projection's event handlers.
+
+## Subscribing via Domain Configuration
+
+You do not manually subscribe to the event bus. The framework handles subscription during `configureDomain`:
+
+1. It reads the `eventHandlers` map from each projection in `readModel.projections`.
+2. For each event name in the map, it registers the handler with the event bus.
+3. When an event with that name is dispatched, the matching handler is called with the event payload and infrastructure.
+
+This is why your projection's `eventHandlers` keys must match the event names produced by your aggregates.
+
+## Implementing a Custom EventBus
+
+For production systems, you often need an event bus backed by a message broker for durability, distribution, and at-least-once delivery.
+
+### Interface Contract
+
+```typescript
+import { Event, EventBus } from "@noddde/core";
+
+class MyCustomEventBus implements EventBus {
+  async dispatch<TEvent extends Event>(event: TEvent): Promise<void> {
+    // Your implementation
+  }
+}
+```
+
+### Example: Kafka EventBus
+
+```typescript
+import { Event, EventBus } from "@noddde/core";
+
+class KafkaEventBus implements EventBus {
+  constructor(private readonly producer: KafkaProducer) {}
+
+  async dispatch<TEvent extends Event>(event: TEvent): Promise<void> {
+    await this.producer.send({
+      topic: `domain-events.${event.name}`,
+      messages: [
+        {
+          key: event.name,
+          value: JSON.stringify(event.payload),
+        },
+      ],
+    });
+  }
+}
+```
+
+### Example: Logging EventBus Decorator
+
+```typescript
+import { Event, EventBus } from "@noddde/core";
+
+class LoggingEventBus implements EventBus {
+  constructor(
+    private readonly inner: EventBus,
+    private readonly logger: Logger,
+  ) {}
+
+  async dispatch<TEvent extends Event>(event: TEvent): Promise<void> {
+    this.logger.info(`Publishing event: ${event.name}`, {
+      payload: event.payload,
+    });
+    await this.inner.dispatch(event);
+  }
+}
+```
+
+Use it as a wrapper:
+
+```typescript
+cqrsInfrastructure: () => ({
+  commandBus: new InMemoryCommandBus(),
+  eventBus: new LoggingEventBus(
+    new EventEmitterEventBus(),
+    new ConsoleLogger(),
+  ),
+  queryBus: new InMemoryQueryBus(),
+}),
+```
+
+### Example: Multi-Dispatch EventBus
+
+Dispatch events to multiple buses simultaneously (e.g., local projections and a remote broker):
+
+```typescript
+import { Event, EventBus } from "@noddde/core";
+
+class CompositeEventBus implements EventBus {
+  constructor(private readonly buses: EventBus[]) {}
+
+  async dispatch<TEvent extends Event>(event: TEvent): Promise<void> {
+    await Promise.all(this.buses.map((bus) => bus.dispatch(event)));
+  }
+}
+```
+
+```typescript
+cqrsInfrastructure: () => ({
+  commandBus: new InMemoryCommandBus(),
+  eventBus: new CompositeEventBus([
+    new EventEmitterEventBus(),  // Local projections
+    new KafkaEventBus(producer), // Remote consumers
+  ]),
+  queryBus: new InMemoryQueryBus(),
+}),
+```
+
+## When to Customize the EventBus
+
+| Scenario | Approach |
+|---|---|
+| Local development and testing | `EventEmitterEventBus` |
+| Need observability | Wrap with a logging decorator |
+| Multi-service architecture | Kafka, RabbitMQ, or NATS-backed bus |
+| Need at-least-once delivery | Message broker with acknowledgments |
+| Multiple consumers in different processes | Publish to a distributed topic |
+| Testing event flow | Use a spy/mock event bus that records dispatched events |
+
+## Error Handling
+
+With `EventEmitterEventBus`, if an event handler throws, the error propagates from `dispatch`. In production event bus implementations, consider:
+
+- **Retry logic** -- Automatically retry failed deliveries.
+- **Dead letter queues** -- Route persistently failing events for manual inspection.
+- **Idempotent handlers** -- Design event handlers to tolerate redelivery, since at-least-once delivery may deliver the same event more than once.
+
+## Next Steps
+
+- Learn how events become the system's source of truth in [Event Sourcing](/docs/events/event-sourcing).
+- Understand the full [domain configuration](/docs/domain-configuration) that wires together all buses and persistence.

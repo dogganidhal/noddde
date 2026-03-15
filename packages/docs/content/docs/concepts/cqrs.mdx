@@ -1,0 +1,306 @@
+---
+title: CQRS
+description: How noddde separates write and read models using Command Query Responsibility Segregation
+---
+
+## What is CQRS?
+
+**Command Query Responsibility Segregation** (CQRS) is an architectural pattern that separates the write side of your application from the read side. Instead of using a single model for both reading and writing data, you maintain two distinct models:
+
+- **Write model** — Handles commands, enforces business rules, and produces events. Optimized for consistency and correctness.
+- **Read model** — Consumes events, builds query-optimized views, and answers queries. Optimized for fast reads and flexible querying.
+
+In a traditional CRUD application, the same data model serves both writes and reads. This creates tension: the schema must be normalized enough for consistent writes but denormalized enough for efficient reads. CQRS resolves this tension by allowing each side to use the data structure that best fits its purpose.
+
+```
+                Write Side                           Read Side
+          =====================               =====================
+
+  Command --> [ Aggregate ] --> Event(s) --> [ Projection ] <-- Query
+                  |                               |
+                  v                               v
+           Event Store /                    Read Database /
+           State Store                      View Tables
+```
+
+## The Write Model in noddde
+
+The write model is where your domain logic lives. It consists of **aggregates** — Decider-based state machines that receive commands, validate them against the current state, and produce events.
+
+In the `DomainConfiguration`, the write model is declared under the `writeModel` key:
+
+```typescript
+import { configureDomain } from "@noddde/core";
+
+const domain = await configureDomain({
+  writeModel: {
+    aggregates: {
+      BankAccount,
+      Transaction,
+    },
+    standaloneCommandHandlers: {
+      SendNotification: async (command, infrastructure) => {
+        await infrastructure.notificationService.send(command.payload);
+      },
+    },
+  },
+  readModel: { projections: {} },
+  infrastructure: { /* ... */ },
+});
+```
+
+### Aggregates
+
+Aggregates are the primary building block of the write model. Each aggregate is a Decider that defines:
+
+- **`initialState`** — The state of a new, empty aggregate instance
+- **`commands`** — A map of command handlers that decide which events to emit
+- **`apply`** — A map of apply handlers that evolve state from events
+
+When a command is dispatched, the framework:
+
+1. Identifies the target aggregate using the command's `name` (for routing to the correct aggregate type) and `targetAggregateId` (for routing to the correct instance)
+2. Loads the current state of that aggregate instance (either by replaying events or loading a snapshot)
+3. Calls the matching command handler with the command, current state, and infrastructure
+4. Receives the event(s) returned by the handler
+5. Applies each event through the corresponding apply handler to produce the new state
+6. Persists the events (or the new state) and dispatches them to the event bus
+
+### Standalone Command Handlers
+
+Not every command targets an aggregate. Some commands trigger side effects that do not involve domain state — sending a notification, calling an external API, or coordinating between multiple aggregates. For these cases, noddde provides **standalone command handlers**:
+
+```typescript
+type StandaloneCommandHandler<TInfrastructure, TCommand> = (
+  command: TCommand,
+  infrastructure: TInfrastructure & CQRSInfrastructure,
+) => void | Promise<void>;
+```
+
+Standalone command handlers receive the full infrastructure (including the command bus, event bus, and query bus), so they can dispatch further commands or events as needed. They are declared in the `writeModel.standaloneCommandHandlers` map.
+
+## The Read Model in noddde
+
+The read model consumes events produced by the write model and builds **projections** — query-optimized data structures that answer specific questions about the domain.
+
+```typescript
+const domain = await configureDomain({
+  writeModel: { aggregates: { BankAccount } },
+  readModel: {
+    projections: {
+      AccountBalanceView,
+      TransactionHistory,
+    },
+    standaloneQueryHandlers: {
+      GetSystemStats: async (_query, infrastructure) => {
+        return infrastructure.statsService.getStats();
+      },
+    },
+  },
+  infrastructure: { /* ... */ },
+});
+```
+
+### Projections
+
+A projection in noddde has two sides:
+
+- **Event handlers** — React to domain events and update the projection's internal state (a database table, an in-memory map, a search index, etc.)
+- **Query handlers** — Serve queries by reading from the projection's internal state
+
+```typescript
+import { Projection } from "@noddde/core";
+
+const AccountBalanceView: Projection<MyInfrastructure> = {
+  eventHandlers: {
+    BankAccountCreated: async (event, infrastructure) => {
+      await infrastructure.db.insert("balances", {
+        accountId: event.id,
+        balance: 0,
+      });
+    },
+    TransactionAuthorized: async (event, infrastructure) => {
+      await infrastructure.db.decrement("balances", event.id, event.amount);
+    },
+    FundsDeposited: async (event, infrastructure) => {
+      await infrastructure.db.increment("balances", event.id, event.amount);
+    },
+  },
+  queryHandlers: {
+    GetAccountBalance: async (query, infrastructure) => {
+      return infrastructure.db.get("balances", query.accountId);
+    },
+  },
+};
+```
+
+Event handlers in projections are fundamentally different from apply handlers in aggregates. Apply handlers are pure and synchronous — they compute the next state from the current state and an event payload. Event handlers in projections are effectful and often asynchronous — they write to databases, update caches, or call external services.
+
+### Standalone Query Handlers
+
+Similar to standalone command handlers, **standalone query handlers** answer queries that do not belong to any specific projection:
+
+```typescript
+type QueryHandler<TInfrastructure, TQuery> = (
+  query: TQuery["payload"],
+  infrastructure: TInfrastructure,
+) => QueryResult<TQuery> | Promise<QueryResult<TQuery>>;
+```
+
+These are declared in `readModel.standaloneQueryHandlers`.
+
+## The Buses
+
+Communication between the write model, read model, and the outside world happens through three buses. These are provided as part of the CQRS infrastructure:
+
+```typescript
+interface CQRSInfrastructure {
+  commandBus: CommandBus;
+  eventBus: EventBus;
+  queryBus: QueryBus;
+}
+```
+
+### CommandBus
+
+The `CommandBus` accepts commands and routes them to the appropriate handler:
+
+```typescript
+interface CommandBus {
+  dispatch(command: Command): Promise<void>;
+}
+```
+
+When you call `domain.dispatchCommand(command)`, the framework uses the command bus internally to route the command to either an aggregate's command handler or a standalone command handler, based on the command's `name`.
+
+### EventBus
+
+The `EventBus` dispatches events to all interested subscribers — primarily projections:
+
+```typescript
+interface EventBus {
+  dispatch<TEvent extends Event>(event: TEvent): Promise<void>;
+}
+```
+
+After an aggregate processes a command and produces events, the framework dispatches each event through the event bus. Every projection that has an event handler matching the event's `name` will receive it.
+
+### QueryBus
+
+The `QueryBus` routes queries to the appropriate query handler and returns the result:
+
+```typescript
+interface QueryBus {
+  dispatch<TQuery extends Query<any>>(query: TQuery): Promise<QueryResult<TQuery>>;
+}
+```
+
+The query bus connects the outside world to the read model. Queries flow in, results flow out. The query bus itself is stateless — it simply routes each query to the handler registered for that query's `name`.
+
+### In-Memory Implementations
+
+noddde ships with in-memory implementations of all three buses for development and testing:
+
+```typescript
+import {
+  InMemoryCommandBus,
+  EventEmitterEventBus,
+  InMemoryQueryBus,
+} from "@noddde/core";
+
+const domain = await configureDomain({
+  // ...
+  infrastructure: {
+    cqrsInfrastructure: () => ({
+      commandBus: new InMemoryCommandBus(),
+      eventBus: new EventEmitterEventBus(),
+      queryBus: new InMemoryQueryBus(),
+    }),
+  },
+});
+```
+
+In production, you would replace these with implementations backed by a message broker (RabbitMQ, Kafka, etc.) or a distributed event store.
+
+## Why Separate Models?
+
+Separating the write and read models unlocks several architectural advantages:
+
+### Independent Optimization
+
+The write model can use a data structure optimized for consistency and transactional integrity (an event stream, a normalized relational schema), while the read model can use structures optimized for query performance (denormalized views, materialized aggregations, search indexes).
+
+For example, a banking write model might store a sequence of `TransactionAuthorized` and `FundsDeposited` events, while the read model maintains a pre-computed `AccountBalance` view and a `MonthlySpendingSummary` aggregate.
+
+### Independent Scaling
+
+Read traffic and write traffic rarely have the same characteristics. A typical application has far more reads than writes. With CQRS, you can scale the read side independently — add more read replicas, cache aggressively, or distribute projections across multiple services — without affecting the write side.
+
+### Multiple Read Models
+
+A single stream of events can feed multiple projections, each optimized for a different query pattern. The same `TransactionAuthorized` event might:
+
+- Update an `AccountBalance` projection (for balance queries)
+- Append to a `TransactionHistory` projection (for statement queries)
+- Update a `FraudDetection` projection (for anomaly detection)
+- Feed an `AnalyticsDashboard` projection (for business intelligence)
+
+Adding a new read model requires only writing a new projection. The write model is untouched.
+
+### Temporal Flexibility
+
+Because events are immutable facts, you can add a new projection at any time and replay the entire event history to populate it. This means you can answer questions about your data that you did not anticipate when you first designed the system.
+
+## The CQRS Data Flow
+
+Here is the complete flow of a command through a noddde application:
+
+```
+1. Client sends a command
+   { name: "AuthorizeTransaction", targetAggregateId: "acc-1", payload: { amount: 50, merchant: "Store" } }
+
+2. CommandBus routes to BankAccount aggregate
+
+3. Framework loads current state for "acc-1"
+   { balance: 1000, status: "active" }
+
+4. Command handler runs
+   AuthorizeTransaction(command, state, infrastructure) -> event
+
+5. Event returned
+   { name: "TransactionAuthorized", payload: { id: "acc-1", amount: 50, merchant: "Store" } }
+
+6. Apply handler updates state
+   TransactionAuthorized(event.payload, state) -> { balance: 950, status: "active" }
+
+7. Event persisted to event store
+
+8. EventBus dispatches event to projections
+   - AccountBalanceView updates balance for "acc-1"
+   - TransactionHistory appends new entry
+   - FraudDetection checks for anomalies
+
+9. Client can query the read model
+   QueryBus.dispatch({ name: "GetAccountBalance", payload: { accountId: "acc-1" } })
+   -> { balance: 950 }
+```
+
+Steps 1-7 are the **write path** (synchronous, consistent). Steps 8-9 are the **read path** (eventually consistent with the write model).
+
+## Summary
+
+| Component | Side | Purpose |
+|-----------|------|---------|
+| Aggregate | Write | Handles commands, enforces rules, emits events |
+| Standalone Command Handler | Write | Handles commands without aggregate state |
+| Projection | Read | Consumes events, builds query views |
+| Standalone Query Handler | Read | Answers queries without projection state |
+| CommandBus | Bridge | Routes commands to handlers |
+| EventBus | Bridge | Distributes events to projections |
+| QueryBus | Bridge | Routes queries to handlers |
+
+## Next Steps
+
+- Learn how to wire everything together in the [Domain Configuration guide](/docs/guides/domain-configuration)
+- Understand how projections work in the [Projections guide](/docs/guides/projections)
+- Learn about event sourcing as a persistence strategy in [Event Sourcing](/docs/concepts/event-sourcing)

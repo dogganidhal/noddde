@@ -1,0 +1,278 @@
+---
+title: Query Handlers
+description: Implementing query handlers with the QueryHandler type, connecting to infrastructure for data access, and patterns for standalone and projection-backed query handlers
+---
+
+## The QueryHandler Type
+
+A `QueryHandler` is a function that receives a query payload and infrastructure, then returns the query result. It is the read-side counterpart to a command handler on the write side.
+
+```typescript
+import { Infrastructure } from "@noddde/core";
+import { Query, QueryResult } from "@noddde/core";
+
+type QueryHandler<
+  TInfrastructure extends Infrastructure,
+  TQuery extends Query<any>,
+> = (
+  query: TQuery["payload"],
+  infrastructure: TInfrastructure,
+) => QueryResult<TQuery> | Promise<QueryResult<TQuery>>;
+```
+
+| Parameter | Type | Description |
+|---|---|---|
+| `query` | `TQuery["payload"]` | The query payload (the filtering/lookup parameters). This is the `payload` field from the query object, not the entire query. |
+| `infrastructure` | `TInfrastructure` | Infrastructure services available to the handler (repositories, database connections, caches). |
+| **Return** | `QueryResult<TQuery>` or `Promise<...>` | The result type inferred from the query definition. Can be synchronous or asynchronous. |
+
+## Defining a Query Handler
+
+### Basic Example
+
+```typescript
+import { QueryHandler } from "@noddde/core";
+
+interface BankingInfrastructure {
+  bankAccountViewRepository: {
+    getById(id: string): Promise<BankAccountView>;
+  };
+}
+
+interface GetBankAccountByIdQuery extends Query<BankAccountView> {
+  name: "GetBankAccountById";
+  payload: { id: string };
+}
+
+const getBankAccountByIdHandler: QueryHandler<
+  BankingInfrastructure,
+  GetBankAccountByIdQuery
+> = async (query, { bankAccountViewRepository }) => {
+  return bankAccountViewRepository.getById(query.id);
+};
+```
+
+The handler receives `query` as the payload (in this case `{ id: string }`), not the full query object. It destructures `bankAccountViewRepository` from the infrastructure and uses it to fetch the data.
+
+### Handler with Filtering and Pagination
+
+```typescript
+interface ListBankAccountTransactionsQuery
+  extends Query<TransactionView[]> {
+  name: "ListBankAccountTransactions";
+  payload: {
+    accountId: string;
+    status?: "pending" | "processed" | "declined";
+    limit?: number;
+    offset?: number;
+  };
+}
+
+const listTransactionsHandler: QueryHandler<
+  BankingInfrastructure,
+  ListBankAccountTransactionsQuery
+> = async (query, { transactionViewRepository }) => {
+  return transactionViewRepository.list({
+    accountId: query.accountId,
+    status: query.status,
+    limit: query.limit ?? 50,
+    offset: query.offset ?? 0,
+  });
+};
+```
+
+Default values for optional parameters (like `limit` and `offset`) are typically applied inside the handler.
+
+### Synchronous Handler
+
+Query handlers do not have to be asynchronous. If the data source is in-memory, return the result directly:
+
+```typescript
+const getSystemStatsHandler: QueryHandler<
+  AppInfrastructure,
+  GetSystemStatsQuery
+> = (query, { statsCache }) => {
+  return statsCache.getStats();
+};
+```
+
+## Infrastructure for Query Handlers
+
+Query handlers access data through **infrastructure** -- typically repositories or read-model stores. The infrastructure type you define determines what services are available.
+
+### Repository Pattern
+
+The most common pattern is a view repository that encapsulates the underlying storage:
+
+```typescript
+interface BankingInfrastructure {
+  bankAccountViewRepository: {
+    getById(id: string): Promise<BankAccountView>;
+    listByCustomer(customerId: string): Promise<BankAccountView[]>;
+  };
+  transactionViewRepository: {
+    list(params: {
+      accountId: string;
+      status?: string;
+      limit: number;
+      offset: number;
+    }): Promise<TransactionView[]>;
+    countByAccount(accountId: string): Promise<number>;
+  };
+}
+```
+
+This keeps the query handler focused on orchestration while the repository handles storage details (SQL queries, document lookups, cache reads).
+
+### Multiple Repository Access
+
+A single query handler can access multiple repositories when the query requires data from different sources:
+
+```typescript
+interface GetAccountSummaryQuery extends Query<AccountSummary> {
+  name: "GetAccountSummary";
+  payload: { accountId: string };
+}
+
+const getAccountSummaryHandler: QueryHandler<
+  BankingInfrastructure,
+  GetAccountSummaryQuery
+> = async (
+  query,
+  { bankAccountViewRepository, transactionViewRepository },
+) => {
+  const account = await bankAccountViewRepository.getById(
+    query.accountId,
+  );
+  const transactionCount =
+    await transactionViewRepository.countByAccount(
+      query.accountId,
+    );
+
+  return {
+    id: account.id,
+    balance: account.balance,
+    availableBalance: account.availableBalance,
+    ownerName: account.ownerName,
+    transactionCount,
+  };
+};
+```
+
+## Standalone vs Projection-Backed Handlers
+
+### Projection-Backed Handlers
+
+Most query handlers read from **view models** built by [projections](/docs/guides/projections). Projections listen to events and maintain denormalized read models in a store. The query handler simply reads from that store.
+
+```
+Events --> Projection --> View Store --> Query Handler --> Result
+```
+
+This is the standard CQRS approach: projections keep the read model up to date, and query handlers serve it.
+
+```typescript
+// The projection maintains the BankAccountView in a repository
+// The query handler just reads from it
+const getBankAccountByIdHandler: QueryHandler<
+  BankingInfrastructure,
+  GetBankAccountByIdQuery
+> = async (query, { bankAccountViewRepository }) => {
+  return bankAccountViewRepository.getById(query.id);
+};
+```
+
+### Standalone Query Handlers
+
+Some queries do not need a prebuilt read model. They compute results on-the-fly from raw data or external services. These are **standalone** query handlers.
+
+```typescript
+interface CalculateInterestQuery extends Query<InterestProjection> {
+  name: "CalculateInterest";
+  payload: { accountId: string; days: number; rate: number };
+}
+
+const calculateInterestHandler: QueryHandler<
+  BankingInfrastructure,
+  CalculateInterestQuery
+> = async (query, { bankAccountViewRepository }) => {
+  const account = await bankAccountViewRepository.getById(
+    query.accountId,
+  );
+
+  // Computed on the fly, not stored anywhere
+  const interest =
+    (account.balance * query.rate * query.days) / 365;
+
+  return {
+    accountId: query.accountId,
+    currentBalance: account.balance,
+    projectedInterest: Math.round(interest * 100) / 100,
+    projectedBalance:
+      Math.round((account.balance + interest) * 100) / 100,
+    days: query.days,
+    rate: query.rate,
+  };
+};
+```
+
+Standalone query handlers are useful for:
+- Computed or derived data that does not justify a persistent read model
+- Queries that combine data from multiple sources at read time
+- Queries against external services or APIs
+
+## Registering Query Handlers
+
+Query handlers are registered in the domain configuration under `readModel.standaloneQueryHandlers`:
+
+```typescript
+import { configureDomain } from "@noddde/core";
+
+const domain = await configureDomain({
+  writeModel: {
+    aggregates: { BankAccount },
+  },
+  readModel: {
+    projections: { /* ... */ },
+    standaloneQueryHandlers: {
+      GetBankAccountById: getBankAccountByIdHandler,
+      ListBankAccountTransactions: listTransactionsHandler,
+      GetAccountSummary: getAccountSummaryHandler,
+    },
+  },
+  infrastructure: { /* ... */ },
+});
+```
+
+The key in the map must match the query's `name` field. The framework uses this mapping to route dispatched queries to the correct handler.
+
+## Error Handling
+
+Query handlers can throw errors for invalid queries or missing data. The error propagates through the [query bus](/docs/queries/query-bus) to the caller:
+
+```typescript
+const getBankAccountByIdHandler: QueryHandler<
+  BankingInfrastructure,
+  GetBankAccountByIdQuery
+> = async (query, { bankAccountViewRepository }) => {
+  const account = await bankAccountViewRepository.getById(
+    query.id,
+  );
+
+  if (!account) {
+    throw new Error(
+      `Bank account not found: ${query.id}`,
+    );
+  }
+
+  return account;
+};
+```
+
+How you handle this error at the call site depends on your application layer (HTTP status codes, GraphQL errors, etc.).
+
+## Next Steps
+
+- [Query Bus](/docs/queries/query-bus) -- Dispatching queries and receiving typed results
+- [Defining Queries](/docs/queries/defining-queries) -- The `Query` and `QueryResult` types
+- [Domain Configuration](/docs/guides/domain-configuration) -- Wiring query handlers into the domain

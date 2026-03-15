@@ -1,0 +1,160 @@
+---
+title: Functional Projections
+description: Building read models with the ProjectionV2 reducer pattern for pure, testable view construction.
+---
+
+`ProjectionV2` takes a functional approach to projections. Instead of separate event handler and query handler maps, it uses a single **reducer** function that builds a view by folding over events.
+
+## The ProjectionV2 Type
+
+```ts
+type ProjectionV2<TEvent extends Event, TView = any> = {
+  reducer: (view: TView, event: TEvent) => TView;
+};
+```
+
+Two generic parameters:
+
+- `TEvent` — The event union type this projection consumes
+- `TView` — The shape of the view being built
+
+The `reducer` is a pure function: given the current view and an event, it returns the new view. No side effects, no infrastructure, no async.
+
+## Writing a Reducer
+
+The reducer uses `event.name` as the discriminant to narrow the event type:
+
+```ts
+import { ProjectionV2 } from "@noddde/core";
+import { BankAccountEvent } from "./events";
+
+type BankAccountView = {
+  id: string;
+  balance: number;
+  transactions: {
+    id: string;
+    timestamp: Date;
+    amount: number;
+    status: "processed" | "declined" | "authorized";
+  }[];
+};
+
+export const BankAccountV2: ProjectionV2<BankAccountEvent, BankAccountView> = {
+  reducer: (view, event) => {
+    switch (event.name) {
+      case "BankAccountCreated":
+        return {
+          id: event.payload.id,
+          balance: 0,
+          transactions: [],
+        };
+      case "TransactionProcessed":
+        return {
+          ...view,
+          balance: view.balance + event.payload.amount,
+          transactions: [
+            ...view.transactions,
+            {
+              id: event.payload.id,
+              timestamp: event.payload.timestamp,
+              amount: event.payload.amount,
+              status: "processed",
+            },
+          ],
+        };
+      case "TransactionDeclined":
+      case "TransactionAuthorized":
+        return view;
+    }
+  },
+};
+```
+
+Notice how some events can be combined into a single case when they require the same handling (or no handling at all).
+
+## Similarity to Apply Handlers
+
+If the reducer pattern looks familiar, it should — it follows the same philosophy as [apply handlers](/docs/events/apply-handlers) in aggregates. Both are pure functions that transform state based on events.
+
+The difference is in their purpose:
+- **Apply handlers** rebuild the aggregate's internal state for command processing
+- **Projection reducers** build a query-optimized view for the read model
+
+The same events produce different data structures depending on the consumer's needs.
+
+## Testing Functional Projections
+
+Because reducers are pure functions, testing them is trivial:
+
+```ts
+import { describe, it, expect } from "vitest";
+import { BankAccountV2 } from "./projection";
+
+describe("BankAccountV2 projection", () => {
+  const initialView = { id: "", balance: 0, transactions: [] };
+
+  it("initializes the view on BankAccountCreated", () => {
+    const result = BankAccountV2.reducer(initialView, {
+      name: "BankAccountCreated",
+      payload: { id: "acc-123" },
+    });
+
+    expect(result.id).toBe("acc-123");
+    expect(result.balance).toBe(0);
+  });
+
+  it("adds to balance on TransactionProcessed", () => {
+    const view = { id: "acc-123", balance: 100, transactions: [] };
+
+    const result = BankAccountV2.reducer(view, {
+      name: "TransactionProcessed",
+      payload: {
+        id: "txn-1",
+        timestamp: new Date(),
+        amount: 50,
+        merchant: "Store",
+      },
+    });
+
+    expect(result.balance).toBe(150);
+    expect(result.transactions).toHaveLength(1);
+  });
+});
+```
+
+No mocks needed. No infrastructure setup. Just call the function with inputs and assert the output.
+
+## Replaying a Full Event Stream
+
+To build a complete view from scratch, fold over the entire event stream:
+
+```ts
+const events: BankAccountEvent[] = loadEventsFromStore();
+
+const view = events.reduce(
+  BankAccountV2.reducer,
+  { id: "", balance: 0, transactions: [] }, // initial view
+);
+```
+
+This is particularly useful for rebuilding projections from the event store — a common operation in event-sourced systems.
+
+## Limitations
+
+`ProjectionV2` trades flexibility for simplicity:
+
+- **No infrastructure access** — Cannot call repositories or external services
+- **No query handlers** — The view itself is the query result
+- **No async operations** — The reducer must be synchronous
+- **No side effects** — Cannot send notifications or trigger external actions
+
+If you need any of these capabilities, use [Legacy Projections](/docs/projections/legacy-projections) instead.
+
+## When to Use
+
+Functional projections are ideal for:
+
+- **In-memory views** — When the view lives in memory rather than a database
+- **Simple transformations** — When the view maps directly from the event stream
+- **Testing** — When you want easily testable projections
+- **Rebuilding from events** — When you need to replay the event stream to reconstruct the view

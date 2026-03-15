@@ -1,0 +1,103 @@
+---
+title: "Why the Decider Pattern?"
+description: Why noddde uses pure functions instead of OOP aggregate classes.
+---
+
+## The Decision
+
+noddde models aggregates as pure function Deciders — `initialState` + `commands` (decide) + `apply` (evolve) — instead of class hierarchies with base classes and method decorators.
+
+## The Problem
+
+Traditional DDD frameworks model aggregates as classes:
+
+```ts
+// Traditional OOP approach (NOT how noddde works)
+class BankAccount extends AggregateRoot {
+  private balance = 0;
+
+  @CommandHandler
+  authorizeTransaction(command: AuthorizeTransaction) {
+    if (this.balance < command.amount) {
+      this.apply(new TransactionDeclined(command));
+    } else {
+      this.apply(new TransactionAuthorized(command));
+    }
+  }
+
+  @EventSourcingHandler
+  onTransactionAuthorized(event: TransactionAuthorized) {
+    this.balance -= event.amount;
+  }
+}
+```
+
+This approach has several problems:
+- Requires a base class (`AggregateRoot`) — couples your domain to the framework
+- Uses `this.apply()` to dispatch events — mixes decision-making with side effects
+- Mutates internal state — harder to reason about
+- Requires decorators — TypeScript decorators have changed across versions
+- Testing requires constructing the class, potentially with its base class dependencies
+
+## Alternatives Considered
+
+- **Axon Framework style** — `@Aggregate` annotation + `@CommandHandler`/`@EventSourcingHandler` methods (Java annotations / TS decorators)
+- **NestJS CQRS** — Class-based aggregates with `AggregateRoot` base class
+- **EventStoreDB client** — Thin client, no aggregate abstraction at all
+
+## Why This Approach
+
+The Decider pattern treats an aggregate as three pure components:
+
+```ts
+const BankAccount = defineAggregate<BankAccountDef>({
+  initialState: { balance: 0, transactions: [] },
+  commands: {
+    AuthorizeTransaction: (command, state, infra) => { /* return events */ },
+  },
+  apply: {
+    TransactionAuthorized: (event, state) => { /* return new state */ },
+  },
+});
+```
+
+Benefits:
+- **No base class** — Your domain types are plain TypeScript
+- **No decorators** — Works with any TypeScript version and build tool
+- **No `this`** — Handlers are functions, not methods; no binding issues
+- **Pure functions** — Command handlers return events; apply handlers return state
+- **Trivial testing** — Call the function, assert the result
+- **Full type inference** — TypeScript infers handler parameter types automatically
+- **Composable** — Aggregate definitions are plain objects; they can be merged, transformed, or generated
+
+## Trade-offs
+
+- **Less familiar** — Developers coming from Java/C# DDD frameworks expect class-based aggregates
+- **Different mental model** — Thinking in terms of `decide` and `evolve` rather than methods and mutations
+- **No lifecycle hooks** — No `onLoad`, `onSave`, or similar hooks (by design — these belong in the framework, not the domain)
+
+## Example
+
+The same authorization logic, comparing approaches:
+
+```ts
+// OOP: mutates state, calls this.apply()
+class BankAccount extends AggregateRoot {
+  authorizeTransaction(cmd) {
+    if (this.balance < cmd.amount) this.apply(new TransactionDeclined(cmd));
+    else this.apply(new TransactionAuthorized(cmd));
+  }
+}
+
+// Decider: pure function, returns events
+commands: {
+  AuthorizeTransaction: (cmd, state) => {
+    if (state.availableBalance < cmd.payload.amount) {
+      return { name: "TransactionDeclined", payload: { ... } };
+    }
+    return { name: "TransactionAuthorized", payload: { ... } };
+  },
+},
+```
+
+The Decider version is shorter, testable without framework setup, and makes the decision flow explicit.

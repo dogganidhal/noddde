@@ -1,0 +1,4 @@
+{
+  "title": "Queries",
+  "pages": ["defining-queries", "query-handlers", "query-bus"]
+}

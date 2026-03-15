@@ -1,0 +1,138 @@
+---
+title: Aggregates Overview
+description: What aggregates are in Domain-Driven Design, how noddde models them as Deciders, and the relationship between a single definition and multiple runtime instances
+---
+
+## What is an Aggregate?
+
+In Domain-Driven Design, an **aggregate** is a cluster of domain objects that is treated as a single unit for data changes. Every aggregate has a root entity (identified by a unique ID) and enforces invariants across all the objects it contains.
+
+Aggregates serve as **consistency boundaries**: all business rules that must hold true together live inside the same aggregate. When you dispatch a command, only one aggregate instance handles it, validates the business rules, and produces events that record what happened.
+
+## The Decider Pattern
+
+noddde models aggregates using the **Decider pattern**, a functional approach that breaks aggregate behavior into three clearly separated parts:
+
+### 1. Initial State
+
+The starting state for every new aggregate instance. When an aggregate is first created (no events have been applied yet), this is the state that command handlers receive.
+
+```typescript
+initialState: {
+  balance: 0,
+  availableBalance: 0,
+  transactions: [],
+}
+```
+
+### 2. Command Handlers (Decide)
+
+Command handlers are **decision-makers**. They receive the current command, the current state, and optional infrastructure, then return one or more events representing what happened. They do **not** mutate state directly.
+
+```typescript
+commands: {
+  AuthorizeTransaction: (command, state, { logger }) => {
+    if (state.availableBalance < command.payload.amount) {
+      return {
+        name: "TransactionDeclined",
+        payload: { /* ... */ },
+      };
+    }
+    return {
+      name: "TransactionAuthorized",
+      payload: { /* ... */ },
+    };
+  },
+}
+```
+
+The command handler's job is to **decide** which events should be emitted. It can:
+
+- Return a single event
+- Return an array of events
+- Return a promise resolving to either of the above
+- Use infrastructure services (logging, clocks, external lookups) to inform the decision
+
+### 3. Apply Handlers (Evolve)
+
+Apply handlers are **pure reducers**. They take an event payload and the current state, then return the new state. They contain zero business logic and perform no side effects.
+
+```typescript
+apply: {
+  TransactionAuthorized: (event, state) => ({
+    ...state,
+    availableBalance: state.availableBalance - event.amount,
+    transactions: [
+      ...state.transactions,
+      { ...event, status: "pending" as const },
+    ],
+  }),
+}
+```
+
+Apply handlers are called both when processing new commands (to update the in-memory state) and when **replaying events** from storage to reconstruct an aggregate's current state.
+
+## How the Three Parts Work Together
+
+When the framework processes a command against an aggregate instance:
+
+1. **Load** -- Fetch all previously stored events for that aggregate ID
+2. **Rebuild** -- Start from `initialState` and fold every stored event through the matching `apply` handler to reconstruct the current state
+3. **Decide** -- Pass the command, the reconstructed state, and infrastructure to the matching `commands` handler
+4. **Evolve** -- Fold the newly returned events through `apply` handlers to get the updated state
+5. **Persist** -- Store the new events (event sourcing) or the new state (state-stored)
+
+This cycle guarantees that command handlers always work with the latest state and that all state transitions are traceable through events.
+
+## Single Definition, Multiple Instances
+
+An aggregate definition (the object you create with `defineAggregate`) is a **blueprint**, not a singleton. It describes the behavior for a *type* of entity. At runtime, there can be many instances of the same aggregate type, each identified by a unique `targetAggregateId`.
+
+```typescript
+// One definition...
+export const BankAccount = defineAggregate<BankAccountDef>({ /* ... */ });
+
+// ...many instances at runtime
+await domain.dispatchCommand({
+  name: "CreateBankAccount",
+  targetAggregateId: "acct-001",
+});
+
+await domain.dispatchCommand({
+  name: "CreateBankAccount",
+  targetAggregateId: "acct-002",
+});
+```
+
+Each instance (`acct-001`, `acct-002`) has its own event stream and its own state, but they all share the same command handlers, apply handlers, and initial state from the `BankAccount` definition.
+
+The aggregate name used by the framework is the key you assign in the domain configuration's `writeModel.aggregates` map:
+
+```typescript
+const domain = await configureDomain({
+  writeModel: {
+    aggregates: {
+      BankAccount,  // "BankAccount" is the aggregate name
+      Auction,      // "Auction" is the aggregate name
+    },
+  },
+  // ...
+});
+```
+
+## No Base Classes
+
+Unlike many DDD frameworks, noddde does not use base classes or decorators. An aggregate is a plain typed object with three properties: `initialState`, `commands`, and `apply`. The `defineAggregate` function is a simple identity function that exists solely to provide full type inference across all three parts.
+
+This makes aggregates:
+
+- Easy to test (they are plain objects and pure functions)
+- Easy to compose (no class hierarchy to manage)
+- Fully type-safe (TypeScript infers all relationships from the `AggregateTypes` bundle)
+
+## Next Steps
+
+- [Defining Aggregates](/docs/aggregates/defining-aggregates) -- Step-by-step guide to building your first aggregate
+- [State Design](/docs/aggregates/state-design) -- Best practices for designing aggregate state
+- [Command Routing](/docs/aggregates/command-routing) -- How commands reach the right aggregate instance
+- [Type Inference Helpers](/docs/aggregates/type-inference) -- Extract types from aggregate definitions

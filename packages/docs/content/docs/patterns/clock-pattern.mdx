@@ -1,0 +1,178 @@
+---
+title: The Clock Pattern
+description: How to inject time as an infrastructure dependency for deterministic, testable command handlers.
+---
+
+The Clock pattern is the canonical example of infrastructure injection in noddde. It solves a fundamental problem in event-sourced systems: non-deterministic behavior caused by direct calls to `new Date()`.
+
+## The Problem
+
+Consider an auction system where bids are rejected if the auction has ended:
+
+```ts
+// Problematic: direct Date call
+commands: {
+  PlaceBid: (command, state) => {
+    const now = new Date(); // Different every time!
+    if (now > state.endsAt) {
+      return { name: "BidRejected", payload: { reason: "Auction has ended" } };
+    }
+    // ...
+  },
+},
+```
+
+This handler is non-deterministic. It produces different results depending on when it runs, which makes it:
+
+- **Untestable** — You cannot control what `new Date()` returns
+- **Non-replayable** — If you replay the command later (e.g., for debugging), you get a different result
+- **Fragile** — Tests that depend on timing are flaky
+
+## The Solution
+
+Define a `Clock` interface and inject it through infrastructure:
+
+```ts
+// Interface — the capability your domain needs
+interface Clock {
+  now(): Date;
+}
+
+// Production implementation
+class SystemClock implements Clock {
+  now(): Date {
+    return new Date();
+  }
+}
+
+// Test implementation — returns a fixed, predictable time
+class FixedClock implements Clock {
+  constructor(private readonly time: Date) {}
+  now(): Date {
+    return this.time;
+  }
+}
+```
+
+Add it to your infrastructure type:
+
+```ts
+interface AuctionInfrastructure {
+  clock: Clock;
+}
+```
+
+Use it in the command handler:
+
+```ts
+commands: {
+  PlaceBid: (command, state, { clock }) => {
+    const now = clock.now(); // Deterministic!
+    if (now > state.endsAt) {
+      return {
+        name: "BidRejected",
+        payload: {
+          bidderId: command.payload.bidderId,
+          amount: command.payload.amount,
+          reason: "Auction has ended",
+        },
+      };
+    }
+    // ...
+  },
+},
+```
+
+## Testing with FixedClock
+
+Now tests are deterministic and clear:
+
+```ts
+describe("PlaceBid", () => {
+  const auctionEndsAt = new Date("2024-06-01T00:00:00Z");
+  const openAuctionState: AuctionState = {
+    item: "Guitar",
+    startingPrice: 500,
+    endsAt: auctionEndsAt,
+    status: "open",
+    highestBid: null,
+    bidCount: 0,
+  };
+
+  it("rejects bids after auction ends", () => {
+    const result = Auction.commands.PlaceBid(
+      {
+        name: "PlaceBid",
+        targetAggregateId: "auction-1",
+        payload: { bidderId: "alice", amount: 600 },
+      },
+      openAuctionState,
+      { clock: new FixedClock(new Date("2024-06-02")) }, // After end
+    );
+
+    expect(result).toMatchObject({
+      name: "BidRejected",
+      payload: { reason: "Auction has ended" },
+    });
+  });
+
+  it("accepts valid bids before auction ends", () => {
+    const result = Auction.commands.PlaceBid(
+      {
+        name: "PlaceBid",
+        targetAggregateId: "auction-1",
+        payload: { bidderId: "alice", amount: 600 },
+      },
+      openAuctionState,
+      { clock: new FixedClock(new Date("2024-05-15")) }, // Before end
+    );
+
+    expect(result).toMatchObject({
+      name: "BidPlaced",
+      payload: { bidderId: "alice", amount: 600 },
+    });
+  });
+});
+```
+
+## Production Configuration
+
+In production, provide `SystemClock`:
+
+```ts
+const domain = await configureDomain<AuctionInfrastructure>({
+  // ...
+  infrastructure: {
+    provideInfrastructure: () => ({
+      clock: new SystemClock(),
+    }),
+  },
+});
+```
+
+## Generalizing the Pattern
+
+The Clock pattern is not specific to time. It applies to **any non-deterministic dependency**:
+
+| Dependency | Interface | Production | Test |
+|---|---|---|---|
+| Current time | `Clock` | `SystemClock` | `FixedClock` |
+| Random IDs | `IdGenerator` | `UUIDGenerator` | `SequentialIdGenerator` |
+| External APIs | `PaymentGateway` | `StripeGateway` | `StubPaymentGateway` |
+| Random numbers | `RandomSource` | `CryptoRandom` | `FixedRandom` |
+
+The recipe is always the same:
+
+1. **Identify the non-deterministic call** (e.g., `new Date()`, `crypto.randomUUID()`, `fetch()`)
+2. **Define an interface** for the capability
+3. **Create a production implementation** that wraps the real call
+4. **Create a test implementation** with predictable behavior
+5. **Add to infrastructure** and inject into handlers
+
+This keeps your domain logic pure and your tests reliable.
+
+## Next Steps
+
+- [Custom Infrastructure](/docs/infrastructure/custom-infrastructure) — Defining infrastructure types
+- [Testing Infrastructure](/docs/testing/testing-infrastructure) — Full testing patterns
+- [Why Injectable Infrastructure](/docs/design-decisions/why-injectable-infrastructure) — Design rationale

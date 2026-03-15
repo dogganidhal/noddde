@@ -1,91 +1,175 @@
 ---
 title: Quick Start
-description: Build your first noddde application
+description: Build your first noddde application — a bank account aggregate
 ---
 
-This guide walks you through building a simple auction system using noddde.
+This guide walks you through building a bank account system step by step. By the end, you will have a working aggregate with commands, events, state, and a domain configuration.
 
-## 1. Define your events
+## What We Will Build
 
-```typescript
+A bank account that supports:
+- **Creating** a new account
+- **Authorizing transactions** (with balance validation)
+- Two possible outcomes: authorized or declined
+
+## Step 1: Define Events
+
+Events are immutable facts about what happened. Use `DefineEvents` to declare them:
+
+```ts
 import { DefineEvents } from "@noddde/core";
 
-export type AuctionEvent = DefineEvents<{
-  AuctionCreated: { item: string; startingPrice: number };
-  BidPlaced: { bidderId: string; amount: number };
-  AuctionClosed: { winnerId: string | null };
+export type BankAccountEvent = DefineEvents<{
+  BankAccountCreated: { id: string };
+  TransactionAuthorized: {
+    id: string;
+    timestamp: Date;
+    amount: number;
+    merchant: string;
+  };
+  TransactionDeclined: {
+    id: string;
+    timestamp: Date;
+    amount: number;
+    merchant: string;
+  };
 }>;
 ```
 
-## 2. Define your commands
+Each key becomes the event's `name` discriminant. The value becomes the `payload` type. `DefineEvents` builds a discriminated union from this map. Learn more in [Defining Events](/docs/events/defining-events).
 
-```typescript
+## Step 2: Define Commands
+
+Commands express intent. Use `DefineCommands`:
+
+```ts
 import { DefineCommands } from "@noddde/core";
 
-export type AuctionCommand = DefineCommands<{
-  CreateAuction: { item: string; startingPrice: number };
-  PlaceBid: { bidderId: string; amount: number };
-  CloseAuction: void;
+export type BankAccountCommand = DefineCommands<{
+  CreateBankAccount: void;
+  AuthorizeTransaction: { amount: number; merchant: string };
 }>;
 ```
 
-## 3. Define your aggregate
+`void` means `CreateBankAccount` has no payload — just a name and a `targetAggregateId`. Learn more in [Defining Commands](/docs/commands/defining-commands).
 
-```typescript
+## Step 3: Define State
+
+The aggregate state holds everything needed for business decisions:
+
+```ts
+export interface BankAccountState {
+  balance: number;
+  availableBalance: number;
+  transactions: Array<{
+    id: string;
+    timestamp: Date;
+    amount: number;
+    merchant: string;
+    status: "pending" | "processed" | "declined";
+  }>;
+}
+```
+
+Note: the aggregate ID is **not** part of state. It lives on the command as `targetAggregateId`. See [Why ID Not in State](/docs/design-decisions/why-id-not-in-state).
+
+## Step 4: Bundle Types
+
+Create an `AggregateTypes` bundle that ties everything together:
+
+```ts
+type BankAccountDef = {
+  state: BankAccountState;
+  events: BankAccountEvent;
+  commands: BankAccountCommand;
+  infrastructure: {};  // No custom infrastructure for this example
+};
+```
+
+This single type replaces five positional generic parameters. Learn more in [AggregateTypes Bundle](/docs/design-decisions/why-aggregate-types).
+
+## Step 5: Define the Aggregate
+
+Use `defineAggregate` to create the aggregate definition:
+
+```ts
 import { defineAggregate } from "@noddde/core";
 
-export const Auction = defineAggregate({
+export const BankAccount = defineAggregate<BankAccountDef>({
+  // The state before any events
   initialState: {
-    item: "",
-    startingPrice: 0,
-    status: "open" as const,
-    highestBid: null as { bidderId: string; amount: number } | null,
+    balance: 0,
+    availableBalance: 0,
+    transactions: [],
   },
 
+  // Command handlers — decide what events to produce
   commands: {
-    CreateAuction: (command) => ({
-      name: "AuctionCreated",
-      payload: command.payload,
+    CreateBankAccount: (command) => ({
+      name: "BankAccountCreated",
+      payload: { id: command.targetAggregateId },
     }),
 
-    PlaceBid: (command, state) => {
-      const minimum = state.highestBid?.amount ?? state.startingPrice;
-      if (command.payload.amount <= minimum) {
-        return { name: "BidRejected", payload: { reason: "Too low" } };
+    AuthorizeTransaction: (command, state) => {
+      const { amount, merchant } = command.payload;
+
+      if (state.availableBalance < amount) {
+        return {
+          name: "TransactionDeclined",
+          payload: {
+            id: command.targetAggregateId,
+            timestamp: new Date(),
+            amount,
+            merchant,
+          },
+        };
       }
-      return { name: "BidPlaced", payload: command.payload };
-    },
 
-    CloseAuction: (_command, state) => ({
-      name: "AuctionClosed",
-      payload: { winnerId: state.highestBid?.bidderId ?? null },
-    }),
+      return {
+        name: "TransactionAuthorized",
+        payload: {
+          id: command.targetAggregateId,
+          timestamp: new Date(),
+          amount,
+          merchant,
+        },
+      };
+    },
   },
 
+  // Apply handlers — evolve state from events (pure functions)
   apply: {
-    AuctionCreated: (event) => ({
-      item: event.item,
-      startingPrice: event.startingPrice,
-      status: "open" as const,
-      highestBid: null,
+    BankAccountCreated: () => ({
+      balance: 0,
+      availableBalance: 0,
+      transactions: [],
     }),
 
-    BidPlaced: (event, state) => ({
+    TransactionAuthorized: (event, state) => ({
       ...state,
-      highestBid: { bidderId: event.bidderId, amount: event.amount },
+      availableBalance: state.availableBalance - event.amount,
+      transactions: [
+        ...state.transactions,
+        { ...event, status: "pending" as const },
+      ],
     }),
 
-    AuctionClosed: (_event, state) => ({
+    TransactionDeclined: (event, state) => ({
       ...state,
-      status: "closed" as const,
+      transactions: [
+        ...state.transactions,
+        { ...event, status: "declined" as const },
+      ],
     }),
   },
 });
 ```
 
-## 4. Configure and run
+## Step 6: Configure the Domain
 
-```typescript
+Wire the aggregate into a running domain with in-memory infrastructure:
+
+```ts
 import {
   configureDomain,
   InMemoryCommandBus,
@@ -95,8 +179,12 @@ import {
 } from "@noddde/core";
 
 const domain = await configureDomain({
-  writeModel: { aggregates: { Auction } },
-  readModel: { projections: {} },
+  writeModel: {
+    aggregates: { BankAccount },
+  },
+  readModel: {
+    projections: {},
+  },
   infrastructure: {
     aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
     provideInfrastructure: () => ({}),
@@ -107,10 +195,46 @@ const domain = await configureDomain({
     }),
   },
 });
+```
 
+## Step 7: Dispatch Commands
+
+```ts
+import { randomUUID } from "crypto";
+
+const accountId = randomUUID();
+
+// Create the bank account
 await domain.dispatchCommand({
-  name: "CreateAuction",
-  targetAggregateId: "auction-1",
-  payload: { item: "Vintage Guitar", startingPrice: 500 },
+  name: "CreateBankAccount",
+  targetAggregateId: accountId,
+});
+
+// Authorize a transaction
+await domain.dispatchCommand({
+  name: "AuthorizeTransaction",
+  targetAggregateId: accountId,
+  payload: { amount: 100, merchant: "Amazon" },
 });
 ```
+
+## What Just Happened?
+
+The full flow for each `dispatchCommand` call:
+
+1. **Command dispatched** — `{ name: "AuthorizeTransaction", targetAggregateId: "...", payload: { amount: 100, merchant: "Amazon" } }`
+2. **State loaded** — Framework loads the aggregate's event history and replays through apply handlers
+3. **Command handler called** — `commands.AuthorizeTransaction(command, currentState, infrastructure)`
+4. **Event returned** — Handler decides: `TransactionAuthorized` or `TransactionDeclined`
+5. **Event persisted** — Saved to the event store
+6. **State updated** — Apply handler called: `apply.TransactionAuthorized(event, state)` returns new state
+7. **Event published** — Sent to EventBus for projections to consume
+
+## Next Steps
+
+- [Concepts](/docs/concepts/messaging) — Understand the foundational patterns
+- [Aggregates](/docs/aggregates/defining-aggregates) — Deep dive into aggregate definitions
+- [Commands](/docs/commands/defining-commands) — The full command system
+- [Events](/docs/events/defining-events) — Events and apply handlers
+- [Projections](/docs/projections/overview) — Building read models
+- [Domain Configuration](/docs/domain-configuration/overview) — Complete wiring reference

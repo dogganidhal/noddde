@@ -1,0 +1,292 @@
+---
+title: Query Bus
+description: The QueryBus interface for dispatching queries, the InMemoryQueryBus implementation, typed dispatch, and guidelines for building custom query bus implementations
+---
+
+## The QueryBus Interface
+
+The `QueryBus` is the entry point for dispatching queries on the read side. It provides a single `dispatch` method that accepts a query object and returns a promise resolving to the typed result.
+
+```typescript
+import { Query, QueryResult } from "@noddde/core";
+
+interface QueryBus {
+  dispatch<TQuery extends Query<any>>(
+    query: TQuery,
+  ): Promise<QueryResult<TQuery>>;
+}
+```
+
+The `dispatch` method is generic over `TQuery`. When you provide an explicit type argument, TypeScript infers the return type from the query's `TResult` phantom type -- no manual type annotations needed on the result.
+
+## Typed Dispatch
+
+The power of the `QueryBus` is its type-safe dispatch. The return type is automatically derived from the query type:
+
+```typescript
+import { QueryBus } from "@noddde/core";
+
+// Assuming these query types are defined:
+// GetBankAccountByIdQuery extends Query<BankAccountView>
+// ListBankAccountTransactionsQuery extends Query<TransactionView[]>
+
+async function example(queryBus: QueryBus) {
+  // result is typed as BankAccountView
+  const account =
+    await queryBus.dispatch<GetBankAccountByIdQuery>({
+      name: "GetBankAccountById",
+      payload: { id: "acct-001" },
+    });
+
+  // result is typed as TransactionView[]
+  const transactions =
+    await queryBus.dispatch<ListBankAccountTransactionsQuery>({
+      name: "ListBankAccountTransactions",
+      payload: {
+        accountId: "acct-001",
+        limit: 20,
+        offset: 0,
+      },
+    });
+}
+```
+
+The explicit type argument on `dispatch<GetBankAccountByIdQuery>(...)` serves two purposes:
+
+1. **Return type inference** -- TypeScript knows `account` is a `BankAccountView`
+2. **Payload validation** -- TypeScript ensures the query object matches the expected shape (correct `name` and `payload` fields)
+
+## InMemoryQueryBus
+
+noddde ships with `InMemoryQueryBus`, a stub implementation suitable for development and testing:
+
+```typescript
+import { InMemoryQueryBus } from "@noddde/core";
+
+const queryBus = new InMemoryQueryBus();
+```
+
+The `InMemoryQueryBus` implements the `QueryBus` interface. In its current form it is a placeholder that throws a "not implemented" error. It is used as the default query bus when configuring a domain for local development or testing.
+
+### Using in Domain Configuration
+
+```typescript
+import {
+  configureDomain,
+  InMemoryCommandBus,
+  EventEmitterEventBus,
+  InMemoryQueryBus,
+  InMemoryEventSourcedAggregatePersistence,
+} from "@noddde/core";
+
+const domain = await configureDomain({
+  writeModel: {
+    aggregates: { BankAccount },
+  },
+  readModel: {
+    projections: {},
+    standaloneQueryHandlers: {
+      GetBankAccountById: getBankAccountByIdHandler,
+      ListBankAccountTransactions: listTransactionsHandler,
+    },
+  },
+  infrastructure: {
+    aggregatePersistence: () =>
+      new InMemoryEventSourcedAggregatePersistence(),
+    provideInfrastructure: () => ({
+      bankAccountViewRepository: inMemoryBankAccountRepo,
+      transactionViewRepository: inMemoryTransactionRepo,
+    }),
+    cqrsInfrastructure: () => ({
+      commandBus: new InMemoryCommandBus(),
+      eventBus: new EventEmitterEventBus(),
+      queryBus: new InMemoryQueryBus(),
+    }),
+  },
+});
+```
+
+The query bus, along with the command bus and event bus, is provided through the `cqrsInfrastructure` factory in your domain configuration.
+
+## Dispatching Queries from Application Code
+
+In a typical application, you access the query bus through the domain's infrastructure and dispatch queries from your API or service layer:
+
+```typescript
+// In an HTTP handler, GraphQL resolver, or service
+async function getAccountDetails(accountId: string) {
+  const queryBus = domain.infrastructure.queryBus;
+
+  const account =
+    await queryBus.dispatch<GetBankAccountByIdQuery>({
+      name: "GetBankAccountById",
+      payload: { id: accountId },
+    });
+
+  return account;
+}
+```
+
+### Dispatching from an Express Route
+
+```typescript
+app.get("/accounts/:id", async (req, res) => {
+  try {
+    const account =
+      await domain.infrastructure.queryBus.dispatch<GetBankAccountByIdQuery>(
+        {
+          name: "GetBankAccountById",
+          payload: { id: req.params.id },
+        },
+      );
+    res.json(account);
+  } catch (error) {
+    res.status(404).json({ error: "Account not found" });
+  }
+});
+
+app.get("/accounts/:id/transactions", async (req, res) => {
+  const transactions =
+    await domain.infrastructure.queryBus.dispatch<ListBankAccountTransactionsQuery>(
+      {
+        name: "ListBankAccountTransactions",
+        payload: {
+          accountId: req.params.id,
+          limit: Number(req.query.limit) || 50,
+          offset: Number(req.query.offset) || 0,
+        },
+      },
+    );
+  res.json(transactions);
+});
+```
+
+## Building a Custom Query Bus
+
+For production use, you will likely need a query bus that actually routes queries to registered handlers. A custom implementation must satisfy the `QueryBus` interface.
+
+### Example: Handler-Registry Query Bus
+
+```typescript
+import { Query, QueryBus, QueryHandler, QueryResult } from "@noddde/core";
+import { Infrastructure } from "@noddde/core";
+
+class HandlerRegistryQueryBus<
+  TInfrastructure extends Infrastructure,
+> implements QueryBus {
+  private handlers = new Map<string, QueryHandler<any, any>>();
+
+  constructor(private infrastructure: TInfrastructure) {}
+
+  register<TQuery extends Query<any>>(
+    name: string,
+    handler: QueryHandler<TInfrastructure, TQuery>,
+  ): void {
+    this.handlers.set(name, handler);
+  }
+
+  async dispatch<TQuery extends Query<any>>(
+    query: TQuery,
+  ): Promise<QueryResult<TQuery>> {
+    const handler = this.handlers.get(query.name as string);
+
+    if (!handler) {
+      throw new Error(
+        `No handler registered for query: ${String(query.name)}`,
+      );
+    }
+
+    return handler(query.payload, this.infrastructure);
+  }
+}
+```
+
+### Usage
+
+```typescript
+const queryBus = new HandlerRegistryQueryBus(infrastructure);
+
+queryBus.register<GetBankAccountByIdQuery>(
+  "GetBankAccountById",
+  getBankAccountByIdHandler,
+);
+
+queryBus.register<ListBankAccountTransactionsQuery>(
+  "ListBankAccountTransactions",
+  listTransactionsHandler,
+);
+
+// Now dispatch works with handler routing
+const account =
+  await queryBus.dispatch<GetBankAccountByIdQuery>({
+    name: "GetBankAccountById",
+    payload: { id: "acct-001" },
+  });
+```
+
+### Considerations for Custom Implementations
+
+When building a production query bus, consider:
+
+- **Error handling** -- How should unregistered query names, handler errors, and timeouts be reported?
+- **Logging** -- Log query names, durations, and failures for observability
+- **Middleware** -- Support cross-cutting concerns like caching, authorization, or rate limiting
+- **Async initialization** -- Handlers may need async setup (database connections, cache warming)
+
+```typescript
+class ProductionQueryBus<
+  TInfrastructure extends Infrastructure,
+> implements QueryBus {
+  // ...
+
+  async dispatch<TQuery extends Query<any>>(
+    query: TQuery,
+  ): Promise<QueryResult<TQuery>> {
+    const start = Date.now();
+    const queryName = String(query.name);
+
+    this.logger.debug(`Dispatching query: ${queryName}`);
+
+    const handler = this.handlers.get(queryName);
+    if (!handler) {
+      throw new Error(
+        `No handler registered for query: ${queryName}`,
+      );
+    }
+
+    try {
+      const result = await handler(
+        query.payload,
+        this.infrastructure,
+      );
+      this.logger.debug(
+        `Query ${queryName} completed in ${Date.now() - start}ms`,
+      );
+      return result;
+    } catch (error) {
+      this.logger.error(
+        `Query ${queryName} failed after ${Date.now() - start}ms`,
+        error,
+      );
+      throw error;
+    }
+  }
+}
+```
+
+## Query Bus vs Direct Handler Calls
+
+You might wonder why dispatch through a bus instead of calling the handler function directly. The query bus provides:
+
+- **Decoupling** -- Callers do not need to know which handler function serves a query or where it lives
+- **Middleware** -- Cross-cutting concerns (logging, caching, auth) can be applied uniformly
+- **Consistency** -- All queries flow through the same pipeline, making the system easier to reason about
+- **Testability** -- You can substitute the bus implementation in tests without changing calling code
+
+For small applications or early development, direct handler calls are acceptable. The bus becomes valuable as the system grows and more queries, handlers, and cross-cutting concerns are added.
+
+## Next Steps
+
+- [Defining Queries](/docs/queries/defining-queries) -- The `Query` and `QueryResult` types
+- [Query Handlers](/docs/queries/query-handlers) -- Implementing the handler functions
+- [Domain Configuration](/docs/guides/domain-configuration) -- Wiring the query bus into your domain

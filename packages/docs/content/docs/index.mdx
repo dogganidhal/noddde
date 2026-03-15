@@ -1,14 +1,50 @@
 ---
-title: noddde
+title: noDDDe
 description: A TypeScript framework for Domain-Driven Design, CQRS, and Event Sourcing
 ---
 
-Welcome to the **noddde** documentation.
+**noDDDe** is a TypeScript framework for building business applications using Domain-Driven Design (DDD), Command Query Responsibility Segregation (CQRS), and Event Sourcing patterns.
 
-noddde is a TypeScript framework for building applications using Domain-Driven Design (DDD), Command Query Responsibility Segregation (CQRS), and Event Sourcing patterns.
+It provides a declarative, type-safe way to express domain aggregates using the functional **Decider pattern** — no base classes, no decorators, just typed objects and pure functions.
 
-## Quick Links
+## Key Principles
 
-- [Introduction](/docs/getting-started/introduction) — What is noddde and why use it
-- [Installation](/docs/getting-started/installation) — Get up and running
-- [Quick Start](/docs/getting-started/quick-start) — Build your first noddde application
+- **Pure functions over class hierarchies** — Aggregates are objects with handler maps, not classes with methods
+- **Type safety via mapped types** — `DefineCommands` and `DefineEvents` build discriminated unions from simple payload maps
+- **The Decider pattern** — `initialState` + `commands` (decide) + `apply` (evolve)
+- **Infrastructure injection** — Dependencies are function parameters, not imports; testable by default
+
+## Choose Your Path
+
+### New to DDD / CQRS / Event Sourcing?
+
+Start with the foundational concepts:
+
+- [Messaging](/docs/concepts/messaging) — How typed messages drive the architecture
+- [The Decider Pattern](/docs/concepts/decider-pattern) — The functional foundation
+- [CQRS](/docs/concepts/cqrs) — Separating reads from writes
+- [Event Sourcing](/docs/concepts/event-sourcing) — Storing events, not state
+
+### Want to build something?
+
+Jump into the hands-on guides:
+
+- [Installation](/docs/getting-started/installation) — Get `@noddde/core` installed
+- [Quick Start](/docs/getting-started/quick-start) — Build a bank account aggregate step by step
+
+### Know the patterns?
+
+Go directly to the reference:
+
+- [Defining Aggregates](/docs/aggregates/defining-aggregates) — The `defineAggregate` function
+- [Defining Commands](/docs/commands/defining-commands) — The `DefineCommands` utility type
+- [Defining Events](/docs/events/defining-events) — The `DefineEvents` utility type
+- [Domain Configuration](/docs/domain-configuration/overview) — Wiring everything together
+
+### Understand the design
+
+Learn why noddde is built the way it is:
+
+- [Why the Decider Pattern?](/docs/design-decisions/why-decider) — Pure functions vs. OOP
+- [Why DefineCommands/Events?](/docs/design-decisions/why-define-commands-events) — Mapped types vs. enums
+- [Why Injectable Infrastructure?](/docs/design-decisions/why-injectable-infrastructure) — Testability by design

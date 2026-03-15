@@ -1,0 +1,76 @@
+---
+title: Read Model
+description: Configuring projections and standalone query handlers for the read side of your domain.
+---
+
+The `readModel` section of the domain configuration defines how your application builds views and serves queries. It contains two maps: `projections` for event-driven view builders and `standaloneQueryHandlers` for queries not tied to a specific projection.
+
+## Registering Projections
+
+```ts
+import { BankAccountProjection } from "./projection";
+import { TransactionHistoryProjection } from "./transaction-history";
+
+readModel: {
+  projections: {
+    BankAccount: BankAccountProjection,
+    TransactionHistory: TransactionHistoryProjection,
+  },
+},
+```
+
+Each projection receives events from the `EventBus` and updates its view accordingly. Multiple projections can consume the same events to build different views.
+
+The key in the map is the projection name — used for identification and logging. It does not need to match any aggregate name.
+
+## Standalone Query Handlers
+
+For queries that do not belong to any specific projection, register them as standalone query handlers:
+
+```ts
+import { QueryHandler } from "@noddde/core";
+
+const getSystemStatus: QueryHandler<
+  MyInfrastructure,
+  GetSystemStatusQuery
+> = async (_query, infrastructure) => {
+  // Access infrastructure to gather system-wide information
+  return {
+    activeAccounts: 42,
+    uptime: process.uptime(),
+  };
+};
+
+readModel: {
+  projections: { /* ... */ },
+  standaloneQueryHandlers: {
+    GetSystemStatus: getSystemStatus,
+  },
+},
+```
+
+Standalone query handlers are useful for:
+
+- **Cross-projection queries** — Queries that span multiple read models
+- **System queries** — Health checks, status endpoints, metrics
+- **Ad-hoc queries** — Queries that do not have a dedicated projection
+
+## Read Model and CQRS
+
+The read model is the query side of the [CQRS pattern](/docs/concepts/cqrs). Events flow from the write model (aggregates) through the `EventBus` into projections, which build views that serve queries.
+
+```
+Write Model                     Read Model
+──────────                      ──────────
+Aggregate → Events → EventBus → Projection → View
+                                                ↑
+                                    QueryBus → QueryHandler
+```
+
+This separation allows you to optimize read and write sides independently. The write model focuses on enforcing business rules, while the read model focuses on serving queries efficiently.
+
+## Next Steps
+
+- [Projections Overview](/docs/projections/overview) — How projections work
+- [Query Handlers](/docs/queries/query-handlers) — Writing query handlers
+- [Write Model](/docs/domain-configuration/write-model) — The command-handling side
