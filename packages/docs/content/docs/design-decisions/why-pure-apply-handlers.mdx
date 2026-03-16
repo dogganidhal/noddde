@@ -1,0 +1,107 @@
+---
+title: "Why Are Apply Handlers Pure?"
+description: Why noddde requires apply handlers to be pure functions with no infrastructure access.
+---
+
+## The Decision
+
+Apply handlers in noddde are pure functions that receive only the event payload and current state, returning the new state. They have no access to infrastructure, no async capability, and must produce no side effects.
+
+```ts
+type ApplyHandler<TEvent extends Event, TState> = (
+  event: TEvent["payload"],
+  state: TState,
+) => TState;
+```
+
+## The Problem
+
+If apply handlers could access infrastructure (databases, APIs, time), event replay becomes non-deterministic:
+
+```ts
+// Dangerous: apply handler with side effects (NOT how noddde works)
+apply: {
+  TransactionAuthorized: (event, state, { exchangeRateService }) => {
+    const rate = exchangeRateService.getRate("USD"); // Different each time!
+    return { ...state, balance: state.balance - event.amount * rate };
+  },
+},
+```
+
+Replaying this event tomorrow would produce a different state because the exchange rate changed. The entire premise of event sourcing — that replaying events deterministically reconstructs state — breaks down.
+
+## Alternatives Considered
+
+- **Allow infrastructure in apply handlers** — Some frameworks do this, trading correctness for convenience
+- **Snapshot-only replay** — Only replay from the latest snapshot, reducing the window of non-determinism
+- **Version-tagged handlers** — Different apply handler per event version
+
+## Why This Approach
+
+Pure apply handlers guarantee the **deterministic replay** property:
+
+> Given the same sequence of events, apply handlers always produce the same state.
+
+This guarantee is foundational to event sourcing:
+
+- **Rebuild from history** — Replay all events to reconstruct current state. Always produces the same result.
+- **Rebuild projections** — When you fix a bug in a projection, replay all events to rebuild it
+- **Time travel** — Reconstruct the state at any point in history
+- **Testing** — Apply handlers are trivially testable (pure function, deterministic)
+- **Debugging** — If state is wrong, replay events step by step to find where it diverges
+
+## What If You Need External Data?
+
+If your state transition needs external data, capture it in the **event payload** at decision time (in the command handler), not at replay time (in the apply handler):
+
+```ts
+// Command handler captures all needed data AT DECISION TIME
+commands: {
+  AuthorizeTransaction: (command, state, { exchangeRateService }) => {
+    const rate = exchangeRateService.getRate("USD");
+    return {
+      name: "TransactionAuthorized",
+      payload: {
+        amount: command.payload.amount,
+        exchangeRate: rate,          // Captured in the event!
+        convertedAmount: command.payload.amount * rate,
+      },
+    };
+  },
+},
+
+// Apply handler uses the captured data — deterministic
+apply: {
+  TransactionAuthorized: (event, state) => ({
+    ...state,
+    balance: state.balance - event.convertedAmount, // Always the same
+  }),
+},
+```
+
+The command handler is allowed to be impure (it has infrastructure access). The apply handler stays pure by working only with data that was captured in the event.
+
+## Trade-offs
+
+- **Richer event payloads** — Events must include all data needed for state transitions. This can make event payloads larger.
+- **No lazy computation in apply** — You cannot defer computation to replay time. All computation must happen at command handling time.
+- **Self-contained events** — Events must be self-describing. This is actually a benefit for event-driven architectures — downstream consumers can process events without additional lookups.
+
+## Example
+
+```ts
+// Pure apply handler — same inputs always produce same outputs
+apply: {
+  TransactionAuthorized: (event, state) => ({
+    ...state,
+    availableBalance: state.availableBalance - event.amount,
+    transactions: [
+      ...state.transactions,
+      { ...event, status: "pending" as const },
+    ],
+  }),
+
+  // No-op is also valid — event recorded but no state change
+  BidRejected: (_event, state) => state,
+},
+```

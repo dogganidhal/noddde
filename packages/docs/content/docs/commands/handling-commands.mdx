@@ -1,0 +1,298 @@
+---
+title: Handling Commands
+description: How aggregate command handlers receive commands, validate state, and return events
+---
+
+## Overview
+
+Command handlers are the **decision-making core** of your aggregates. They receive a command and the current state, then decide what happened by returning one or more events. The framework handles everything else: loading state, persisting events, and dispatching them to projections.
+
+Command handlers live inside the `commands` map of an aggregate definition.
+
+## The Command Handler Signature
+
+Every aggregate command handler has this shape:
+
+```typescript
+(command: TCommand, state: TState, infrastructure: TInfrastructure) =>
+  TEvents | TEvents[] | Promise<TEvents | TEvents[]>;
+```
+
+| Parameter | Description |
+|---|---|
+| `command` | The incoming command, narrowed to the specific command type for this handler |
+| `state` | The current state of the aggregate instance (rebuilt from past events or loaded from storage) |
+| `infrastructure` | Your domain infrastructure (loggers, clocks, external services) |
+
+The return value is always one or more events describing what happened.
+
+## The Commands Map
+
+When you define an aggregate with `defineAggregate`, you provide a `commands` object. Each key is a command name, and the value is the handler function for that command:
+
+```typescript
+import { defineAggregate } from "@noddde/core";
+
+export const BankAccount = defineAggregate<BankAccountDef>({
+  initialState: {
+    balance: 0,
+    availableBalance: 0,
+    transactions: [],
+  },
+
+  commands: {
+    CreateBankAccount: (command, _state, { logger }) => {
+      logger.info(`Creating bank account ${command.targetAggregateId}`);
+      return {
+        name: "BankAccountCreated",
+        payload: { id: command.targetAggregateId },
+      };
+    },
+
+    AuthorizeTransaction: (command, state, { logger }) => {
+      const { amount, merchant } = command.payload;
+
+      if (state.availableBalance < amount) {
+        logger.warn(`Transaction declined: insufficient funds`);
+        return {
+          name: "TransactionDeclined",
+          payload: {
+            id: command.targetAggregateId,
+            timestamp: new Date(),
+            amount,
+            merchant,
+          },
+        };
+      }
+
+      logger.info(`Transaction authorized: ${amount} at ${merchant}`);
+      return {
+        name: "TransactionAuthorized",
+        payload: {
+          id: command.targetAggregateId,
+          timestamp: new Date(),
+          amount,
+          merchant,
+        },
+      };
+    },
+  },
+
+  apply: {
+    // ... apply handlers (covered in the Events section)
+  },
+});
+```
+
+The framework uses the `commands` map to route each incoming command to the correct handler based on the command's `name` field. TypeScript enforces that the map contains a handler for **every** command defined in your command union.
+
+## Returning Events
+
+### Single Event
+
+The simplest case: the handler returns one event object.
+
+```typescript
+CreateBankAccount: (command, _state, { logger }) => {
+  logger.info(`Creating bank account ${command.targetAggregateId}`);
+  return {
+    name: "BankAccountCreated",
+    payload: { id: command.targetAggregateId },
+  };
+},
+```
+
+### Conditional Events
+
+A handler can return different events depending on the current state. This is how you model business rule validation:
+
+```typescript
+AuthorizeTransaction: (command, state, { logger }) => {
+  const { amount, merchant } = command.payload;
+
+  if (state.availableBalance < amount) {
+    return {
+      name: "TransactionDeclined",
+      payload: { id: command.targetAggregateId, timestamp: new Date(), amount, merchant },
+    };
+  }
+
+  return {
+    name: "TransactionAuthorized",
+    payload: { id: command.targetAggregateId, timestamp: new Date(), amount, merchant },
+  };
+},
+```
+
+Notice that **both branches return an event**. The handler does not throw an exception for insufficient funds. Instead, it returns a `TransactionDeclined` event. This is a deliberate design choice -- more on this below.
+
+### Multiple Events
+
+Return an array when a single command produces multiple events:
+
+```typescript
+ProcessPayment: (command, state) => {
+  const events = [
+    {
+      name: "PaymentReceived" as const,
+      payload: { amount: command.payload.amount },
+    },
+  ];
+
+  if (state.balance + command.payload.amount >= state.creditLimit) {
+    events.push({
+      name: "CreditLimitReached" as const,
+      payload: { balance: state.balance + command.payload.amount },
+    });
+  }
+
+  return events;
+},
+```
+
+All events in the array are applied in order to update the aggregate's state and then dispatched to the event bus.
+
+## Accessing State for Validation
+
+The `state` parameter contains the aggregate's current state, fully rebuilt from prior events (in event-sourced mode) or loaded from storage. This is how you enforce business invariants:
+
+```typescript
+PlaceBid: (command, state, { clock }) => {
+  const { bidderId, amount } = command.payload;
+  const now = clock.now();
+
+  // Invariant: auction must be open
+  if (state.status === "closed") {
+    return {
+      name: "BidRejected",
+      payload: { bidderId, amount, reason: "Auction is closed" },
+    };
+  }
+
+  // Invariant: auction must not have ended
+  if (now > state.endsAt) {
+    return {
+      name: "BidRejected",
+      payload: { bidderId, amount, reason: "Auction has ended" },
+    };
+  }
+
+  // Invariant: bid must exceed current highest
+  const minimumBid = state.highestBid?.amount ?? state.startingPrice;
+  if (amount <= minimumBid) {
+    return {
+      name: "BidRejected",
+      payload: { bidderId, amount, reason: `Bid must exceed ${minimumBid}` },
+    };
+  }
+
+  return {
+    name: "BidPlaced",
+    payload: { bidderId, amount, timestamp: now },
+  };
+},
+```
+
+Each check inspects the current state and returns an appropriate rejection event when an invariant is violated.
+
+## Using Infrastructure
+
+The third parameter gives you access to your domain infrastructure. This is how handlers use services like loggers, clocks, or ID generators without coupling to concrete implementations:
+
+```typescript
+// Infrastructure interface
+interface AuctionInfrastructure {
+  clock: Clock;
+}
+
+// Handler uses the clock from infrastructure
+PlaceBid: (command, state, { clock }) => {
+  const now = clock.now();
+  // ... use `now` for time-based validation
+},
+```
+
+In tests, you can inject a fake clock to control time. In production, you provide a real system clock. The handler code is identical in both cases.
+
+Common infrastructure services:
+
+- **Loggers** -- for observability within handlers
+- **Clocks** -- for time-dependent logic (testable without mocking `Date`)
+- **ID generators** -- for creating correlation IDs or sub-entity IDs
+
+## Async Command Handlers
+
+Handlers can be asynchronous when they need to call external infrastructure:
+
+```typescript
+AuthorizeTransaction: async (command, state, { fraudService, logger }) => {
+  const { amount, merchant } = command.payload;
+
+  const fraudCheck = await fraudService.check({ amount, merchant });
+  if (fraudCheck.flagged) {
+    logger.warn(`Fraud flagged for ${merchant}`);
+    return {
+      name: "TransactionDeclined",
+      payload: { ...command.payload, reason: "Fraud detected" },
+    };
+  }
+
+  return {
+    name: "TransactionAuthorized",
+    payload: { ...command.payload, timestamp: new Date() },
+  };
+},
+```
+
+The return type `Promise<TEvents | TEvents[]>` is supported by the framework. The command dispatch will `await` the handler before persisting events.
+
+## Error Handling: Rejection Events vs Exceptions
+
+noddde encourages modeling business rule violations as **rejection events** rather than thrown exceptions.
+
+### Rejection Events (Preferred)
+
+```typescript
+// The handler returns a domain event for insufficient funds
+if (state.availableBalance < amount) {
+  return {
+    name: "TransactionDeclined",
+    payload: { id: command.targetAggregateId, timestamp: new Date(), amount, merchant },
+  };
+}
+```
+
+Benefits of rejection events:
+
+- They are part of the event stream and can be projected, audited, and replayed.
+- Projections can react to them (e.g., sending a notification about a declined transaction).
+- The aggregate state can record the rejection (or ignore it via a no-op apply handler).
+- They follow the same code path as successful outcomes.
+
+### Exceptions (Use Sparingly)
+
+Throw exceptions only for truly **unexpected** situations -- programmer errors, infrastructure failures, or invariants that indicate a bug:
+
+```typescript
+// This should never happen if the system is correct
+if (!state) {
+  throw new Error("Aggregate state is missing -- possible persistence failure");
+}
+```
+
+Thrown exceptions abort the command processing. No events are produced, no state changes occur, and the error propagates to the caller.
+
+## Type Safety
+
+The `commands` map is fully typed. TypeScript ensures:
+
+1. **Every command has a handler.** If your command union defines `CreateBankAccount` and `AuthorizeTransaction`, the `commands` map must contain both keys.
+2. **Handler parameters match the command.** The `command` parameter is narrowed to the specific command type (e.g., `AuthorizeTransaction` gets `{ name: "AuthorizeTransaction"; payload: { amount: number; merchant: string }; targetAggregateId: string }`).
+3. **Return types are valid events.** The handler must return events from the aggregate's event union.
+
+This means that adding a new command to your `DefineCommands` type will produce a compile error until you add the corresponding handler, and vice versa.
+
+## Next Steps
+
+- Learn about [standalone command handlers](/docs/commands/standalone-commands) for commands that live outside aggregates.
+- Understand the [full dispatch flow](/docs/commands/dispatching) from command creation to event persistence.

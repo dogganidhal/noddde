@@ -1,0 +1,109 @@
+---
+title: In-Memory Implementations
+description: Built-in in-memory implementations for development, testing, and prototyping.
+---
+
+noddde ships with five in-memory implementations that cover every infrastructure interface. These are suitable for development, testing, and prototyping. For production, replace them with implementations backed by your database and messaging infrastructure.
+
+## InMemoryCommandBus
+
+```ts
+import { InMemoryCommandBus } from "@noddde/core";
+
+const commandBus = new InMemoryCommandBus();
+```
+
+A simple in-process command bus. Commands are dispatched synchronously within the same process. Suitable for single-process applications and testing.
+
+## EventEmitterEventBus
+
+```ts
+import { EventEmitterEventBus } from "@noddde/core";
+
+const eventBus = new EventEmitterEventBus();
+```
+
+Uses Node.js `EventEmitter` under the hood. Events are emitted by name, and projection event handlers are registered as listeners. Delivery is synchronous — handlers execute in the same tick as the dispatch call.
+
+This is the only bus implementation with actual behavior (the others are stubs). It is suitable for local development and testing.
+
+## InMemoryQueryBus
+
+```ts
+import { InMemoryQueryBus } from "@noddde/core";
+
+const queryBus = new InMemoryQueryBus();
+```
+
+A simple in-process query bus. Queries are routed to handlers synchronously within the same process.
+
+## InMemoryEventSourcedAggregatePersistence
+
+```ts
+import { InMemoryEventSourcedAggregatePersistence } from "@noddde/core";
+
+const persistence = new InMemoryEventSourcedAggregatePersistence();
+```
+
+Stores event streams in memory. Events are keyed by `(aggregateName, aggregateId)`. Useful for:
+
+- **Testing** — No database setup required
+- **Prototyping** — Verify aggregate behavior before choosing a database
+- **Development** — Fast iteration without external dependencies
+
+Data is lost when the process exits.
+
+## InMemoryStateStoredAggregatePersistence
+
+```ts
+import { InMemoryStateStoredAggregatePersistence } from "@noddde/core";
+
+const persistence = new InMemoryStateStoredAggregatePersistence();
+```
+
+Stores aggregate state snapshots in memory. State is keyed by `(aggregateName, aggregateId)`. Same use cases as the event-sourced variant.
+
+## Typical Configuration
+
+Most development and test setups use all five together:
+
+```ts
+const domain = await configureDomain<MyInfrastructure>({
+  writeModel: { aggregates: { BankAccount } },
+  readModel: { projections: { BankAccount: BankAccountProjection } },
+  infrastructure: {
+    aggregatePersistence: () =>
+      new InMemoryEventSourcedAggregatePersistence(),
+    provideInfrastructure: () => ({
+      logger: new ConsoleLogger(),
+      bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
+      transactionViewRepository: new InMemoryTransactionViewRepository(),
+    }),
+    cqrsInfrastructure: () => ({
+      commandBus: new InMemoryCommandBus(),
+      eventBus: new EventEmitterEventBus(),
+      queryBus: new InMemoryQueryBus(),
+    }),
+  },
+});
+```
+
+## Moving to Production
+
+When you are ready for production, replace the in-memory implementations:
+
+| In-Memory | Production Alternative |
+|---|---|
+| `InMemoryCommandBus` | RabbitMQ, Kafka, or custom bus |
+| `EventEmitterEventBus` | Kafka, Redis Streams, or custom bus |
+| `InMemoryQueryBus` | Custom bus with caching |
+| `InMemoryEventSourcedAggregatePersistence` | PostgreSQL, MongoDB, EventStoreDB |
+| `InMemoryStateStoredAggregatePersistence` | PostgreSQL, MongoDB, DynamoDB |
+
+The aggregate and projection code remains unchanged — only the infrastructure factories in `configureDomain` need to be updated.
+
+## Next Steps
+
+- [Domain Configuration Infrastructure](/docs/domain-configuration/infrastructure) — Wiring providers
+- [Persistence](/docs/domain-configuration/persistence) — Choosing a persistence strategy
+- [Testing Overview](/docs/testing/overview) — Using in-memory implementations for testing

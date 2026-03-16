@@ -1,0 +1,4 @@
+{
+  "title": "Domain Configuration",
+  "pages": ["overview", "write-model", "read-model", "infrastructure", "persistence"]
+}

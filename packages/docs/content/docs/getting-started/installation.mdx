@@ -1,0 +1,84 @@
+---
+title: Installation
+description: How to install and set up noddde
+---
+
+## Installation
+
+```bash
+npm install @noddde/core
+```
+
+Or with yarn:
+
+```bash
+yarn add @noddde/core
+```
+
+Or with pnpm:
+
+```bash
+pnpm add @noddde/core
+```
+
+## Requirements
+
+- **Node.js** >= 18
+- **TypeScript** >= 5.3
+
+## TypeScript Configuration
+
+noDDDe relies on TypeScript's strict mode for full type safety. Ensure your `tsconfig.json` has:
+
+```json
+{
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16"
+  }
+}
+```
+
+Key settings:
+- **`strict: true`** — Required for correct discriminated union narrowing and type inference
+- **`target: ES2022`** or later — For modern JavaScript features used by the framework
+- **`moduleResolution: "Node16"`** — For proper ESM/CJS resolution
+
+## Verify Installation
+
+Create a simple file to verify the installation:
+
+```ts
+import { DefineCommands, DefineEvents, defineAggregate } from "@noddde/core";
+
+type MyCommand = DefineCommands<{ DoSomething: { value: string } }>;
+type MyEvent = DefineEvents<{ SomethingDone: { value: string } }>;
+
+type MyDef = {
+  state: { value: string };
+  events: MyEvent;
+  commands: MyCommand;
+  infrastructure: {};
+};
+
+const MyAggregate = defineAggregate<MyDef>({
+  initialState: { value: "" },
+  commands: {
+    DoSomething: (command) => ({
+      name: "SomethingDone",
+      payload: { value: command.payload.value },
+    }),
+  },
+  apply: {
+    SomethingDone: (event) => ({ value: event.value }),
+  },
+});
+```
+
+If this compiles without errors, noDDDe is correctly installed and configured.
+
+## Next Steps
+
+- [Quick Start](/docs/getting-started/quick-start) — Build your first aggregate

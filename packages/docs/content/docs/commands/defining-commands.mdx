@@ -1,0 +1,247 @@
+---
+title: Defining Commands
+description: How to define commands in noddde using the Command interface and the DefineCommands utility type
+---
+
+## What is a Command?
+
+A command represents an **intent to change state** in your domain. Commands are named instructions that carry the data needed to perform an action. They are always expressed in the imperative mood: `CreateBankAccount`, `PlaceBid`, `AuthorizeTransaction`.
+
+In noddde, commands are plain objects. There are no base classes to extend and no decorators to apply.
+
+## The Command Interface
+
+At the lowest level, every command satisfies this interface:
+
+```typescript
+interface Command {
+  name: string;
+  payload?: any;
+}
+```
+
+- `name` identifies which command handler should process this command.
+- `payload` carries the data the handler needs. It is optional because some commands (like `CreateBankAccount`) require no additional data beyond the target aggregate.
+
+## AggregateCommand
+
+Most commands target a specific aggregate instance. `AggregateCommand` extends `Command` with a `targetAggregateId` field that the framework uses for routing:
+
+```typescript
+interface AggregateCommand<TID = string> extends Command {
+  targetAggregateId: TID;
+}
+```
+
+The generic parameter `TID` defaults to `string` but can be any type that uniquely identifies your aggregate instances (e.g., `number`, a branded string type, or a UUID wrapper).
+
+## DefineCommands Utility
+
+Manually typing out each command as a standalone interface is verbose and error-prone. The `DefineCommands` utility type lets you declare all of an aggregate's commands in a single payload map:
+
+```typescript
+import { DefineCommands } from "@noddde/core";
+
+type BankAccountCommand = DefineCommands<{
+  CreateBankAccount: void;
+  AuthorizeTransaction: { amount: number; merchant: string };
+}>;
+```
+
+This produces a **discriminated union** equivalent to writing:
+
+```typescript
+type BankAccountCommand =
+  | { name: "CreateBankAccount"; targetAggregateId: string }
+  | {
+      name: "AuthorizeTransaction";
+      targetAggregateId: string;
+      payload: { amount: number; merchant: string };
+    };
+```
+
+### How It Works
+
+`DefineCommands` accepts two generic parameters:
+
+```typescript
+type DefineCommands<
+  TPayloads extends Record<string, any>,
+  TID = string,
+>
+```
+
+1. **`TPayloads`** -- A record that maps command names (keys) to their payload types (values).
+2. **`TID`** -- The type of `targetAggregateId`. Defaults to `string`.
+
+For each entry in the payload map:
+
+- If the payload type is `void`, the resulting command has **no `payload` field** -- only `name` and `targetAggregateId`.
+- Otherwise, the resulting command includes a typed `payload` field.
+
+### Void Payloads
+
+Use `void` when a command needs no data beyond the aggregate ID it targets:
+
+```typescript
+type AuctionCommand = DefineCommands<{
+  CreateAuction: { item: string; startingPrice: number; endsAt: Date };
+  PlaceBid: { bidderId: string; amount: number };
+  CloseAuction: void; // No additional data needed
+}>;
+```
+
+When you dispatch a `CloseAuction` command, you only provide the name and target:
+
+```typescript
+await domain.dispatchCommand({
+  name: "CloseAuction",
+  targetAggregateId: auctionId,
+});
+```
+
+### Commands with Payloads
+
+When a command carries data, specify the payload shape as the value type:
+
+```typescript
+type BankAccountCommand = DefineCommands<{
+  AuthorizeTransaction: { amount: number; merchant: string };
+}>;
+```
+
+Dispatching requires the `payload` field:
+
+```typescript
+await domain.dispatchCommand({
+  name: "AuthorizeTransaction",
+  targetAggregateId: bankAccountId,
+  payload: {
+    amount: 50,
+    merchant: "Amazon",
+  },
+});
+```
+
+TypeScript will reject any dispatch call that omits the payload or provides the wrong shape.
+
+## Custom Aggregate ID Types
+
+By default, `targetAggregateId` is typed as `string`. Pass a second generic argument to `DefineCommands` to change this:
+
+```typescript
+// Using a branded type for stronger type safety
+type OrderId = string & { readonly __brand: "OrderId" };
+
+type OrderCommand = DefineCommands<
+  {
+    PlaceOrder: { items: string[]; total: number };
+    CancelOrder: void;
+  },
+  OrderId
+>;
+```
+
+Now all commands in this union require a `targetAggregateId` of type `OrderId`, and TypeScript will prevent you from accidentally passing a plain `string`.
+
+## Full Examples
+
+### Banking Domain
+
+```typescript
+import { DefineCommands } from "@noddde/core";
+
+export type BankAccountCommand = DefineCommands<{
+  CreateBankAccount: void;
+  AuthorizeTransaction: { amount: number; merchant: string };
+}>;
+```
+
+### Auction Domain
+
+```typescript
+import { DefineCommands } from "@noddde/core";
+
+export type AuctionCommand = DefineCommands<{
+  CreateAuction: { item: string; startingPrice: number; endsAt: Date };
+  PlaceBid: { bidderId: string; amount: number };
+  CloseAuction: void;
+}>;
+```
+
+### Inventory Domain (Custom ID)
+
+```typescript
+import { DefineCommands } from "@noddde/core";
+
+type SKU = string & { readonly __brand: "SKU" };
+
+export type InventoryCommand = DefineCommands<
+  {
+    RegisterProduct: { name: string; initialStock: number };
+    AdjustStock: { delta: number; reason: string };
+    DiscontinueProduct: void;
+  },
+  SKU
+>;
+```
+
+## Do This, Not That
+
+**Do** use `DefineCommands` for all aggregate commands. It enforces a consistent structure and generates the discriminated union automatically.
+
+```typescript
+// Good
+type MyCommand = DefineCommands<{
+  DoSomething: { data: string };
+  DoSomethingElse: void;
+}>;
+```
+
+**Don't** manually create individual command interfaces. This is verbose, error-prone, and loses the union type that enables exhaustive matching in command handler maps.
+
+```typescript
+// Avoid
+interface DoSomethingCommand {
+  name: "DoSomething";
+  targetAggregateId: string;
+  payload: { data: string };
+}
+interface DoSomethingElseCommand {
+  name: "DoSomethingElse";
+  targetAggregateId: string;
+}
+type MyCommand = DoSomethingCommand | DoSomethingElseCommand;
+```
+
+**Do** use `void` for commands with no payload.
+
+```typescript
+// Good -- clean, no payload field generated
+type Cmd = DefineCommands<{ CloseAuction: void }>;
+```
+
+**Don't** use an empty object `{}` or `undefined` as the payload for no-data commands. This creates a misleading `payload: {}` field in the resulting type.
+
+```typescript
+// Avoid
+type Cmd = DefineCommands<{ CloseAuction: {} }>;
+```
+
+**Do** name commands in the imperative mood. Commands express intent.
+
+```typescript
+// Good: imperative
+CreateBankAccount, AuthorizeTransaction, PlaceBid, CloseAuction;
+```
+
+**Don't** name commands in past tense -- that is the convention for events.
+
+```typescript
+// Avoid: past tense belongs to events
+BankAccountCreated, TransactionAuthorized;
+```
+
+## Next Steps
+
+Now that you know how to define commands, learn how to [handle them inside aggregates](/docs/commands/handling-commands).

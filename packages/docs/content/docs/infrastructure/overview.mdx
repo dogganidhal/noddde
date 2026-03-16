@@ -1,0 +1,75 @@
+---
+title: Infrastructure Overview
+description: How noddde uses injectable infrastructure to keep domain logic pure and testable.
+---
+
+Infrastructure in noddde refers to everything outside your domain logic — databases, loggers, HTTP clients, clocks, view repositories, and any external service your handlers need to interact with.
+
+## The Core Principle
+
+Domain logic should not know about infrastructure details. A command handler that decides whether a transaction is authorized should not know whether it is logging to the console or to CloudWatch. It should not know whether its state came from PostgreSQL or an in-memory store.
+
+noddde enforces this by injecting infrastructure as a parameter, never as a direct import:
+
+```ts
+// Command handler receives infrastructure as the third parameter
+commands: {
+  AuthorizeTransaction: (command, state, { logger }) => {
+    logger.info(`Processing transaction for ${command.payload.merchant}`);
+    // ...
+  },
+},
+```
+
+The handler depends on the `Logger` interface, not a concrete `ConsoleLogger`. This separation is what makes the entire framework testable without mocks for infrastructure internals.
+
+## The Infrastructure Type
+
+The base `Infrastructure` type is deliberately empty:
+
+```ts
+type Infrastructure = {};
+```
+
+You extend it with whatever your domain needs:
+
+```ts
+interface BankingInfrastructure {
+  logger: Logger;
+  bankAccountViewRepository: BankAccountViewRepository;
+  transactionViewRepository: TransactionViewRepository;
+}
+```
+
+This type becomes the `infrastructure` member of your [AggregateTypes](/docs/aggregates/defining-aggregates) bundle, flowing through the entire type system to ensure handlers receive the correct infrastructure.
+
+## Where Infrastructure is Injected
+
+Infrastructure appears in three places:
+
+1. **Aggregate command handlers** — Third parameter: `(command, state, infrastructure) => events`
+2. **Projection event handlers** — Second parameter: `(eventPayload, infrastructure) => void`
+3. **Query handlers** — Second parameter: `(queryPayload, infrastructure) => result`
+
+[Apply handlers](/docs/events/apply-handlers) deliberately do **not** receive infrastructure. They are pure functions for deterministic event replay.
+
+## CQRSInfrastructure
+
+In addition to your custom infrastructure, noddde provides `CQRSInfrastructure`:
+
+```ts
+interface CQRSInfrastructure {
+  commandBus: CommandBus;
+  eventBus: EventBus;
+  queryBus: QueryBus;
+}
+```
+
+Standalone command handlers receive the merged type `TInfrastructure & CQRSInfrastructure`, giving them access to both your custom infrastructure and the CQRS buses.
+
+## Next Steps
+
+- [Custom Infrastructure](/docs/infrastructure/custom-infrastructure) — Defining and implementing your own
+- [CQRS Infrastructure](/docs/infrastructure/cqrs-infrastructure) — The three buses
+- [In-Memory Implementations](/docs/infrastructure/in-memory-implementations) — Built-in implementations for development and testing
+- [Why Injectable Infrastructure](/docs/design-decisions/why-injectable-infrastructure) — Design rationale

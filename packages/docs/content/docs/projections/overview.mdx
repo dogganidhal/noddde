@@ -1,0 +1,101 @@
+---
+title: Projections Overview
+description: Understanding projections as read-side views built from event streams in noddde.
+---
+
+Projections are the read side of CQRS. They consume events produced by aggregates and transform them into query-optimized data structures called **views** or **read models**.
+
+## Why Projections?
+
+In a CQRS architecture, the write model (aggregates) is optimized for enforcing business rules and maintaining consistency. But the data structures that enforce consistency are rarely the best structures for querying.
+
+Consider a bank account aggregate. Its state tracks `balance`, `availableBalance`, and a `transactions` array. This is perfect for deciding whether a transaction should be authorized. But what if you need:
+
+- A dashboard showing all accounts sorted by balance?
+- A search across all transactions by merchant name?
+- An analytics view of spending patterns over time?
+
+These queries need different data structures than what the aggregate maintains. Projections solve this by building purpose-specific views from the event stream.
+
+## How Projections Work
+
+The flow is straightforward:
+
+1. An aggregate handles a command and produces events
+2. Events are persisted and then published to the `EventBus`
+3. Projections subscribe to events and update their views
+4. Queries read from the projection views
+
+```
+Command → Aggregate → Events → EventBus → Projection → View
+                                                          ↑
+                                              Query → QueryHandler
+```
+
+Each projection can build a completely different view from the same event stream. Multiple projections can consume the same events independently.
+
+## Two Projection Styles
+
+noddde offers two approaches to building projections:
+
+### Legacy Projections (`Projection`)
+
+The `Projection` type combines event handlers and query handlers into a single object. Event handlers update the view using infrastructure (repositories), and query handlers read from it.
+
+```ts
+import { Projection } from "@noddde/core";
+
+const MyProjection: Projection<MyInfrastructure, MyEventNames, MyQueryNames> = {
+  eventHandlers: {
+    SomethingHappened: (event, infrastructure) => {
+      // Update the view in a repository
+    },
+  },
+  queryHandlers: {
+    GetSomething: (query, infrastructure) => {
+      // Read from the repository and return result
+    },
+  },
+};
+```
+
+This style is best when your projection needs infrastructure access (database repositories, external services) and when you want to co-locate event handlers with their related query handlers.
+
+### Functional Projections (`ProjectionV2`)
+
+The `ProjectionV2` type uses a single pure reducer function. It takes the current view and an event, and returns the new view.
+
+```ts
+import { ProjectionV2 } from "@noddde/core";
+
+const MyProjectionV2: ProjectionV2<MyEvent, MyView> = {
+  reducer: (view, event) => {
+    switch (event.name) {
+      case "SomethingHappened":
+        return { ...view, /* update */ };
+      default:
+        return view;
+    }
+  },
+};
+```
+
+This style is simpler, more testable, and works well when the view can be built entirely from the event stream without external lookups.
+
+## Choosing a Style
+
+| Consideration | `Projection` | `ProjectionV2` |
+|---|---|---|
+| Infrastructure access | Yes | No |
+| Query handlers included | Yes | No |
+| Testability | Requires mocking | Pure function |
+| Side effects | Allowed | Not possible |
+| Best for | Database-backed views | In-memory views, simple transforms |
+
+Start with `ProjectionV2` for simpler cases. Reach for `Projection` when you need infrastructure access or co-located query handlers.
+
+## Next Steps
+
+- [Legacy Projections](/docs/projections/legacy-projections) — The `Projection` type with event and query handler maps
+- [Functional Projections](/docs/projections/functional-projections) — The `ProjectionV2` reducer pattern
+- [Connecting Events](/docs/projections/connecting-events) — Wiring projections into the domain configuration

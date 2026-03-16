@@ -1,0 +1,100 @@
+---
+title: "Why the AggregateTypes Bundle?"
+description: Why noddde uses a named type bundle instead of positional generic parameters.
+---
+
+## The Decision
+
+noddde uses a single `AggregateTypes` bundle type instead of multiple positional generic parameters on `defineAggregate`.
+
+## The Problem
+
+Without the bundle, a fully typed aggregate definition would require five positional generics:
+
+```ts
+// Hypothetical — NOT how noddde works
+function defineAggregate<
+  TState,
+  TEvents extends Event,
+  TCommands extends AggregateCommand,
+  TID,
+  TInfrastructure extends Infrastructure,
+>(config: { /* ... */ }): Aggregate<TState, TEvents, TCommands, TID, TInfrastructure>;
+
+// Usage — which parameter is which?
+defineAggregate<
+  BankAccountState,
+  BankAccountEvent,
+  BankAccountCommand,
+  string,
+  BankingInfrastructure
+>({ /* ... */ });
+```
+
+This is:
+- **Hard to read** — Five type arguments in a row
+- **Easy to mix up** — Was Events the second or third parameter?
+- **Rigid** — Adding a sixth parameter is a breaking change
+- **Non-self-documenting** — The types are positional, not named
+
+## Alternatives Considered
+
+- **Individual generic parameters** — The five-parameter approach shown above
+- **Class-based with decorators** — Types inferred from decorated methods
+- **No generics at all** — Use `any` and trust the developer
+
+## Why This Approach
+
+The `AggregateTypes` bundle uses named members:
+
+```ts
+type AggregateTypes = {
+  state: any;
+  events: Event;
+  commands: AggregateCommand;
+  infrastructure: Infrastructure;
+};
+
+// Usage — self-documenting
+type BankAccountDef = {
+  state: BankAccountState;
+  events: BankAccountEvent;
+  commands: BankAccountCommand;
+  infrastructure: BankingInfrastructure;
+};
+
+defineAggregate<BankAccountDef>({ /* ... */ });
+```
+
+Benefits:
+- **Named members** — `state`, `events`, `commands`, `infrastructure` are self-documenting
+- **Single generic parameter** — `defineAggregate<T>` instead of `defineAggregate<A, B, C, D, E>`
+- **Extensible** — Adding a new member does not change the generic parameter count
+- **Reusable** — The type bundle can be referenced from other types (e.g., `InferAggregateState<T>`)
+- **IDE-friendly** — Hovering over `BankAccountDef` shows all four members
+
+## Trade-offs
+
+- **One extra type declaration** — You need to declare the `type XxxDef = { ... }` bundle
+- **Indirect** — The types are one level removed from the function call
+
+In practice, the extra type declaration serves as a useful summary of the aggregate's type universe — a single place where all the types are collected.
+
+## Example
+
+```ts
+// The bundle declares the aggregate's type universe
+type BankAccountDef = {
+  state: BankAccountState;
+  events: BankAccountEvent;
+  commands: BankAccountCommand;
+  infrastructure: BankingInfrastructure;
+};
+
+// One generic parameter, fully typed
+export const BankAccount = defineAggregate<BankAccountDef>({
+  initialState: { /* TypeScript knows this must be BankAccountState */ },
+  commands: { /* TypeScript knows each handler's parameter types */ },
+  apply: { /* TypeScript knows each handler's parameter types */ },
+});
+```

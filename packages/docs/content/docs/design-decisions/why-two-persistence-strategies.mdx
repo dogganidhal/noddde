@@ -1,0 +1,95 @@
+---
+title: "Why Two Persistence Strategies?"
+description: Why noddde supports both event sourcing and state storage for aggregate persistence.
+---
+
+## The Decision
+
+noddde provides two persistence interfaces — `EventSourcedAggregatePersistence` (store events) and `StateStoredAggregatePersistence` (store state) — and lets you choose at configuration time.
+
+## The Problem
+
+Event sourcing is powerful but not always appropriate. Forcing every aggregate to use event sourcing adds complexity where simple state storage would suffice:
+
+- A user profile that only updates name and email does not need an event stream
+- A simple settings aggregate does not benefit from temporal queries
+- Some teams are not ready for the operational overhead of event stores
+
+On the other hand, state-stored-only frameworks cannot provide audit trails, event replay, or projection rebuilding.
+
+## Alternatives Considered
+
+- **Event sourcing only** — Like Axon Framework. Every aggregate is event-sourced.
+- **State storage only** — Like traditional ORMs. No event history.
+- **Hybrid per-aggregate** — Different persistence strategy per aggregate type.
+
+## Why This Approach
+
+The same aggregate definition works with either strategy:
+
+```ts
+// This aggregate works with EITHER persistence strategy
+export const BankAccount = defineAggregate<BankAccountDef>({
+  initialState: { ... },
+  commands: { ... },
+  apply: { ... },
+});
+```
+
+The choice is made at configuration time:
+
+```ts
+// Event sourcing — store events, replay on load
+infrastructure: {
+  aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
+},
+
+// OR state storage — store final state, load directly
+infrastructure: {
+  aggregatePersistence: () => new InMemoryStateStoredAggregatePersistence(),
+},
+```
+
+Benefits:
+- **Start simple** — Use state storage initially, migrate to event sourcing when you need it
+- **Per-environment** — Use event sourcing in production, state storage in tests for speed
+- **Same aggregate** — No code changes needed when switching strategies
+- **Gradual adoption** — Teams can adopt event sourcing incrementally
+
+## Trade-offs
+
+- **Two interfaces** — Two persistence contracts to understand
+- **Two mental models** — Developers need to understand when each is appropriate
+- **Apply handlers still required** — Even with state storage, you define apply handlers (they are used to process events returned by command handlers within a single dispatch cycle)
+
+## When to Use Each
+
+| Use Event Sourcing When... | Use State Storage When... |
+|---|---|
+| You need an audit trail | You only need current state |
+| You want temporal queries | You have simple CRUD operations |
+| You plan to rebuild projections | Storage growth is a concern |
+| Events drive other systems | Simplicity is the priority |
+| You need debugging capabilities | Performance is critical (O(1) load) |
+
+## Example
+
+```ts
+// Development: in-memory event sourcing for debugging
+const devDomain = await configureDomain<MyInfra>({
+  /* same writeModel and readModel */
+  infrastructure: {
+    aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
+  },
+});
+
+// Production: PostgreSQL event store for full audit trail
+const prodDomain = await configureDomain<MyInfra>({
+  /* same writeModel and readModel */
+  infrastructure: {
+    aggregatePersistence: () => new PostgresEventStore(connectionString),
+  },
+});
+```
+
+Same aggregates, same projections, different persistence. The aggregate code does not change.

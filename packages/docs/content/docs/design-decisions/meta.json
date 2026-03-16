@@ -1,0 +1,13 @@
+{
+  "title": "Design Decisions",
+  "pages": [
+    "why-decider",
+    "why-aggregate-types",
+    "why-define-commands-events",
+    "why-commands-return-events",
+    "why-id-not-in-state",
+    "why-pure-apply-handlers",
+    "why-two-persistence-strategies",
+    "why-injectable-infrastructure"
+  ]
+}

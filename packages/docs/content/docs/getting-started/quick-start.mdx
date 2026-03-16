@@ -1,0 +1,240 @@
+---
+title: Quick Start
+description: Build your first noddde application — a bank account aggregate
+---
+
+This guide walks you through building a bank account system step by step. By the end, you will have a working aggregate with commands, events, state, and a domain configuration.
+
+## What We Will Build
+
+A bank account that supports:
+- **Creating** a new account
+- **Authorizing transactions** (with balance validation)
+- Two possible outcomes: authorized or declined
+
+## Step 1: Define Events
+
+Events are immutable facts about what happened. Use `DefineEvents` to declare them:
+
+```ts
+import { DefineEvents } from "@noddde/core";
+
+export type BankAccountEvent = DefineEvents<{
+  BankAccountCreated: { id: string };
+  TransactionAuthorized: {
+    id: string;
+    timestamp: Date;
+    amount: number;
+    merchant: string;
+  };
+  TransactionDeclined: {
+    id: string;
+    timestamp: Date;
+    amount: number;
+    merchant: string;
+  };
+}>;
+```
+
+Each key becomes the event's `name` discriminant. The value becomes the `payload` type. `DefineEvents` builds a discriminated union from this map. Learn more in [Defining Events](/docs/events/defining-events).
+
+## Step 2: Define Commands
+
+Commands express intent. Use `DefineCommands`:
+
+```ts
+import { DefineCommands } from "@noddde/core";
+
+export type BankAccountCommand = DefineCommands<{
+  CreateBankAccount: void;
+  AuthorizeTransaction: { amount: number; merchant: string };
+}>;
+```
+
+`void` means `CreateBankAccount` has no payload — just a name and a `targetAggregateId`. Learn more in [Defining Commands](/docs/commands/defining-commands).
+
+## Step 3: Define State
+
+The aggregate state holds everything needed for business decisions:
+
+```ts
+export interface BankAccountState {
+  balance: number;
+  availableBalance: number;
+  transactions: Array<{
+    id: string;
+    timestamp: Date;
+    amount: number;
+    merchant: string;
+    status: "pending" | "processed" | "declined";
+  }>;
+}
+```
+
+Note: the aggregate ID is **not** part of state. It lives on the command as `targetAggregateId`. See [Why ID Not in State](/docs/design-decisions/why-id-not-in-state).
+
+## Step 4: Bundle Types
+
+Create an `AggregateTypes` bundle that ties everything together:
+
+```ts
+type BankAccountDef = {
+  state: BankAccountState;
+  events: BankAccountEvent;
+  commands: BankAccountCommand;
+  infrastructure: {};  // No custom infrastructure for this example
+};
+```
+
+This single type replaces five positional generic parameters. Learn more in [AggregateTypes Bundle](/docs/design-decisions/why-aggregate-types).
+
+## Step 5: Define the Aggregate
+
+Use `defineAggregate` to create the aggregate definition:
+
+```ts
+import { defineAggregate } from "@noddde/core";
+
+export const BankAccount = defineAggregate<BankAccountDef>({
+  // The state before any events
+  initialState: {
+    balance: 0,
+    availableBalance: 0,
+    transactions: [],
+  },
+
+  // Command handlers — decide what events to produce
+  commands: {
+    CreateBankAccount: (command) => ({
+      name: "BankAccountCreated",
+      payload: { id: command.targetAggregateId },
+    }),
+
+    AuthorizeTransaction: (command, state) => {
+      const { amount, merchant } = command.payload;
+
+      if (state.availableBalance < amount) {
+        return {
+          name: "TransactionDeclined",
+          payload: {
+            id: command.targetAggregateId,
+            timestamp: new Date(),
+            amount,
+            merchant,
+          },
+        };
+      }
+
+      return {
+        name: "TransactionAuthorized",
+        payload: {
+          id: command.targetAggregateId,
+          timestamp: new Date(),
+          amount,
+          merchant,
+        },
+      };
+    },
+  },
+
+  // Apply handlers — evolve state from events (pure functions)
+  apply: {
+    BankAccountCreated: () => ({
+      balance: 0,
+      availableBalance: 0,
+      transactions: [],
+    }),
+
+    TransactionAuthorized: (event, state) => ({
+      ...state,
+      availableBalance: state.availableBalance - event.amount,
+      transactions: [
+        ...state.transactions,
+        { ...event, status: "pending" as const },
+      ],
+    }),
+
+    TransactionDeclined: (event, state) => ({
+      ...state,
+      transactions: [
+        ...state.transactions,
+        { ...event, status: "declined" as const },
+      ],
+    }),
+  },
+});
+```
+
+## Step 6: Configure the Domain
+
+Wire the aggregate into a running domain with in-memory infrastructure:
+
+```ts
+import {
+  configureDomain,
+  InMemoryCommandBus,
+  EventEmitterEventBus,
+  InMemoryQueryBus,
+  InMemoryEventSourcedAggregatePersistence,
+} from "@noddde/core";
+
+const domain = await configureDomain({
+  writeModel: {
+    aggregates: { BankAccount },
+  },
+  readModel: {
+    projections: {},
+  },
+  infrastructure: {
+    aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
+    provideInfrastructure: () => ({}),
+    cqrsInfrastructure: () => ({
+      commandBus: new InMemoryCommandBus(),
+      eventBus: new EventEmitterEventBus(),
+      queryBus: new InMemoryQueryBus(),
+    }),
+  },
+});
+```
+
+## Step 7: Dispatch Commands
+
+```ts
+import { randomUUID } from "crypto";
+
+const accountId = randomUUID();
+
+// Create the bank account
+await domain.dispatchCommand({
+  name: "CreateBankAccount",
+  targetAggregateId: accountId,
+});
+
+// Authorize a transaction
+await domain.dispatchCommand({
+  name: "AuthorizeTransaction",
+  targetAggregateId: accountId,
+  payload: { amount: 100, merchant: "Amazon" },
+});
+```
+
+## What Just Happened?
+
+The full flow for each `dispatchCommand` call:
+
+1. **Command dispatched** — `{ name: "AuthorizeTransaction", targetAggregateId: "...", payload: { amount: 100, merchant: "Amazon" } }`
+2. **State loaded** — Framework loads the aggregate's event history and replays through apply handlers
+3. **Command handler called** — `commands.AuthorizeTransaction(command, currentState, infrastructure)`
+4. **Event returned** — Handler decides: `TransactionAuthorized` or `TransactionDeclined`
+5. **Event persisted** — Saved to the event store
+6. **State updated** — Apply handler called: `apply.TransactionAuthorized(event, state)` returns new state
+7. **Event published** — Sent to EventBus for projections to consume
+
+## Next Steps
+
+- [Concepts](/docs/concepts/messaging) — Understand the foundational patterns
+- [Aggregates](/docs/aggregates/defining-aggregates) — Deep dive into aggregate definitions
+- [Commands](/docs/commands/defining-commands) — The full command system
+- [Events](/docs/events/defining-events) — Events and apply handlers
+- [Projections](/docs/projections/overview) — Building read models
+- [Domain Configuration](/docs/domain-configuration/overview) — Complete wiring reference
