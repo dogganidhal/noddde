@@ -1,22 +1,15 @@
-import { Query, QueryHandler } from "@noddde/core";
-import { BankingInfrastructure } from "./infrastructure";
-
-export enum BankAccountQueries {
-  GetBankAccountById = "GetBankAccountById",
-  ListBankAccountTransactions = "ListBankAccountTransactions",
-}
+import { DefineQueries } from "@noddde/core";
 
 export type BankAccountView = {
   id: string;
   balance: number;
-};
-
-export interface GetBankAccountByIdQuery extends Query<BankAccountView> {
-  name: BankAccountQueries.GetBankAccountById;
-  payload: {
+  transactions: {
     id: string;
-  };
-}
+    timestamp: Date;
+    amount: number;
+    status: string;
+  }[];
+};
 
 export type TransactionView = {
   id: string;
@@ -29,29 +22,10 @@ export type BankAccountTransactionsView = {
   transactions: TransactionView[];
 };
 
-export interface ListBankAccountTransactionsQuery
-  extends Query<BankAccountTransactionsView> {
-  name: BankAccountQueries.ListBankAccountTransactions;
-  payload: {
-    bankAccountId: string;
+export type BankAccountQuery = DefineQueries<{
+  GetBankAccountById: { payload: { id: string }; result: BankAccountView };
+  ListBankAccountTransactions: {
+    payload: { bankAccountId: string };
+    result: BankAccountTransactionsView;
   };
-}
-
-export const getBankAccountByIdQueryHandler: QueryHandler<
-  BankingInfrastructure,
-  GetBankAccountByIdQuery
-> = async (query, { bankAccountViewRepository }) => {
-  return bankAccountViewRepository.getById(query.id);
-};
-
-export const listBankAccountTransactionsQueryHandler: QueryHandler<
-  BankingInfrastructure,
-  ListBankAccountTransactionsQuery
-> = async (query, { transactionViewRepository }) => {
-  return {
-    id: query.bankAccountId,
-    transactions: await transactionViewRepository.listByBankAccountId(
-      query.bankAccountId,
-    ),
-  };
-};
+}>;
