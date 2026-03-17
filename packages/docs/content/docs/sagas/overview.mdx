@@ -1,0 +1,94 @@
+---
+title: Sagas Overview
+description: Event-driven process managers that coordinate workflows across multiple aggregates.
+---
+
+## What is a Saga?
+
+A **saga** (also called a process manager) is a stateful, event-driven workflow that coordinates actions across multiple aggregates. While an aggregate handles a single consistency boundary, a saga orchestrates the interactions between several aggregates to complete a multi-step business process.
+
+A saga is the structural inverse of an aggregate:
+
+| | Aggregate | Saga |
+|---|---|---|
+| **Triggered by** | Commands | Events |
+| **Produces** | Events | Commands |
+| **State** | Domain truth | Workflow progress |
+| **Persistence** | Event-sourced or state-stored | State-stored |
+| **Purity** | Command handlers may use infra | Event handlers may use infra |
+
+```
+  Aggregate                          Saga
+  =========                          ====
+
+  Command ──> decide ──> Event(s)    Event ──> react ──> Command(s)
+                 |                               |
+                 v                               v
+              State                           State
+```
+
+## When to Use a Saga
+
+Use a saga when a business process:
+
+- **Spans multiple aggregates** — e.g., Order, Payment, and Shipping must coordinate for order fulfillment
+- **Requires sequential steps** — each step depends on the outcome of the previous one
+- **Needs compensation** — if a step fails, earlier steps must be rolled back (e.g., refund a payment when shipping fails)
+- **Has a lifecycle** — the process starts, progresses through stages, and completes or times out
+
+### Examples
+
+- **Order fulfillment** — Order placed → payment requested → payment completed → shipment arranged → shipment dispatched → order delivered
+- **Account onboarding** — Registration → email verification → KYC check → account activated
+- **Transfer between accounts** — Debit source → credit destination → confirm transfer (or rollback)
+
+## Saga vs Standalone Command Handler
+
+noddde also supports [standalone command handlers](/docs/commands/standalone-commands) for cross-aggregate coordination. Here is when to use which:
+
+| | Standalone Command Handler | Saga |
+|---|---|---|
+| **Triggered by** | A command | Domain events |
+| **Stateful** | No | Yes (persisted state) |
+| **Lifecycle** | Single request-response | Multi-step over time |
+| **Compensation** | Manual | Built-in via event reactions |
+| **Use case** | Simple orchestration (transfer funds) | Complex workflows (order fulfillment) |
+
+Use a standalone command handler for simple, synchronous orchestration. Use a saga when the workflow spans time and needs to track progress.
+
+## How It Works
+
+The saga runtime lifecycle:
+
+1. **An event arrives** (from any aggregate in the domain)
+2. The framework checks if any saga subscribes to that event
+3. The **association map** extracts the saga instance ID from the event
+4. If the event is in `startedBy` and no instance exists, a new instance is created with `initialState`
+5. Otherwise, the existing saga state is loaded from persistence
+6. The **event handler** is called with `(event, state, infrastructure)`
+7. The handler returns a `SagaReaction`: new state + commands to dispatch
+8. The framework persists the new state and dispatches the returned commands
+9. Those commands trigger aggregates, which emit events, which may trigger the saga again
+
+```
+Event ──> Association Map ──> Load State ──> Handler ──> SagaReaction
+                                                           |
+                                                    ┌──────┴──────┐
+                                                    v             v
+                                              Persist State   Dispatch Commands
+                                                                  |
+                                                                  v
+                                                           Aggregate(s)
+                                                                  |
+                                                                  v
+                                                            New Event(s)
+                                                                  |
+                                                                  v
+                                                            (cycle repeats)
+```
+
+## Next Steps
+
+- [Defining Sagas](/docs/sagas/defining-sagas) — Step-by-step guide to building a saga
+- [Associations](/docs/sagas/associations) — How events are routed to saga instances
+- [Testing Sagas](/docs/sagas/testing-sagas) — Testing saga handlers in isolation

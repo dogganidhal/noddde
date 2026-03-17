@@ -3,7 +3,7 @@ title: In-Memory Implementations
 description: Built-in in-memory implementations for development, testing, and prototyping.
 ---
 
-noddde ships with five in-memory implementations that cover every infrastructure interface. These are suitable for development, testing, and prototyping. For production, replace them with implementations backed by your database and messaging infrastructure.
+noddde ships with six in-memory implementations that cover every infrastructure interface. These are suitable for development, testing, and prototyping. For production, replace them with implementations backed by your database and messaging infrastructure.
 
 ## InMemoryCommandBus
 
@@ -63,17 +63,32 @@ const persistence = new InMemoryStateStoredAggregatePersistence();
 
 Stores aggregate state snapshots in memory. State is keyed by `(aggregateName, aggregateId)`. Same use cases as the event-sourced variant.
 
+## InMemorySagaPersistence
+
+```ts
+import { InMemorySagaPersistence } from "@noddde/core";
+
+const persistence = new InMemorySagaPersistence();
+```
+
+Stores saga instance state in memory. State is keyed by `(sagaName, sagaId)`. Required when using sagas (`processModel`) in your domain configuration.
+
+Use cases are the same as the aggregate persistence implementations — development, testing, and prototyping. Data is lost when the process exits.
+
 ## Typical Configuration
 
-Most development and test setups use all five together:
+Most development and test setups use all six together:
 
 ```ts
 const domain = await configureDomain<MyInfrastructure>({
   writeModel: { aggregates: { BankAccount } },
   readModel: { projections: { BankAccount: BankAccountProjection } },
+  processModel: { sagas: { OrderFulfillment: OrderFulfillmentSaga } },
   infrastructure: {
     aggregatePersistence: () =>
       new InMemoryEventSourcedAggregatePersistence(),
+    sagaPersistence: () =>
+      new InMemorySagaPersistence(),
     provideInfrastructure: () => ({
       logger: new ConsoleLogger(),
       bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
@@ -99,6 +114,7 @@ When you are ready for production, replace the in-memory implementations:
 | `InMemoryQueryBus` | Custom bus with caching |
 | `InMemoryEventSourcedAggregatePersistence` | PostgreSQL, MongoDB, EventStoreDB |
 | `InMemoryStateStoredAggregatePersistence` | PostgreSQL, MongoDB, DynamoDB |
+| `InMemorySagaPersistence` | PostgreSQL, MongoDB, Redis |
 
 The aggregate and projection code remains unchanged — only the infrastructure factories in `configureDomain` need to be updated.
 

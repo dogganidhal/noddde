@@ -1,0 +1,67 @@
+---
+title: Why Sagas Return Commands
+description: Why saga event handlers return a SagaReaction instead of dispatching commands imperatively.
+---
+
+## The Decision
+
+Saga event handlers return a `SagaReaction<TState, TCommands>` (state + commands) rather than dispatching commands imperatively through the `CommandBus`.
+
+```ts
+// noddde approach: declarative return
+PaymentCompleted: (event, state) => ({
+  state: { ...state, status: "awaiting_shipment" },
+  commands: [
+    { name: "ConfirmOrder", targetAggregateId: state.orderId! },
+    { name: "ArrangeShipment", targetAggregateId: shipmentId, payload: { ... } },
+  ],
+}),
+
+// Alternative: imperative dispatch (NOT what noddde does)
+PaymentCompleted: async (event, state, { commandBus }) => {
+  await commandBus.dispatch({ name: "ConfirmOrder", ... });
+  await commandBus.dispatch({ name: "ArrangeShipment", ... });
+  return { ...state, status: "awaiting_shipment" };
+},
+```
+
+## Why
+
+### Mirrors the Aggregate Pattern
+
+In noddde, aggregate command handlers return events — they don't persist events themselves. The framework handles persistence and dispatch. Sagas follow the same pattern: handlers return commands, and the framework handles dispatch after persisting the new state.
+
+This consistency makes the framework predictable: **handlers declare outputs, the framework executes side effects**.
+
+### Testability
+
+With declarative returns, testing is trivial:
+
+```ts
+const reaction = OrderFulfillmentSaga.handlers.PaymentCompleted(event, state, mockInfra);
+expect(reaction.commands).toMatchObject([
+  { name: "ConfirmOrder" },
+  { name: "ArrangeShipment" },
+]);
+```
+
+With imperative dispatch, you'd need to mock the `CommandBus`, capture calls, and assert on mock invocations. The test becomes coupled to the dispatch mechanism rather than the business decision.
+
+### Atomicity
+
+The framework can persist the new saga state and dispatch commands as a single logical operation. If the handler dispatched commands imperatively, a failure between dispatches would leave the saga in an inconsistent state — commands partially dispatched but state not updated.
+
+### Deterministic Replay
+
+If saga event streams are replayed (for rebuilding state or debugging), declarative reactions can be inspected without executing side effects. Imperative dispatches would re-trigger commands during replay.
+
+## The Trade-off
+
+Handlers still receive `CQRSInfrastructure` (including `QueryBus`), so they _can_ read data before deciding which commands to return. The constraint is on outputs, not inputs: you can read from the query bus, but you return commands rather than dispatching them.
+
+For truly imperative side effects (notifications, logging), handlers can call infrastructure methods directly — only command dispatch is declarative.
+
+## See Also
+
+- [Why Commands Return Events](/docs/design-decisions/why-commands-return-events) — The aggregate-side equivalent
+- [Defining Sagas](/docs/sagas/defining-sagas) — Full saga API reference

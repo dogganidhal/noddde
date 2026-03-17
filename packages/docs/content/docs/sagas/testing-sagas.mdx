@@ -1,0 +1,264 @@
+---
+title: Testing Sagas
+description: Testing saga event handlers, associations, and full workflows in isolation.
+---
+
+## Why Sagas Are Easy to Test
+
+Because saga event handlers return a `SagaReaction` (state + commands) rather than dispatching commands imperatively, testing is straightforward: call the handler, assert on the returned value. No bus mocking needed.
+
+## Testing Individual Handlers
+
+Each handler is a function with the signature `(event, state, infrastructure) => SagaReaction`. Call it directly:
+
+```ts
+import { OrderFulfillmentSaga } from "./saga/order-fulfillment";
+
+describe("OrderFulfillmentSaga", () => {
+  const mockInfra = {
+    clock: { now: () => new Date("2024-01-01") },
+    notificationService: { notifyCustomer: vi.fn() },
+    orderSummaryRepository: { getById: vi.fn(), save: vi.fn() },
+    // CQRSInfrastructure is merged but not needed for pure handler tests
+    commandBus: { dispatch: vi.fn() },
+    eventBus: { dispatch: vi.fn() },
+    queryBus: { dispatch: vi.fn() },
+  };
+
+  it("should request payment when order is placed", () => {
+    const event = {
+      name: "OrderPlaced" as const,
+      payload: {
+        orderId: "order-1",
+        customerId: "customer-42",
+        items: [{ productId: "prod-1", quantity: 2, unitPrice: 29.99 }],
+        total: 59.98,
+        placedAt: new Date(),
+      },
+    };
+
+    const reaction = OrderFulfillmentSaga.handlers.OrderPlaced(
+      event,
+      OrderFulfillmentSaga.initialState,
+      mockInfra,
+    );
+
+    // Assert state transition
+    expect(reaction.state.status).toBe("awaiting_payment");
+    expect(reaction.state.orderId).toBe("order-1");
+    expect(reaction.state.total).toBe(59.98);
+
+    // Assert command dispatched
+    expect(reaction.commands).toMatchObject({
+      name: "RequestPayment",
+      payload: { referenceId: "order-1", amount: 59.98 },
+    });
+  });
+
+  it("should cancel order when payment fails", () => {
+    const state = {
+      ...OrderFulfillmentSaga.initialState,
+      orderId: "order-1",
+      customerId: "customer-42",
+      status: "awaiting_payment" as const,
+      paymentId: "payment-1",
+    };
+
+    const event = {
+      name: "PaymentFailed" as const,
+      payload: {
+        paymentId: "payment-1",
+        referenceId: "order-1",
+        reason: "Insufficient funds",
+        failedAt: new Date(),
+      },
+    };
+
+    const reaction = OrderFulfillmentSaga.handlers.PaymentFailed(
+      event,
+      state,
+      mockInfra,
+    );
+
+    expect(reaction.state.status).toBe("payment_failed");
+    expect(reaction.commands).toMatchObject({
+      name: "CancelOrder",
+      targetAggregateId: "order-1",
+      payload: { reason: "Payment failed: Insufficient funds" },
+    });
+  });
+
+  it("should refund payment when order is cancelled after payment", () => {
+    const state = {
+      ...OrderFulfillmentSaga.initialState,
+      orderId: "order-1",
+      customerId: "customer-42",
+      status: "awaiting_shipment" as const,
+      paymentId: "payment-1",
+    };
+
+    const event = {
+      name: "OrderCancelled" as const,
+      payload: {
+        orderId: "order-1",
+        reason: "Customer requested cancellation",
+        cancelledAt: new Date(),
+      },
+    };
+
+    const reaction = OrderFulfillmentSaga.handlers.OrderCancelled(
+      event,
+      state,
+      mockInfra,
+    );
+
+    expect(reaction.state.status).toBe("cancelled");
+    expect(reaction.commands).toMatchObject({
+      name: "RefundPayment",
+      targetAggregateId: "payment-1",
+    });
+  });
+
+  it("should NOT refund when order is cancelled before payment", () => {
+    const state = {
+      ...OrderFulfillmentSaga.initialState,
+      orderId: "order-1",
+      customerId: "customer-42",
+      status: "awaiting_payment" as const,
+      paymentId: null, // no payment taken yet
+    };
+
+    const event = {
+      name: "OrderCancelled" as const,
+      payload: {
+        orderId: "order-1",
+        reason: "Customer changed mind",
+        cancelledAt: new Date(),
+      },
+    };
+
+    const reaction = OrderFulfillmentSaga.handlers.OrderCancelled(
+      event,
+      state,
+      mockInfra,
+    );
+
+    expect(reaction.state.status).toBe("cancelled");
+    expect(reaction.commands).toBeUndefined();
+  });
+});
+```
+
+## Testing Associations
+
+Association functions are also directly callable. Each bounded context names the correlation field differently, so test that each extractor resolves to the same saga ID:
+
+```ts
+describe("associations", () => {
+  it("should extract orderId from OrderPlaced", () => {
+    const event = {
+      name: "OrderPlaced" as const,
+      payload: { orderId: "order-1", customerId: "c-1", items: [], total: 0, placedAt: new Date() },
+    };
+    expect(OrderFulfillmentSaga.associations.OrderPlaced(event)).toBe("order-1");
+  });
+
+  it("should extract referenceId from PaymentCompleted", () => {
+    const event = {
+      name: "PaymentCompleted" as const,
+      payload: { paymentId: "pay-1", referenceId: "order-1", amount: 100, completedAt: new Date() },
+    };
+    expect(OrderFulfillmentSaga.associations.PaymentCompleted(event)).toBe("order-1");
+  });
+
+  it("should extract customerReference from ShipmentDispatched", () => {
+    const event = {
+      name: "ShipmentDispatched" as const,
+      payload: { shipmentId: "ship-1", customerReference: "order-1", trackingNumber: "TRK-1", dispatchedAt: new Date() },
+    };
+    expect(OrderFulfillmentSaga.associations.ShipmentDispatched(event)).toBe("order-1");
+  });
+});
+```
+
+## Testing Full Workflows
+
+Replay a sequence of events through the saga to verify the full workflow:
+
+```ts
+it("should complete the full happy path", async () => {
+  let state = OrderFulfillmentSaga.initialState;
+  let commands: any;
+
+  // Step 1: Order placed
+  ({ state, commands } = OrderFulfillmentSaga.handlers.OrderPlaced(
+    { name: "OrderPlaced", payload: { orderId: "o-1", customerId: "c-1", items: [], total: 100, placedAt: new Date() } },
+    state,
+    mockInfra,
+  ));
+  expect(state.status).toBe("awaiting_payment");
+  expect(commands.name).toBe("RequestPayment");
+
+  // Step 2: Payment completed
+  ({ state, commands } = OrderFulfillmentSaga.handlers.PaymentCompleted(
+    { name: "PaymentCompleted", payload: { paymentId: "p-1", referenceId: "o-1", amount: 100, completedAt: new Date() } },
+    state,
+    mockInfra,
+  ));
+  expect(state.status).toBe("awaiting_shipment");
+  expect(commands).toHaveLength(2); // ConfirmOrder + ArrangeShipment
+
+  // Step 3: Shipment dispatched
+  ({ state, commands } = OrderFulfillmentSaga.handlers.ShipmentDispatched(
+    { name: "ShipmentDispatched", payload: { shipmentId: "s-1", customerReference: "o-1", trackingNumber: "TRK-123", dispatchedAt: new Date() } },
+    state,
+    mockInfra,
+  ));
+  expect(state.status).toBe("shipped");
+  expect(state.trackingNumber).toBe("TRK-123");
+
+  // Step 4: Shipment delivered
+  const reaction = await OrderFulfillmentSaga.handlers.ShipmentDelivered(
+    { name: "ShipmentDelivered", payload: { shipmentId: "s-1", customerReference: "o-1", deliveredAt: new Date() } },
+    state,
+    mockInfra,
+  );
+  expect(reaction.state.status).toBe("delivered");
+  expect(mockInfra.notificationService.notifyCustomer).toHaveBeenCalled();
+});
+```
+
+## The Given-When-Then Pattern for Sagas
+
+The same testing pattern used for aggregates applies to sagas:
+
+- **Given** — A saga state (or: `initialState` + a sequence of events replayed through handlers)
+- **When** — A new event arrives
+- **Then** — The expected state transition and commands
+
+```ts
+// Given: an order awaiting payment
+const given: OrderFulfillmentState = {
+  ...initialFulfillmentState,
+  orderId: "order-1",
+  status: "awaiting_payment",
+  paymentId: "payment-1",
+};
+
+// When: payment fails
+const when = {
+  name: "PaymentFailed" as const,
+  payload: { paymentId: "payment-1", referenceId: "order-1", reason: "Card declined", failedAt: new Date() },
+};
+
+// Then: order is cancelled
+const then = OrderFulfillmentSaga.handlers.PaymentFailed(when, given, mockInfra);
+expect(then.state.status).toBe("payment_failed");
+expect(then.commands).toMatchObject({ name: "CancelOrder" });
+```
+
+## Next Steps
+
+- [Sagas Overview](/docs/sagas/overview) — Conceptual introduction to sagas
+- [Defining Sagas](/docs/sagas/defining-sagas) — The full saga definition API
+- [Testing Overview](/docs/testing/overview) — General testing patterns in noddde

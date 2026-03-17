@@ -40,69 +40,57 @@ The `TResult` type parameter does not appear as a field on the query object -- i
 
 ## Defining Query Types
 
-### Basic Query with Payload
+### Using DefineQueries (Recommended)
+
+The `DefineQueries` utility type creates a discriminated union of query types from a simple definition map — consistent with `DefineCommands` and `DefineEvents`:
+
+```typescript
+import { DefineQueries } from "@noddde/core";
+
+type BankAccountQuery = DefineQueries<{
+  GetBankAccountById: { payload: { id: string }; result: BankAccountView };
+  ListBankAccountTransactions: {
+    payload: { accountId: string; limit?: number; offset?: number };
+    result: TransactionView[];
+  };
+  GetAccountSummary: { payload: { accountId: string }; result: AccountSummary };
+  GetSystemStats: { result: SystemStats };
+}>;
+```
+
+Each key becomes a query `name`. Each value specifies:
+
+- **`result`** (required) — The return type of the query. Encoded as a phantom type, extractable via `QueryResult`.
+- **`payload`** (optional) — The data carried by the query. Omit or use `void` for queries with no payload.
+
+The generated union is equivalent to manually defining individual query interfaces, but with zero boilerplate.
+
+### Query Without Payload
+
+Omit the `payload` field for queries that need no parameters:
+
+```typescript
+type StatsQuery = DefineQueries<{
+  GetSystemStats: { result: SystemStats };
+}>;
+
+// Equivalent to: { name: "GetSystemStats" } & Query<SystemStats, "GetSystemStats">
+```
+
+### Manual Query Definitions
+
+You can still define queries manually by extending the `Query<TResult>` interface:
 
 ```typescript
 import { Query } from "@noddde/core";
 
-// The view model this query returns
-interface BankAccountView {
-  id: string;
-  balance: number;
-  availableBalance: number;
-  ownerName: string;
-}
-
-// The query definition
 interface GetBankAccountByIdQuery extends Query<BankAccountView> {
   name: "GetBankAccountById";
   payload: { id: string };
 }
 ```
 
-### Query Without Payload
-
-Some queries do not need parameters (e.g., fetching all items or a system-wide summary):
-
-```typescript
-interface GetSystemStatsQuery extends Query<SystemStats> {
-  name: "GetSystemStats";
-}
-```
-
-When no `payload` field is defined, the query handler receives `undefined` for the payload parameter.
-
-### Using Enums for Query Names
-
-For domains with many queries, use an enum to centralize query names and prevent typos:
-
-```typescript
-enum BankAccountQueries {
-  GetBankAccountById = "GetBankAccountById",
-  ListBankAccountTransactions = "ListBankAccountTransactions",
-  GetAccountSummary = "GetAccountSummary",
-}
-
-interface GetBankAccountByIdQuery
-  extends Query<BankAccountView, BankAccountQueries> {
-  name: BankAccountQueries.GetBankAccountById;
-  payload: { id: string };
-}
-
-interface ListBankAccountTransactionsQuery
-  extends Query<TransactionView[], BankAccountQueries> {
-  name: BankAccountQueries.ListBankAccountTransactions;
-  payload: { accountId: string; limit?: number; offset?: number };
-}
-
-interface GetAccountSummaryQuery
-  extends Query<AccountSummary, BankAccountQueries> {
-  name: BankAccountQueries.GetAccountSummary;
-  payload: { accountId: string };
-}
-```
-
-The second type parameter on `Query` narrows the `name` field to only accept values from the enum, providing an additional layer of type safety.
+This approach works but is more verbose. `DefineQueries` is the recommended way for consistency with `DefineCommands` and `DefineEvents`.
 
 ## The QueryResult Type Extractor
 
@@ -176,6 +164,35 @@ interface ListTransactionsQuery extends Query<TransactionView[]> {
 
 Use optional fields for filters and pagination. Required fields should be the minimum needed to scope the query (e.g., the parent entity ID).
 
+## Using DefineQueries with Projections
+
+`DefineQueries` pairs naturally with `defineProjection`. The query union defined by `DefineQueries` is passed as the `queries` field in the `ProjectionTypes` bundle:
+
+```typescript
+import { DefineQueries, defineProjection } from "@noddde/core";
+
+type BankAccountQuery = DefineQueries<{
+  GetBankAccountById: { payload: { id: string }; result: BankAccountView | null };
+}>;
+
+type BankAccountProjectionDef = {
+  events: BankAccountEvent;
+  queries: BankAccountQuery;
+  view: BankAccountView;
+  infrastructure: BankingInfrastructure;
+};
+
+const BankAccountProjection = defineProjection<BankAccountProjectionDef>({
+  reducers: { /* ... */ },
+  queryHandlers: {
+    GetBankAccountById: async (query, { bankAccountViewRepository }) =>
+      bankAccountViewRepository.getById(query.payload.id),
+  },
+});
+```
+
+The query handler receives the narrowed query type with full payload type safety, and the return type is validated against the `result` type declared in the `DefineQueries` map.
+
 ## View Models
 
 The result type (`TResult`) of a query is typically a **view model** -- a read-optimized data structure tailored for the consumer. View models are distinct from aggregate state:
@@ -200,10 +217,10 @@ interface BankAccountView {
 }
 ```
 
-View models can include derived data, joined data from multiple sources, and formatted fields that would be inappropriate in aggregate state. They are built and maintained by [projections](/docs/guides/projections).
+View models can include derived data, joined data from multiple sources, and formatted fields that would be inappropriate in aggregate state. They are built and maintained by [projections](/docs/projections/overview).
 
 ## Next Steps
 
 - [Query Handlers](/docs/queries/query-handlers) -- Implementing handlers that execute queries
 - [Query Bus](/docs/queries/query-bus) -- Dispatching queries through the bus
-- [Projections](/docs/guides/projections) -- Building the read models that queries return
+- [Projections](/docs/projections/overview) -- Building the read models that queries return

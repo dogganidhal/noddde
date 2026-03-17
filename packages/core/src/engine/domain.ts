@@ -1,5 +1,5 @@
 import { CQRSInfrastructure, Infrastructure } from "../infrastructure";
-import { Aggregate, Projection } from "../ddd";
+import { Aggregate, Projection, Saga } from "../ddd";
 import {
   AggregateCommand,
   Command,
@@ -12,6 +12,8 @@ import { Event } from "../edd";
 type AggregateMap = Record<string | symbol, Aggregate<any>>;
 
 type ProjectionMap = Record<string | symbol, Projection<any>>;
+
+type SagaMap = Record<string | symbol, Saga<any, any>>;
 
 /**
  * Persistence strategy that stores the current aggregate state directly.
@@ -78,6 +80,36 @@ type PersistenceConfiguration =
   | StateStoredAggregatePersistence
   | EventSourcedAggregatePersistence;
 
+/**
+ * Persistence strategy for saga instance state. Each saga instance is
+ * identified by a (sagaName, sagaId) pair, analogous to aggregate
+ * persistence.
+ *
+ * Sagas use state-stored persistence (not event-sourced) because they
+ * track workflow progress, not domain truth.
+ *
+ * @see {@link InMemorySagaPersistence} for the built-in in-memory implementation.
+ */
+export interface SagaPersistence {
+  /**
+   * Persists the current state of a saga instance.
+   *
+   * @param sagaName - The saga type name (used as a namespace).
+   * @param sagaId - The unique identifier of the saga instance.
+   * @param state - The full saga state to persist.
+   */
+  save(sagaName: string, sagaId: string, state: any): Promise<void>;
+
+  /**
+   * Loads the current state of a saga instance.
+   * Returns `undefined` or `null` if no saga instance exists.
+   *
+   * @param sagaName - The saga type name (used as a namespace).
+   * @param sagaId - The unique identifier of the saga instance.
+   */
+  load(sagaName: string, sagaId: string): Promise<any | undefined | null>;
+}
+
 type StandaloneCommandHandlerMap<
   TInfrastructure extends Infrastructure,
   TStandaloneCommand extends Command,
@@ -139,6 +171,15 @@ export type DomainConfiguration<
       TStandaloneQuery
     >;
   };
+  /**
+   * Process managers (sagas) that orchestrate workflows across aggregates
+   * by reacting to events and dispatching commands. Optional — omit if
+   * the domain has no cross-aggregate workflows.
+   */
+  processModel?: {
+    /** A map of saga definitions keyed by saga name. */
+    sagas: SagaMap;
+  };
   /** Factory functions for providing infrastructure at startup. */
   infrastructure: {
     /**
@@ -149,6 +190,12 @@ export type DomainConfiguration<
     aggregatePersistence?: () =>
       | PersistenceConfiguration
       | Promise<PersistenceConfiguration>;
+    /**
+     * Factory for saga persistence. Required if `processModel` is configured.
+     *
+     * @see {@link InMemorySagaPersistence} for the built-in in-memory implementation.
+     */
+    sagaPersistence?: () => SagaPersistence | Promise<SagaPersistence>;
     /**
      * Factory for custom infrastructure dependencies (repositories,
      * clocks, API clients, etc.).

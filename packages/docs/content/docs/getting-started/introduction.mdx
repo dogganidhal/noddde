@@ -56,19 +56,42 @@ type BankAccountEvent = DefineEvents<{
 Projections build **read-optimized views** from event streams. They are the query side of CQRS:
 
 ```ts
-const BankAccountView: ProjectionV2<BankAccountEvent, ViewType> = {
-  reducer: (view, event) => { /* build view from events */ },
-};
+const BankAccountProjection = defineProjection<BankAccountProjectionDef>({
+  reducers: {
+    BankAccountCreated: (event, view) => ({ ...view, id: event.payload.id }),
+    TransactionAuthorized: (event, view) => ({ ...view, balance: view.balance + event.payload.amount }),
+  },
+  queryHandlers: { /* ... */ },
+});
+```
+
+### Sagas
+
+Sagas are **event-driven process managers** that coordinate workflows across multiple aggregates. They are the structural inverse of aggregates — events in, commands out:
+
+```ts
+const OrderFulfillmentSaga = defineSaga<OrderFulfillmentSagaDef>({
+  initialState: { status: null },
+  startedBy: ["OrderPlaced"],
+  associations: { OrderPlaced: (event) => event.payload.orderId },
+  handlers: {
+    OrderPlaced: (event, state) => ({
+      state: { ...state, status: "awaiting_payment" },
+      commands: { name: "RequestPayment", targetAggregateId: "...", payload: { ... } },
+    }),
+  },
+});
 ```
 
 ### Domain Configuration
 
-`configureDomain` wires aggregates, projections, and infrastructure into a running domain:
+`configureDomain` wires aggregates, projections, sagas, and infrastructure into a running domain:
 
 ```ts
 const domain = await configureDomain<MyInfrastructure>({
   writeModel: { aggregates: { BankAccount } },
   readModel: { projections: { BankAccount: BankAccountProjection } },
+  processModel: { sagas: { OrderFulfillment: OrderFulfillmentSaga } },
   infrastructure: { /* persistence, buses, custom infra */ },
 });
 ```

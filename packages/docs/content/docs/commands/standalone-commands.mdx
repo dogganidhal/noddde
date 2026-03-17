@@ -93,37 +93,33 @@ const domain = await configureDomain<MyInfrastructure>({
 
 ## Use Cases
 
-### Sagas and Process Managers
+### Simple Orchestration
 
-Standalone commands are ideal for orchestrating multi-step business processes that span multiple aggregates:
+Standalone commands work for stateless, fire-and-forget orchestration:
 
 ```typescript
 standaloneCommandHandlers: {
-  ProcessCheckout: async (command, { commandBus }) => {
-    const { cartId, paymentMethod, shippingAddress } = command.payload;
+  TransferFunds: async (command, { commandBus }) => {
+    const { fromAccountId, toAccountId, amount } = command.payload;
 
-    // Step 1: Reserve inventory
     await commandBus.dispatch({
-      name: "ReserveInventory",
-      targetAggregateId: cartId,
+      name: "AuthorizeTransaction",
+      targetAggregateId: fromAccountId,
+      payload: { amount: -amount, merchant: `Transfer to ${toAccountId}` },
     });
 
-    // Step 2: Charge payment
     await commandBus.dispatch({
-      name: "ChargePayment",
-      targetAggregateId: cartId,
-      payload: { method: paymentMethod },
-    });
-
-    // Step 3: Create shipment
-    await commandBus.dispatch({
-      name: "CreateShipment",
-      targetAggregateId: cartId,
-      payload: { address: shippingAddress },
+      name: "AuthorizeTransaction",
+      targetAggregateId: toAccountId,
+      payload: { amount, merchant: `Transfer from ${fromAccountId}` },
     });
   },
 },
 ```
+
+<Callout type="info">
+For **stateful** multi-step workflows that need to track progress, handle failures, and coordinate compensation across aggregates, consider using [Sagas](/docs/sagas/overview) instead. Sagas are event-driven, persist their state, and return commands declaratively — making them testable without mocking buses.
+</Callout>
 
 ### Integration Commands
 
@@ -181,14 +177,32 @@ standaloneCommandHandlers: {
 | Has access to CQRSInfrastructure | No (only domain infrastructure) | Yes (commandBus, eventBus, queryBus) |
 | Purpose | Domain logic within a single aggregate | Cross-aggregate orchestration |
 
+## Standalone Commands vs Sagas
+
+noddde provides two mechanisms for cross-aggregate coordination:
+
+| Aspect | Standalone Command Handler | Saga |
+|---|---|---|
+| Trigger | Command (imperative) | Event (reactive) |
+| State | Stateless | Stateful (persisted) |
+| Output | Side effects via infrastructure | Declarative command returns |
+| Testability | Requires mocking buses | Assert on returned data |
+| Error handling | Manual try/catch | Compensation via state machine |
+| Best for | Simple one-shot orchestration, integrations | Multi-step workflows, long-running processes |
+
+**Use standalone commands** for stateless, simple coordination: sending notifications, syncing with external systems, or dispatching a few commands in sequence.
+
+**Use sagas** when the workflow has multiple steps, needs to track progress, or requires compensation on failure. See the [Sagas guide](/docs/sagas/overview) for details.
+
 ## Guidelines
 
 - Use standalone commands for **orchestration**, not for domain logic. Business rules and invariants should live in aggregate command handlers where they have access to consistent state.
 - Keep standalone handlers **thin**. They should coordinate and delegate, not contain complex logic.
-- When a standalone handler dispatches multiple aggregate commands, consider what happens if one of them fails. Compensating actions or retry strategies may be needed depending on your consistency requirements.
+- When a standalone handler dispatches multiple aggregate commands, consider what happens if one of them fails. For complex failure scenarios, consider a [saga](/docs/sagas/overview) instead.
 - Standalone handlers are a good fit for reacting to external triggers (webhooks, scheduled jobs) that need to dispatch commands into the domain.
 
 ## Next Steps
 
 - See how commands flow from dispatch to execution in [Dispatching Commands](/docs/commands/dispatching).
 - Learn about the [CommandBus infrastructure](/docs/commands/infrastructure) that standalone handlers use for cross-aggregate communication.
+- Learn about [Sagas](/docs/sagas/overview) for stateful, event-driven workflow coordination.

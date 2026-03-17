@@ -17,10 +17,18 @@ In a traditional CRUD application, the same data model serves both writes and re
           =====================               =====================
 
   Command --> [ Aggregate ] --> Event(s) --> [ Projection ] <-- Query
-                  |                               |
-                  v                               v
-           Event Store /                    Read Database /
-           State Store                      View Tables
+                  |                  |             |
+                  v                  |             v
+           Event Store /             |      Read Database /
+           State Store               |      View Tables
+                                     |
+                               Process Side
+                          =====================
+                                     |
+                              [ Saga ] --> Command(s)
+                                 |
+                                 v
+                          Saga State Store
 ```
 
 ## The Write Model in noddde
@@ -88,8 +96,8 @@ const domain = await configureDomain({
   writeModel: { aggregates: { BankAccount } },
   readModel: {
     projections: {
-      AccountBalanceView,
-      TransactionHistory,
+      AccountBalance: AccountBalanceProjection,
+      TransactionHistory: TransactionHistoryProjection,
     },
     standaloneQueryHandlers: {
       GetSystemStats: async (_query, infrastructure) => {
@@ -105,36 +113,42 @@ const domain = await configureDomain({
 
 A projection in noddde has two sides:
 
-- **Event handlers** — React to domain events and update the projection's internal state (a database table, an in-memory map, a search index, etc.)
-- **Query handlers** — Serve queries by reading from the projection's internal state
+- **Reducers** — React to domain events and build an updated view. Each reducer receives the narrowed event type and the current view, returning the new view.
+- **Query handlers** — Serve queries by reading from the projection's persisted view.
 
 ```typescript
-import { Projection } from "@noddde/core";
+import { defineProjection } from "@noddde/core";
 
-const AccountBalanceView: Projection<MyInfrastructure> = {
-  eventHandlers: {
-    BankAccountCreated: async (event, infrastructure) => {
-      await infrastructure.db.insert("balances", {
-        accountId: event.id,
-        balance: 0,
-      });
-    },
-    TransactionAuthorized: async (event, infrastructure) => {
-      await infrastructure.db.decrement("balances", event.id, event.amount);
-    },
-    FundsDeposited: async (event, infrastructure) => {
-      await infrastructure.db.increment("balances", event.id, event.amount);
-    },
+type AccountBalanceProjectionDef = {
+  events: BankAccountEvent;
+  queries: BankAccountQuery;
+  view: AccountBalanceView;
+  infrastructure: MyInfrastructure;
+};
+
+const AccountBalanceProjection = defineProjection<AccountBalanceProjectionDef>({
+  reducers: {
+    BankAccountCreated: (event) => ({
+      accountId: event.payload.id,
+      balance: 0,
+    }),
+    TransactionAuthorized: (event, view) => ({
+      ...view,
+      balance: view.balance - event.payload.amount,
+    }),
+    FundsDeposited: (event, view) => ({
+      ...view,
+      balance: view.balance + event.payload.amount,
+    }),
   },
   queryHandlers: {
-    GetAccountBalance: async (query, infrastructure) => {
-      return infrastructure.db.get("balances", query.accountId);
-    },
+    GetAccountBalance: async (query, { balanceRepository }) =>
+      balanceRepository.getById(query.accountId),
   },
-};
+});
 ```
 
-Event handlers in projections are fundamentally different from apply handlers in aggregates. Apply handlers are pure and synchronous — they compute the next state from the current state and an event payload. Event handlers in projections are effectful and often asynchronous — they write to databases, update caches, or call external services.
+Reducers are similar to apply handlers in aggregates — both are pure functions that produce new state from events. The difference is their purpose: apply handlers rebuild aggregate state for command processing, while reducers build query-optimized views for the read model.
 
 ### Standalone Query Handlers
 
@@ -148,6 +162,73 @@ type QueryHandler<TInfrastructure, TQuery> = (
 ```
 
 These are declared in `readModel.standaloneQueryHandlers`.
+
+## The Process Model in noddde
+
+The process model sits between the write and read models. It contains **sagas** — stateful, event-driven process managers that coordinate workflows across multiple aggregates by reacting to events and dispatching commands.
+
+```typescript
+const domain = await configureDomain({
+  writeModel: { aggregates: { Order, Payment, Shipping } },
+  readModel: { projections: { OrderSummary: OrderSummaryProjection } },
+  processModel: {
+    sagas: {
+      OrderFulfillment: OrderFulfillmentSaga,
+    },
+  },
+  infrastructure: { /* ... */ },
+});
+```
+
+### Sagas
+
+A saga is the structural inverse of an aggregate:
+
+- **Aggregate**: command in → events out (decisions)
+- **Saga**: event in → commands out (coordination)
+
+Sagas are declared using the Decider-inspired `defineSaga` function. Each saga defines:
+
+- **`initialState`** — The starting state for a new saga instance
+- **`startedBy`** — Which events create new saga instances
+- **`associations`** — Per-event functions that extract the saga instance ID (routing)
+- **`handlers`** — A map of event handlers that return a `SagaReaction` (new state + commands to dispatch)
+
+```typescript
+import { defineSaga } from "@noddde/core";
+
+const OrderFulfillmentSaga = defineSaga<OrderFulfillmentSagaDef>({
+  initialState: { status: null },
+  startedBy: ["OrderPlaced"],
+  // Different bounded contexts name the correlation field differently
+  associations: {
+    OrderPlaced: (event) => event.payload.orderId,           // Order context
+    PaymentProcessed: (event) => event.payload.referenceId,  // Payment context
+  },
+  handlers: {
+    OrderPlaced: (event, state) => ({
+      state: { ...state, status: "awaiting_payment" },
+      commands: {
+        name: "ProcessPayment",
+        targetAggregateId: event.payload.paymentId,
+        payload: { amount: event.payload.total },
+      },
+    }),
+    PaymentProcessed: (event, state) => ({
+      state: { ...state, status: "awaiting_shipment" },
+      commands: {
+        name: "CreateShipment",
+        targetAggregateId: event.payload.referenceId,
+        payload: { /* ... */ },
+      },
+    }),
+  },
+});
+```
+
+Saga handlers return commands declaratively — they do not dispatch commands imperatively. This keeps handlers testable (assert on returned commands without mocking a bus) and consistent with the aggregate pattern (handlers return data, framework handles side effects).
+
+`processModel` is a separate top-level key because sagas are neither pure write-model (they subscribe to events) nor pure read-model (they dispatch commands) — they bridge both.
 
 ## The Buses
 
@@ -175,7 +256,7 @@ When you call `domain.dispatchCommand(command)`, the framework uses the command 
 
 ### EventBus
 
-The `EventBus` dispatches events to all interested subscribers — primarily projections:
+The `EventBus` dispatches events to all interested subscribers — projections and sagas:
 
 ```typescript
 interface EventBus {
@@ -183,7 +264,7 @@ interface EventBus {
 }
 ```
 
-After an aggregate processes a command and produces events, the framework dispatches each event through the event bus. Every projection that has an event handler matching the event's `name` will receive it.
+After an aggregate processes a command and produces events, the framework dispatches each event through the event bus. Every projection that has a reducer matching the event's `name` will receive it, and every saga that has an association for the event will route it to the appropriate saga instance.
 
 ### QueryBus
 
@@ -275,17 +356,18 @@ Here is the complete flow of a command through a noddde application:
 
 7. Event persisted to event store
 
-8. EventBus dispatches event to projections
+8. EventBus dispatches event to projections and sagas
    - AccountBalanceView updates balance for "acc-1"
    - TransactionHistory appends new entry
    - FraudDetection checks for anomalies
+   - OrderFulfillmentSaga (if applicable) transitions state and returns commands
 
 9. Client can query the read model
    QueryBus.dispatch({ name: "GetAccountBalance", payload: { accountId: "acc-1" } })
    -> { balance: 950 }
 ```
 
-Steps 1-7 are the **write path** (synchronous, consistent). Steps 8-9 are the **read path** (eventually consistent with the write model).
+Steps 1-7 are the **write path** (synchronous, consistent). Step 8 fans out to the **read path** (projections) and the **process path** (sagas). Step 9 is the **query path**.
 
 ## Summary
 
@@ -295,12 +377,14 @@ Steps 1-7 are the **write path** (synchronous, consistent). Steps 8-9 are the **
 | Standalone Command Handler | Write | Handles commands without aggregate state |
 | Projection | Read | Consumes events, builds query views |
 | Standalone Query Handler | Read | Answers queries without projection state |
+| Saga | Process | Reacts to events, dispatches commands across aggregates |
 | CommandBus | Bridge | Routes commands to handlers |
-| EventBus | Bridge | Distributes events to projections |
+| EventBus | Bridge | Distributes events to projections and sagas |
 | QueryBus | Bridge | Routes queries to handlers |
 
 ## Next Steps
 
-- Learn how to wire everything together in the [Domain Configuration guide](/docs/guides/domain-configuration)
-- Understand how projections work in the [Projections guide](/docs/guides/projections)
+- Learn how to wire everything together in the [Domain Configuration guide](/docs/domain-configuration/overview)
+- Understand how projections work in the [Projections guide](/docs/projections/overview)
+- Understand how sagas coordinate workflows in the [Sagas guide](/docs/sagas/overview)
 - Learn about event sourcing as a persistence strategy in [Event Sourcing](/docs/concepts/event-sourcing)

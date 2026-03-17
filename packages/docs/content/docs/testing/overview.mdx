@@ -3,11 +3,11 @@ title: Testing Overview
 description: How noddde's functional design makes testing natural and straightforward.
 ---
 
-noddde's functional architecture is built for testability. Command handlers are functions. Apply handlers are pure functions. Projections are either functions with injectable dependencies or pure reducers. There is no framework to boot, no container to configure, and no decorators to mock.
+noddde's functional architecture is built for testability. Command handlers are functions. Apply handlers are pure functions. Projection reducers are pure functions. Saga handlers return data. There is no framework to boot, no container to configure, and no decorators to mock.
 
 ## What to Test
 
-A typical noddde application has four layers worth testing:
+A typical noddde application has five layers worth testing:
 
 ### 1. Command Handlers (Business Logic)
 
@@ -33,13 +33,51 @@ const newState = BankAccount.apply.TransactionAuthorized(
 );
 ```
 
-### 3. Projections (Read Model Building)
+### 3. Projection Reducers (Read Model Building)
 
-For `ProjectionV2`, call the reducer directly. For legacy `Projection`, call event handlers with mock infrastructure.
+Projection reducers are per-event pure functions. Call them directly with an event and the current view:
 
-### 4. Integration (Full Dispatch Cycle)
+```ts
+const newView = BankAccountProjection.reducers.TransactionAuthorized(
+  { name: "TransactionAuthorized", payload: { id: "txn-1", amount: 100, merchant: "Store" } },
+  { id: "acc-1", balance: 500, transactions: [] },
+);
 
-Use `configureDomain` with in-memory implementations to test the full command-to-event-to-projection pipeline.
+expect(newView.balance).toBe(400);
+```
+
+### 4. Saga Handlers (Workflow Coordination)
+
+Saga handlers return a `SagaReaction` — new state plus commands to dispatch. Test them by calling directly and asserting on both the returned state and commands:
+
+```ts
+const reaction = OrderFulfillmentSaga.handlers.OrderPlaced(
+  { name: "OrderPlaced", payload: { orderId: "ord-1", total: 99.99, /* ... */ } },
+  { status: null }, // initial state
+  mockInfrastructure,
+);
+
+// Assert state transition
+expect(reaction.state.status).toBe("awaiting_payment");
+
+// Assert dispatched commands
+expect(reaction.commands).toEqual(
+  expect.objectContaining({ name: "ProcessPayment" }),
+);
+```
+
+Saga associations can also be tested — they are plain functions that extract a saga ID from an event:
+
+```ts
+const sagaId = OrderFulfillmentSaga.associations.OrderPlaced(
+  { name: "OrderPlaced", payload: { orderId: "ord-1", /* ... */ } },
+);
+expect(sagaId).toBe("ord-1");
+```
+
+### 5. Integration (Full Dispatch Cycle)
+
+Use `configureDomain` with in-memory implementations to test the full command-to-event-to-projection-to-saga pipeline.
 
 ## Testing Stack
 
@@ -85,8 +123,11 @@ expect(events).toEqual({
 });
 ```
 
+For saga testing, the pattern adapts to: **Given** (saga state) → **When** (event received) → **Then** (new state + commands returned).
+
 ## Next Steps
 
 - [Testing Aggregates](/docs/testing/testing-aggregates) — Detailed aggregate testing patterns
-- [Testing Projections](/docs/testing/testing-projections) — Testing both projection styles
+- [Testing Projections](/docs/testing/testing-projections) — Testing projection reducers
+- [Testing Sagas](/docs/sagas/testing-sagas) — Testing saga handlers and associations
 - [Testing Infrastructure](/docs/testing/testing-infrastructure) — Mocking infrastructure, Clock pattern

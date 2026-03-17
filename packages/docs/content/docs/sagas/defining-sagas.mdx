@@ -1,0 +1,297 @@
+---
+title: Defining Sagas
+description: Step-by-step guide to building sagas with SagaTypes, defineSaga, and SagaReaction.
+---
+
+## The SagaTypes Bundle
+
+Like aggregates and projections, a saga starts with a **types bundle** that declares its type universe:
+
+```ts
+import { SagaTypes } from "@noddde/core";
+
+type OrderFulfillmentSagaDef = {
+  state: OrderFulfillmentState;
+  events: OrderEvent | PaymentEvent | ShippingEvent;
+  commands: OrderCommand | PaymentCommand | ShippingCommand;
+  infrastructure: EcommerceInfrastructure;
+};
+```
+
+| Member | Description |
+|---|---|
+| `state` | The saga's internal state tracking workflow progress |
+| `events` | Union of all event types the saga reacts to (from any aggregate) |
+| `commands` | Union of all command types the saga may dispatch |
+| `infrastructure` | External dependencies available to handlers |
+
+Note that `events` and `commands` can span multiple aggregates — this is the whole point of a saga.
+
+## Saga State
+
+The saga state tracks where the workflow currently stands. Design it around the workflow steps, not domain state:
+
+```ts
+type FulfillmentStatus =
+  | "awaiting_payment"
+  | "payment_failed"
+  | "awaiting_shipment"
+  | "shipped"
+  | "delivered"
+  | "cancelled";
+
+interface OrderFulfillmentState {
+  orderId: string | null;
+  customerId: string | null;
+  items: OrderItem[];
+  total: number;
+  status: FulfillmentStatus | null;
+  paymentId: string | null;
+  shipmentId: string | null;
+  trackingNumber: string | null;
+}
+```
+
+The `initialState` should use null/empty zero-values, just like aggregate state.
+
+## The SagaReaction
+
+Every saga event handler returns a `SagaReaction` — the new state plus commands to dispatch:
+
+```ts
+type SagaReaction<TState, TCommands extends Command> = {
+  state: TState;
+  commands?: TCommands | TCommands[];
+};
+```
+
+This is the key design: handlers **return** commands declaratively rather than dispatching them imperatively. The framework handles dispatch after persisting the new state. This keeps handlers testable — you assert on the returned value without mocking a bus.
+
+### Return patterns
+
+```ts
+// Single command
+return {
+  state: { ...state, status: "awaiting_payment" },
+  commands: { name: "RequestPayment", targetAggregateId: paymentId, payload: { ... } },
+};
+
+// Multiple commands
+return {
+  state: { ...state, status: "awaiting_shipment" },
+  commands: [
+    { name: "ConfirmOrder", targetAggregateId: orderId },
+    { name: "ArrangeShipment", targetAggregateId: shipmentId, payload: { ... } },
+  ],
+};
+
+// State update only, no commands
+return { state: { ...state, status: "delivered" } };
+
+// Conditional commands
+return {
+  state: { ...state, status: "cancelled" },
+  commands: state.paymentId
+    ? { name: "RefundPayment", targetAggregateId: state.paymentId, payload: { ... } }
+    : undefined,
+};
+```
+
+## Defining a Saga with defineSaga
+
+Use `defineSaga` — an identity function that provides full type inference:
+
+```ts
+import { defineSaga } from "@noddde/core";
+
+export const OrderFulfillmentSaga = defineSaga<OrderFulfillmentSagaDef>({
+  initialState: { /* zero-value state */ },
+  startedBy: ["OrderPlaced"],
+  associations: { /* per-event ID extractors */ },
+  handlers: { /* per-event reaction handlers */ },
+});
+```
+
+### Full example
+
+```ts
+export const OrderFulfillmentSaga = defineSaga<OrderFulfillmentSagaDef>({
+  initialState: {
+    orderId: null,
+    customerId: null,
+    items: [],
+    total: 0,
+    status: null,
+    paymentId: null,
+    shipmentId: null,
+    trackingNumber: null,
+  },
+
+  startedBy: ["OrderPlaced"],
+
+  // Each bounded context names the correlation field differently
+  associations: {
+    // Order aggregate — uses "orderId"
+    OrderPlaced: (event) => event.payload.orderId,
+    OrderConfirmed: (event) => event.payload.orderId,
+    OrderCancelled: (event) => event.payload.orderId,
+    // Payment aggregate — uses "referenceId"
+    PaymentCompleted: (event) => event.payload.referenceId,
+    PaymentFailed: (event) => event.payload.referenceId,
+    // Shipping aggregate — uses "customerReference"
+    ShipmentDispatched: (event) => event.payload.customerReference,
+    ShipmentDelivered: (event) => event.payload.customerReference,
+  },
+
+  handlers: {
+    // Order placed → request payment
+    OrderPlaced: (event, state) => ({
+      state: {
+        ...state,
+        orderId: event.payload.orderId,
+        customerId: event.payload.customerId,
+        total: event.payload.total,
+        items: event.payload.items,
+        status: "awaiting_payment" as const,
+        paymentId: "payment-" + event.payload.orderId,
+      },
+      commands: {
+        name: "RequestPayment",
+        targetAggregateId: "payment-" + event.payload.orderId,
+        payload: {
+          referenceId: event.payload.orderId,
+          amount: event.payload.total,
+        },
+      },
+    }),
+
+    // Payment completed → confirm order + arrange shipment
+    PaymentCompleted: (event, state) => ({
+      state: { ...state, status: "awaiting_shipment" as const },
+      commands: [
+        {
+          name: "ConfirmOrder",
+          targetAggregateId: state.orderId!,
+        },
+        {
+          name: "ArrangeShipment",
+          targetAggregateId: "ship-" + event.payload.referenceId,
+          payload: {
+            customerReference: event.payload.referenceId,
+            itemCount: state.items.reduce((sum, i) => sum + i.quantity, 0),
+          },
+        },
+      ],
+    }),
+
+    // Payment failed → cancel the order
+    PaymentFailed: (event, state) => ({
+      state: { ...state, status: "payment_failed" as const },
+      commands: {
+        name: "CancelOrder",
+        targetAggregateId: state.orderId!,
+        payload: { reason: `Payment failed: ${event.payload.reason}` },
+      },
+    }),
+
+    // Shipment dispatched → update order with tracking
+    ShipmentDispatched: (event, state) => ({
+      state: {
+        ...state,
+        trackingNumber: event.payload.trackingNumber,
+        status: "shipped" as const,
+      },
+      commands: {
+        name: "MarkOrderShipped",
+        targetAggregateId: state.orderId!,
+        payload: { trackingNumber: event.payload.trackingNumber },
+      },
+    }),
+
+    // Shipment delivered → notify customer, mark order complete
+    ShipmentDelivered: async (_event, state, { notificationService }) => {
+      await notificationService.notifyCustomer(
+        state.customerId!,
+        `Your order ${state.orderId} has been delivered!`,
+      );
+      return {
+        state: { ...state, status: "delivered" as const },
+        commands: {
+          name: "MarkOrderDelivered",
+          targetAggregateId: state.orderId!,
+        },
+      };
+    },
+
+    // Order cancelled → refund if payment was taken
+    OrderCancelled: (event, state) => ({
+      state: { ...state, status: "cancelled" as const },
+      commands: state.paymentId
+        ? {
+            name: "RefundPayment",
+            targetAggregateId: state.paymentId,
+            payload: { reason: event.payload.reason },
+          }
+        : undefined,
+    }),
+
+    // Events observed for tracking, no commands dispatched
+    OrderConfirmed: (_event, state) => ({ state }),
+  },
+});
+```
+
+## Registering Sagas
+
+Sagas are registered in the `processModel` section of `configureDomain` — a dedicated top-level key separate from `writeModel` and `readModel`:
+
+```ts
+import { configureDomain, InMemorySagaPersistence } from "@noddde/core";
+
+const domain = await configureDomain<EcommerceInfrastructure>({
+  writeModel: {
+    aggregates: { Order, Payment, Shipping },
+  },
+  readModel: {
+    projections: { OrderSummary: OrderSummaryProjection },
+  },
+  processModel: {
+    sagas: {
+      OrderFulfillment: OrderFulfillmentSaga,
+    },
+  },
+  infrastructure: {
+    aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
+    sagaPersistence: () => new InMemorySagaPersistence(),
+    provideInfrastructure: () => ({ /* ... */ }),
+    cqrsInfrastructure: () => ({ /* ... */ }),
+  },
+});
+```
+
+The `processModel` section is separate because sagas are neither pure write-model (they subscribe to events) nor pure read-model (they dispatch commands). They bridge both sides.
+
+## Type Inference Helpers
+
+Like aggregates and projections, sagas have `Infer*` helpers:
+
+```ts
+import {
+  InferSagaState,
+  InferSagaEvents,
+  InferSagaCommands,
+  InferSagaInfrastructure,
+  InferSagaId,
+} from "@noddde/core";
+
+type State = InferSagaState<typeof OrderFulfillmentSaga>;
+type Events = InferSagaEvents<typeof OrderFulfillmentSaga>;
+type Commands = InferSagaCommands<typeof OrderFulfillmentSaga>;
+type Infra = InferSagaInfrastructure<typeof OrderFulfillmentSaga>;
+type Id = InferSagaId<typeof OrderFulfillmentSaga>; // string
+```
+
+## Next Steps
+
+- [Associations](/docs/sagas/associations) — How events are routed to saga instances
+- [Testing Sagas](/docs/sagas/testing-sagas) — Testing saga handlers in isolation
