@@ -4,6 +4,13 @@ import {
   StateStoredAggregatePersistence,
 } from "../domain";
 
+/**
+ * In-memory {@link EventSourcedAggregatePersistence} implementation that stores
+ * event streams in a `Map`. Events are lost when the process exits.
+ *
+ * Suitable for development, testing, and prototyping.
+ * For production, use a durable event store (PostgreSQL, EventStoreDB, etc.).
+ */
 export class InMemoryEventSourcedAggregatePersistence
   implements EventSourcedAggregatePersistence
 {
@@ -19,6 +26,13 @@ export class InMemoryEventSourcedAggregatePersistence
   }
 }
 
+/**
+ * In-memory {@link StateStoredAggregatePersistence} implementation that stores
+ * state snapshots in a `Map`. State is lost when the process exits.
+ *
+ * Suitable for development, testing, and prototyping.
+ * For production, use a durable store (PostgreSQL, MongoDB, etc.).
+ */
 export class InMemoryStateStoredAggregatePersistence
   implements StateStoredAggregatePersistence
 {

@@ -68,7 +68,7 @@ export const BankAccount = defineAggregate<BankAccountDef>({
   },
 
   apply: {
-    BankAccountCreated: (_event, _state) => ({
+    BankAccountCreated: () => ({
       balance: 0,
       availableBalance: 0,
       transactions: [],
