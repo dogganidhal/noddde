@@ -12,7 +12,7 @@ import {
   InMemoryBankAccountViewRepository,
   InMemoryTransactionViewRepository,
 } from "./infrastructure";
-import { BankAccount as BankAccountProjection } from "./projection";
+import { BankAccountProjection } from "./projection";
 import { randomUUID } from "crypto";
 
 const main = async () => {

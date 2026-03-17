@@ -11,10 +11,7 @@ import { Event } from "../edd";
 
 type AggregateMap = Record<string | symbol, Aggregate<any>>;
 
-type ProjectionMap<TInfrastructure extends Infrastructure> = Record<
-  string | symbol,
-  Projection<any, any, any, TInfrastructure>
->;
+type ProjectionMap = Record<string | symbol, Projection<any>>;
 
 /**
  * Persistence strategy that stores the current aggregate state directly.
@@ -135,7 +132,7 @@ export type DomainConfiguration<
   /** The read side: projections and standalone query handlers. */
   readModel: {
     /** A map of projection definitions keyed by projection name. */
-    projections: ProjectionMap<TInfrastructure>;
+    projections: ProjectionMap;
     /** Optional map of standalone query handlers keyed by query name. */
     standaloneQueryHandlers?: StandaloneQueryHandlerMap<
       TInfrastructure,
