@@ -3,15 +3,20 @@
   "version": "0.0.0",
   "private": true,
   "types": "dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "lint": "eslint . --max-warnings 0",
     "build": "tsc",
-    "build:watch": "tsc --watch"
+    "build:watch": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "devDependencies": {
+    "@noddde/typescript-config": "0.0.0",
     "eslint": "^8.56.0",
     "typescript": "^5.3.3",
-    "@noddde/typescript-config": "0.0.0"
+    "vitest": "^4.1.0"
   }
 }
