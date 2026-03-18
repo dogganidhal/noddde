@@ -1,10 +1,4 @@
-import {
-  mysqlTable,
-  varchar,
-  int,
-  text,
-  json,
-} from "drizzle-orm/mysql-core";
+import { mysqlTable, varchar, int, text, json } from "drizzle-orm/mysql-core";
 
 /**
  * MySQL table definition for event-sourced aggregate persistence.

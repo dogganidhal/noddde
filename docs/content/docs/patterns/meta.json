@@ -1,4 +1,10 @@
 {
   "title": "Patterns & Examples",
-  "pages": ["clock-pattern", "banking-domain", "auction-domain", "order-fulfillment", "fund-transfer"]
+  "pages": [
+    "clock-pattern",
+    "banking-domain",
+    "auction-domain",
+    "order-fulfillment",
+    "fund-transfer"
+  ]
 }

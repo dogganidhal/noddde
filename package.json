@@ -7,10 +7,13 @@
     "lint": "turbo lint",
     "test": "turbo test",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
-    "format:check": "prettier --check \"**/*.{ts,tsx,md}\""
+    "format:check": "prettier --check \"**/*.{ts,tsx,md}\"",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
     "prettier": "^3.1.1",
     "turbo": "latest"
   },
@@ -22,5 +25,14 @@
     "packages/*",
     "samples/*",
     "docs"
-  ]
+  ],
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "prettier --write",
+      "eslint --max-warnings 0 --fix"
+    ],
+    "*.{md,mdx,json}": [
+      "prettier --write"
+    ]
+  }
 }

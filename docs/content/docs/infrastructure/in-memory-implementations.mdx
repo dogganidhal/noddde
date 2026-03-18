@@ -99,10 +99,8 @@ const domain = await configureDomain<MyInfrastructure>({
   readModel: { projections: { BankAccount: BankAccountProjection } },
   processModel: { sagas: { OrderFulfillment: OrderFulfillmentSaga } },
   infrastructure: {
-    aggregatePersistence: () =>
-      new InMemoryEventSourcedAggregatePersistence(),
-    sagaPersistence: () =>
-      new InMemorySagaPersistence(),
+    aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
+    sagaPersistence: () => new InMemorySagaPersistence(),
     provideInfrastructure: () => ({
       logger: new ConsoleLogger(),
       bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
@@ -121,15 +119,15 @@ const domain = await configureDomain<MyInfrastructure>({
 
 When you are ready for production, replace the in-memory implementations. noddde provides three [ORM adapter packages](/docs/infrastructure/orm-adapters) that cover persistence and unit of work out of the box:
 
-| In-Memory | Production Alternative |
-|---|---|
+| In-Memory                                  | Production Alternative                                    |
+| ------------------------------------------ | --------------------------------------------------------- |
 | `InMemoryEventSourcedAggregatePersistence` | `@noddde/drizzle`, `@noddde/prisma`, or `@noddde/typeorm` |
-| `InMemoryStateStoredAggregatePersistence` | `@noddde/drizzle`, `@noddde/prisma`, or `@noddde/typeorm` |
-| `InMemorySagaPersistence` | `@noddde/drizzle`, `@noddde/prisma`, or `@noddde/typeorm` |
-| `InMemoryUnitOfWork` | `@noddde/drizzle`, `@noddde/prisma`, or `@noddde/typeorm` |
-| `InMemoryCommandBus` | Custom bus (RabbitMQ, Kafka, etc.) |
-| `EventEmitterEventBus` | Custom bus (Kafka, Redis Streams, etc.) |
-| `InMemoryQueryBus` | Custom bus with caching |
+| `InMemoryStateStoredAggregatePersistence`  | `@noddde/drizzle`, `@noddde/prisma`, or `@noddde/typeorm` |
+| `InMemorySagaPersistence`                  | `@noddde/drizzle`, `@noddde/prisma`, or `@noddde/typeorm` |
+| `InMemoryUnitOfWork`                       | `@noddde/drizzle`, `@noddde/prisma`, or `@noddde/typeorm` |
+| `InMemoryCommandBus`                       | Custom bus (RabbitMQ, Kafka, etc.)                        |
+| `EventEmitterEventBus`                     | Custom bus (Kafka, Redis Streams, etc.)                   |
+| `InMemoryQueryBus`                         | Custom bus with caching                                   |
 
 Each ORM adapter provides a single factory function that creates all persistence implementations and a unit of work factory wired to share a database transaction context. The aggregate and projection code remains unchanged — only the infrastructure factories in `configureDomain` need to be updated.
 

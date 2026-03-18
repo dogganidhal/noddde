@@ -7,17 +7,21 @@ noddde provides three ORM adapter packages that implement all persistence interf
 
 ## Available Adapters
 
-| Package | ORM | Dialects | Schema |
-|---------|-----|----------|--------|
+| Package           | ORM         | Dialects                  | Schema                                  |
+| ----------------- | ----------- | ------------------------- | --------------------------------------- |
 | `@noddde/drizzle` | Drizzle ORM | SQLite, PostgreSQL, MySQL | TypeScript table builders (per dialect) |
-| `@noddde/prisma` | Prisma | Any Prisma-supported DB | `.prisma` schema file |
-| `@noddde/typeorm` | TypeORM | Any TypeORM-supported DB | TypeScript entity decorators |
+| `@noddde/prisma`  | Prisma      | Any Prisma-supported DB   | `.prisma` schema file                   |
+| `@noddde/typeorm` | TypeORM     | Any TypeORM-supported DB  | TypeScript entity decorators            |
 
 Each package exports a single factory function that returns all persistence implementations wired to share a transaction context:
 
 ```ts
 import { events, aggregateStates, sagaStates } from "@noddde/drizzle/pg";
-const infra = createDrizzlePersistence(db, { events, aggregateStates, sagaStates });
+const infra = createDrizzlePersistence(db, {
+  events,
+  aggregateStates,
+  sagaStates,
+});
 // or: createPrismaPersistence(prisma)
 // or: createTypeORMPersistence(dataSource)
 
@@ -64,7 +68,11 @@ import { createDrizzlePersistence } from "@noddde/drizzle";
 import { events, aggregateStates, sagaStates } from "@noddde/drizzle/sqlite";
 
 const db = drizzle(new Database("app.db"));
-const infra = createDrizzlePersistence(db, { events, aggregateStates, sagaStates });
+const infra = createDrizzlePersistence(db, {
+  events,
+  aggregateStates,
+  sagaStates,
+});
 
 const domain = await configureDomain({
   writeModel: { aggregates: { Order } },
@@ -177,7 +185,11 @@ import {
 const dataSource = new DataSource({
   type: "postgres",
   url: process.env.DATABASE_URL,
-  entities: [NodddeEventEntity, NodddeAggregateStateEntity, NodddeSagaStateEntity],
+  entities: [
+    NodddeEventEntity,
+    NodddeAggregateStateEntity,
+    NodddeSagaStateEntity,
+  ],
   synchronize: true, // use migrations in production
 });
 await dataSource.initialize();
@@ -223,24 +235,24 @@ This shared transaction store pattern means persistence classes do not need to k
 
 All three adapters use the same logical schema:
 
-| Table | Purpose | Key | Columns |
-|-------|---------|-----|---------|
-| `noddde_events` | Event streams | Auto-increment `id` | `aggregate_name`, `aggregate_id`, `sequence_number`, `event_name`, `payload` (JSON) |
-| `noddde_aggregate_states` | State snapshots | Composite (`aggregate_name`, `aggregate_id`) | `state` (JSON) |
-| `noddde_saga_states` | Saga state | Composite (`saga_name`, `saga_id`) | `state` (JSON) |
+| Table                     | Purpose         | Key                                          | Columns                                                                             |
+| ------------------------- | --------------- | -------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `noddde_events`           | Event streams   | Auto-increment `id`                          | `aggregate_name`, `aggregate_id`, `sequence_number`, `event_name`, `payload` (JSON) |
+| `noddde_aggregate_states` | State snapshots | Composite (`aggregate_name`, `aggregate_id`) | `state` (JSON)                                                                      |
+| `noddde_saga_states`      | Saga state      | Composite (`saga_name`, `saga_id`)           | `state` (JSON)                                                                      |
 
 States and event payloads are serialized as JSON strings, making the schema database-agnostic.
 
 ## Choosing an Adapter
 
-| Factor | Drizzle | Prisma | TypeORM |
-|--------|---------|--------|---------|
-| Schema definition | TypeScript table builders | `.prisma` schema file | Decorator-based entities |
-| Code generation | None | Required (`prisma generate`) | None |
-| Type safety | Full (inferred from schema) | Full (generated client) | Partial (decorator metadata) |
-| Bundle size | Lightweight | Heavier (generated client) | Medium |
-| Sync driver support | Yes (`better-sqlite3`) | No (async only) | Yes |
-| Migration tooling | Drizzle Kit | Prisma Migrate | TypeORM migrations |
+| Factor              | Drizzle                     | Prisma                       | TypeORM                      |
+| ------------------- | --------------------------- | ---------------------------- | ---------------------------- |
+| Schema definition   | TypeScript table builders   | `.prisma` schema file        | Decorator-based entities     |
+| Code generation     | None                        | Required (`prisma generate`) | None                         |
+| Type safety         | Full (inferred from schema) | Full (generated client)      | Partial (decorator metadata) |
+| Bundle size         | Lightweight                 | Heavier (generated client)   | Medium                       |
+| Sync driver support | Yes (`better-sqlite3`)      | No (async only)              | Yes                          |
+| Migration tooling   | Drizzle Kit                 | Prisma Migrate               | TypeORM migrations           |
 
 All three provide identical functionality for noddde's purposes. The choice comes down to which ORM your project already uses.
 

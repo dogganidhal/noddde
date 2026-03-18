@@ -104,7 +104,11 @@ import { events, aggregateStates, sagaStates } from "@noddde/drizzle/pg";
 // or: createPrismaPersistence from "@noddde/prisma"
 // or: createTypeORMPersistence from "@noddde/typeorm"
 
-const infra = createDrizzlePersistence(db, { events, aggregateStates, sagaStates });
+const infra = createDrizzlePersistence(db, {
+  events,
+  aggregateStates,
+  sagaStates,
+});
 
 const domain = await configureDomain({
   writeModel: { aggregates: { Order } },

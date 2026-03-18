@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable no-unused-vars */
 import { eq, and, asc, sql } from "drizzle-orm";
 import type {
   Event,
@@ -183,17 +183,13 @@ export class DrizzleSagaPersistence implements SagaPersistence {
     const existing = await executor
       .select()
       .from(table)
-      .where(
-        and(eq(table.sagaName, sagaName), eq(table.sagaId, sagaId)),
-      );
+      .where(and(eq(table.sagaName, sagaName), eq(table.sagaId, sagaId)));
 
     if (existing.length > 0) {
       await executor
         .update(table)
         .set({ state: serialized })
-        .where(
-          and(eq(table.sagaName, sagaName), eq(table.sagaId, sagaId)),
-        );
+        .where(and(eq(table.sagaName, sagaName), eq(table.sagaId, sagaId)));
     } else {
       await executor.insert(table).values({
         sagaName,
@@ -213,9 +209,7 @@ export class DrizzleSagaPersistence implements SagaPersistence {
     const rows = await executor
       .select()
       .from(table)
-      .where(
-        and(eq(table.sagaName, sagaName), eq(table.sagaId, sagaId)),
-      );
+      .where(and(eq(table.sagaName, sagaName), eq(table.sagaId, sagaId)));
 
     if (rows.length === 0) return undefined;
     return JSON.parse(rows[0]!.state);

@@ -9,12 +9,17 @@ noddde supports two persistence strategies for aggregates: **event sourcing** (s
 
 ```ts
 interface EventSourcedAggregatePersistence {
-  save(aggregateName: string, aggregateId: string, events: Event[]): Promise<void>;
+  save(
+    aggregateName: string,
+    aggregateId: string,
+    events: Event[],
+  ): Promise<void>;
   load(aggregateName: string, aggregateId: string): Promise<Event[]>;
 }
 ```
 
 With event sourcing:
+
 - **`save`** appends new events to the aggregate's event stream
 - **`load`** returns all events for an aggregate instance
 - The framework replays events through [apply handlers](/docs/events/apply-handlers) to reconstruct current state
@@ -51,6 +56,7 @@ interface StateStoredAggregatePersistence {
 ```
 
 With state storage:
+
 - **`save`** overwrites the current state snapshot
 - **`load`** returns the last saved state (or `null` for new aggregates)
 - No event replay is needed — the loaded state is used directly
@@ -76,21 +82,22 @@ State storage is simpler and appropriate when:
 
 ## Decision Matrix
 
-| Factor | Event Sourcing | State Storage |
-|---|---|---|
-| Audit trail | Full history | Current state only |
-| Storage growth | Grows with events | Constant per aggregate |
-| Load performance | Slower (replay) | Faster (direct read) |
-| Projection rebuild | Possible | Not possible |
-| Temporal queries | Supported | Not supported |
-| Complexity | Higher | Lower |
-| Debugging | Excellent | Standard |
+| Factor             | Event Sourcing    | State Storage          |
+| ------------------ | ----------------- | ---------------------- |
+| Audit trail        | Full history      | Current state only     |
+| Storage growth     | Grows with events | Constant per aggregate |
+| Load performance   | Slower (replay)   | Faster (direct read)   |
+| Projection rebuild | Possible          | Not possible           |
+| Temporal queries   | Supported         | Not supported          |
+| Complexity         | Higher            | Lower                  |
+| Debugging          | Excellent         | Standard               |
 
 ## Same Aggregate, Different Strategy
 
 The same aggregate definition works with either strategy. The `defineAggregate` function does not know or care about persistence — it defines `initialState`, `commands`, and `apply` regardless.
 
 This means you can:
+
 - Start with state storage for simplicity
 - Migrate to event sourcing later without changing your aggregate
 - Use event sourcing in production and state storage in tests

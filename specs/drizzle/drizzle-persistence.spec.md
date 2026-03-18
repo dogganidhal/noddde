@@ -242,7 +242,11 @@ function createTestDb() {
 describe("Drizzle Multi-Dialect Persistence", () => {
   it("factory creates all four infrastructure components", () => {
     const db = createTestDb();
-    const infra = createDrizzlePersistence(db, { events, aggregateStates, sagaStates });
+    const infra = createDrizzlePersistence(db, {
+      events,
+      aggregateStates,
+      sagaStates,
+    });
 
     expect(infra.eventSourcedPersistence).toBeDefined();
     expect(infra.stateStoredPersistence).toBeDefined();
@@ -258,7 +262,11 @@ describe("Drizzle Multi-Dialect Persistence", () => {
 ```ts
 it("saves and loads events with JSON-parsed payloads", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, { events, aggregateStates, sagaStates });
+  const infra = createDrizzlePersistence(db, {
+    events,
+    aggregateStates,
+    sagaStates,
+  });
   const persistence = infra.eventSourcedPersistence;
 
   await persistence.save("Order", "order-1", [
@@ -269,7 +277,10 @@ it("saves and loads events with JSON-parsed payloads", async () => {
   const loaded = await persistence.load("Order", "order-1");
   expect(loaded).toHaveLength(2);
   expect(loaded[0]).toEqual({ name: "OrderPlaced", payload: { total: 100 } });
-  expect(loaded[1]).toEqual({ name: "OrderConfirmed", payload: { confirmedAt: "2024-01-01" } });
+  expect(loaded[1]).toEqual({
+    name: "OrderConfirmed",
+    payload: { confirmedAt: "2024-01-01" },
+  });
 });
 ```
 
@@ -278,9 +289,16 @@ it("saves and loads events with JSON-parsed payloads", async () => {
 ```ts
 it("returns empty array for nonexistent aggregate", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, { events, aggregateStates, sagaStates });
+  const infra = createDrizzlePersistence(db, {
+    events,
+    aggregateStates,
+    sagaStates,
+  });
 
-  const loaded = await infra.eventSourcedPersistence.load("Order", "nonexistent");
+  const loaded = await infra.eventSourcedPersistence.load(
+    "Order",
+    "nonexistent",
+  );
   expect(loaded).toEqual([]);
 });
 ```
@@ -290,7 +308,11 @@ it("returns empty array for nonexistent aggregate", async () => {
 ```ts
 it("appends events with incrementing sequence numbers", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, { events, aggregateStates, sagaStates });
+  const infra = createDrizzlePersistence(db, {
+    events,
+    aggregateStates,
+    sagaStates,
+  });
   const persistence = infra.eventSourcedPersistence;
 
   await persistence.save("Order", "order-1", [
@@ -312,11 +334,19 @@ it("appends events with incrementing sequence numbers", async () => {
 ```ts
 it("isolates events by aggregate name", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, { events, aggregateStates, sagaStates });
+  const infra = createDrizzlePersistence(db, {
+    events,
+    aggregateStates,
+    sagaStates,
+  });
   const persistence = infra.eventSourcedPersistence;
 
-  await persistence.save("Order", "id-1", [{ name: "OrderPlaced", payload: {} }]);
-  await persistence.save("Payment", "id-1", [{ name: "PaymentReceived", payload: {} }]);
+  await persistence.save("Order", "id-1", [
+    { name: "OrderPlaced", payload: {} },
+  ]);
+  await persistence.save("Payment", "id-1", [
+    { name: "PaymentReceived", payload: {} },
+  ]);
 
   const orderEvents = await persistence.load("Order", "id-1");
   const paymentEvents = await persistence.load("Payment", "id-1");
@@ -333,7 +363,11 @@ it("isolates events by aggregate name", async () => {
 ```ts
 it("saves and loads state with JSON parsing", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, { events, aggregateStates, sagaStates });
+  const infra = createDrizzlePersistence(db, {
+    events,
+    aggregateStates,
+    sagaStates,
+  });
   const persistence = infra.stateStoredPersistence;
 
   await persistence.save("Account", "acc-1", { balance: 500, owner: "Alice" });
@@ -347,9 +381,16 @@ it("saves and loads state with JSON parsing", async () => {
 ```ts
 it("returns undefined for nonexistent aggregate", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, { events, aggregateStates, sagaStates });
+  const infra = createDrizzlePersistence(db, {
+    events,
+    aggregateStates,
+    sagaStates,
+  });
 
-  const state = await infra.stateStoredPersistence.load("Account", "nonexistent");
+  const state = await infra.stateStoredPersistence.load(
+    "Account",
+    "nonexistent",
+  );
   expect(state).toBeUndefined();
 });
 ```
@@ -359,7 +400,11 @@ it("returns undefined for nonexistent aggregate", async () => {
 ```ts
 it("overwrites state on subsequent saves", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, { events, aggregateStates, sagaStates });
+  const infra = createDrizzlePersistence(db, {
+    events,
+    aggregateStates,
+    sagaStates,
+  });
   const persistence = infra.stateStoredPersistence;
 
   await persistence.save("Account", "acc-1", { balance: 100 });
@@ -375,7 +420,11 @@ it("overwrites state on subsequent saves", async () => {
 ```ts
 it("saves and loads saga state", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, { events, aggregateStates, sagaStates });
+  const infra = createDrizzlePersistence(db, {
+    events,
+    aggregateStates,
+    sagaStates,
+  });
   const persistence = infra.sagaPersistence;
 
   await persistence.save("OrderSaga", "saga-1", { status: "active", step: 2 });
@@ -389,7 +438,11 @@ it("saves and loads saga state", async () => {
 ```ts
 it("commits all operations atomically and returns deferred events", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, { events, aggregateStates, sagaStates });
+  const infra = createDrizzlePersistence(db, {
+    events,
+    aggregateStates,
+    sagaStates,
+  });
   const uow = infra.unitOfWorkFactory();
 
   uow.enlist(async () => {
@@ -420,7 +473,11 @@ it("commits all operations atomically and returns deferred events", async () => 
 ```ts
 it("rollback discards all operations and events", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, { events, aggregateStates, sagaStates });
+  const infra = createDrizzlePersistence(db, {
+    events,
+    aggregateStates,
+    sagaStates,
+  });
   const uow = infra.unitOfWorkFactory();
 
   uow.enlist(async () => {
@@ -442,12 +499,18 @@ it("rollback discards all operations and events", async () => {
 ```ts
 it("throws on any operation after commit or rollback", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, { events, aggregateStates, sagaStates });
+  const infra = createDrizzlePersistence(db, {
+    events,
+    aggregateStates,
+    sagaStates,
+  });
   const uow = infra.unitOfWorkFactory();
 
   await uow.commit();
 
-  expect(() => uow.enlist(async () => {})).toThrow("UnitOfWork already completed");
+  expect(() => uow.enlist(async () => {})).toThrow(
+    "UnitOfWork already completed",
+  );
   expect(() => uow.deferPublish()).toThrow("UnitOfWork already completed");
   await expect(uow.commit()).rejects.toThrow("UnitOfWork already completed");
   await expect(uow.rollback()).rejects.toThrow("UnitOfWork already completed");
