@@ -55,7 +55,7 @@ Key differences from aggregate command handlers:
 Standalone command handlers are registered in the `writeModel.standaloneCommandHandlers` map of your domain configuration:
 
 ```typescript
-import { configureDomain } from "@noddde/core";
+import { configureDomain } from "@noddde/engine";
 
 const domain = await configureDomain<MyInfrastructure>({
   writeModel: {

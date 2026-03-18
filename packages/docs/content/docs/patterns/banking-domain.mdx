@@ -223,7 +223,7 @@ export const BankAccountV2: ProjectionV2<BankAccountEvent, BankAccountView> = {
 ## Step 7: Configure and Run
 
 ```ts
-import { configureDomain, InMemoryEventSourcedAggregatePersistence, InMemoryCommandBus, EventEmitterEventBus, InMemoryQueryBus } from "@noddde/core";
+import { configureDomain, InMemoryEventSourcedAggregatePersistence, InMemoryCommandBus, EventEmitterEventBus, InMemoryQueryBus } from "@noddde/engine";
 import { randomUUID } from "crypto";
 
 const domain = await configureDomain<BankingInfrastructure>({

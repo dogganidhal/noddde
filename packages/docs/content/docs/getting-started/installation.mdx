@@ -6,20 +6,22 @@ description: How to install and set up noddde
 ## Installation
 
 ```bash
-npm install @noddde/core
+npm install @noddde/core @noddde/engine
 ```
 
 Or with yarn:
 
 ```bash
-yarn add @noddde/core
+yarn add @noddde/core @noddde/engine
 ```
 
 Or with pnpm:
 
 ```bash
-pnpm add @noddde/core
+pnpm add @noddde/core @noddde/engine
 ```
+
+`@noddde/core` provides the type definitions, identity functions, and interfaces for defining your domain (aggregates, commands, events, queries, projections, sagas). `@noddde/engine` provides the runtime implementations (`configureDomain`, in-memory buses, persistence, and the event emitter event bus).
 
 ## Requirements
 

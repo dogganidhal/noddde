@@ -24,7 +24,7 @@ Events are the source of truth. State is ephemeral — derived on every load by 
 ### Configuration
 
 ```ts
-import { InMemoryEventSourcedAggregatePersistence } from "@noddde/core";
+import { InMemoryEventSourcedAggregatePersistence } from "@noddde/engine";
 
 infrastructure: {
   aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
@@ -58,7 +58,7 @@ With state storage:
 ### Configuration
 
 ```ts
-import { InMemoryStateStoredAggregatePersistence } from "@noddde/core";
+import { InMemoryStateStoredAggregatePersistence } from "@noddde/engine";
 
 infrastructure: {
   aggregatePersistence: () => new InMemoryStateStoredAggregatePersistence(),

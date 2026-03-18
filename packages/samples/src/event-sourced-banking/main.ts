@@ -4,7 +4,7 @@ import {
   InMemoryCommandBus,
   InMemoryEventSourcedAggregatePersistence,
   InMemoryQueryBus,
-} from "@noddde/core";
+} from "@noddde/engine";
 import { BankAccount } from "./aggregate";
 import {
   BankingInfrastructure,

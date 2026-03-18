@@ -8,7 +8,7 @@ noddde ships with six in-memory implementations that cover every infrastructure 
 ## InMemoryCommandBus
 
 ```ts
-import { InMemoryCommandBus } from "@noddde/core";
+import { InMemoryCommandBus } from "@noddde/engine";
 
 const commandBus = new InMemoryCommandBus();
 ```
@@ -18,7 +18,7 @@ An in-process command bus with a handler registry. Commands are routed by name t
 ## EventEmitterEventBus
 
 ```ts
-import { EventEmitterEventBus } from "@noddde/core";
+import { EventEmitterEventBus } from "@noddde/engine";
 
 const eventBus = new EventEmitterEventBus();
 ```
@@ -30,7 +30,7 @@ Suitable for local development and testing.
 ## InMemoryQueryBus
 
 ```ts
-import { InMemoryQueryBus } from "@noddde/core";
+import { InMemoryQueryBus } from "@noddde/engine";
 
 const queryBus = new InMemoryQueryBus();
 ```
@@ -40,7 +40,7 @@ An in-process query bus with a handler registry. Queries are routed by name to h
 ## InMemoryEventSourcedAggregatePersistence
 
 ```ts
-import { InMemoryEventSourcedAggregatePersistence } from "@noddde/core";
+import { InMemoryEventSourcedAggregatePersistence } from "@noddde/engine";
 
 const persistence = new InMemoryEventSourcedAggregatePersistence();
 ```
@@ -56,7 +56,7 @@ Data is lost when the process exits.
 ## InMemoryStateStoredAggregatePersistence
 
 ```ts
-import { InMemoryStateStoredAggregatePersistence } from "@noddde/core";
+import { InMemoryStateStoredAggregatePersistence } from "@noddde/engine";
 
 const persistence = new InMemoryStateStoredAggregatePersistence();
 ```
@@ -66,7 +66,7 @@ Stores aggregate state snapshots in memory. State is keyed by `(aggregateName, a
 ## InMemorySagaPersistence
 
 ```ts
-import { InMemorySagaPersistence } from "@noddde/core";
+import { InMemorySagaPersistence } from "@noddde/engine";
 
 const persistence = new InMemorySagaPersistence();
 ```

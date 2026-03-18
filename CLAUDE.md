@@ -4,11 +4,12 @@
 
 noddde is a TypeScript framework for building business applications using Domain-Driven Design (DDD), Command Query Responsibility Segregation (CQRS), and Event Sourcing. It follows the functional **Decider pattern**: no base classes, no decorators — just typed objects and pure functions.
 
-**Current state**: The API surface (types, interfaces, `define*` identity functions) is complete. Runtime implementations are stubs (`throw new Error("Not implemented")`). Three sample domains exist as usage references. No tests exist yet.
+**Current state**: The API surface (types, interfaces, `define*` identity functions) is complete. Runtime implementations are implemented with in-memory backends. Three sample domains exist as usage references.
 
 **Monorepo layout** (Turborepo + Yarn workspaces):
 
-- `packages/core/` — Framework library (`@noddde/core`)
+- `packages/core/` — Types, interfaces, and definition functions (`@noddde/core`) — zero runtime dependencies
+- `packages/engine/` — Runtime: Domain orchestration + in-memory implementations (`@noddde/engine`) — depends on `@noddde/core`
 - `packages/samples/` — 3 sample domains (auction, banking, order-fulfillment)
 - `packages/docs/` — Fumadocs documentation site
 - `specs/` — Spec-driven development specs (see below)
@@ -38,13 +39,20 @@ noddde is a TypeScript framework for building business applications using Domain
 | `cqrs/query/query-handler.ts`                               | `QueryHandler` type                                                                           |
 | **infrastructure/**                                         |                                                                                               |
 | `infrastructure/index.ts`                                   | `Infrastructure` (empty base), `CQRSInfrastructure` (commandBus + eventBus + queryBus)        |
-| **engine/**                                                 |                                                                                               |
-| `engine/domain.ts`                                          | `Domain` class, `DomainConfiguration`, `configureDomain`, persistence interfaces              |
-| `engine/implementations/ee-event-bus.ts`                    | `EventEmitterEventBus` (Node.js EventEmitter-backed)                                          |
-| `engine/implementations/in-memory-command-bus.ts`           | `InMemoryCommandBus` (stub)                                                                   |
-| `engine/implementations/in-memory-query-bus.ts`             | `InMemoryQueryBus` (stub)                                                                     |
-| `engine/implementations/in-memory-aggregate-persistence.ts` | `InMemoryEventSourcedAggregatePersistence`, `InMemoryStateStoredAggregatePersistence` (stubs) |
-| `engine/implementations/in-memory-saga-persistence.ts`      | `InMemorySagaPersistence` (stub)                                                              |
+| **persistence/**                                            |                                                                                               |
+| `persistence/index.ts`                                      | `StateStoredAggregatePersistence`, `EventSourcedAggregatePersistence`, `SagaPersistence`       |
+
+### Engine Source Files (`packages/engine/src/`)
+
+| File                                          | Purpose                                                                              |
+| --------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `index.ts`                                    | Re-exports `@noddde/core` + all engine exports                                      |
+| `domain.ts`                                   | `Domain` class, `DomainConfiguration`, `configureDomain`                             |
+| `implementations/ee-event-bus.ts`             | `EventEmitterEventBus` (Node.js EventEmitter-backed)                                 |
+| `implementations/in-memory-command-bus.ts`    | `InMemoryCommandBus`                                                                 |
+| `implementations/in-memory-query-bus.ts`      | `InMemoryQueryBus`                                                                   |
+| `implementations/in-memory-aggregate-persistence.ts` | `InMemoryEventSourcedAggregatePersistence`, `InMemoryStateStoredAggregatePersistence` |
+| `implementations/in-memory-saga-persistence.ts`      | `InMemorySagaPersistence`                                                            |
 
 ### Key Patterns
 
@@ -64,9 +72,12 @@ noddde is a TypeScript framework for building business applications using Domain
 
 ## Spec System
 
-Specs live in `specs/` and mirror `packages/core/src/`. See `specs/README.md` for the full format documentation.
+Specs live in `specs/` and mirror the package source directories. See `specs/README.md` for the full format documentation.
 
-**Finding a spec**: Replace `packages/core/src/` with `specs/core/` and `.ts` with `.spec.md`.
+**Finding a spec**:
+- `packages/core/src/<path>.ts` → `specs/core/<path>.spec.md`
+- `packages/engine/src/<path>.ts` → `specs/engine/<path>.spec.md`
+
 Example: `packages/core/src/ddd/aggregate-root.ts` → `specs/core/ddd/aggregate.spec.md`
 
 **Spec sections**:
@@ -217,18 +228,19 @@ Everything between gates runs without asking.
 
 Test files map from spec `## Test Scenarios`:
 
-| Spec Path                                                                   | Test File Path                                                                               |
-| --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `specs/core/ddd/aggregate.spec.md`                                          | `packages/core/src/__tests__/ddd/aggregate.test.ts`                                          |
-| `specs/core/engine/implementations/in-memory-aggregate-persistence.spec.md` | `packages/core/src/__tests__/engine/implementations/in-memory-aggregate-persistence.test.ts` |
-| `specs/integration/command-dispatch-lifecycle.spec.md`                      | `packages/core/src/__tests__/integration/command-dispatch-lifecycle.test.ts`                 |
+| Spec Path                                                                     | Test File Path                                                                                 |
+| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `specs/core/ddd/aggregate.spec.md`                                            | `packages/core/src/__tests__/ddd/aggregate.test.ts`                                            |
+| `specs/engine/implementations/in-memory-aggregate-persistence.spec.md`        | `packages/engine/src/__tests__/engine/implementations/in-memory-aggregate-persistence.test.ts`  |
+| `specs/integration/command-dispatch-lifecycle.spec.md`                         | `packages/engine/src/__tests__/integration/command-dispatch-lifecycle.test.ts`                  |
 
 **Mapping rules**:
 
 - Each `### Heading` in Test Scenarios → `it("heading", async () => { ... })`
 - Group tests under `describe("<spec title>", () => { ... })`
 - TypeScript code fences are the test body
-- Use `import { ... } from "@noddde/core"` (or relative paths) for imports
+- Use `import { ... } from "@noddde/core"` for type/definition imports
+- Use `import { ... } from "@noddde/engine"` for runtime imports (Domain, configureDomain, InMemory*, etc.)
 - Use `expectTypeOf` from vitest for type-level assertions
 - Use `expect` from vitest for runtime assertions
 

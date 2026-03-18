@@ -119,7 +119,7 @@ The `aggregateName` parameter identifies the aggregate type (e.g., `"BankAccount
 noddde provides an in-memory implementation for development and testing:
 
 ```typescript
-import { InMemoryEventSourcedAggregatePersistence } from "@noddde/core";
+import { InMemoryEventSourcedAggregatePersistence } from "@noddde/engine";
 ```
 
 This stores events in memory and loses them when the process exits. It is useful for prototyping and running tests.

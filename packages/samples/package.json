@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@noddde/core": "0.0.0",
+    "@noddde/engine": "0.0.0",
     "type-fest": "^4.35.0"
   },
   "devDependencies": {

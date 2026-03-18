@@ -5,7 +5,7 @@ import {
   InMemoryEventSourcedAggregatePersistence,
   InMemoryQueryBus,
   InMemorySagaPersistence,
-} from "@noddde/core";
+} from "@noddde/engine";
 import { Order } from "./order/aggregate";
 import { Payment } from "./payment/aggregate";
 import { Shipping } from "./shipping/aggregate";

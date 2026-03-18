@@ -82,7 +82,7 @@ draft ──→ ready ──→ implementing ──→ implemented
 
 ## Directory Structure
 
-`specs/` mirrors `packages/core/src/`:
+`specs/` mirrors the package source directories:
 
 ```
 specs/
@@ -91,13 +91,16 @@ specs/
     edd/                 ← events, event bus, handlers
     cqrs/                ← commands, queries, buses, handlers
     infrastructure/
-    engine/              ← domain configuration, persistence
-      implementations/   ← in-memory implementations
+    persistence/         ← persistence interface contracts
+  engine/                ← packages/engine/src/
+    implementations/     ← in-memory implementations
   integration/           ← end-to-end flow specs
   templates/             ← blank templates for new specs
 ```
 
-To find the spec for any source file: replace `packages/core/src/` with `specs/core/` and change `.ts` to `.spec.md`.
+To find the spec for any source file:
+- `packages/core/src/<path>.ts` → `specs/core/<path>.spec.md`
+- `packages/engine/src/<path>.ts` → `specs/engine/<path>.spec.md`
 
 ## Dependency Graph
 
@@ -198,10 +201,11 @@ Before a spec reaches `ready`:
 
 The `## Test Scenarios` section maps directly to vitest test files:
 
-| Spec path                          | Test file path                                           |
-| ---------------------------------- | -------------------------------------------------------- |
-| `specs/core/<path>/<name>.spec.md` | `packages/core/src/__tests__/<path>/<name>.test.ts`      |
-| `specs/integration/<name>.spec.md` | `packages/core/src/__tests__/integration/<name>.test.ts` |
+| Spec path                            | Test file path                                             |
+| ------------------------------------ | ---------------------------------------------------------- |
+| `specs/core/<path>/<name>.spec.md`   | `packages/core/src/__tests__/<path>/<name>.test.ts`        |
+| `specs/engine/<path>/<name>.spec.md` | `packages/engine/src/__tests__/engine/<path>/<name>.test.ts` |
+| `specs/integration/<name>.spec.md`   | `packages/engine/src/__tests__/integration/<name>.test.ts` |
 
 - Each `### Heading` becomes one `it("heading", ...)` block
 - TypeScript code fences in each subsection are the test body

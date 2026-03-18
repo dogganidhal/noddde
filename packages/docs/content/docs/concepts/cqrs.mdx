@@ -38,7 +38,7 @@ The write model is where your domain logic lives. It consists of **aggregates** 
 In the `DomainConfiguration`, the write model is declared under the `writeModel` key:
 
 ```typescript
-import { configureDomain } from "@noddde/core";
+import { configureDomain } from "@noddde/engine";
 
 const domain = await configureDomain({
   writeModel: {

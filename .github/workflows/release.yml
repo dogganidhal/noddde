@@ -43,11 +43,17 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           echo "Publishing version: $VERSION"
-          cd packages/core
-          npm version "$VERSION" --no-git-tag-version
+          cd packages/core && npm version "$VERSION" --no-git-tag-version && cd ../..
+          cd packages/engine && npm version "$VERSION" --no-git-tag-version && cd ../..
 
       - name: Publish @noddde/core
         run: npm publish --access public
         working-directory: packages/core
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @noddde/engine
+        run: npm publish --access public
+        working-directory: packages/engine
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

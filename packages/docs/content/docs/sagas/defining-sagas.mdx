@@ -246,7 +246,7 @@ export const OrderFulfillmentSaga = defineSaga<OrderFulfillmentSagaDef>({
 Sagas are registered in the `processModel` section of `configureDomain` — a dedicated top-level key separate from `writeModel` and `readModel`:
 
 ```ts
-import { configureDomain, InMemorySagaPersistence } from "@noddde/core";
+import { configureDomain, InMemorySagaPersistence } from "@noddde/engine";
 
 const domain = await configureDomain<EcommerceInfrastructure>({
   writeModel: {

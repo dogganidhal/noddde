@@ -4,7 +4,7 @@ import {
   InMemoryCommandBus,
   InMemoryEventSourcedAggregatePersistence,
   InMemoryQueryBus,
-} from "@noddde/core";
+} from "@noddde/engine";
 import { Auction } from "./aggregate";
 import { AuctionInfrastructure, SystemClock } from "./infrastructure";
 import { randomUUID } from "crypto";
