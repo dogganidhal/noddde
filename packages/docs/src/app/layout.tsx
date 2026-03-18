@@ -1,5 +1,6 @@
 import { RootProvider } from "fumadocs-ui/provider/next";
 import "fumadocs-ui/style.css";
+import "./globals.css";
 import type { ReactNode } from "react";
 
 export const metadata = {

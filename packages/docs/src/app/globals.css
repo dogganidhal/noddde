@@ -1,0 +1,12 @@
+.logo-light {
+  display: block;
+}
+.logo-dark {
+  display: none;
+}
+.dark .logo-light {
+  display: none;
+}
+.dark .logo-dark {
+  display: block;
+}

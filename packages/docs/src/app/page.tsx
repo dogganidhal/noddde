@@ -2,12 +2,27 @@ import Link from "next/link";
 
 export default function HomePage() {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-8 text-center">
-      <h1 className="text-5xl font-bold tracking-tight">noddde</h1>
-      <p className="max-w-lg text-lg text-fd-muted-foreground">
-        Domain-Driven Design, CQRS, and Event Sourcing for TypeScript
+    <main className="fixed inset-0 flex flex-col items-center justify-center px-6">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/icon-light.png" alt="noddde" width={56} height={40} className="logo-light" />
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/icon-dark.png" alt="noddde" width={56} height={40} className="logo-dark" />
+
+      <h1 className="mt-5 text-4xl font-bold tracking-tight text-fd-foreground">
+        noddde
+      </h1>
+
+      <p className="mt-4 max-w-md text-center text-base leading-relaxed text-fd-muted-foreground">
+        Build business applications with aggregates, projections, and
+        sagas&nbsp;&mdash; using plain objects and pure functions. No base
+        classes. No decorators. No DI&nbsp;container.
       </p>
-      <div className="flex gap-4">
+
+      <pre className="mt-6 rounded-lg border border-fd-border bg-fd-card px-4 py-2.5 text-sm text-fd-muted-foreground">
+        <code>yarn add @noddde/core</code>
+      </pre>
+
+      <div className="mt-6 flex gap-4">
         <Link
           href="/docs/getting-started/introduction"
           className="rounded-lg bg-fd-primary px-6 py-3 text-sm font-medium text-fd-primary-foreground"
