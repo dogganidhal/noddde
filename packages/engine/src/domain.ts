@@ -1,4 +1,5 @@
 /* eslint-disable no-unused-vars */
+import { AsyncLocalStorage } from "node:async_hooks";
 import type {
   Aggregate,
   AggregateCommand,
@@ -17,12 +18,15 @@ import type {
   SagaPersistence,
   StandaloneCommandHandler,
   StateStoredAggregatePersistence,
+  UnitOfWork,
+  UnitOfWorkFactory,
 } from "@noddde/core";
 import { InMemoryCommandBus } from "./implementations/in-memory-command-bus";
 import { EventEmitterEventBus } from "./implementations/ee-event-bus";
 import { InMemoryQueryBus } from "./implementations/in-memory-query-bus";
 import { InMemoryEventSourcedAggregatePersistence } from "./implementations/in-memory-aggregate-persistence";
 import { InMemorySagaPersistence } from "./implementations/in-memory-saga-persistence";
+import { createInMemoryUnitOfWork } from "./implementations/in-memory-unit-of-work";
 
 type AggregateMap = Record<string | symbol, Aggregate<any>>;
 
@@ -128,6 +132,14 @@ export type DomainConfiguration<
     cqrsInfrastructure?: (
       infrastructure: TInfrastructure,
     ) => CQRSInfrastructure | Promise<CQRSInfrastructure>;
+    /**
+     * Factory for the {@link UnitOfWorkFactory}. Called once during
+     * {@link Domain.init}. The returned factory is called once per
+     * unit of work boundary.
+     *
+     * If not provided, defaults to {@link createInMemoryUnitOfWork}.
+     */
+    unitOfWorkFactory?: () => UnitOfWorkFactory | Promise<UnitOfWorkFactory>;
   };
 };
 
@@ -147,6 +159,8 @@ export class Domain<
   private _infrastructure!: TInfrastructure & CQRSInfrastructure;
   private _persistence!: PersistenceConfiguration;
   private _sagaPersistence?: SagaPersistence;
+  private _unitOfWorkFactory!: UnitOfWorkFactory;
+  private readonly _uowStorage = new AsyncLocalStorage<UnitOfWork>();
   private readonly _projectionViews = new Map<string, any>();
 
   /** The fully resolved infrastructure (custom + CQRS buses). */
@@ -220,6 +234,11 @@ export class Domain<
         this._sagaPersistence = new InMemorySagaPersistence();
       }
     }
+
+    // Step 5.5: Resolve UnitOfWork factory
+    this._unitOfWorkFactory = configuration.infrastructure.unitOfWorkFactory
+      ? await configuration.infrastructure.unitOfWorkFactory()
+      : createInMemoryUnitOfWork;
 
     const { commandBus, eventBus, queryBus } = this._infrastructure;
 
@@ -345,6 +364,9 @@ export class Domain<
    * Executes the full saga event handling lifecycle:
    * derive ID, load state, bootstrap or resume, execute handler,
    * persist state, dispatch commands.
+   *
+   * Creates its own UoW that spans the saga state persistence and
+   * all commands dispatched by the saga reaction, ensuring atomicity.
    */
   private async executeSagaHandler(
     sagaName: string,
@@ -386,23 +408,50 @@ export class Domain<
       this._infrastructure,
     );
 
-    // Step 5: Persist saga state
-    await this._sagaPersistence.save(sagaName, sagaId, reaction.state);
+    // Step 5: Create UoW for saga reaction (spans state + commands)
+    const uow = this._unitOfWorkFactory();
+    const sagaPersistence = this._sagaPersistence;
 
-    // Step 6: Dispatch commands
-    if (reaction.commands) {
-      const commands = Array.isArray(reaction.commands)
-        ? reaction.commands
-        : [reaction.commands];
-      for (const command of commands) {
-        await this._infrastructure.commandBus.dispatch(command);
+    await this._uowStorage.run(uow, async () => {
+      try {
+        // Enlist saga state persistence
+        uow.enlist(() => sagaPersistence.save(sagaName, sagaId, reaction.state));
+
+        // Step 6: Dispatch commands (within the saga's UoW)
+        if (reaction.commands) {
+          const commands = Array.isArray(reaction.commands)
+            ? reaction.commands
+            : [reaction.commands];
+          for (const command of commands) {
+            await this._infrastructure.commandBus.dispatch(command);
+          }
+        }
+
+        // Step 7: Commit saga state + all aggregate changes atomically
+        const events = await uow.commit();
+
+        // Step 8: Publish all deferred events
+        for (const deferredEvent of events) {
+          await this._infrastructure.eventBus.dispatch(deferredEvent);
+        }
+      } catch (error) {
+        try {
+          await uow.rollback();
+        } catch {
+          // UoW may already be completed if commit failed
+        }
+        throw error;
       }
-    }
+    });
   }
 
   /**
    * Executes the full aggregate command lifecycle:
    * load, execute, apply, persist, publish.
+   *
+   * If a UnitOfWork is active (via {@link withUnitOfWork} or saga handling),
+   * persistence and event publishing are deferred to the owning UoW.
+   * Otherwise, an implicit UoW is created and committed immediately.
    */
   private async executeAggregateCommand(
     aggregateName: string,
@@ -412,66 +461,142 @@ export class Domain<
     const persistence = this._persistence;
     const eventBus = this._infrastructure.eventBus;
 
-    // Step 1: Load
-    const loaded = await persistence.load(
-      aggregateName,
-      command.targetAggregateId,
-    );
+    const existingUow = this._uowStorage.getStore();
+    const uow = existingUow ?? this._unitOfWorkFactory();
+    const ownsUow = !existingUow;
 
-    let currentState: any;
-    const isEventSourced = Array.isArray(loaded);
-
-    if (isEventSourced) {
-      // Event-sourced: replay events to rebuild state
-      currentState = (loaded as Event[]).reduce((state: any, event: Event) => {
-        const applyHandler = aggregate.apply[event.name];
-        return applyHandler ? applyHandler(event.payload, state) : state;
-      }, aggregate.initialState);
-    } else {
-      // State-stored: use loaded state or initial state
-      currentState = loaded ?? aggregate.initialState;
-    }
-
-    // Step 2: Execute command handler
-    const handler = aggregate.commands[command.name];
-    if (!handler) {
-      throw new Error(
-        `No command handler found for command: ${command.name} on aggregate: ${aggregateName}`,
+    try {
+      // Step 1: Load
+      const loaded = await persistence.load(
+        aggregateName,
+        command.targetAggregateId,
       );
-    }
-    const result = await handler(command, currentState, this._infrastructure);
 
-    // Step 3: Normalize to array
-    const newEvents: Event[] = Array.isArray(result) ? result : [result];
+      let currentState: any;
+      const isEventSourced = Array.isArray(loaded);
 
-    // Step 4: Apply events to get new state
-    let newState = currentState;
-    for (const event of newEvents) {
-      const applyHandler = aggregate.apply[event.name];
-      if (applyHandler) {
-        newState = applyHandler(event.payload, newState);
+      if (isEventSourced) {
+        // Event-sourced: replay events to rebuild state
+        currentState = (loaded as Event[]).reduce(
+          (state: any, event: Event) => {
+            const applyHandler = aggregate.apply[event.name];
+            return applyHandler ? applyHandler(event.payload, state) : state;
+          },
+          aggregate.initialState,
+        );
+      } else {
+        // State-stored: use loaded state or initial state
+        currentState = loaded ?? aggregate.initialState;
       }
+
+      // Step 2: Execute command handler
+      const handler = aggregate.commands[command.name];
+      if (!handler) {
+        throw new Error(
+          `No command handler found for command: ${command.name} on aggregate: ${aggregateName}`,
+        );
+      }
+      const result = await handler(command, currentState, this._infrastructure);
+
+      // Step 3: Normalize to array
+      const newEvents: Event[] = Array.isArray(result) ? result : [result];
+
+      // Step 4: Apply events to get new state
+      let newState = currentState;
+      for (const event of newEvents) {
+        const applyHandler = aggregate.apply[event.name];
+        if (applyHandler) {
+          newState = applyHandler(event.payload, newState);
+        }
+      }
+
+      // Step 5: Enlist persistence in UoW (deferred until commit)
+      if (isEventSourced) {
+        uow.enlist(() =>
+          (persistence as EventSourcedAggregatePersistence).save(
+            aggregateName,
+            command.targetAggregateId,
+            newEvents,
+          ),
+        );
+      } else {
+        uow.enlist(() =>
+          (persistence as StateStoredAggregatePersistence).save(
+            aggregateName,
+            command.targetAggregateId,
+            newState,
+          ),
+        );
+      }
+
+      // Step 6: Defer event publishing (published after commit)
+      uow.deferPublish(...newEvents);
+
+      // Step 7: Commit if we own the UoW (implicit unit of work)
+      if (ownsUow) {
+        const events = await uow.commit();
+        for (const event of events) {
+          await eventBus.dispatch(event);
+        }
+      }
+    } catch (error) {
+      if (ownsUow) {
+        try {
+          await uow.rollback();
+        } catch {
+          // UoW may already be completed if commit failed partway through
+        }
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Executes a function within an explicit unit of work boundary.
+   * All commands dispatched inside `fn` share a single {@link UnitOfWork}.
+   * Persistence is deferred until the function completes, then committed
+   * atomically. Events are published only after successful commit.
+   *
+   * Nested units of work are not supported — calling `withUnitOfWork()`
+   * inside an active unit of work throws an error.
+   *
+   * @typeParam T - The return type of the scoped function.
+   * @param fn - The function to execute within the unit of work.
+   * @returns The return value of `fn`.
+   *
+   * @example
+   * ```ts
+   * await domain.withUnitOfWork(async () => {
+   *   await domain.dispatchCommand(createOrder);
+   *   await domain.dispatchCommand(requestPayment);
+   *   // Both persist atomically, events published together after commit
+   * });
+   * ```
+   */
+  public async withUnitOfWork<T>(fn: () => Promise<T>): Promise<T> {
+    if (this._uowStorage.getStore()) {
+      throw new Error("Nested units of work are not supported");
     }
 
-    // Step 5: Persist (before publishing -- events must not be published on failure)
-    if (isEventSourced) {
-      await (persistence as EventSourcedAggregatePersistence).save(
-        aggregateName,
-        command.targetAggregateId,
-        newEvents,
-      );
-    } else {
-      await (persistence as StateStoredAggregatePersistence).save(
-        aggregateName,
-        command.targetAggregateId,
-        newState,
-      );
-    }
+    const uow = this._unitOfWorkFactory();
 
-    // Step 6: Publish events (only after successful persistence)
-    for (const event of newEvents) {
-      await eventBus.dispatch(event);
-    }
+    return this._uowStorage.run(uow, async () => {
+      try {
+        const result = await fn();
+        const events = await uow.commit();
+        for (const event of events) {
+          await this._infrastructure.eventBus.dispatch(event);
+        }
+        return result;
+      } catch (error) {
+        try {
+          await uow.rollback();
+        } catch {
+          // UoW may already be completed if commit failed
+        }
+        throw error;
+      }
+    });
   }
 
   /**

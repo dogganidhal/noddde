@@ -1,0 +1,115 @@
+---
+title: Unit of Work
+description: Atomic command dispatch and multi-command units of work in the write model.
+---
+
+The domain uses the **Unit of Work** pattern to ensure atomicity in the write model. Every command dispatch buffers persistence operations and defers event publishing until all writes succeed. You can also group multiple commands into an explicit unit of work.
+
+## How It Works
+
+When you dispatch a command, the domain automatically creates a unit of work that:
+
+1. **Buffers persistence** — aggregate state/events are not written immediately
+2. **Defers event publishing** — events are collected but not dispatched to the EventBus
+3. **Commits atomically** — all persistence operations execute together
+4. **Publishes after commit** — events reach projections and sagas only after persistence succeeds
+
+If persistence fails, no events are published. This prevents inconsistencies between the store and downstream subscribers.
+
+## Implicit Unit of Work
+
+Every `dispatchCommand` call is automatically wrapped in its own unit of work. No configuration needed:
+
+```ts
+// This is already wrapped in a unit of work
+await domain.dispatchCommand({
+  name: "PlaceOrder",
+  targetAggregateId: "order-1",
+  payload: { total: 99 },
+});
+```
+
+## Explicit Unit of Work
+
+Use `domain.withUnitOfWork()` to group multiple commands into a single atomic boundary:
+
+```ts
+await domain.withUnitOfWork(async () => {
+  await domain.dispatchCommand({
+    name: "CreateOrder",
+    targetAggregateId: "order-1",
+    payload: { items: ["widget"] },
+  });
+  await domain.dispatchCommand({
+    name: "ReserveInventory",
+    targetAggregateId: "inv-1",
+    payload: { itemId: "widget", quantity: 1 },
+  });
+  // Both commands persist atomically
+  // Events are published together after commit
+});
+```
+
+If any command within the unit of work throws, all buffered persistence operations are discarded and no events are published.
+
+`withUnitOfWork()` returns the value from its callback:
+
+```ts
+const orderId = await domain.withUnitOfWork(async () => {
+  const id = await domain.dispatchCommand(createOrderCommand);
+  await domain.dispatchCommand(reserveInventoryCommand);
+  return id;
+});
+```
+
+**Nesting is not supported** — calling `withUnitOfWork()` inside an active unit of work throws an error.
+
+## Saga Unit of Work
+
+Saga reactions are automatically wrapped in a unit of work. When a saga handler dispatches commands, the saga state persistence and all dispatched command operations share a single unit of work:
+
+```
+Event arrives → saga handler executes
+  → saga state persisted  ┐
+  → command 1 persisted    ├── all in one unit of work
+  → command 2 persisted    ┘
+  → events published after commit
+```
+
+This ensures that saga state transitions and the commands they trigger are always consistent.
+
+## Custom UnitOfWork Factory
+
+By default, the domain uses `InMemoryUnitOfWork`. For production use with a database, provide a custom `unitOfWorkFactory` that wraps your database's unit of work mechanism:
+
+```ts
+const domain = await configureDomain<MyInfrastructure>({
+  writeModel: { aggregates: { Order } },
+  readModel: { projections: { OrderSummary } },
+  infrastructure: {
+    aggregatePersistence: () => new PostgresEventStore(),
+    unitOfWorkFactory: () => () => new PostgresUnitOfWork(pool),
+    // ...
+  },
+});
+```
+
+The factory is a function that returns a `UnitOfWorkFactory` (a function that returns a `UnitOfWork`). The outer function is called once during `Domain.init()`. The inner factory is called once per unit of work boundary.
+
+## The UnitOfWork Interface
+
+```ts
+interface UnitOfWork {
+  enlist(operation: () => Promise<void>): void;
+  deferPublish(...events: Event[]): void;
+  commit(): Promise<Event[]>;
+  rollback(): Promise<void>;
+}
+```
+
+- `enlist` — buffers a persistence operation
+- `deferPublish` — schedules events for post-commit publishing
+- `commit` — executes all operations, returns events for the domain to publish
+- `rollback` — discards all operations and events
+
+A UnitOfWork is single-use: after `commit()` or `rollback()`, further calls throw.

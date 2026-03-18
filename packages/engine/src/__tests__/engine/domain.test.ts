@@ -17,6 +17,7 @@ import {
 } from "@noddde/core";
 import {
   configureDomain,
+  createInMemoryUnitOfWork,
   Domain,
   EventEmitterEventBus,
   InMemoryCommandBus,
@@ -751,5 +752,257 @@ describe("Domain.dispatchQuery - error propagation", () => {
         payload: {},
       }),
     ).rejects.toThrow("No handler registered for query: NonExistentQuery");
+  });
+});
+
+// ============================================================
+// domain.withUnitOfWork() groups multiple commands atomically
+// ============================================================
+
+describe("Domain.withUnitOfWork", () => {
+  it("should group multiple commands into one atomic commit", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+    const eventBus = new EventEmitterEventBus();
+    const publishedEvents: any[] = [];
+
+    eventBus.on("CounterCreated", (payload: any) => {
+      publishedEvents.push({ name: "CounterCreated", payload });
+    });
+    eventBus.on("Incremented", (payload: any) => {
+      publishedEvents.push({ name: "Incremented", payload });
+    });
+
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: () => persistence,
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus,
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    await domain.withUnitOfWork(async () => {
+      await domain.dispatchCommand({
+        name: "CreateCounter",
+        targetAggregateId: "c-1",
+      });
+      await domain.dispatchCommand({
+        name: "Increment",
+        targetAggregateId: "c-1",
+        payload: { by: 10 },
+      });
+    });
+
+    // Both commands persisted
+    const events = await persistence.load("Counter", "c-1");
+    expect(events).toHaveLength(2);
+
+    // Both events published after commit
+    expect(publishedEvents).toHaveLength(2);
+  });
+
+  it("should publish events only after all commands persist", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+    const eventBus = new EventEmitterEventBus();
+    const timeline: string[] = [];
+
+    // Wrap save to track ordering
+    const originalSave = persistence.save.bind(persistence);
+    persistence.save = async (...args: any[]) => {
+      timeline.push("persist");
+      return originalSave(...args);
+    };
+
+    eventBus.on("CounterCreated", () => {
+      timeline.push("publish:CounterCreated");
+    });
+    eventBus.on("Incremented", () => {
+      timeline.push("publish:Incremented");
+    });
+
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: () => persistence,
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus,
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    await domain.withUnitOfWork(async () => {
+      await domain.dispatchCommand({
+        name: "CreateCounter",
+        targetAggregateId: "c-2",
+      });
+      await domain.dispatchCommand({
+        name: "Increment",
+        targetAggregateId: "c-2",
+        payload: { by: 3 },
+      });
+    });
+
+    // All persists happen before any publish
+    expect(timeline).toEqual([
+      "persist",
+      "persist",
+      "publish:CounterCreated",
+      "publish:Incremented",
+    ]);
+  });
+
+  it("should rollback all changes if any command fails", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+    const eventBus = new EventEmitterEventBus();
+    const eventSpy = vi.fn();
+
+    eventBus.on("CounterCreated", eventSpy);
+
+    // Create a "broken" aggregate that throws on Increment
+    const BrokenCounter = defineAggregate<CounterTypes>({
+      initialState: { count: 0 },
+      commands: {
+        CreateCounter: (cmd) => ({
+          name: "CounterCreated",
+          payload: { id: cmd.targetAggregateId },
+        }),
+        Increment: () => {
+          throw new Error("Command handler failure");
+        },
+      },
+      apply: {
+        CounterCreated: (_payload, state) => state,
+        Incremented: (payload, state) => ({
+          count: state.count + payload.by,
+        }),
+      },
+    });
+
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { BrokenCounter } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: () => persistence,
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus,
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    await expect(
+      domain.withUnitOfWork(async () => {
+        await domain.dispatchCommand({
+          name: "CreateCounter",
+          targetAggregateId: "c-fail",
+        });
+        // This will throw
+        await domain.dispatchCommand({
+          name: "Increment",
+          targetAggregateId: "c-fail",
+          payload: { by: 1 },
+        });
+      }),
+    ).rejects.toThrow("Command handler failure");
+
+    // No events should have been published
+    expect(eventSpy).not.toHaveBeenCalled();
+  });
+
+  it("should throw on nested units of work", async () => {
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: {} },
+      readModel: { projections: {} },
+      infrastructure: {
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    await expect(
+      domain.withUnitOfWork(async () => {
+        await domain.withUnitOfWork(async () => {
+          // This should throw
+        });
+      }),
+    ).rejects.toThrow("Nested units of work are not supported");
+  });
+
+  it("should return the value from the unit of work function", async () => {
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: () =>
+          new InMemoryEventSourcedAggregatePersistence(),
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    const result = await domain.withUnitOfWork(async () => {
+      await domain.dispatchCommand({
+        name: "CreateCounter",
+        targetAggregateId: "c-ret",
+      });
+      return "uow-result";
+    });
+
+    expect(result).toBe("uow-result");
+  });
+});
+
+// ============================================================
+// custom unitOfWorkFactory is used when provided
+// ============================================================
+
+describe("Domain - custom unitOfWorkFactory", () => {
+  it("should use the provided unitOfWorkFactory", async () => {
+    const factoryCalls: number[] = [];
+    let callCount = 0;
+
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: () =>
+          new InMemoryEventSourcedAggregatePersistence(),
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+        unitOfWorkFactory: () => {
+          // Return a factory that tracks calls
+          return () => {
+            callCount++;
+            factoryCalls.push(callCount);
+            return createInMemoryUnitOfWork();
+          };
+        },
+      },
+    });
+
+    await domain.dispatchCommand({
+      name: "CreateCounter",
+      targetAggregateId: "c-custom",
+    });
+
+    // The custom factory should have been called once (one command = one UoW)
+    expect(factoryCalls).toHaveLength(1);
   });
 });

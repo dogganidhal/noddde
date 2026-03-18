@@ -3,15 +3,16 @@ title: Infrastructure Providers
 description: Configuring persistence, custom infrastructure, and CQRS buses in the domain configuration.
 ---
 
-The `infrastructure` section of the domain configuration provides three factory functions that set up the runtime dependencies for your domain.
+The `infrastructure` section of the domain configuration provides factory functions that set up the runtime dependencies for your domain.
 
-## The Three Providers
+## The Providers
 
 ```ts
 infrastructure: {
   aggregatePersistence?: () => PersistenceConfiguration | Promise<PersistenceConfiguration>;
   provideInfrastructure?: () => TInfrastructure | Promise<TInfrastructure>;
   cqrsInfrastructure?: (infra: TInfrastructure) => CQRSInfrastructure | Promise<CQRSInfrastructure>;
+  unitOfWorkFactory?: () => UnitOfWorkFactory | Promise<UnitOfWorkFactory>;
 },
 ```
 
@@ -67,6 +68,16 @@ The buses are the communication backbone of the CQRS architecture:
 - **`EventBus`** — Publishes events to projections
 - **`QueryBus`** — Routes queries to query handlers
 
+### 4. unitOfWorkFactory
+
+Provides the factory for creating `UnitOfWork` instances used for atomic command dispatch:
+
+```ts
+unitOfWorkFactory: () => () => new PostgresUnitOfWork(pool),
+```
+
+Returns a `UnitOfWorkFactory` — a function that creates a new `UnitOfWork` per unit of work boundary. If not provided, defaults to `createInMemoryUnitOfWork`. See [Unit of Work](/docs/domain-configuration/unit-of-work) for details.
+
 ## Provider Execution Order
 
 When `configureDomain` is called:
@@ -74,7 +85,8 @@ When `configureDomain` is called:
 1. `provideInfrastructure()` is called first to create custom infrastructure
 2. `cqrsInfrastructure(customInfra)` is called with the custom infrastructure
 3. `aggregatePersistence()` is called to set up persistence
-4. The `Domain` instance is created with all infrastructure merged
+4. `unitOfWorkFactory()` is called to set up the unit of work factory
+5. The `Domain` instance is created with all infrastructure merged
 
 The resulting `domain.infrastructure` property is `TInfrastructure & CQRSInfrastructure` — your custom infrastructure merged with the CQRS buses.
 

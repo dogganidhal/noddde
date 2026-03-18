@@ -76,6 +76,8 @@ export type PersistenceConfiguration =
  * Sagas use state-stored persistence (not event-sourced) because they
  * track workflow progress, not domain truth.
  */
+export * from "./unit-of-work";
+
 export interface SagaPersistence {
   /**
    * Persists the current state of a saga instance.
