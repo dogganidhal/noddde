@@ -1,30 +1,26 @@
-/* eslint-disable no-unused-vars */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { eq, and, asc, sql } from "drizzle-orm";
-import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import type {
   Event,
   EventSourcedAggregatePersistence,
   StateStoredAggregatePersistence,
   SagaPersistence,
 } from "@noddde/core";
-import {
-  nodddeEvents,
-  nodddeAggregateStates,
-  nodddeSagaStates,
-} from "./schema";
-import type { DrizzleTransactionStore } from "./unit-of-work";
+import type { DrizzleTransactionStore, DrizzleNodddeSchema } from "./index";
 
 /**
  * Drizzle-backed event-sourced aggregate persistence.
- * Appends events to the `noddde_events` table and loads them
- * ordered by sequence number.
+ * Appends events to the events table and loads them
+ * ordered by sequence number. Dialect-agnostic — accepts
+ * schema tables as constructor parameters.
  */
 export class DrizzleEventSourcedAggregatePersistence
   implements EventSourcedAggregatePersistence
 {
   constructor(
-    private readonly db: BaseSQLiteDatabase<any, any>,
+    private readonly db: any,
     private readonly txStore: DrizzleTransactionStore,
+    private readonly schema: DrizzleNodddeSchema,
   ) {}
 
   private getExecutor() {
@@ -39,21 +35,24 @@ export class DrizzleEventSourcedAggregatePersistence
     if (events.length === 0) return;
 
     const executor = this.getExecutor();
+    const eventsTable = this.schema.events;
 
     // Get current max sequence number
     const result = await executor
-      .select({ maxSeq: sql<number>`COALESCE(MAX(${nodddeEvents.sequenceNumber}), 0)` })
-      .from(nodddeEvents)
+      .select({
+        maxSeq: sql<number>`COALESCE(MAX(${eventsTable.sequenceNumber}), 0)`,
+      })
+      .from(eventsTable)
       .where(
         and(
-          eq(nodddeEvents.aggregateName, aggregateName),
-          eq(nodddeEvents.aggregateId, aggregateId),
+          eq(eventsTable.aggregateName, aggregateName),
+          eq(eventsTable.aggregateId, aggregateId),
         ),
       );
 
     const maxSeq = result[0]?.maxSeq ?? 0;
 
-    await executor.insert(nodddeEvents).values(
+    await executor.insert(eventsTable).values(
       events.map((event, index) => ({
         aggregateName,
         aggregateId,
@@ -66,19 +65,20 @@ export class DrizzleEventSourcedAggregatePersistence
 
   async load(aggregateName: string, aggregateId: string): Promise<Event[]> {
     const executor = this.getExecutor();
+    const eventsTable = this.schema.events;
 
     const rows = await executor
       .select()
-      .from(nodddeEvents)
+      .from(eventsTable)
       .where(
         and(
-          eq(nodddeEvents.aggregateName, aggregateName),
-          eq(nodddeEvents.aggregateId, aggregateId),
+          eq(eventsTable.aggregateName, aggregateName),
+          eq(eventsTable.aggregateId, aggregateId),
         ),
       )
-      .orderBy(asc(nodddeEvents.sequenceNumber));
+      .orderBy(asc(eventsTable.sequenceNumber));
 
-    return rows.map((row) => ({
+    return rows.map((row: any) => ({
       name: row.eventName,
       payload: JSON.parse(row.payload),
     }));
@@ -87,14 +87,15 @@ export class DrizzleEventSourcedAggregatePersistence
 
 /**
  * Drizzle-backed state-stored aggregate persistence.
- * Upserts the full state snapshot into `noddde_aggregate_states`.
+ * Upserts the full state snapshot. Dialect-agnostic.
  */
 export class DrizzleStateStoredAggregatePersistence
   implements StateStoredAggregatePersistence
 {
   constructor(
-    private readonly db: BaseSQLiteDatabase<any, any>,
+    private readonly db: any,
     private readonly txStore: DrizzleTransactionStore,
+    private readonly schema: DrizzleNodddeSchema,
   ) {}
 
   private getExecutor() {
@@ -107,31 +108,32 @@ export class DrizzleStateStoredAggregatePersistence
     state: any,
   ): Promise<void> {
     const executor = this.getExecutor();
+    const table = this.schema.aggregateStates;
     const serialized = JSON.stringify(state);
 
-    // Upsert: insert or replace on conflict
+    // Upsert: check existence, then insert or update
     const existing = await executor
       .select()
-      .from(nodddeAggregateStates)
+      .from(table)
       .where(
         and(
-          eq(nodddeAggregateStates.aggregateName, aggregateName),
-          eq(nodddeAggregateStates.aggregateId, aggregateId),
+          eq(table.aggregateName, aggregateName),
+          eq(table.aggregateId, aggregateId),
         ),
       );
 
     if (existing.length > 0) {
       await executor
-        .update(nodddeAggregateStates)
+        .update(table)
         .set({ state: serialized })
         .where(
           and(
-            eq(nodddeAggregateStates.aggregateName, aggregateName),
-            eq(nodddeAggregateStates.aggregateId, aggregateId),
+            eq(table.aggregateName, aggregateName),
+            eq(table.aggregateId, aggregateId),
           ),
         );
     } else {
-      await executor.insert(nodddeAggregateStates).values({
+      await executor.insert(table).values({
         aggregateName,
         aggregateId,
         state: serialized,
@@ -141,14 +143,15 @@ export class DrizzleStateStoredAggregatePersistence
 
   async load(aggregateName: string, aggregateId: string): Promise<any> {
     const executor = this.getExecutor();
+    const table = this.schema.aggregateStates;
 
     const rows = await executor
       .select()
-      .from(nodddeAggregateStates)
+      .from(table)
       .where(
         and(
-          eq(nodddeAggregateStates.aggregateName, aggregateName),
-          eq(nodddeAggregateStates.aggregateId, aggregateId),
+          eq(table.aggregateName, aggregateName),
+          eq(table.aggregateId, aggregateId),
         ),
       );
 
@@ -159,12 +162,13 @@ export class DrizzleStateStoredAggregatePersistence
 
 /**
  * Drizzle-backed saga persistence.
- * Upserts saga instance state into `noddde_saga_states`.
+ * Upserts saga instance state. Dialect-agnostic.
  */
 export class DrizzleSagaPersistence implements SagaPersistence {
   constructor(
-    private readonly db: BaseSQLiteDatabase<any, any>,
+    private readonly db: any,
     private readonly txStore: DrizzleTransactionStore,
+    private readonly schema: DrizzleNodddeSchema,
   ) {}
 
   private getExecutor() {
@@ -173,30 +177,25 @@ export class DrizzleSagaPersistence implements SagaPersistence {
 
   async save(sagaName: string, sagaId: string, state: any): Promise<void> {
     const executor = this.getExecutor();
+    const table = this.schema.sagaStates;
     const serialized = JSON.stringify(state);
 
     const existing = await executor
       .select()
-      .from(nodddeSagaStates)
+      .from(table)
       .where(
-        and(
-          eq(nodddeSagaStates.sagaName, sagaName),
-          eq(nodddeSagaStates.sagaId, sagaId),
-        ),
+        and(eq(table.sagaName, sagaName), eq(table.sagaId, sagaId)),
       );
 
     if (existing.length > 0) {
       await executor
-        .update(nodddeSagaStates)
+        .update(table)
         .set({ state: serialized })
         .where(
-          and(
-            eq(nodddeSagaStates.sagaName, sagaName),
-            eq(nodddeSagaStates.sagaId, sagaId),
-          ),
+          and(eq(table.sagaName, sagaName), eq(table.sagaId, sagaId)),
         );
     } else {
-      await executor.insert(nodddeSagaStates).values({
+      await executor.insert(table).values({
         sagaName,
         sagaId,
         state: serialized,
@@ -209,15 +208,13 @@ export class DrizzleSagaPersistence implements SagaPersistence {
     sagaId: string,
   ): Promise<any | undefined | null> {
     const executor = this.getExecutor();
+    const table = this.schema.sagaStates;
 
     const rows = await executor
       .select()
-      .from(nodddeSagaStates)
+      .from(table)
       .where(
-        and(
-          eq(nodddeSagaStates.sagaName, sagaName),
-          eq(nodddeSagaStates.sagaId, sagaId),
-        ),
+        and(eq(table.sagaName, sagaName), eq(table.sagaId, sagaId)),
       );
 
     if (rows.length === 0) return undefined;

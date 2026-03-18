@@ -1,4 +1,4 @@
 {
   "title": "Patterns & Examples",
-  "pages": ["clock-pattern", "banking-domain", "auction-domain", "order-fulfillment"]
+  "pages": ["clock-pattern", "banking-domain", "auction-domain", "order-fulfillment", "fund-transfer"]
 }

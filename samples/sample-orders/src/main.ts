@@ -1,11 +1,23 @@
+/**
+ * Order Fulfillment Sample — TypeORM Adapter
+ *
+ * Demonstrates @noddde/typeorm with SQLite for persistence.
+ * A complex domain with 3 aggregates, a saga, and projections.
+ */
+import "reflect-metadata";
 import {
   configureDomain,
   EventEmitterEventBus,
   InMemoryCommandBus,
-  InMemoryEventSourcedAggregatePersistence,
   InMemoryQueryBus,
-  InMemorySagaPersistence,
 } from "@noddde/engine";
+import { DataSource } from "typeorm";
+import {
+  createTypeORMPersistence,
+  NodddeEventEntity,
+  NodddeAggregateStateEntity,
+  NodddeSagaStateEntity,
+} from "@noddde/typeorm";
 import { Order } from "./order/aggregate";
 import { Payment } from "./payment/aggregate";
 import { Shipping } from "./shipping/aggregate";
@@ -20,7 +32,22 @@ import {
 import { randomUUID } from "crypto";
 
 const main = async () => {
-  // ── Wire up the full domain ──────────────────────────────────
+  // ── Set up TypeORM with SQLite ───────────────────────────────
+  const dataSource = new DataSource({
+    type: "better-sqlite3",
+    database: "orders.db",
+    entities: [
+      NodddeEventEntity,
+      NodddeAggregateStateEntity,
+      NodddeSagaStateEntity,
+    ],
+    synchronize: true,
+  });
+  await dataSource.initialize();
+
+  const typeormInfra = createTypeORMPersistence(dataSource);
+
+  // ── Configure the domain with TypeORM persistence ────────────
   const domain = await configureDomain<EcommerceInfrastructure>({
     writeModel: {
       aggregates: {
@@ -40,9 +67,9 @@ const main = async () => {
       },
     },
     infrastructure: {
-      aggregatePersistence: () =>
-        new InMemoryEventSourcedAggregatePersistence(),
-      sagaPersistence: () => new InMemorySagaPersistence(),
+      aggregatePersistence: () => typeormInfra.eventSourcedPersistence,
+      sagaPersistence: () => typeormInfra.sagaPersistence,
+      unitOfWorkFactory: () => typeormInfra.unitOfWorkFactory,
       provideInfrastructure: () => ({
         clock: new SystemClock(),
         notificationService: new ConsoleNotificationService(),
@@ -57,8 +84,6 @@ const main = async () => {
   });
 
   // ── Place an order ───────────────────────────────────────────
-  // This dispatches PlaceOrder → emits OrderPlaced → saga picks it up
-  // → saga dispatches RequestPayment to the Payment aggregate
   const orderId = randomUUID();
 
   await domain.dispatchCommand({
@@ -89,6 +114,9 @@ const main = async () => {
   // 7. Notifies the customer via infrastructure
   // 8. Dispatches MarkOrderDelivered to Order aggregate
   // 9. Saga state reaches "delivered" — workflow complete
+
+  await dataSource.destroy();
+  console.log("✅ Order fulfillment sample completed (TypeORM + SQLite)");
 };
 
 main();

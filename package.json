@@ -10,6 +10,7 @@
     "format:check": "prettier --check \"**/*.{ts,tsx,md}\""
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "prettier": "^3.1.1",
     "turbo": "latest"
   },

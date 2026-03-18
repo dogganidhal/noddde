@@ -96,6 +96,28 @@ const domain = await configureDomain<MyInfrastructure>({
 
 The factory is a function that returns a `UnitOfWorkFactory` (a function that returns a `UnitOfWork`). The outer function is called once during `Domain.init()`. The inner factory is called once per unit of work boundary.
 
+noddde ships with three ORM adapter packages that provide database-backed unit of work implementations using real transactions:
+
+```ts
+import { createDrizzlePersistence } from "@noddde/drizzle";
+import { events, aggregateStates, sagaStates } from "@noddde/drizzle/pg";
+// or: createPrismaPersistence from "@noddde/prisma"
+// or: createTypeORMPersistence from "@noddde/typeorm"
+
+const infra = createDrizzlePersistence(db, { events, aggregateStates, sagaStates });
+
+const domain = await configureDomain({
+  writeModel: { aggregates: { Order } },
+  readModel: { projections: {} },
+  infrastructure: {
+    aggregatePersistence: () => infra.eventSourcedPersistence,
+    unitOfWorkFactory: () => infra.unitOfWorkFactory, // real DB transactions
+  },
+});
+```
+
+See [ORM Adapters](/docs/infrastructure/orm-adapters) for setup details.
+
 ## The UnitOfWork Interface
 
 ```ts
@@ -113,3 +135,10 @@ interface UnitOfWork {
 - `rollback` — discards all operations and events
 
 A UnitOfWork is single-use: after `commit()` or `rollback()`, further calls throw.
+
+## Next Steps
+
+- [Example: Fund Transfer](/docs/patterns/fund-transfer) — Complete walkthrough of atomic multi-command operations
+- [ORM Adapters](/docs/infrastructure/orm-adapters) — Database-backed persistence with real transactions
+- [In-Memory Implementations](/docs/infrastructure/in-memory-implementations) — Built-in implementations for development and testing
+- [Persistence](/docs/domain-configuration/persistence) — Choosing between event-sourced and state-stored strategies

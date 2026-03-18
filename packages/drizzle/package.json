@@ -3,6 +3,24 @@
   "version": "0.0.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./sqlite": {
+      "types": "./dist/sqlite/schema.d.ts",
+      "default": "./dist/sqlite/schema.js"
+    },
+    "./pg": {
+      "types": "./dist/pg/schema.d.ts",
+      "default": "./dist/pg/schema.js"
+    },
+    "./mysql": {
+      "types": "./dist/mysql/schema.d.ts",
+      "default": "./dist/mysql/schema.js"
+    }
+  },
   "files": [
     "dist"
   ],

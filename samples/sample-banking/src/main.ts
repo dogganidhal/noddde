@@ -1,10 +1,17 @@
+/**
+ * Banking Sample — Prisma Adapter
+ *
+ * Demonstrates @noddde/prisma with SQLite for persistence.
+ * A bank account domain with projections and queries.
+ */
 import {
   configureDomain,
   EventEmitterEventBus,
   InMemoryCommandBus,
-  InMemoryEventSourcedAggregatePersistence,
   InMemoryQueryBus,
 } from "@noddde/engine";
+import { PrismaClient } from "@prisma/client";
+import { createPrismaPersistence } from "@noddde/prisma";
 import { BankAccount } from "./aggregate";
 import {
   BankingInfrastructure,
@@ -17,6 +24,11 @@ import { BankAccountProjection } from "./projection";
 import { randomUUID } from "crypto";
 
 const main = async () => {
+  // ── Set up Prisma with SQLite ────────────────────────────────
+  const prisma = new PrismaClient();
+  const prismaInfra = createPrismaPersistence(prisma);
+
+  // ── Configure the domain with Prisma persistence ─────────────
   const domain = await configureDomain<BankingInfrastructure>({
     writeModel: {
       aggregates: {
@@ -29,8 +41,8 @@ const main = async () => {
       },
     },
     infrastructure: {
-      aggregatePersistence: () =>
-        new InMemoryEventSourcedAggregatePersistence(),
+      aggregatePersistence: () => prismaInfra.eventSourcedPersistence,
+      unitOfWorkFactory: () => prismaInfra.unitOfWorkFactory,
       provideInfrastructure: () => ({
         clock: new SystemClock(),
         logger: new ConsoleLogger(),
@@ -45,6 +57,7 @@ const main = async () => {
     },
   });
 
+  // ── Run the banking scenario ─────────────────────────────────
   const bankAccountId = randomUUID();
 
   await domain.dispatchCommand({
@@ -78,6 +91,9 @@ const main = async () => {
       merchant: "Fnac",
     },
   });
+
+  await prisma.$disconnect();
+  console.log("✅ Banking sample completed (Prisma + SQLite)");
 };
 
 main();

@@ -7,18 +7,21 @@
     "lint": "eslint . --max-warnings 0",
     "test": "vitest run",
     "test:watch": "vitest",
-    "start": "tsx src/main.ts"
+    "start": "prisma generate && prisma db push && tsx src/main.ts"
   },
   "dependencies": {
     "@noddde/core": "0.0.0",
     "@noddde/engine": "0.0.0",
+    "@noddde/prisma": "0.0.0",
     "@noddde/testing": "0.0.0",
+    "@prisma/client": "^6.5.0",
     "type-fest": "^4.35.0"
   },
   "devDependencies": {
     "@noddde/typescript-config": "0.0.0",
     "@types/node": "^20.11.17",
     "eslint": "^8.56.0",
+    "prisma": "^6.5.0",
     "typescript": "^5.3.3",
     "vitest": "^4.1.0",
     "tsx": "^4.21.0"

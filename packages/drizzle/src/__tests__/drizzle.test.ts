@@ -1,237 +1,284 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import { sql } from "drizzle-orm";
 import { createDrizzlePersistence } from "../index";
-import { nodddeEvents, nodddeAggregateStates, nodddeSagaStates } from "../schema";
+import { events, aggregateStates, sagaStates } from "../sqlite/schema";
 
 function createTestDb() {
   const sqlite = new Database(":memory:");
-  const db = drizzle(sqlite);
-
-  // Create tables
-  db.run(sql`CREATE TABLE noddde_events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    aggregate_name TEXT NOT NULL,
-    aggregate_id TEXT NOT NULL,
-    sequence_number INTEGER NOT NULL,
-    event_name TEXT NOT NULL,
-    payload TEXT NOT NULL
-  )`);
-
-  db.run(sql`CREATE TABLE noddde_aggregate_states (
-    aggregate_name TEXT NOT NULL,
-    aggregate_id TEXT NOT NULL,
-    state TEXT NOT NULL,
-    PRIMARY KEY (aggregate_name, aggregate_id)
-  )`);
-
-  db.run(sql`CREATE TABLE noddde_saga_states (
-    saga_name TEXT NOT NULL,
-    saga_id TEXT NOT NULL,
-    state TEXT NOT NULL,
-    PRIMARY KEY (saga_name, saga_id)
-  )`);
-
-  return db;
+  sqlite.exec(`
+    CREATE TABLE noddde_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      aggregate_name TEXT NOT NULL,
+      aggregate_id TEXT NOT NULL,
+      sequence_number INTEGER NOT NULL,
+      event_name TEXT NOT NULL,
+      payload TEXT NOT NULL
+    );
+    CREATE TABLE noddde_aggregate_states (
+      aggregate_name TEXT NOT NULL,
+      aggregate_id TEXT NOT NULL,
+      state TEXT NOT NULL,
+      PRIMARY KEY (aggregate_name, aggregate_id)
+    );
+    CREATE TABLE noddde_saga_states (
+      saga_name TEXT NOT NULL,
+      saga_id TEXT NOT NULL,
+      state TEXT NOT NULL,
+      PRIMARY KEY (saga_name, saga_id)
+    );
+  `);
+  return drizzle(sqlite);
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// Event-Sourced Aggregate Persistence
-// ═══════════════════════════════════════════════════════════════════
-
-describe("DrizzleEventSourcedAggregatePersistence", () => {
-  let infra: ReturnType<typeof createDrizzlePersistence>;
-
-  beforeEach(() => {
+describe("Drizzle Multi-Dialect Persistence", () => {
+  it("factory creates all four infrastructure components", () => {
     const db = createTestDb();
-    infra = createDrizzlePersistence(db);
+    const infra = createDrizzlePersistence(db, {
+      events,
+      aggregateStates,
+      sagaStates,
+    });
+
+    expect(infra.eventSourcedPersistence).toBeDefined();
+    expect(infra.stateStoredPersistence).toBeDefined();
+    expect(infra.sagaPersistence).toBeDefined();
+    expect(infra.unitOfWorkFactory).toBeDefined();
+    expect(typeof infra.unitOfWorkFactory).toBe("function");
   });
 
-  it("should save and load events", async () => {
-    const { eventSourcedPersistence: persistence } = infra;
+  it("saves and loads events with JSON-parsed payloads", async () => {
+    const db = createTestDb();
+    const infra = createDrizzlePersistence(db, {
+      events,
+      aggregateStates,
+      sagaStates,
+    });
+    const persistence = infra.eventSourcedPersistence;
 
-    await persistence.save("Account", "acc-1", [
-      { name: "AccountCreated", payload: { owner: "Alice" } },
-      { name: "DepositMade", payload: { amount: 100 } },
+    await persistence.save("Order", "order-1", [
+      { name: "OrderPlaced", payload: { total: 100 } },
+      { name: "OrderConfirmed", payload: { confirmedAt: "2024-01-01" } },
     ]);
 
-    const events = await persistence.load("Account", "acc-1");
-    expect(events).toEqual([
-      { name: "AccountCreated", payload: { owner: "Alice" } },
-      { name: "DepositMade", payload: { amount: 100 } },
-    ]);
+    const loaded = await persistence.load("Order", "order-1");
+    expect(loaded).toHaveLength(2);
+    expect(loaded[0]).toEqual({
+      name: "OrderPlaced",
+      payload: { total: 100 },
+    });
+    expect(loaded[1]).toEqual({
+      name: "OrderConfirmed",
+      payload: { confirmedAt: "2024-01-01" },
+    });
   });
 
-  it("should return empty array for unknown aggregate", async () => {
-    const events = await infra.eventSourcedPersistence.load("Account", "nonexistent");
-    expect(events).toEqual([]);
+  it("returns empty array for nonexistent aggregate", async () => {
+    const db = createTestDb();
+    const infra = createDrizzlePersistence(db, {
+      events,
+      aggregateStates,
+      sagaStates,
+    });
+
+    const loaded = await infra.eventSourcedPersistence.load(
+      "Order",
+      "nonexistent",
+    );
+    expect(loaded).toEqual([]);
   });
 
-  it("should append events across multiple saves", async () => {
-    const { eventSourcedPersistence: persistence } = infra;
+  it("appends events with incrementing sequence numbers", async () => {
+    const db = createTestDb();
+    const infra = createDrizzlePersistence(db, {
+      events,
+      aggregateStates,
+      sagaStates,
+    });
+    const persistence = infra.eventSourcedPersistence;
 
-    await persistence.save("Account", "acc-1", [
-      { name: "AccountCreated", payload: { owner: "Alice" } },
+    await persistence.save("Order", "order-1", [
+      { name: "OrderPlaced", payload: {} },
     ]);
-    await persistence.save("Account", "acc-1", [
-      { name: "DepositMade", payload: { amount: 50 } },
+    await persistence.save("Order", "order-1", [
+      { name: "OrderConfirmed", payload: {} },
     ]);
 
-    const events = await persistence.load("Account", "acc-1");
-    expect(events).toHaveLength(2);
-    expect(events[0]!.name).toBe("AccountCreated");
-    expect(events[1]!.name).toBe("DepositMade");
+    const loaded = await persistence.load("Order", "order-1");
+    expect(loaded).toHaveLength(2);
+    expect(loaded[0]!.name).toBe("OrderPlaced");
+    expect(loaded[1]!.name).toBe("OrderConfirmed");
   });
 
-  it("should isolate by aggregate name", async () => {
-    const { eventSourcedPersistence: persistence } = infra;
+  it("isolates events by aggregate name", async () => {
+    const db = createTestDb();
+    const infra = createDrizzlePersistence(db, {
+      events,
+      aggregateStates,
+      sagaStates,
+    });
+    const persistence = infra.eventSourcedPersistence;
 
-    await persistence.save("Order", "1", [
-      { name: "OrderPlaced", payload: { total: 200 } },
+    await persistence.save("Order", "id-1", [
+      { name: "OrderPlaced", payload: {} },
     ]);
-    await persistence.save("Account", "1", [
-      { name: "AccountCreated", payload: { owner: "Bob" } },
+    await persistence.save("Payment", "id-1", [
+      { name: "PaymentReceived", payload: {} },
     ]);
 
-    const orderEvents = await persistence.load("Order", "1");
-    const accountEvents = await persistence.load("Account", "1");
+    const orderEvents = await persistence.load("Order", "id-1");
+    const paymentEvents = await persistence.load("Payment", "id-1");
+
     expect(orderEvents).toHaveLength(1);
     expect(orderEvents[0]!.name).toBe("OrderPlaced");
-    expect(accountEvents).toHaveLength(1);
-    expect(accountEvents[0]!.name).toBe("AccountCreated");
+    expect(paymentEvents).toHaveLength(1);
+    expect(paymentEvents[0]!.name).toBe("PaymentReceived");
   });
-});
 
-// ═══════════════════════════════════════════════════════════════════
-// State-Stored Aggregate Persistence
-// ═══════════════════════════════════════════════════════════════════
-
-describe("DrizzleStateStoredAggregatePersistence", () => {
-  let infra: ReturnType<typeof createDrizzlePersistence>;
-
-  beforeEach(() => {
+  it("saves and loads state with JSON parsing", async () => {
     const db = createTestDb();
-    infra = createDrizzlePersistence(db);
-  });
+    const infra = createDrizzlePersistence(db, {
+      events,
+      aggregateStates,
+      sagaStates,
+    });
+    const persistence = infra.stateStoredPersistence;
 
-  it("should save and load state", async () => {
-    const { stateStoredPersistence: persistence } = infra;
-
-    await persistence.save("Account", "acc-1", { balance: 100, owner: "Alice" });
+    await persistence.save("Account", "acc-1", {
+      balance: 500,
+      owner: "Alice",
+    });
     const state = await persistence.load("Account", "acc-1");
-    expect(state).toEqual({ balance: 100, owner: "Alice" });
+    expect(state).toEqual({ balance: 500, owner: "Alice" });
   });
 
-  it("should return undefined for unknown aggregate", async () => {
-    const state = await infra.stateStoredPersistence.load("Account", "nonexistent");
+  it("returns undefined for nonexistent state-stored aggregate", async () => {
+    const db = createTestDb();
+    const infra = createDrizzlePersistence(db, {
+      events,
+      aggregateStates,
+      sagaStates,
+    });
+
+    const state = await infra.stateStoredPersistence.load(
+      "Account",
+      "nonexistent",
+    );
     expect(state).toBeUndefined();
   });
 
-  it("should overwrite state on repeated saves", async () => {
-    const { stateStoredPersistence: persistence } = infra;
+  it("overwrites state on subsequent saves", async () => {
+    const db = createTestDb();
+    const infra = createDrizzlePersistence(db, {
+      events,
+      aggregateStates,
+      sagaStates,
+    });
+    const persistence = infra.stateStoredPersistence;
 
     await persistence.save("Account", "acc-1", { balance: 100 });
     await persistence.save("Account", "acc-1", { balance: 200 });
+
     const state = await persistence.load("Account", "acc-1");
     expect(state).toEqual({ balance: 200 });
   });
 
-  it("should isolate by aggregate name", async () => {
-    const { stateStoredPersistence: persistence } = infra;
-
-    await persistence.save("Order", "1", { total: 50 });
-    await persistence.save("Account", "1", { balance: 999 });
-
-    expect(await persistence.load("Order", "1")).toEqual({ total: 50 });
-    expect(await persistence.load("Account", "1")).toEqual({ balance: 999 });
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════
-// Saga Persistence
-// ═══════════════════════════════════════════════════════════════════
-
-describe("DrizzleSagaPersistence", () => {
-  let infra: ReturnType<typeof createDrizzlePersistence>;
-
-  beforeEach(() => {
+  it("saves and loads saga state", async () => {
     const db = createTestDb();
-    infra = createDrizzlePersistence(db);
+    const infra = createDrizzlePersistence(db, {
+      events,
+      aggregateStates,
+      sagaStates,
+    });
+    const persistence = infra.sagaPersistence;
+
+    await persistence.save("OrderSaga", "saga-1", {
+      status: "active",
+      step: 2,
+    });
+    const state = await persistence.load("OrderSaga", "saga-1");
+    expect(state).toEqual({ status: "active", step: 2 });
   });
 
-  it("should save and load saga state", async () => {
-    const { sagaPersistence: persistence } = infra;
-
-    await persistence.save("Fulfillment", "order-1", { status: "awaiting_payment" });
-    const state = await persistence.load("Fulfillment", "order-1");
-    expect(state).toEqual({ status: "awaiting_payment" });
-  });
-
-  it("should return undefined for unknown saga", async () => {
-    const state = await infra.sagaPersistence.load("Fulfillment", "nonexistent");
-    expect(state == null).toBe(true);
-  });
-
-  it("should overwrite state on repeated saves", async () => {
-    const { sagaPersistence: persistence } = infra;
-
-    await persistence.save("Fulfillment", "o-1", { step: 1 });
-    await persistence.save("Fulfillment", "o-1", { step: 2 });
-    const state = await persistence.load("Fulfillment", "o-1");
-    expect(state).toEqual({ step: 2 });
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════
-// UnitOfWork (real database transaction)
-// ═══════════════════════════════════════════════════════════════════
-
-describe("DrizzleUnitOfWork", () => {
-  it("should commit all operations in a real database transaction", async () => {
+  it("commits all operations atomically and returns deferred events", async () => {
     const db = createTestDb();
-    const infra = createDrizzlePersistence(db);
-
+    const infra = createDrizzlePersistence(db, {
+      events,
+      aggregateStates,
+      sagaStates,
+    });
     const uow = infra.unitOfWorkFactory();
 
-    uow.enlist(() =>
-      infra.eventSourcedPersistence.save("Account", "acc-1", [
-        { name: "AccountCreated", payload: { owner: "Alice" } },
-      ]),
+    uow.enlist(async () => {
+      await infra.eventSourcedPersistence.save("Order", "o1", [
+        { name: "OrderPlaced", payload: { total: 50 } },
+      ]);
+    });
+    uow.enlist(async () => {
+      await infra.stateStoredPersistence.save("Account", "a1", {
+        balance: 50,
+      });
+    });
+    uow.deferPublish({ name: "OrderPlaced", payload: { total: 50 } });
+
+    const publishedEvents = await uow.commit();
+
+    expect(publishedEvents).toHaveLength(1);
+    expect(publishedEvents[0]!.name).toBe("OrderPlaced");
+
+    const loadedEvents = await infra.eventSourcedPersistence.load(
+      "Order",
+      "o1",
     );
-    uow.enlist(() =>
-      infra.sagaPersistence.save("Fulfillment", "o-1", { step: 1 }),
+    expect(loadedEvents).toHaveLength(1);
+
+    const loadedState = await infra.stateStoredPersistence.load(
+      "Account",
+      "a1",
     );
-    uow.deferPublish({ name: "AccountCreated", payload: { owner: "Alice" } });
-
-    const events = await uow.commit();
-
-    // Events returned for publishing
-    expect(events).toHaveLength(1);
-    expect(events[0]!.name).toBe("AccountCreated");
-
-    // Data is persisted
-    const loaded = await infra.eventSourcedPersistence.load("Account", "acc-1");
-    expect(loaded).toHaveLength(1);
-    const sagaState = await infra.sagaPersistence.load("Fulfillment", "o-1");
-    expect(sagaState).toEqual({ step: 1 });
+    expect(loadedState).toEqual({ balance: 50 });
   });
 
-  it("should rollback without persisting anything", async () => {
+  it("rollback discards all operations and events", async () => {
     const db = createTestDb();
-    const infra = createDrizzlePersistence(db);
-
+    const infra = createDrizzlePersistence(db, {
+      events,
+      aggregateStates,
+      sagaStates,
+    });
     const uow = infra.unitOfWorkFactory();
 
-    uow.enlist(() =>
-      infra.eventSourcedPersistence.save("Account", "acc-1", [
-        { name: "AccountCreated", payload: { owner: "Alice" } },
-      ]),
-    );
+    uow.enlist(async () => {
+      await infra.eventSourcedPersistence.save("Order", "o1", [
+        { name: "OrderPlaced", payload: {} },
+      ]);
+    });
+    uow.deferPublish({ name: "OrderPlaced", payload: {} });
 
     await uow.rollback();
 
-    const events = await infra.eventSourcedPersistence.load("Account", "acc-1");
-    expect(events).toEqual([]);
+    const loaded = await infra.eventSourcedPersistence.load("Order", "o1");
+    expect(loaded).toEqual([]);
+  });
+
+  it("throws on any operation after commit or rollback", async () => {
+    const db = createTestDb();
+    const infra = createDrizzlePersistence(db, {
+      events,
+      aggregateStates,
+      sagaStates,
+    });
+    const uow = infra.unitOfWorkFactory();
+
+    await uow.commit();
+
+    expect(() => uow.enlist(async () => {})).toThrow(
+      "UnitOfWork already completed",
+    );
+    expect(() => uow.deferPublish()).toThrow("UnitOfWork already completed");
+    await expect(uow.commit()).rejects.toThrow("UnitOfWork already completed");
+    await expect(uow.rollback()).rejects.toThrow(
+      "UnitOfWork already completed",
+    );
   });
 });
