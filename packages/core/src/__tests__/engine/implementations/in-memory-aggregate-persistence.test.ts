@@ -64,10 +64,10 @@ describe("InMemoryEventSourcedAggregatePersistence", () => {
     const accountEvents = await persistence.load("Account", "1");
 
     expect(orderEvents).toHaveLength(1);
-    expect(orderEvents[0].name).toBe("OrderPlaced");
+    expect(orderEvents[0]?.name).toBe("OrderPlaced");
 
     expect(accountEvents).toHaveLength(1);
-    expect(accountEvents![0].name).toBe("AccountCreated");
+    expect(accountEvents[0]?.name).toBe("AccountCreated");
   });
 
   it("saving empty array is a no-op", async () => {
