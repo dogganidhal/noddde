@@ -139,10 +139,66 @@ The framework ships with everything you need to build and test a domain locally:
 
 The in-memory implementations are designed for development and testing. For production, implement the `EventBus`, `CommandBus`, `QueryBus`, and persistence interfaces with your infrastructure of choice — Kafka, PostgreSQL, Redis, whatever your stack requires.
 
+## Testing
+
+`@noddde/testing` provides type-safe test harnesses that express tests in the natural Given-When-Then pattern of the Decider — no domain bootstrap, no bus wiring, no manual spying.
+
+**Unit test an aggregate** — given prior events, when a command arrives, assert on produced events and state:
+
+```typescript
+const result = await testAggregate(BankAccount)
+  .given(
+    { name: "AccountCreated", payload: { id: "acc-1" } },
+    { name: "DepositMade", payload: { amount: 1000 } },
+  )
+  .when({
+    name: "Withdraw",
+    targetAggregateId: "acc-1",
+    payload: { amount: 200 },
+  })
+  .execute();
+
+expect(result.events[0].name).toBe("WithdrawalMade");
+expect(result.state.balance).toBe(800);
+```
+
+**Unit test a saga** — given prior state, when an event arrives, assert on new state and dispatched commands:
+
+```typescript
+const result = await testSaga(OrderFulfillmentSaga)
+  .givenState({ status: "awaiting_payment", orderId: "o-1" })
+  .when({
+    name: "PaymentCompleted",
+    payload: { referenceId: "o-1", amount: 99.99 },
+  })
+  .execute();
+
+expect(result.state.status).toBe("awaiting_shipment");
+expect(result.commands).toHaveLength(2); // ConfirmOrder + ArrangeShipment
+```
+
+**Slice test a domain** — zero-boilerplate domain with event and command spies:
+
+```typescript
+const { domain, spy } = await testDomain({
+  aggregates: { BankAccount },
+  projections: { BankAccountView },
+  sagas: { OrderFulfillment },
+});
+
+await domain.dispatchCommand(depositCommand);
+
+expect(spy.publishedEvents).toContainEqual({ name: "DepositMade", payload: { amount: 500 } });
+expect(domain.getProjectionView("BankAccountView")).toEqual({ balance: 500 });
+```
+
+The full toolkit includes `testAggregate`, `testProjection`, `testSaga`, `testDomain`, and `evolveAggregate`. See the [testing documentation](https://noddde.dev/docs/testing/overview) for the complete guide.
+
 ## Getting started
 
 ```bash
-yarn add @noddde/core
+yarn add @noddde/core @noddde/engine
+yarn add --dev @noddde/testing
 ```
 
 Head to the [documentation](https://noddde.dev/docs/getting-started) for a walkthrough that builds a complete domain from scratch, or explore the [sample domains](packages/samples/src/) for real-world patterns:
