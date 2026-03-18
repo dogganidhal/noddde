@@ -5,10 +5,10 @@ import {
   evolveAggregate,
   testDomain,
 } from "@noddde/testing";
-import { BankAccount, BankAccountState } from "../../event-sourced-banking/aggregate";
-import { BankAccountProjection } from "../../event-sourced-banking/projection";
-import { FixedClock } from "../../event-sourced-banking/infrastructure";
-import type { BankAccountView } from "../../event-sourced-banking/queries";
+import { BankAccount, BankAccountState } from "../aggregate";
+import { BankAccountProjection } from "../projection";
+import { FixedClock } from "../infrastructure";
+import type { BankAccountView } from "../queries";
 
 // ---- Shared fixtures ----
 

@@ -6,15 +6,15 @@ import {
   evolveAggregate,
   testDomain,
 } from "@noddde/testing";
-import { Order } from "../../order-fulfillment/order/aggregate";
-import { Payment } from "../../order-fulfillment/payment/aggregate";
-import { Shipping } from "../../order-fulfillment/shipping/aggregate";
-import { OrderFulfillmentSaga } from "../../order-fulfillment/saga/order-fulfillment";
-import { initialFulfillmentState } from "../../order-fulfillment/saga/state";
-import { OrderSummaryProjection } from "../../order-fulfillment/projection";
-import { FixedClock } from "../../order-fulfillment/infrastructure";
-import type { OrderItem } from "../../order-fulfillment/order/events";
-import type { OrderSummary } from "../../order-fulfillment/infrastructure";
+import { Order } from "../order/aggregate";
+import { Payment } from "../payment/aggregate";
+import { Shipping } from "../shipping/aggregate";
+import { OrderFulfillmentSaga } from "../saga/order-fulfillment";
+import { initialFulfillmentState } from "../saga/state";
+import { OrderSummaryProjection } from "../projection";
+import { FixedClock } from "../infrastructure";
+import type { OrderItem } from "../order/events";
+import type { OrderSummary } from "../infrastructure";
 
 // ---- Shared fixtures ----
 

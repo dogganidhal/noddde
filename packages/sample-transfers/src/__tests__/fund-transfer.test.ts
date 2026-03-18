@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Infrastructure } from "@noddde/core";
 import { testAggregate, evolveAggregate, testDomain } from "@noddde/testing";
-import { Account } from "../../fund-transfer/aggregate";
+import { Account } from "../aggregate";
 
 // ═══════════════════════════════════════════════════════════════════
 // UNIT TESTS — testAggregate

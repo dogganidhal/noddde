@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { testAggregate, evolveAggregate, testDomain } from "@noddde/testing";
-import { Auction } from "../../auction/aggregate";
+import { Auction } from "../aggregate";
 
 // ---- Shared fixtures ----
 
