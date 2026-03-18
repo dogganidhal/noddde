@@ -23,9 +23,9 @@ interface CommandBus {
 }
 ```
 
-The `CommandBus` routes commands to their handlers. When `domain.dispatchCommand()` is called, the command eventually flows through the `CommandBus`.
+The `CommandBus` routes commands to their registered handlers. During domain initialization, command handlers for each aggregate and standalone handler are registered on the bus.
 
-For aggregate commands, the bus resolves the target aggregate, loads its state, calls the appropriate command handler, persists resulting events, and publishes them.
+The aggregate lifecycle (loading state, executing the handler, persisting events, and publishing them) is orchestrated by the `Domain` class, not the `CommandBus` itself. The bus is a simple dispatch-to-handler router.
 
 ## EventBus
 
@@ -37,7 +37,7 @@ interface EventBus {
 
 The `EventBus` publishes events to projection event handlers. After an aggregate command handler produces events and they are persisted, each event is dispatched through the `EventBus`.
 
-The built-in `EventEmitterEventBus` uses Node.js `EventEmitter` for synchronous, in-process delivery. For distributed systems, implement a custom `EventBus` backed by Kafka, RabbitMQ, or similar.
+The built-in `EventEmitterEventBus` delivers events in-process, sequentially awaiting each registered handler. For distributed systems, implement a custom `EventBus` backed by Kafka, RabbitMQ, or similar.
 
 ## QueryBus
 

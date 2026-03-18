@@ -2,9 +2,12 @@
 title: "StandaloneCommandHandler"
 module: cqrs/command/command-handler
 source_file: packages/core/src/cqrs/command/command-handler.ts
-status: ready
+status: implemented
 exports: [StandaloneCommandHandler]
 depends_on: [cqrs/command/command, infrastructure/index]
+docs:
+  - commands/handling-commands.mdx
+  - commands/standalone-commands.mdx
 ---
 
 # StandaloneCommandHandler

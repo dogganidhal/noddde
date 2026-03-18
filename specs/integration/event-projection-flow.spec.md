@@ -6,12 +6,14 @@ source_file:
   - packages/core/src/engine/domain.ts
   - packages/core/src/edd/event-bus.ts
   - packages/core/src/engine/implementations/ee-event-bus.ts
-status: ready
+status: implemented
 exports: []
 depends_on:
   - core/ddd/projection
   - core/edd/event-bus
   - core/engine/domain
+docs:
+  - projections/connecting-events.mdx
 ---
 
 # Event-to-Projection Flow

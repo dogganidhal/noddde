@@ -37,32 +37,43 @@ The event bus is called **after** persistence, so handlers can assume the event 
 
 ## EventEmitterEventBus
 
-noddde ships with `EventEmitterEventBus`, an in-process implementation built on Node.js `EventEmitter`:
+noddde ships with `EventEmitterEventBus`, an in-process implementation that tracks handlers internally and awaits them during dispatch:
 
 ```typescript
-import { Event, EventBus } from "@noddde/core";
-import { EventEmitter } from "node:events";
-
 class EventEmitterEventBus implements EventBus {
-  private readonly underlying = new EventEmitter();
+  private readonly handlers = new Map<string, AsyncEventHandler[]>();
+
+  public on(eventName: string, handler: AsyncEventHandler): void {
+    const existing = this.handlers.get(eventName);
+    if (existing) {
+      existing.push(handler);
+    } else {
+      this.handlers.set(eventName, [handler]);
+    }
+  }
 
   public async dispatch<TEvent extends Event>(event: TEvent): Promise<void> {
-    this.underlying.emit(event.name, event.payload);
+    const eventHandlers = this.handlers.get(event.name);
+    if (eventHandlers) {
+      for (const handler of eventHandlers) {
+        await handler(event.payload);
+      }
+    }
   }
 }
 ```
 
 ### How It Works
 
-- When `dispatch` is called, it emits a Node.js event using the event's `name` as the event type and the `payload` as the data.
-- The framework subscribes projection event handlers to the underlying `EventEmitter` during domain configuration, matching each handler's key to the event name.
-- Delivery is synchronous within the Node.js event loop -- handlers run in the same process, one after another.
+- **Subscription**: The `on(eventName, handler)` method registers handlers for a given event name. The framework calls `on` during domain configuration to wire projection reducers and saga handlers.
+- **Dispatch**: When `dispatch` is called, it looks up handlers by `event.name` and sequentially awaits each one, ensuring async projection reducers and saga handlers complete before dispatch resolves.
+- Handlers run in registration order within the same process.
 
 ### Characteristics
 
 | Property | Behavior |
 |---|---|
-| Delivery | In-process, synchronous emit |
+| Delivery | In-process, sequentially awaited |
 | Ordering | Handlers run in registration order |
 | Durability | None -- if the process crashes, unprocessed events are lost |
 | At-least-once | No -- events are delivered exactly once within the process |
@@ -113,11 +124,11 @@ When `domain.dispatchCommand()` produces events, they flow through the `EventEmi
 
 You do not manually subscribe to the event bus. The framework handles subscription during `configureDomain`:
 
-1. It reads the `eventHandlers` map from each projection in `readModel.projections`.
-2. For each event name in the map, it registers the handler with the event bus.
-3. When an event with that name is dispatched, the matching handler is called with the event payload and infrastructure.
+1. It reads the `reducers` map from each projection in `readModel.projections`.
+2. For each event name in the map, it registers a handler with the event bus via `on(eventName, handler)`.
+3. When an event with that name is dispatched, the matching reducer is called with the full event and the current projection view.
 
-This is why your projection's `eventHandlers` keys must match the event names produced by your aggregates.
+This is why your projection's `reducers` keys must match the event names produced by your aggregates.
 
 ## Implementing a Custom EventBus
 
@@ -230,7 +241,7 @@ cqrsInfrastructure: () => ({
 
 ## Error Handling
 
-With `EventEmitterEventBus`, if an event handler throws, the error propagates from `dispatch`. In production event bus implementations, consider:
+With `EventEmitterEventBus`, if an event handler throws, the error propagates from the awaited `dispatch` call. In production event bus implementations, consider:
 
 - **Retry logic** -- Automatically retry failed deliveries.
 - **Dead letter queues** -- Route persistently failing events for manual inspection.

@@ -22,8 +22,8 @@ domain.dispatchCommand(cmd)
   → persistence.save(aggregateName, id, events)
   → eventBus.dispatch(Event1)
   → eventBus.dispatch(Event2)
-  → projection.eventHandlers.Event1(payload, infra)
-  → projection.eventHandlers.Event2(payload, infra)
+  → projection.reducers.Event1(event, currentView) → newView
+  → projection.reducers.Event2(event, currentView) → newView
 ```
 
 ## Registering Projections
@@ -75,18 +75,22 @@ A projection is not limited to events from a single aggregate. If your domain ha
 
 ```ts
 // This projection handles events from both BankAccount and Auction aggregates
-const CrossDomainProjection: Projection<
-  AppInfrastructure,
-  BankAccountEvent["name"] | AuctionEvent["name"]
-> = {
-  eventHandlers: {
-    BankAccountCreated: (event, infra) => { /* ... */ },
-    AuctionCreated: (event, infra) => { /* ... */ },
-    TransactionProcessed: (event, infra) => { /* ... */ },
-    AuctionClosed: (event, infra) => { /* ... */ },
+type CrossDomainProjectionDef = {
+  events: BankAccountEvent | AuctionEvent;
+  queries: CrossDomainQuery;
+  view: CrossDomainView;
+  infrastructure: AppInfrastructure;
+};
+
+const CrossDomainProjection = defineProjection<CrossDomainProjectionDef>({
+  reducers: {
+    BankAccountCreated: (event, view) => ({ /* ... */ }),
+    AuctionCreated: (event, view) => ({ /* ... */ }),
+    TransactionProcessed: (event, view) => ({ /* ... */ }),
+    AuctionClosed: (event, view) => ({ /* ... */ }),
   },
   queryHandlers: { /* ... */ },
-};
+});
 ```
 
 This is useful for building aggregate views that span multiple domain concepts (e.g., a user activity feed combining financial and auction events).
@@ -95,7 +99,7 @@ This is useful for building aggregate views that span multiple domain concepts (
 
 The `EventBus` implementation determines delivery guarantees:
 
-- **`EventEmitterEventBus`** (built-in) — Synchronous, in-process delivery. Events are delivered immediately after persistence. If a handler throws, the error propagates. Suitable for single-process applications and testing.
+- **`EventEmitterEventBus`** (built-in) — In-process, sequentially awaited delivery. Events are delivered immediately after persistence. If a handler throws, the error propagates. Suitable for single-process applications and testing.
 
 - **Custom implementations** — You can implement asynchronous delivery, at-least-once guarantees, or distributed event buses by providing your own `EventBus` implementation through the [infrastructure configuration](/docs/domain-configuration/infrastructure).
 
@@ -103,4 +107,4 @@ The `EventBus` implementation determines delivery guarantees:
 
 - [Domain Configuration Overview](/docs/domain-configuration/overview) — Full domain wiring reference
 - [Event Bus](/docs/events/event-bus) — EventBus interface and implementations
-- [Legacy Projections](/docs/projections/legacy-projections) — Building projections with event handler maps
+- [Reducer-Based Projections](/docs/projections/functional-projections) — Building projections with reducer maps

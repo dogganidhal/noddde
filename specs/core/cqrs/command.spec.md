@@ -2,9 +2,11 @@
 title: "Command, AggregateCommand, StandaloneCommand & DefineCommands"
 module: cqrs/command/command
 source_file: packages/core/src/cqrs/command/command.ts
-status: ready
+status: implemented
 exports: [Command, AggregateCommand, StandaloneCommand, DefineCommands]
 depends_on: []
+docs:
+  - commands/defining-commands.mdx
 ---
 
 # Command, AggregateCommand, StandaloneCommand & DefineCommands

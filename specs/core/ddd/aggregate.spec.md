@@ -2,9 +2,15 @@
 title: "AggregateTypes, CommandHandler, Aggregate, defineAggregate & Infer Utilities"
 module: ddd/aggregate-root
 source_file: packages/core/src/ddd/aggregate-root.ts
-status: ready
+status: implemented
 exports: [AggregateTypes, CommandHandler, Aggregate, defineAggregate, InferAggregateID, InferAggregateState, InferAggregateEvents, InferAggregateCommands, InferAggregateInfrastructure]
 depends_on: [edd/event, edd/event-sourcing-handler, cqrs/command/command, infrastructure/index]
+docs:
+  - aggregates/overview.mdx
+  - aggregates/defining-aggregates.mdx
+  - aggregates/state-design.mdx
+  - aggregates/command-routing.mdx
+  - aggregates/type-inference.mdx
 ---
 
 # AggregateTypes, CommandHandler, Aggregate, defineAggregate & Infer Utilities

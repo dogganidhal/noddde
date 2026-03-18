@@ -7,13 +7,15 @@ source_file:
   - packages/core/src/engine/implementations/in-memory-aggregate-persistence.ts
   - packages/core/src/engine/implementations/ee-event-bus.ts
   - packages/core/src/engine/implementations/in-memory-command-bus.ts
-status: ready
+status: implemented
 exports: []
 depends_on:
   - core/ddd/aggregate-root
   - core/engine/domain
   - core/engine/implementations/in-memory-aggregate-persistence
   - core/edd/event-bus
+docs:
+  - commands/dispatching.mdx
 ---
 
 # Command Dispatch Lifecycle

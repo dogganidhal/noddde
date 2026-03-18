@@ -8,6 +8,7 @@ depends_on:
   - core/ddd/aggregate-root
   - core/edd/event
   - core/cqrs/command
+docs: []  # Documentation pages covering this module (paths relative to packages/docs/content/docs/)
 ---
 
 # [AggregateName] Aggregate

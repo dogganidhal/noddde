@@ -9,7 +9,7 @@ allowed-tools: Read, Glob, Grep, Bash
 
 Run the test suite and report whether the RED tests from step 2 are now GREEN.
 
-This is **step 4** of the 5-step pipeline:
+This is **step 4** of the 6-step pipeline:
 
 ```
   1. /new-spec or /edit-spec    ✅ Done
@@ -17,6 +17,7 @@ This is **step 4** of the 5-step pipeline:
   3. /implement-spec            ✅ Done (code written)
 → 4. /run-tests                 Run tests — should be GREEN now
   5. /validate-spec              Cross-check
+  6. /update-docs                Update documentation
 ```
 
 ## Step 1: Determine What to Run

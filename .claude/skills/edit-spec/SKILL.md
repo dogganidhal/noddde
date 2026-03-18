@@ -9,7 +9,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 
 Modify a behavioral specification while detecting breaking changes and managing downstream impact.
 
-This is **step 1** of the 5-step pipeline (the "edit" variant):
+This is **step 1** of the 6-step pipeline (the "edit" variant):
 
 ```
 → 1. /edit-spec          Modify the spec (type contract, requirements, test scenarios)
@@ -17,6 +17,7 @@ This is **step 1** of the 5-step pipeline (the "edit" variant):
   3. /implement-spec      Update the implementation (no test generation)
   4. /run-tests           Run tests (GREEN — all passing)
   5. /validate-spec       Cross-check spec vs implementation
+  6. /update-docs         Update documentation pages
 ```
 
 ## Step 1: Load Context

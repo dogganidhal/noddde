@@ -9,6 +9,7 @@ depends_on: []
   # - core/edd/event-bus       (for EventBus implementations)
   # - core/cqrs/command-bus    (for CommandBus implementations)
   # - core/cqrs/query-bus      (for QueryBus implementations)
+docs: []  # Documentation pages covering this module (paths relative to packages/docs/content/docs/)
 ---
 
 # [BusName] [BusType] Implementation

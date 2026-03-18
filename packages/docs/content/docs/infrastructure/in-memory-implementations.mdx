@@ -13,7 +13,7 @@ import { InMemoryCommandBus } from "@noddde/core";
 const commandBus = new InMemoryCommandBus();
 ```
 
-A simple in-process command bus. Commands are dispatched synchronously within the same process. Suitable for single-process applications and testing.
+An in-process command bus with a handler registry. Commands are routed by name to handlers registered via `register(commandName, handler)`. The bus throws if no handler is found for a command or if a duplicate handler is registered. Suitable for single-process applications and testing.
 
 ## EventEmitterEventBus
 
@@ -23,9 +23,9 @@ import { EventEmitterEventBus } from "@noddde/core";
 const eventBus = new EventEmitterEventBus();
 ```
 
-Uses Node.js `EventEmitter` under the hood. Events are emitted by name, and projection event handlers are registered as listeners. Delivery is synchronous — handlers execute in the same tick as the dispatch call.
+An in-process event bus that tracks handlers internally and sequentially awaits them during dispatch. Handlers are registered via `on(eventName, handler)` and can be async. The framework calls `on` during domain initialization to wire projection reducers and saga handlers.
 
-This is the only bus implementation with actual behavior (the others are stubs). It is suitable for local development and testing.
+Suitable for local development and testing.
 
 ## InMemoryQueryBus
 
@@ -35,7 +35,7 @@ import { InMemoryQueryBus } from "@noddde/core";
 const queryBus = new InMemoryQueryBus();
 ```
 
-A simple in-process query bus. Queries are routed to handlers synchronously within the same process.
+An in-process query bus with a handler registry. Queries are routed by name to handlers registered via `register(queryName, handler)`. The bus throws if no handler is found for a query or if a duplicate handler is registered. Suitable for single-process applications and testing.
 
 ## InMemoryEventSourcedAggregatePersistence
 

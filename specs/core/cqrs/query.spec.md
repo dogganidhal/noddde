@@ -2,9 +2,11 @@
 title: "Query, QueryResult & DefineQueries"
 module: cqrs/query/query
 source_file: packages/core/src/cqrs/query/query.ts
-status: ready
+status: implemented
 exports: [Query, QueryResult, DefineQueries]
 depends_on: []
+docs:
+  - queries/defining-queries.mdx
 ---
 
 # Query, QueryResult & DefineQueries

@@ -9,7 +9,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash
 
 Create or update a vitest test file from a spec's `## Test Scenarios` section.
 
-This is **step 2** of the 5-step pipeline:
+This is **step 2** of the 6-step pipeline:
 
 ```
   1. /new-spec or /edit-spec    ✅ Done
@@ -17,6 +17,7 @@ This is **step 2** of the 5-step pipeline:
   3. /implement-spec             Implement the code
   4. /run-tests                  Run tests (GREEN)
   5. /validate-spec              Cross-check
+  6. /update-docs                Update documentation
 ```
 
 **Key principle**: Tests MUST be generated BEFORE the implementation. This proves the tests are meaningful — they fail when the behavior is missing and pass when it's present. If tests are generated alongside the implementation, you can't know if they'd catch regressions.

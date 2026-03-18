@@ -2,9 +2,11 @@
 title: "EventHandler"
 module: edd/event-handler
 source_file: packages/core/src/edd/event-handler.ts
-status: ready
+status: implemented
 exports: [EventHandler]
 depends_on: [edd/event, infrastructure/index]
+docs:
+  - events/event-handlers.mdx
 ---
 
 # EventHandler

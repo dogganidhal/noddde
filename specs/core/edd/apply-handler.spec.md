@@ -2,9 +2,11 @@
 title: "ApplyHandler"
 module: edd/event-sourcing-handler
 source_file: packages/core/src/edd/event-sourcing-handler.ts
-status: ready
+status: implemented
 exports: [ApplyHandler]
 depends_on: [edd/event]
+docs:
+  - events/apply-handlers.mdx
 ---
 
 # ApplyHandler

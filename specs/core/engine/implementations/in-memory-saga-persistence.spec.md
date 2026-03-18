@@ -2,9 +2,11 @@
 title: "InMemorySagaPersistence"
 module: engine/implementations/in-memory-saga-persistence
 source_file: packages/core/src/engine/implementations/in-memory-saga-persistence.ts
-status: ready
+status: implemented
 exports: [InMemorySagaPersistence]
 depends_on: [engine/domain]
+docs:
+  - infrastructure/in-memory-implementations.mdx
 ---
 
 # InMemorySagaPersistence

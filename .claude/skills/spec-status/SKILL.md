@@ -6,7 +6,7 @@ allowed-tools: Read, Glob, Grep, Bash
 
 # Spec Status Report
 
-Scan all specs and report implementation status across the entire project, mapping each to its position in the 5-step pipeline.
+Scan all specs and report implementation status across the entire project, mapping each to its position in the 6-step pipeline.
 
 ## Step 1: Gather Data
 

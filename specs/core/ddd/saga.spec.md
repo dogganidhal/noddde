@@ -2,9 +2,14 @@
 title: "SagaTypes, SagaReaction, SagaEventHandler, Saga, defineSaga & Infer Utilities"
 module: ddd/saga
 source_file: packages/core/src/ddd/saga.ts
-status: ready
+status: implemented
 exports: [SagaTypes, SagaReaction, SagaEventHandler, Saga, defineSaga, InferSagaState, InferSagaEvents, InferSagaCommands, InferSagaInfrastructure, InferSagaId]
 depends_on: [edd/event, cqrs/command/command, infrastructure/index]
+docs:
+  - sagas/overview.mdx
+  - sagas/defining-sagas.mdx
+  - sagas/associations.mdx
+  - sagas/testing-sagas.mdx
 ---
 
 # SagaTypes, SagaReaction, SagaEventHandler, Saga, defineSaga & Infer Utilities

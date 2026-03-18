@@ -1,0 +1,204 @@
+import { describe, it, expect, expectTypeOf } from "vitest";
+import type {
+  DefineEvents,
+  DefineQueries,
+  Infrastructure,
+  Query,
+  InferProjectionView,
+  InferProjectionEvents,
+  InferProjectionQueries,
+  InferProjectionInfrastructure,
+} from "@noddde/core";
+import { defineProjection } from "@noddde/core";
+
+describe("defineProjection", () => {
+  interface AccountView {
+    id: string;
+    balance: number;
+  }
+
+  type AccountEvent = DefineEvents<{
+    AccountCreated: { id: string; owner: string };
+    DepositMade: { amount: number };
+  }>;
+
+  type AccountQuery = DefineQueries<{
+    GetAccountById: { payload: { id: string }; result: AccountView };
+    ListAccounts: { result: AccountView[] };
+  }>;
+
+  interface AccountInfra extends Infrastructure {
+    accountRepo: { getById(id: string): Promise<AccountView> };
+    accountListRepo: { getAll(): Promise<AccountView[]> };
+  }
+
+  type AccountProjectionDef = {
+    events: AccountEvent;
+    queries: AccountQuery;
+    view: AccountView;
+    infrastructure: AccountInfra;
+  };
+
+  const projection = defineProjection<AccountProjectionDef>({
+    reducers: {
+      AccountCreated: (event, _view) => ({
+        id: event.payload.id,
+        balance: 0,
+      }),
+      DepositMade: (event, view) => ({
+        ...view,
+        balance: view.balance + event.payload.amount,
+      }),
+    },
+    queryHandlers: {
+      GetAccountById: (payload, infra) => infra.accountRepo.getById(payload.id),
+      ListAccounts: (_payload, infra) => infra.accountListRepo.getAll(),
+    },
+  });
+
+  it("should have typed reducers", () => {
+    expectTypeOf(projection.reducers.AccountCreated).toBeFunction();
+    expectTypeOf(projection.reducers.DepositMade).toBeFunction();
+  });
+
+  it("should have typed query handlers", () => {
+    expectTypeOf(projection.queryHandlers.GetAccountById).not.toBeUndefined();
+  });
+});
+
+describe("Reducer event parameter", () => {
+  type MyEvent = DefineEvents<{ ItemAdded: { item: string } }>;
+
+  type Def = {
+    events: MyEvent;
+    queries: Query<any>;
+    view: string[];
+    infrastructure: Infrastructure;
+  };
+
+  it("should pass the full event to reducer, not just payload", () => {
+    const projection = defineProjection<Def>({
+      reducers: {
+        ItemAdded: (event, view) => {
+          // event has both name and payload
+          expectTypeOf(event).toEqualTypeOf<{ name: "ItemAdded"; payload: { item: string } }>();
+          expectTypeOf(event.name).toEqualTypeOf<"ItemAdded">();
+          expectTypeOf(event.payload).toEqualTypeOf<{ item: string }>();
+          return [...view, event.payload.item];
+        },
+      },
+      queryHandlers: {},
+    });
+    expectTypeOf(projection).toMatchTypeOf<object>();
+  });
+});
+
+describe("Optional query handlers", () => {
+  type Events = DefineEvents<{ Created: { id: string } }>;
+  type Queries = DefineQueries<{
+    GetById: { payload: { id: string }; result: { id: string } };
+    ListAll: { result: { id: string }[] };
+  }>;
+
+  type Def = {
+    events: Events;
+    queries: Queries;
+    view: { id: string };
+    infrastructure: Infrastructure;
+  };
+
+  it("should compile with empty query handlers", () => {
+    const projection = defineProjection<Def>({
+      reducers: {
+        Created: (event, _view) => ({ id: event.payload.id }),
+      },
+      queryHandlers: {},
+    });
+    expect(projection.queryHandlers).toEqual({});
+  });
+
+  it("should compile with partial query handlers", () => {
+    const projection = defineProjection<Def>({
+      reducers: {
+        Created: (event, _view) => ({ id: event.payload.id }),
+      },
+      queryHandlers: {
+        GetById: (payload, _infra) => ({ id: payload.id }),
+      },
+    });
+    expect(projection.queryHandlers.GetById).toBeDefined();
+  });
+});
+
+describe("Projection Infer utilities", () => {
+  interface MyView { items: string[] }
+  type MyEvent = DefineEvents<{ Added: { item: string } }>;
+  type MyQuery = DefineQueries<{ GetItems: { result: string[] } }>;
+  interface MyInfra extends Infrastructure { db: { query(): Promise<string[]> } }
+
+  type Def = {
+    events: MyEvent;
+    queries: MyQuery;
+    view: MyView;
+    infrastructure: MyInfra;
+  };
+
+  const proj = defineProjection<Def>({
+    reducers: {
+      Added: (event, view) => ({ items: [...view.items, event.payload.item] }),
+    },
+    queryHandlers: {},
+  });
+
+  it("should infer view type", () => {
+    expectTypeOf<InferProjectionView<typeof proj>>().toEqualTypeOf<MyView>();
+  });
+
+  it("should infer events type", () => {
+    expectTypeOf<InferProjectionEvents<typeof proj>>().toEqualTypeOf<MyEvent>();
+  });
+
+  it("should infer queries type", () => {
+    expectTypeOf<InferProjectionQueries<typeof proj>>().toEqualTypeOf<MyQuery>();
+  });
+
+  it("should infer infrastructure type", () => {
+    expectTypeOf<InferProjectionInfrastructure<typeof proj>>().toEqualTypeOf<MyInfra>();
+  });
+});
+
+describe("Async reducers", () => {
+  type Events = DefineEvents<{ ItemAdded: { item: string } }>;
+  type Def = {
+    events: Events;
+    queries: Query<any>;
+    view: string[];
+    infrastructure: Infrastructure;
+  };
+
+  it("should accept async reducer functions", () => {
+    const proj = defineProjection<Def>({
+      reducers: {
+        ItemAdded: async (event, view) => {
+          return [...view, event.payload.item];
+        },
+      },
+      queryHandlers: {},
+    });
+    expect(proj).toBeDefined();
+  });
+});
+
+describe("defineProjection identity", () => {
+  type E = DefineEvents<{ X: { v: number } }>;
+  type Def = { events: E; queries: Query<any>; view: number; infrastructure: Infrastructure };
+
+  it("should return the exact same config object", () => {
+    const config = {
+      reducers: { X: (_event: any, _view: any) => 42 },
+      queryHandlers: {},
+    };
+    const result = defineProjection<Def>(config as any);
+    expect(result).toBe(config);
+  });
+});

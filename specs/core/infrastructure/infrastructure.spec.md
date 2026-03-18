@@ -2,9 +2,13 @@
 title: "Infrastructure & CQRSInfrastructure"
 module: infrastructure/index
 source_file: packages/core/src/infrastructure/index.ts
-status: ready
+status: implemented
 exports: [Infrastructure, CQRSInfrastructure]
 depends_on: [cqrs/command/command-bus, cqrs/query/query-bus, edd/event-bus]
+docs:
+  - infrastructure/overview.mdx
+  - infrastructure/custom-infrastructure.mdx
+  - infrastructure/cqrs-infrastructure.mdx
 ---
 
 # Infrastructure & CQRSInfrastructure

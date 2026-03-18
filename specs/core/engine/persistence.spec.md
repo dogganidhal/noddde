@@ -2,9 +2,11 @@
 title: "Persistence Interface Contracts"
 module: engine/domain
 source_file: packages/core/src/engine/domain.ts
-status: ready
+status: implemented
 exports: [StateStoredAggregatePersistence, EventSourcedAggregatePersistence, SagaPersistence]
 depends_on: [edd/event]
+docs:
+  - domain-configuration/persistence.mdx
 ---
 
 # Persistence Interface Contracts

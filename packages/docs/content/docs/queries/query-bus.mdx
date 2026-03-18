@@ -58,7 +58,7 @@ The explicit type argument on `dispatch<GetBankAccountByIdQuery>(...)` serves tw
 
 ## InMemoryQueryBus
 
-noddde ships with `InMemoryQueryBus`, a stub implementation suitable for development and testing:
+noddde ships with `InMemoryQueryBus`, an in-process implementation with a handler registry:
 
 ```typescript
 import { InMemoryQueryBus } from "@noddde/core";
@@ -66,7 +66,7 @@ import { InMemoryQueryBus } from "@noddde/core";
 const queryBus = new InMemoryQueryBus();
 ```
 
-The `InMemoryQueryBus` implements the `QueryBus` interface. In its current form it is a placeholder that throws a "not implemented" error. It is used as the default query bus when configuring a domain for local development or testing.
+The `InMemoryQueryBus` implements the `QueryBus` interface with a `register(queryName, handler)` method and a `dispatch(query)` method that routes queries by name to their registered handler. It throws if no handler is registered for a query or if a duplicate handler is registered for the same query name. During domain initialization, the framework automatically registers projection query handlers and standalone query handlers on the bus.
 
 ### Using in Domain Configuration
 
@@ -163,7 +163,7 @@ app.get("/accounts/:id/transactions", async (req, res) => {
 
 ## Building a Custom Query Bus
 
-For production use, you will likely need a query bus that actually routes queries to registered handlers. A custom implementation must satisfy the `QueryBus` interface.
+For production use, you may need a query bus with additional capabilities like caching, middleware, or distributed routing. A custom implementation must satisfy the `QueryBus` interface.
 
 ### Example: Handler-Registry Query Bus
 

@@ -7,7 +7,7 @@ source_file:
   - packages/core/src/engine/implementations/in-memory-saga-persistence.ts
   - packages/core/src/edd/event-bus.ts
   - packages/core/src/cqrs/command/command-bus.ts
-status: ready
+status: implemented
 exports: []
 depends_on:
   - core/ddd/saga
@@ -15,6 +15,9 @@ depends_on:
   - core/engine/implementations/in-memory-saga-persistence
   - core/edd/event-bus
   - core/cqrs/command/command-bus
+docs:
+  - sagas/overview.mdx
+  - patterns/order-fulfillment.mdx
 ---
 
 # Saga Orchestration

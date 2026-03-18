@@ -9,7 +9,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 
 Create a behavioral specification for a new or existing module in the noddde framework.
 
-This is **step 1** of the 5-step spec-driven development pipeline:
+This is **step 1** of the 6-step spec-driven development pipeline:
 
 ```
 → 1. /new-spec          Write the spec (API, invariants, test scenarios)
@@ -17,6 +17,7 @@ This is **step 1** of the 5-step spec-driven development pipeline:
   3. /implement-spec     Implement the code (no test generation)
   4. /run-tests          Run tests (GREEN — all passing)
   5. /validate-spec      Cross-check spec vs implementation
+  6. /update-docs        Update documentation pages
 ```
 
 ## Step 1: Understand Intent

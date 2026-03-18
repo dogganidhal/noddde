@@ -2,9 +2,12 @@
 title: "Event & DefineEvents"
 module: edd/event
 source_file: packages/core/src/edd/event.ts
-status: ready
+status: implemented
 exports: [Event, DefineEvents]
 depends_on: []
+docs:
+  - events/defining-events.mdx
+  - events/event-sourcing.mdx
 ---
 
 # Event & DefineEvents

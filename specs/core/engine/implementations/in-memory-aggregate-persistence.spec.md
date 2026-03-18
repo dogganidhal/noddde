@@ -2,9 +2,11 @@
 title: "InMemoryAggregatePersistence"
 module: engine/implementations/in-memory-aggregate-persistence
 source_file: packages/core/src/engine/implementations/in-memory-aggregate-persistence.ts
-status: ready
+status: implemented
 exports: [InMemoryEventSourcedAggregatePersistence, InMemoryStateStoredAggregatePersistence]
 depends_on: [engine/domain, edd/event]
+docs:
+  - infrastructure/in-memory-implementations.mdx
 ---
 
 # InMemoryAggregatePersistence

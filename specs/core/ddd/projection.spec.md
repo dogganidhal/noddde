@@ -2,9 +2,14 @@
 title: "ProjectionTypes, Projection, defineProjection & Infer Utilities"
 module: ddd/projection
 source_file: packages/core/src/ddd/projection.ts
-status: ready
+status: implemented
 exports: [ProjectionTypes, Projection, defineProjection, InferProjectionView, InferProjectionEvents, InferProjectionQueries, InferProjectionInfrastructure]
 depends_on: [edd/event, cqrs/query/query, cqrs/query/query-handler, infrastructure/index]
+docs:
+  - projections/overview.mdx
+  - projections/functional-projections.mdx
+  - projections/connecting-events.mdx
+  - projections/legacy-projections.mdx
 ---
 
 # ProjectionTypes, Projection, defineProjection & Infer Utilities

@@ -8,6 +8,7 @@ depends_on: []
   # Choose the relevant dependency:
   # - core/engine/domain  (for StateStoredAggregatePersistence or EventSourcedAggregatePersistence)
   # - core/engine/domain  (for SagaPersistence)
+docs: []  # Documentation pages covering this module (paths relative to packages/docs/content/docs/)
 ---
 
 # [PersistenceName] Persistence Implementation

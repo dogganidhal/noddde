@@ -8,6 +8,7 @@ depends_on:
   - core/ddd/projection
   - core/edd/event
   - core/cqrs/query
+docs: []  # Documentation pages covering this module (paths relative to packages/docs/content/docs/)
 ---
 
 # [ProjectionName] Projection

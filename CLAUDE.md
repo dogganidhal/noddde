@@ -86,11 +86,12 @@ Example: `packages/core/src/ddd/aggregate-root.ts` → `specs/core/ddd/aggregate
   Step 3: IMPLEMENT     → Write code to make tests pass
   Step 4: TEST (GREEN)  → Run tests — loop back to step 3 if RED
   Step 5: VALIDATE      → Final cross-check
+  Step 6: DOCS          → Update documentation pages
 ```
 
 | Command | Purpose |
 |---------|---------|
-| `/spec <description>` | Full pipeline: describe what you want, Claude handles all 5 steps |
+| `/spec <description>` | Full pipeline: describe what you want, Claude handles all 6 steps |
 | `/spec-status` | Show all specs and their pipeline position |
 
 ### How It Works
@@ -98,7 +99,7 @@ Example: `packages/core/src/ddd/aggregate-root.ts` → `specs/core/ddd/aggregate
 1. You describe the change: `"Add a PostgreSQL event store"`, `"Fix the empty event array bug"`, `"Add metadata to events"`
 2. Claude **plans step 1** (the spec) and presents it for approval
 3. You approve (or give feedback)
-4. Claude **executes steps 2→3→4→5 autonomously**, looping step 3↔4 if tests fail
+4. Claude **executes steps 2→3→4→5→6 autonomously**, looping step 3↔4 if tests fail
 5. Claude **pauses only when**:
    - **Breaking change detected** — asks how to handle it
    - **Stuck** — same test fails 3 times, escalates to you
@@ -135,6 +136,7 @@ Everything between gates runs without asking.
     → implements code
     → runs tests (GREEN: 8/8 passing)
     → validates (PASS)
+    → updates documentation (2 pages updated)
     → done
 ```
 
@@ -147,6 +149,7 @@ Everything between gates runs without asking.
     → fixes implementation
     → runs tests (all GREEN)
     → validates
+    → updates documentation (1 code example updated)
     → done
 ```
 
@@ -159,6 +162,7 @@ Everything between gates runs without asking.
     → shows impact: 3 specs, 3 samples → you choose "deprecate"
     → adds @deprecated, migration notes
     → generates tests → implements → GREEN → validates
+    → updates documentation (5 pages updated, deprecation notices added)
     → done
 ```
 
@@ -228,6 +232,7 @@ Before marking a spec as `implemented`:
 - [ ] `npx tsc --noEmit` passes in `packages/core`
 - [ ] `CODEARTIFACT_AUTH_TOKEN="" npx vitest run` passes in `packages/core`
 - [ ] No `throw new Error("Not implemented")` remains in the source file
+- [ ] Documentation pages referencing changed exports are up to date
 
 ## Spec Authority Principle
 

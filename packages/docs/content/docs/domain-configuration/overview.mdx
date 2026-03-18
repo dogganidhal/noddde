@@ -66,7 +66,7 @@ Four top-level sections, each with a distinct responsibility:
 
 ## The Domain Class
 
-The `Domain` class exposes two main capabilities:
+The `Domain` class exposes three main capabilities:
 
 ### Dispatching Commands
 
@@ -89,6 +89,14 @@ const { commandBus, eventBus, queryBus } = domain.infrastructure;
 ```
 
 The `infrastructure` getter returns the merged custom infrastructure and CQRS infrastructure.
+
+### Reading Projection Views
+
+```ts
+const view = domain.getProjectionView<BankAccountView>("BankAccount");
+```
+
+The `getProjectionView` method returns the current in-memory view for a named projection. The projection name is the key under which the projection was registered in `readModel.projections`. Returns `undefined` if no events have been processed by the projection yet. Useful for testing and debugging.
 
 ## Complete Example
 

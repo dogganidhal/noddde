@@ -185,8 +185,8 @@ type BankAccountProjectionDef = {
 const BankAccountProjection = defineProjection<BankAccountProjectionDef>({
   reducers: { /* ... */ },
   queryHandlers: {
-    GetBankAccountById: async (query, { bankAccountViewRepository }) =>
-      bankAccountViewRepository.getById(query.payload.id),
+    GetBankAccountById: async (payload, { bankAccountViewRepository }) =>
+      bankAccountViewRepository.getById(payload.id),
   },
 });
 ```

@@ -9,7 +9,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 
 Turn a behavioral specification into working code. Tests already exist and are RED — your job is to make them GREEN.
 
-This is **step 3** of the 5-step pipeline:
+This is **step 3** of the 6-step pipeline:
 
 ```
   1. /new-spec or /edit-spec    ✅ Done
@@ -17,6 +17,7 @@ This is **step 3** of the 5-step pipeline:
 → 3. /implement-spec            Write the implementation code
   4. /run-tests                  Run tests (GREEN)
   5. /validate-spec              Cross-check
+  6. /update-docs                Update documentation
 ```
 
 **Key principle**: This step writes ONLY implementation code. It does NOT generate tests — that was step 2. If tests don't exist yet, stop and tell the developer to run `/generate-tests` first.

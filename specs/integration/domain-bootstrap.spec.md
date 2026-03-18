@@ -8,13 +8,16 @@ source_file:
   - packages/core/src/engine/implementations/in-memory-query-bus.ts
   - packages/core/src/engine/implementations/in-memory-aggregate-persistence.ts
   - packages/core/src/engine/implementations/in-memory-saga-persistence.ts
-status: ready
+status: implemented
 exports: []
 depends_on:
   - core/engine/domain
   - core/ddd/aggregate-root
   - core/ddd/projection
   - core/ddd/saga
+docs:
+  - domain-configuration/overview.mdx
+  - getting-started/quick-start.mdx
 ---
 
 # Domain Bootstrap

@@ -2,9 +2,11 @@
 title: "QueryHandler"
 module: cqrs/query/query-handler
 source_file: packages/core/src/cqrs/query/query-handler.ts
-status: ready
+status: implemented
 exports: [QueryHandler]
 depends_on: [cqrs/query/query, infrastructure/index]
+docs:
+  - queries/query-handlers.mdx
 ---
 
 # QueryHandler

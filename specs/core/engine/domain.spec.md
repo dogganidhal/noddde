@@ -2,7 +2,7 @@
 title: "Domain, DomainConfiguration & configureDomain"
 module: engine/domain
 source_file: packages/core/src/engine/domain.ts
-status: ready
+status: implemented
 exports: [Domain, DomainConfiguration, configureDomain]
 depends_on:
   - engine/implementations/ee-event-bus
@@ -17,6 +17,11 @@ depends_on:
   - cqrs/query/query
   - edd/event
   - infrastructure
+docs:
+  - domain-configuration/overview.mdx
+  - domain-configuration/write-model.mdx
+  - domain-configuration/read-model.mdx
+  - domain-configuration/infrastructure.mdx
 ---
 
 # Domain, DomainConfiguration & configureDomain

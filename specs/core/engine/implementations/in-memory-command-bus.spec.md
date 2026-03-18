@@ -5,6 +5,8 @@ source_file: packages/core/src/engine/implementations/in-memory-command-bus.ts
 status: implemented
 exports: [InMemoryCommandBus]
 depends_on: [cqrs/command/command-bus, cqrs/command/command]
+docs:
+  - infrastructure/in-memory-implementations.mdx
 ---
 
 # InMemoryCommandBus

@@ -1,6 +1,6 @@
 ---
 name: validate-spec
-description: "Internal procedure for Step 5. Use /spec instead — it orchestrates the full pipeline. This skill contains detailed instructions for validating implementation against spec."
+description: "Internal procedure for Step 5. Use /spec instead — it orchestrates the full 6-step pipeline. This skill contains detailed instructions for validating implementation against spec."
 user-invocable: false
 allowed-tools: Read, Glob, Grep, Bash, Agent
 ---
@@ -9,7 +9,7 @@ allowed-tools: Read, Glob, Grep, Bash, Agent
 
 Final cross-check: verify the implementation fully satisfies the spec, beyond just passing tests.
 
-This is **step 5** of the 5-step pipeline:
+This is **step 5** of the 6-step pipeline:
 
 ```
   1. /new-spec or /edit-spec    ✅ Done
@@ -17,6 +17,7 @@ This is **step 5** of the 5-step pipeline:
   3. /implement-spec            ✅ Done
   4. /run-tests                 ✅ Done (GREEN)
 → 5. /validate-spec             Final audit
+  6. /update-docs               Update documentation
 ```
 
 **Why this step exists**: Tests can pass while the implementation still drifts from the spec — missing exports, unenforced invariants, unhandled edge cases, leftover stubs. This step catches that.
@@ -111,6 +112,25 @@ cd packages/core && CODEARTIFACT_AUTH_TOKEN="" npx vitest run --reporter=verbose
 cd packages/core && npx tsc --noEmit
 ```
 
+## Step 7.5: Documentation Staleness Check
+
+If the spec has a `docs` frontmatter field, check documentation coverage:
+
+1. Read each listed documentation page
+2. For each page, find code blocks that import from `@noddde/core` and reference the spec's exports
+3. Check if those code examples still match the current API signatures
+4. Report any stale documentation:
+
+```
+Documentation Coverage:
+  Pages listed in spec: <N>
+  Pages with stale code examples: <N>
+    - <page-path> (uses old signature for <export>)
+  Pages discovered via grep but not in spec: <N>
+```
+
+This is a **warning**, not a hard failure — documentation updates happen in step 6.
+
 ## Step 8: Validation Report
 
 ```
@@ -157,10 +177,11 @@ Action required:
 ```
 ✅ Spec fully validated: <spec-path>
 
-The 5-step pipeline is complete:
+The 6-step pipeline continues:
   1. ✅ Spec written
   2. ✅ Tests generated (were RED)
   3. ✅ Implementation written
   4. ✅ Tests GREEN
   5. ✅ Validation PASS
+  → 6. Update documentation (next step)
 ```

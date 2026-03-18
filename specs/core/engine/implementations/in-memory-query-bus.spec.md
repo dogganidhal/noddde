@@ -2,9 +2,11 @@
 title: "InMemoryQueryBus"
 module: engine/implementations/in-memory-query-bus
 source_file: packages/core/src/engine/implementations/in-memory-query-bus.ts
-status: ready
+status: implemented
 exports: [InMemoryQueryBus]
 depends_on: [cqrs/query/query-bus, cqrs/query/query, cqrs/query/query-handler]
+docs:
+  - infrastructure/in-memory-implementations.mdx
 ---
 
 # InMemoryQueryBus

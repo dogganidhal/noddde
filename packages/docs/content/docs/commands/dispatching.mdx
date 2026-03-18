@@ -51,8 +51,8 @@ Here is the step-by-step lifecycle of a dispatched command:
 
 The framework looks up the command's `name` in the registered aggregates. It scans the `commands` map of each aggregate in the `writeModel.aggregates` configuration to find a matching handler.
 
-- If the command name matches a key in an aggregate's `commands` map, the command is routed to that aggregate.
-- If the command name matches a key in `writeModel.standaloneCommandHandlers`, it is routed to the standalone handler instead.
+- If the command name matches a key in an aggregate's `commands` map, the command is routed directly to that aggregate's command lifecycle (load, handle, persist, publish).
+- If no aggregate handles the command, it falls through to the `CommandBus`, which routes it to standalone command handlers that were registered during domain initialization.
 
 ### Step 3: Load Aggregate State
 

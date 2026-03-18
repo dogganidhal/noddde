@@ -17,6 +17,8 @@ exports:
   - SymbolName2
 depends_on:
   - module/path/of/dependency
+docs:
+  - category/page-name.mdx
 ---
 
 # Title
@@ -116,7 +118,7 @@ Layer 6 (integration): command-dispatch-lifecycle, event-projection-flow,
 
 **Breaking change propagation**: When a spec changes, all specs that transitively depend on it may be affected. The `/edit-spec` skill walks this graph automatically.
 
-## The 5-Step Pipeline
+## The 6-Step Pipeline
 
 Every change follows a strict RED→GREEN pipeline, driven by a single command:
 
@@ -124,14 +126,15 @@ Every change follows a strict RED→GREEN pipeline, driven by a single command:
 /spec "describe what you want"
 ```
 
-Claude orchestrates all 5 steps autonomously, only pausing at gate points:
+Claude orchestrates all 6 steps autonomously, only pausing at gate points:
 
 ```
   Gate ──→ Step 1: SPEC         Write/edit the spec → developer approves
            Step 2: TEST (RED)   Generate tests, confirm they fail
            Step 3: IMPLEMENT    Write code to make tests pass
   Loop ──→ Step 4: TEST (GREEN) Run tests — loop to step 3 if RED
-           Step 5: VALIDATE     Final cross-check → report
+           Step 5: VALIDATE     Final cross-check
+           Step 6: DOCS         Update documentation pages → report
 ```
 
 **Why RED before GREEN**: Tests are generated (step 2) before the implementation (step 3). This proves they catch missing behavior. You'll see `🔴 8 RED` become `✅ 8 GREEN`.
@@ -146,16 +149,16 @@ Claude orchestrates all 5 steps autonomously, only pausing at gate points:
 ```
 /spec "Add a PostgreSQL event store"
   → Claude drafts spec, shows plan → you approve
-  → generates 8 RED tests → implements → 8 GREEN → validates → done
+  → generates 8 RED tests → implements → 8 GREEN → validates → updates docs → done
 
 /spec "Fix: dispatchCommand crashes on empty event arrays"
   → Claude finds domain.spec.md, adds edge case → you approve
-  → adds 1 RED test → fixes code → all GREEN → done
+  → adds 1 RED test → fixes code → all GREEN → updates docs → done
 
 /spec "Command handlers should also receive the aggregate name"
   → Claude edits aggregate.spec.md → you approve
   → ⚠️ breaking change detected → you choose "deprecate"
-  → tests → implement → GREEN → done
+  → tests → implement → GREEN → updates docs → done
 ```
 
 ## Writing Specs
@@ -182,6 +185,7 @@ Before a spec reaches `ready`:
 - [ ] Edge cases cover empty inputs, error states, boundary values
 - [ ] Test scenarios have compilable TypeScript code blocks
 - [ ] `depends_on` lists all specs this module consumes types from
+- [ ] `docs` lists all documentation pages covering this module (paths relative to `packages/docs/content/docs/`)
 
 ## Test Generation
 
@@ -200,7 +204,7 @@ The `## Test Scenarios` section maps directly to vitest test files:
 
 | Command | Purpose |
 |---------|---------|
-| `/spec <description>` | Full pipeline: spec → RED tests → implement → GREEN tests → validate |
+| `/spec <description>` | Full pipeline: spec → RED tests → implement → GREEN tests → validate → update docs |
 | `/spec-status` | Show all specs and their pipeline position |
 
 That's it. Two commands. Claude handles the rest.

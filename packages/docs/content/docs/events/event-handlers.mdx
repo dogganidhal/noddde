@@ -5,11 +5,29 @@ description: Side-effect handlers that react to events in projections, updating 
 
 ## What Are Event Handlers?
 
-Event handlers react to events **after** they have been persisted. They are the place for side effects: updating read models, sending notifications, triggering external APIs, or dispatching further commands. They live in projections and receive the event payload along with your domain infrastructure.
+Event handlers react to events **after** they have been persisted. In noddde, projections use **reducer functions** that receive the full event and the current view, returning a new view. This is fundamentally different from [apply handlers](/docs/events/apply-handlers), which evolve aggregate state.
 
-Event handlers are fundamentally different from [apply handlers](/docs/events/apply-handlers). Where apply handlers are pure state transitions inside aggregates, event handlers are impure -- they exist precisely to perform side effects.
+noddde also provides a standalone `EventHandler` type for impure, infrastructure-aware handlers (used in sagas and standalone event processing), while projection reducers are pure view builders.
 
-## The EventHandler Type
+## Projection Reducers
+
+Projections use reducer functions defined in the `reducers` map. Each reducer receives the full event object and the current view, returning the updated view:
+
+```typescript
+// Reducer signature (in projections)
+(event: TEvent, view: TView) => TView | Promise<TView>
+```
+
+| Parameter | Description |
+|---|---|
+| `event` | The full event object (`{ name, payload }`) |
+| `view` | The current projection view state |
+
+The reducer returns the new view state. It can be async for I/O-bound operations.
+
+## The EventHandler Type (standalone)
+
+For standalone event processing outside projections (e.g., notifications, external API calls), the `EventHandler` type provides infrastructure access:
 
 ```typescript
 type EventHandler<
@@ -21,229 +39,159 @@ type EventHandler<
 ) => void | Promise<void>;
 ```
 
-| Parameter | Description |
-|---|---|
-| `event` | The event's **payload** (the data describing what happened) |
-| `infrastructure` | Your domain infrastructure (repositories, loggers, external services) |
-
-The handler returns `void` or `Promise<void>`. It does not return events or state -- its purpose is side effects.
+This type is used in sagas and standalone handlers, not in projections.
 
 ## Event Handlers vs Apply Handlers
 
-| Aspect | Apply Handler | Event Handler |
+| Aspect | Apply Handler | Projection Reducer |
 |---|---|---|
-| Purpose | Update aggregate state | Perform side effects |
-| Location | Inside aggregate (`apply` map) | Inside projection (`eventHandlers` map) |
-| Pure | Yes -- no side effects allowed | No -- side effects are the point |
+| Purpose | Update aggregate state | Build projection views |
+| Location | Inside aggregate (`apply` map) | Inside projection (`reducers` map) |
+| Pure | Yes -- no side effects allowed | Ideally pure (returns new view) |
 | Async | No | Yes (can be `async`) |
-| Receives infrastructure | No | Yes |
-| Return value | New state | `void` |
+| Receives | Event payload + current state | Full event + current view |
+| Return value | New state | New view |
 | Called during replay | Yes | No (only on new events) |
 
-The key distinction: apply handlers are called during event replay (to rebuild aggregate state), so they must be pure. Event handlers are called only when **new** events are published, so they can safely perform side effects.
+The key distinction: apply handlers are called during event replay (to rebuild aggregate state), so they must be pure. Projection reducers are called only when **new** events are published, and they build read-optimized views.
 
-## Event Handlers in Projections
+## Reducers in Projections
 
-Event handlers are defined in the `eventHandlers` map of a projection:
+Reducers are defined in the `reducers` map of a projection:
 
 ```typescript
-import { Projection } from "@noddde/core";
-import { BankingInfrastructure } from "./infrastructure";
-import { BankAccountEvent } from "./events";
+import { defineProjection } from "@noddde/core";
 
-export const BankAccountProjection: Projection<
-  BankingInfrastructure,
-  BankAccountEvent["name"]
-> = {
+type BankAccountProjectionDef = {
+  events: BankAccountEvent;
+  queries: BankAccountQuery;
+  view: BankAccountView;
+  infrastructure: BankingInfrastructure;
+};
+
+export const BankAccountProjection = defineProjection<BankAccountProjectionDef>({
+  reducers: {
+    BankAccountCreated: (event, view) => ({
+      ...view,
+      id: event.payload.id,
+      balance: 0,
+    }),
+    TransactionProcessed: (event, view) => ({
+      ...view,
+      balance: view.balance + event.payload.amount,
+    }),
+    TransactionAuthorized: (_event, view) => view,
+    TransactionDeclined: (_event, view) => view,
+  },
   queryHandlers: {
     // ... query handlers
   },
-  eventHandlers: {
-    BankAccountCreated: (event, { bankAccountViewRepository }) => {
-      bankAccountViewRepository.insert(event);
-    },
-    TransactionAuthorized: (_event, _infrastructure) => {},
-    TransactionDeclined: (_event, _infrastructure) => {},
-    TransactionProcessed: (_event, _infrastructure) => {},
-  },
-};
+});
 ```
 
-Each key in `eventHandlers` corresponds to an event name. When that event is published to the event bus, the matching handler is invoked.
+Each key in `reducers` corresponds to an event name. When that event is published to the event bus, the matching reducer is called with the full event and the current view, and it returns the updated view.
 
-## Infrastructure Access
+## Common Reducer Patterns
 
-Event handlers receive your full domain infrastructure as the second parameter. This gives them access to repositories, external service clients, and other tools needed for side effects:
+### Building Read Model Views
+
+The most common use case. Reducers project events into denormalized views optimized for queries:
 
 ```typescript
-eventHandlers: {
-  BankAccountCreated: (event, { bankAccountViewRepository }) => {
-    // Insert into the read model
-    bankAccountViewRepository.insert(event);
+reducers: {
+  BankAccountCreated: (event, view) => ({
+    ...view,
+    id: event.payload.id,
+    balance: 0,
+    transactions: [],
+  }),
+
+  TransactionProcessed: (event, view) => ({
+    ...view,
+    balance: view.balance + event.payload.amount,
+  }),
+},
+```
+
+### Identity Reducers
+
+Sometimes a projection subscribes to an event but does not need to update the view. Return the view unchanged:
+
+```typescript
+reducers: {
+  TransactionAuthorized: (_event, view) => view,
+  TransactionDeclined: (_event, view) => view,
+},
+```
+
+### Async Reducers
+
+Reducers can be asynchronous when they need I/O (e.g., enriching the view from an external source):
+
+```typescript
+reducers: {
+  BankAccountCreated: async (event, view) => {
+    // Async operations are awaited by the framework
+    return { ...view, id: event.payload.id, balance: 0 };
   },
 },
 ```
 
-Infrastructure is destructured directly from the second parameter, giving you access to exactly the services you need.
-
-## Common Use Cases
-
-### Updating Read Models
-
-The most common use case. Event handlers project events into denormalized read models optimized for queries:
-
-```typescript
-eventHandlers: {
-  BankAccountCreated: (event, { bankAccountViewRepository }) => {
-    bankAccountViewRepository.insert({
-      id: event.id,
-      balance: 0,
-      transactions: [],
-    });
-  },
-
-  TransactionProcessed: async (event, { bankAccountViewRepository }) => {
-    await bankAccountViewRepository.update({
-      id: event.id,
-      // Update the view with the processed transaction details
-    });
-  },
-},
-```
-
-### Sending Notifications
-
-React to domain events by notifying users or external systems:
-
-```typescript
-eventHandlers: {
-  TransactionDeclined: async (event, { notificationService }) => {
-    await notificationService.send({
-      to: event.accountHolder,
-      message: `Transaction of ${event.amount} at ${event.merchant} was declined.`,
-    });
-  },
-},
-```
-
-### Triggering Downstream Processes
-
-Use event handlers to kick off further domain actions:
-
-```typescript
-eventHandlers: {
-  OrderPlaced: async (event, { commandBus }) => {
-    // Trigger inventory reservation when an order is placed
-    await commandBus.dispatch({
-      name: "ReserveInventory",
-      targetAggregateId: event.orderId,
-      payload: { items: event.items },
-    });
-  },
-},
-```
-
-### Logging and Auditing
-
-```typescript
-eventHandlers: {
-  TransactionAuthorized: (event, { auditLogger }) => {
-    auditLogger.record({
-      type: "transaction_authorized",
-      timestamp: event.timestamp,
-      amount: event.amount,
-      merchant: event.merchant,
-    });
-  },
-},
-```
-
-## Async Event Handlers
-
-Event handlers can be asynchronous. This is common when they interact with databases, APIs, or other I/O-bound services:
-
-```typescript
-eventHandlers: {
-  BankAccountCreated: async (event, { bankAccountViewRepository }) => {
-    await bankAccountViewRepository.insert({
-      id: event.id,
-      balance: 0,
-      transactions: [],
-    });
-  },
-},
-```
-
-The framework awaits async handlers before considering the event fully processed.
-
-## No-Op Event Handlers
-
-Sometimes a projection subscribes to an event but does not need to act on it. This is valid -- the handler can be a no-op:
-
-```typescript
-eventHandlers: {
-  TransactionAuthorized: (_event, _infrastructure) => {},
-  TransactionDeclined: (_event, _infrastructure) => {},
-},
-```
-
-This commonly occurs when a projection only cares about a subset of an aggregate's events (e.g., only `BankAccountCreated` for a read model, but the typing requires handlers for all event names in the projection's generic parameter).
+The framework awaits async reducers before considering the event fully processed.
 
 ## Multiple Projections Handling the Same Event
 
-Different projections can independently handle the same event. Each projection's event handler runs independently:
+Different projections can independently handle the same event. Each projection maintains its own view:
 
 ```typescript
-// Projection 1: Account balances read model
-export const BalancesProjection: Projection<MyInfra, BankAccountEvent["name"]> = {
-  eventHandlers: {
-    TransactionProcessed: async (event, { balancesRepository }) => {
-      await balancesRepository.updateBalance(event.id, event.amount);
-    },
-    // ...
+// Projection 1: Account balances view
+const BalancesProjection = defineProjection<BalancesProjectionDef>({
+  reducers: {
+    TransactionProcessed: (event, view) => ({
+      ...view,
+      balance: view.balance + event.payload.amount,
+    }),
   },
   queryHandlers: { /* ... */ },
-};
+});
 
-// Projection 2: Transaction history read model
-export const TransactionsProjection: Projection<MyInfra, BankAccountEvent["name"]> = {
-  eventHandlers: {
-    TransactionProcessed: async (event, { transactionHistoryRepository }) => {
-      await transactionHistoryRepository.append({
-        accountId: event.id,
-        amount: event.amount,
-        merchant: event.merchant,
-        processedAt: event.timestamp,
-      });
-    },
-    // ...
+// Projection 2: Transaction history view
+const TransactionsProjection = defineProjection<TransactionsProjectionDef>({
+  reducers: {
+    TransactionProcessed: (event, view) => ({
+      ...view,
+      transactions: [...view.transactions, {
+        amount: event.payload.amount,
+        merchant: event.payload.merchant,
+      }],
+    }),
   },
   queryHandlers: { /* ... */ },
-};
+});
 ```
 
-Both projections receive the `TransactionProcessed` event and update their respective read models.
+Both projections receive the `TransactionProcessed` event and build their respective views independently.
 
-## Error Handling in Event Handlers
+## Side Effects via Sagas
 
-If an event handler throws an error, the behavior depends on your event bus implementation. With the built-in `EventEmitterEventBus`, errors in handlers will propagate. In production systems, you may want to:
-
-- Wrap handlers in try/catch for resilience
-- Log failures and continue processing
-- Use a dead-letter mechanism for failed events
+For side effects like sending notifications or dispatching commands in response to events, use [sagas](/docs/sagas/overview) rather than projection reducers. Sagas receive CQRS infrastructure and can dispatch commands:
 
 ```typescript
-eventHandlers: {
-  TransactionProcessed: async (event, { repository, logger }) => {
-    try {
-      await repository.update(event);
-    } catch (error) {
-      logger.error(`Failed to project TransactionProcessed: ${error}`);
-      // Decide: rethrow, ignore, or queue for retry
-    }
+handlers: {
+  TransactionDeclined: async (event, state, { commandBus }) => {
+    await commandBus.dispatch({
+      name: "SendNotification",
+      targetAggregateId: event.payload.accountId,
+      payload: { message: "Transaction declined" },
+    });
+    return { state, commands: [] };
   },
 },
 ```
+
+## Error Handling
+
+If a reducer throws an error, the behavior depends on your event bus implementation. With the built-in `EventEmitterEventBus`, errors propagate from the awaited `dispatch` call. In production systems, consider wrapping reducers with error handling or using a dead-letter mechanism.
 
 ## Next Steps
 

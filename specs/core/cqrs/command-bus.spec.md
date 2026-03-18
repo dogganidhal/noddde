@@ -2,9 +2,11 @@
 title: "CommandBus"
 module: cqrs/command/command-bus
 source_file: packages/core/src/cqrs/command/command-bus.ts
-status: ready
+status: implemented
 exports: [CommandBus]
 depends_on: [cqrs/command/command]
+docs:
+  - commands/dispatching.mdx
 ---
 
 # CommandBus

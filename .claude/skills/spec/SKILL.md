@@ -1,13 +1,13 @@
 ---
 name: spec
-description: "Spec-driven development orchestrator. The single entry point for all spec work: creating features, fixing bugs, evolving APIs. Drives the full 5-step pipeline (spec → RED tests → implement → GREEN tests → validate) autonomously, only pausing for developer approval at gate points. Use when asked to 'add a feature', 'implement', 'fix a bug', 'change the API', 'new spec', 'edit spec', or any development task."
+description: "Spec-driven development orchestrator. The single entry point for all spec work: creating features, fixing bugs, evolving APIs. Drives the full 6-step pipeline (spec → RED tests → implement → GREEN tests → validate → update docs) autonomously, only pausing for developer approval at gate points. Use when asked to 'add a feature', 'implement', 'fix a bug', 'change the API', 'new spec', 'edit spec', or any development task."
 argument-hint: <description of what you want to build or change>
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 ---
 
 # Spec-Driven Development Orchestrator
 
-You are the orchestrator of a 5-step spec-driven pipeline. The developer describes what they want. You plan, execute, loop, and deliver — only pausing at gate points.
+You are the orchestrator of a 6-step spec-driven pipeline. The developer describes what they want. You plan, execute, loop, and deliver — only pausing at gate points.
 
 ## Pipeline Overview
 
@@ -22,6 +22,8 @@ You are the orchestrator of a 5-step spec-driven pipeline. The developer describ
     ↓
   (auto)  ──→ Step 5: VALIDATE     Final cross-check
     ↓
+  (auto)  ──→ Step 6: DOCS         Update documentation pages
+    ↓
   Report  ──→ Done
 ```
 
@@ -30,7 +32,7 @@ You are the orchestrator of a 5-step spec-driven pipeline. The developer describ
 - **Breaking changes**: If detected during step 1 — "Breaking change. How to handle?"
 - **Stuck loop**: If step 3↔4 fails 3+ times on the same test — "I can't fix this. Here's what's happening."
 
-**Everything else runs autonomously.** Don't ask for permission between steps 2→3→4→5.
+**Everything else runs autonomously.** Don't ask for permission between steps 2→3→4→5→6.
 
 ---
 
@@ -274,6 +276,34 @@ Update spec frontmatter: `status: implemented`
 
 ---
 
+## Step 6: Update Documentation
+
+**Run autonomously — no gate.**
+
+1. Read the spec's `docs` frontmatter field for explicitly mapped documentation pages.
+2. Grep `packages/docs/content/docs/` for references to the spec's exports (discover additional pages).
+3. For each affected documentation page:
+   - Update code examples that use changed API signatures
+   - Update explanatory text if behavioral requirements changed
+   - Add deprecation notices if applicable
+4. If this is a new spec (new module), create stub documentation pages in the appropriate category under `packages/docs/content/docs/` and update the category's `meta.json`.
+5. Flag auto-generated API reference pages (in `packages/docs/src/content/docs/api/`) for regeneration if exports changed — do NOT manually edit them.
+6. Report briefly and continue to the Final Report:
+   ```
+   📖 Step 6 complete: Documentation updated
+     Pages updated: <N>
+     Pages created: <N>
+     API reference: <status>
+     Flagged for review: <N>
+   ```
+
+If no documentation updates are needed (internal-only change, no API surface affected):
+   ```
+   📖 Step 6 complete: No documentation updates needed
+   ```
+
+---
+
 ## Final Report
 
 Present the complete result:
@@ -286,6 +316,7 @@ Present the complete result:
   Step 3: Implemented      → <source-path>
   Step 4: Tests GREEN      → <N>/<N> passing
   Step 5: Validated        → <coverage summary>
+  Step 6: Docs updated     → <N> pages updated, <M> created
 
   Status: implemented
   Breaking changes: <none | managed via deprecation | accepted>
