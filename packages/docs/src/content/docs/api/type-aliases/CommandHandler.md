@@ -13,7 +13,7 @@ Defined in: [ddd/aggregate-root.ts:22](https://github.com/dogganidhal/noddde/blo
 
 ### TCommand
 
-`TCommand` *extends* [`AggregateCommand`](/api/interfaces/aggregatecommand/)
+`TCommand` _extends_ [`AggregateCommand`](/api/interfaces/aggregatecommand/)
 
 ### TState
 
@@ -21,11 +21,11 @@ Defined in: [ddd/aggregate-root.ts:22](https://github.com/dogganidhal/noddde/blo
 
 ### TEvents
 
-`TEvents` *extends* [`Event`](/api/interfaces/event/)
+`TEvents` _extends_ [`Event`](/api/interfaces/event/)
 
 ### TInfrastructure
 
-`TInfrastructure` *extends* [`Infrastructure`](/api/type-aliases/infrastructure/) = [`Infrastructure`](/api/type-aliases/infrastructure/)
+`TInfrastructure` _extends_ [`Infrastructure`](/api/type-aliases/infrastructure/) = [`Infrastructure`](/api/type-aliases/infrastructure/)
 
 ## Parameters
 

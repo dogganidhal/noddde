@@ -13,4 +13,4 @@ Defined in: [edd/event.ts:13](https://github.com/dogganidhal/noddde/blob/7fcd7bf
 
 ### TPayloads
 
-`TPayloads` *extends* `Record`\<`string`, `any`\>
+`TPayloads` _extends_ `Record`\<`string`, `any`\>

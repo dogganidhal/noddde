@@ -99,7 +99,10 @@ describe("EventHandler sync/async", () => {
   });
 
   it("should allow asynchronous handler", () => {
-    const handler: EventHandler<Event, Infrastructure> = async (_payload, _infra) => {
+    const handler: EventHandler<Event, Infrastructure> = async (
+      _payload,
+      _infra,
+    ) => {
       // no-op, async
     };
     expect(handler).toBeDefined();

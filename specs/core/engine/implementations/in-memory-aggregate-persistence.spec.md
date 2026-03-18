@@ -3,7 +3,11 @@ title: "InMemoryAggregatePersistence"
 module: engine/implementations/in-memory-aggregate-persistence
 source_file: packages/core/src/engine/implementations/in-memory-aggregate-persistence.ts
 status: implemented
-exports: [InMemoryEventSourcedAggregatePersistence, InMemoryStateStoredAggregatePersistence]
+exports:
+  [
+    InMemoryEventSourcedAggregatePersistence,
+    InMemoryStateStoredAggregatePersistence,
+  ]
 depends_on: [engine/domain, edd/event]
 docs:
   - infrastructure/in-memory-implementations.mdx
@@ -16,12 +20,20 @@ docs:
 ## Type Contract
 
 ```ts
-class InMemoryEventSourcedAggregatePersistence implements EventSourcedAggregatePersistence {
+class InMemoryEventSourcedAggregatePersistence
+  implements EventSourcedAggregatePersistence
+{
   load(aggregateName: string, aggregateId: string): Promise<Event[]>;
-  save(aggregateName: string, aggregateId: string, events: Event[]): Promise<void>;
+  save(
+    aggregateName: string,
+    aggregateId: string,
+    events: Event[],
+  ): Promise<void>;
 }
 
-class InMemoryStateStoredAggregatePersistence implements StateStoredAggregatePersistence {
+class InMemoryStateStoredAggregatePersistence
+  implements StateStoredAggregatePersistence
+{
   load(aggregateName: string, aggregateId: string): Promise<any>;
   save(aggregateName: string, aggregateId: string, state: any): Promise<void>;
 }
@@ -131,7 +143,10 @@ describe("InMemoryEventSourcedAggregatePersistence", () => {
     const loaded = await persistence.load("BankAccount", "acc-1");
 
     expect(loaded).toHaveLength(3);
-    expect(loaded[0]).toEqual({ name: "AccountCreated", payload: { id: "acc-1" } });
+    expect(loaded[0]).toEqual({
+      name: "AccountCreated",
+      payload: { id: "acc-1" },
+    });
     expect(loaded[1]).toEqual({ name: "DepositMade", payload: { amount: 50 } });
     expect(loaded[2]).toEqual({ name: "DepositMade", payload: { amount: 75 } });
   });

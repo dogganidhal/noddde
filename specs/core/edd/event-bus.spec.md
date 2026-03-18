@@ -64,7 +64,10 @@ describe("EventBus", () => {
   it("should accept a narrowed event type", () => {
     type OrderEvent = DefineEvents<{ OrderPlaced: { orderId: string } }>;
     const bus = {} as EventBus;
-    const event: OrderEvent = { name: "OrderPlaced", payload: { orderId: "1" } };
+    const event: OrderEvent = {
+      name: "OrderPlaced",
+      payload: { orderId: "1" },
+    };
     expectTypeOf(bus.dispatch(event)).toEqualTypeOf<Promise<void>>();
   });
 

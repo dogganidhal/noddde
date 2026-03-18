@@ -13,7 +13,7 @@ Defined in: [edd/event-sourcing-handler.ts:3](https://github.com/dogganidhal/nod
 
 ### TEvent
 
-`TEvent` *extends* [`Event`](/api/interfaces/event/)
+`TEvent` _extends_ [`Event`](/api/interfaces/event/)
 
 ### TState
 

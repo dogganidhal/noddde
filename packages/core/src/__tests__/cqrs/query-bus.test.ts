@@ -1,10 +1,5 @@
-import { describe, it, expectTypeOf } from "vitest";
-import type {
-  QueryBus,
-  Query,
-  DefineQueries,
-  QueryResult,
-} from "@noddde/core";
+import { describe, expectTypeOf, it } from "vitest";
+import type { DefineQueries, Query, QueryBus } from "@noddde/core";
 
 describe("QueryBus", () => {
   interface UserView {

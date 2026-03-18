@@ -13,11 +13,11 @@ Defined in: [cqrs/command/command-handler.ts:4](https://github.com/dogganidhal/n
 
 ### TInfrastructure
 
-`TInfrastructure` *extends* [`Infrastructure`](/api/type-aliases/infrastructure/)
+`TInfrastructure` _extends_ [`Infrastructure`](/api/type-aliases/infrastructure/)
 
 ### TCommand
 
-`TCommand` *extends* [`StandaloneCommand`](/api/type-aliases/standalonecommand/)
+`TCommand` _extends_ [`StandaloneCommand`](/api/type-aliases/standalonecommand/)
 
 ## Parameters
 

@@ -19,7 +19,7 @@ Defined in: [cqrs/command/command.ts:1](https://github.com/dogganidhal/noddde/bl
 
 Defined in: [cqrs/command/command.ts:2](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/cqrs/command/command.ts#L2)
 
-***
+---
 
 ### payload?
 

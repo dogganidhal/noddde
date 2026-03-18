@@ -1,11 +1,11 @@
-import { describe, it, expect, expectTypeOf } from "vitest";
+/* eslint-disable no-unused-vars */
+import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
-  QueryHandler,
+  CQRSInfrastructure,
   DefineQueries,
-  QueryResult,
   Infrastructure,
   Query,
-  CQRSInfrastructure,
+  QueryHandler,
 } from "@noddde/core";
 
 describe("QueryHandler", () => {
@@ -49,7 +49,9 @@ describe("QueryHandler sync/async", () => {
   });
 
   it("should allow asynchronous handler", async () => {
-    const handler: QueryHandler<Infrastructure, Query<number>> = async (_payload) => {
+    const handler: QueryHandler<Infrastructure, Query<number>> = async (
+      _payload,
+    ) => {
       return 42;
     };
     await expect(handler({}, {})).resolves.toBe(42);
@@ -60,6 +62,8 @@ describe("QueryHandler infrastructure isolation", () => {
   type Handler = QueryHandler<Infrastructure, Query<string>>;
 
   it("should not have commandBus in infrastructure", () => {
-    expectTypeOf<Parameters<Handler>[1]>().not.toMatchTypeOf<CQRSInfrastructure>();
+    expectTypeOf<
+      Parameters<Handler>[1]
+    >().not.toMatchTypeOf<CQRSInfrastructure>();
   });
 });

@@ -13,7 +13,7 @@ Defined in: [ddd/projection.ts:28](https://github.com/dogganidhal/noddde/blob/7f
 
 ### TEvent
 
-`TEvent` *extends* [`Event`](/api/interfaces/event/)
+`TEvent` _extends_ [`Event`](/api/interfaces/event/)
 
 ### TView
 

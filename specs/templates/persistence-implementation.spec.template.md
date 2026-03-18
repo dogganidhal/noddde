@@ -4,11 +4,12 @@ module: engine/implementations/[persistence-name]
 source_file: packages/[package]/src/[path]/[persistence-name].ts
 status: draft
 exports: [[PersistenceName]]
-depends_on: []
+depends_on:
+  []
   # Choose the relevant dependency:
   # - core/engine/domain  (for StateStoredAggregatePersistence or EventSourcedAggregatePersistence)
   # - core/engine/domain  (for SagaPersistence)
-docs: []  # Documentation pages covering this module (paths relative to packages/docs/content/docs/)
+docs: [] # Documentation pages covering this module (paths relative to packages/docs/content/docs/)
 ---
 
 # [PersistenceName] Persistence Implementation
@@ -326,7 +327,6 @@ describe("[PersistenceName] - connection errors", () => {
   it("should [throw/retry/queue] when the storage backend is unavailable", async () => {
     // TODO: Configure persistence with an invalid connection
     // const persistence = new [PersistenceName]({ connectionString: "invalid://..." });
-
     // TODO: Verify error behavior
     // await expect(persistence.load("Agg", "id-1")).rejects.toThrow();
   });

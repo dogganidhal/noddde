@@ -19,7 +19,7 @@ Defined in: [cqrs/query/query-bus.ts:4](https://github.com/dogganidhal/noddde/bl
 
 ##### TQuery
 
-`TQuery` *extends* [`Query`](/api/interfaces/query/)\<`any`, `string`\>
+`TQuery` _extends_ [`Query`](/api/interfaces/query/)\<`any`, `string`\>
 
 #### Parameters
 

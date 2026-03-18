@@ -70,6 +70,7 @@ Replace `throw new Error("Not implemented")` stubs with working code.
   - Projection reducers: `(event, view) => view | Promise<view>`
 
 **For each behavioral requirement**:
+
 1. Read the requirement
 2. Implement it
 3. Check: does the implementation satisfy the invariants?

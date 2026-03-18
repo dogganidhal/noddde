@@ -39,14 +39,14 @@ This is **step 1** of the 6-step pipeline (the "edit" variant):
 
 Classify the requested change:
 
-| Change type | Examples | Risk level |
-|------------|----------|------------|
-| **Additive** | New export, new behavioral requirement, new edge case, new test scenario | Safe |
-| **Clarification** | Reword requirement, add detail to type contract, fix typo | Safe |
-| **Narrowing** | Tighten a return type, add a required field, remove an optional behavior | ⚠️ Potentially breaking |
-| **Widening** | Accept more input types, make a field optional, add a union variant | Usually safe |
-| **Removal** | Remove an export, delete a behavioral requirement, drop a handler | 🔴 Breaking |
-| **Signature change** | Different parameters, different return type, renamed type | 🔴 Breaking |
+| Change type          | Examples                                                                 | Risk level              |
+| -------------------- | ------------------------------------------------------------------------ | ----------------------- |
+| **Additive**         | New export, new behavioral requirement, new edge case, new test scenario | Safe                    |
+| **Clarification**    | Reword requirement, add detail to type contract, fix typo                | Safe                    |
+| **Narrowing**        | Tighten a return type, add a required field, remove an optional behavior | ⚠️ Potentially breaking |
+| **Widening**         | Accept more input types, make a field optional, add a union variant      | Usually safe            |
+| **Removal**          | Remove an export, delete a behavioral requirement, drop a handler        | 🔴 Breaking             |
+| **Signature change** | Different parameters, different return type, renamed type                | 🔴 Breaking             |
 
 ## Step 3: Make the Changes
 
@@ -118,24 +118,30 @@ How would you like to handle this?
 ```
 
 **If option 1 (additive)**:
+
 - Keep old exports in the type contract
 - Add new exports alongside
 - Update `exports` frontmatter to include both
 
 **If option 2 (deprecate)**:
+
 - Add `@deprecated` annotation to old types in the type contract
 - Add a `## Migration` section to the spec:
+
   ```markdown
   ## Migration
 
   ### From `OldTypeName` to `NewTypeName` (since <version>)
+
   - `OldTypeName` is deprecated and will be removed in the next major version
   - Replace `OldTypeName` with `NewTypeName`
   - Change: <description of what changed and why>
   ```
+
 - Add `## Deprecations` to the spec frontmatter for tracking
 
 **If option 3 (accept)**:
+
 - List every downstream spec that needs updating
 - For each: describe the specific change needed
 - Ask the developer: "Shall I update all <N> downstream specs now, or flag them for manual review?"
@@ -146,6 +152,7 @@ How would you like to handle this?
   - If `>=1.0.0`: state "this requires a major version bump to <next major>"
 
 **If option 4 (abort)**:
+
 - Revert all changes to the spec
 - Confirm to the developer
 

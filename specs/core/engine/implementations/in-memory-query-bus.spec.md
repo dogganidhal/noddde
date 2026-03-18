@@ -17,7 +17,9 @@ docs:
 
 ```ts
 class InMemoryQueryBus implements QueryBus {
-  dispatch<TQuery extends Query<any>>(query: TQuery): Promise<QueryResult<TQuery>>;
+  dispatch<TQuery extends Query<any>>(
+    query: TQuery,
+  ): Promise<QueryResult<TQuery>>;
 }
 ```
 
@@ -98,9 +100,9 @@ describe("InMemoryQueryBus", () => {
   it("should throw when dispatching a query with no registered handler", async () => {
     const bus = new InMemoryQueryBus();
 
-    await expect(
-      bus.dispatch({ name: "UnknownQuery" }),
-    ).rejects.toThrow(/no handler/i);
+    await expect(bus.dispatch({ name: "UnknownQuery" })).rejects.toThrow(
+      /no handler/i,
+    );
   });
 });
 ```
@@ -167,9 +169,9 @@ describe("InMemoryQueryBus", () => {
       throw new Error("Database connection failed");
     });
 
-    await expect(
-      bus.dispatch({ name: "BrokenQuery" }),
-    ).rejects.toThrow("Database connection failed");
+    await expect(bus.dispatch({ name: "BrokenQuery" })).rejects.toThrow(
+      "Database connection failed",
+    );
   });
 });
 ```

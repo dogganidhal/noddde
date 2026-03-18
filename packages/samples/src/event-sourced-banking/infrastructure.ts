@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import { BankAccountView, TransactionView } from "./queries";
 import { SetRequired } from "type-fest";
 

@@ -25,6 +25,7 @@ This is **step 5** of the 6-step pipeline:
 ## Step 1: Find Spec and Source
 
 Accept either a spec path or source file path:
+
 - Spec → source: read `source_file` from frontmatter
 - Source → spec: replace `packages/core/src/` with `specs/core/`, `.ts` with `.spec.md`
 
@@ -43,6 +44,7 @@ Export Coverage:
 ```
 
 Flags:
+
 - ❌ = spec promises this export but it's missing → implementation gap
 - ⚠️ = source exports something the spec doesn't mention → spec may be incomplete, or export is internal
 
@@ -167,6 +169,7 @@ Tests: <test-file>
 ```
 
 ### If FAIL
+
 ```
 Action required:
   1. <list specific items to fix>
@@ -174,6 +177,7 @@ Action required:
 ```
 
 ### If PASS
+
 ```
 ✅ Spec fully validated: <spec-path>
 

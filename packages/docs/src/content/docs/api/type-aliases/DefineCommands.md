@@ -13,7 +13,7 @@ Defined in: [cqrs/command/command.ts:20](https://github.com/dogganidhal/noddde/b
 
 ### TPayloads
 
-`TPayloads` *extends* `Record`\<`string`, `any`\>
+`TPayloads` _extends_ `Record`\<`string`, `any`\>
 
 ### TID
 

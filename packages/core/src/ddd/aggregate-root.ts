@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import { Event } from "../edd/event";
 import { ApplyHandler } from "../edd/event-sourcing-handler";
 import { AggregateCommand } from "../cqrs/command/command";

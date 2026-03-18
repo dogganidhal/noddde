@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import { Event } from "../edd/event";
 import { Command } from "../cqrs/command/command";
 import { Infrastructure, CQRSInfrastructure } from "../infrastructure";
@@ -88,9 +89,7 @@ export type SagaEventHandler<
   event: TEvent,
   state: TState,
   infrastructure: TInfrastructure & CQRSInfrastructure,
-) =>
-  | SagaReaction<TState, TCommands>
-  | Promise<SagaReaction<TState, TCommands>>;
+) => SagaReaction<TState, TCommands> | Promise<SagaReaction<TState, TCommands>>;
 
 // ---- Internal handler maps ----
 

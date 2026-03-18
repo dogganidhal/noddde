@@ -13,11 +13,11 @@ Defined in: [edd/event-handler.ts:4](https://github.com/dogganidhal/noddde/blob/
 
 ### TEvent
 
-`TEvent` *extends* [`Event`](/api/interfaces/event/)
+`TEvent` _extends_ [`Event`](/api/interfaces/event/)
 
 ### TInfrastructure
 
-`TInfrastructure` *extends* [`Infrastructure`](/api/type-aliases/infrastructure/)
+`TInfrastructure` _extends_ [`Infrastructure`](/api/type-aliases/infrastructure/)
 
 ## Parameters
 

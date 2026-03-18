@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import { Query, QueryBus, QueryResult } from "../../cqrs";
 
 /** Handler function type for query bus registration. */
@@ -26,9 +27,7 @@ export class InMemoryQueryBus implements QueryBus {
    */
   public register(queryName: string, handler: QueryHandlerFn): void {
     if (this.handlers.has(queryName)) {
-      throw new Error(
-        `Handler already registered for query: ${queryName}`,
-      );
+      throw new Error(`Handler already registered for query: ${queryName}`);
     }
     this.handlers.set(queryName, handler);
   }

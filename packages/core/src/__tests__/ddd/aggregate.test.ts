@@ -1,16 +1,16 @@
-import { describe, it, expect, expectTypeOf } from "vitest";
+/* eslint-disable no-unused-vars */
+import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
-  DefineEvents,
-  DefineCommands,
-  Infrastructure,
-  CommandHandler,
   AggregateCommand,
-  Event,
-  InferAggregateState,
-  InferAggregateEvents,
+  CommandHandler,
+  DefineCommands,
+  DefineEvents,
   InferAggregateCommands,
-  InferAggregateInfrastructure,
+  InferAggregateEvents,
   InferAggregateID,
+  InferAggregateInfrastructure,
+  InferAggregateState,
+  Infrastructure,
 } from "@noddde/core";
 import { defineAggregate } from "@noddde/core";
 
@@ -47,8 +47,12 @@ describe("defineAggregate", () => {
       }),
     },
     apply: {
-      Incremented: (payload, state) => ({ count: state.count + payload.amount }),
-      Decremented: (payload, state) => ({ count: state.count - payload.amount }),
+      Incremented: (payload, state) => ({
+        count: state.count + payload.amount,
+      }),
+      Decremented: (payload, state) => ({
+        count: state.count - payload.amount,
+      }),
     },
   });
 
@@ -73,12 +77,22 @@ describe("CommandHandler", () => {
     payload: { owner: string };
   }
 
-  type AccountEvent = { name: "AccountCreated"; payload: { id: string; owner: string } };
+  type AccountEvent = {
+    name: "AccountCreated";
+    payload: { id: string; owner: string };
+  };
 
-  type Handler = CommandHandler<CreateAccountCommand, { balance: number }, AccountEvent, Infrastructure>;
+  type Handler = CommandHandler<
+    CreateAccountCommand,
+    { balance: number },
+    AccountEvent,
+    Infrastructure
+  >;
 
   it("should receive the specific command as first parameter", () => {
-    expectTypeOf<Parameters<Handler>[0]>().toEqualTypeOf<CreateAccountCommand>();
+    expectTypeOf<
+      Parameters<Handler>[0]
+    >().toEqualTypeOf<CreateAccountCommand>();
   });
 
   it("should receive state as second parameter", () => {
@@ -118,11 +132,19 @@ describe("Aggregate exhaustive handlers", () => {
     const cart = defineAggregate<CartTypes>({
       initialState: { items: [] },
       commands: {
-        AddItem: (cmd) => ({ name: "ItemAdded", payload: { item: cmd.payload.item } }),
-        RemoveItem: (cmd) => ({ name: "ItemRemoved", payload: { item: cmd.payload.item } }),
+        AddItem: (cmd) => ({
+          name: "ItemAdded",
+          payload: { item: cmd.payload.item },
+        }),
+        RemoveItem: (cmd) => ({
+          name: "ItemRemoved",
+          payload: { item: cmd.payload.item },
+        }),
       },
       apply: {
-        ItemAdded: (payload, state) => ({ items: [...state.items, payload.item] }),
+        ItemAdded: (payload, state) => ({
+          items: [...state.items, payload.item],
+        }),
         ItemRemoved: (payload, state) => ({
           items: state.items.filter((i) => i !== payload.item),
         }),
@@ -151,7 +173,10 @@ describe("Infer utilities", () => {
   const MyAggregate = defineAggregate<MyTypes>({
     initialState: { value: 0 },
     commands: {
-      Update: (cmd) => ({ name: "Updated", payload: { newValue: cmd.payload.newValue } }),
+      Update: (cmd) => ({
+        name: "Updated",
+        payload: { newValue: cmd.payload.newValue },
+      }),
     },
     apply: {
       Updated: (payload, _state) => ({ value: payload.newValue }),
@@ -159,19 +184,27 @@ describe("Infer utilities", () => {
   });
 
   it("should infer state type", () => {
-    expectTypeOf<InferAggregateState<typeof MyAggregate>>().toEqualTypeOf<MyState>();
+    expectTypeOf<
+      InferAggregateState<typeof MyAggregate>
+    >().toEqualTypeOf<MyState>();
   });
 
   it("should infer events type", () => {
-    expectTypeOf<InferAggregateEvents<typeof MyAggregate>>().toEqualTypeOf<MyEvent>();
+    expectTypeOf<
+      InferAggregateEvents<typeof MyAggregate>
+    >().toEqualTypeOf<MyEvent>();
   });
 
   it("should infer commands type", () => {
-    expectTypeOf<InferAggregateCommands<typeof MyAggregate>>().toEqualTypeOf<MyCommand>();
+    expectTypeOf<
+      InferAggregateCommands<typeof MyAggregate>
+    >().toEqualTypeOf<MyCommand>();
   });
 
   it("should infer infrastructure type", () => {
-    expectTypeOf<InferAggregateInfrastructure<typeof MyAggregate>>().toEqualTypeOf<MyInfra>();
+    expectTypeOf<
+      InferAggregateInfrastructure<typeof MyAggregate>
+    >().toEqualTypeOf<MyInfra>();
   });
 
   it("should infer aggregate ID from types bundle", () => {
@@ -194,7 +227,10 @@ describe("Command handler return types", () => {
     const agg = defineAggregate<Types>({
       initialState: {},
       commands: {
-        DoIt: (cmd) => ({ name: "Done", payload: { id: cmd.targetAggregateId } }),
+        DoIt: (cmd) => ({
+          name: "Done",
+          payload: { id: cmd.targetAggregateId },
+        }),
         DoItTwice: (cmd) => [
           { name: "Done", payload: { id: cmd.targetAggregateId } },
           { name: "Done", payload: { id: cmd.targetAggregateId } },
@@ -211,13 +247,21 @@ describe("Command handler return types", () => {
 describe("defineAggregate identity", () => {
   type E = DefineEvents<{ X: { v: number } }>;
   type C = DefineCommands<{ Y: { v: number } }>;
-  type T = { state: { v: number }; events: E; commands: C; infrastructure: Infrastructure };
+  type T = {
+    state: { v: number };
+    events: E;
+    commands: C;
+    infrastructure: Infrastructure;
+  };
 
   it("should return the exact same config object", () => {
     const config = {
       initialState: { v: 0 },
       commands: {
-        Y: (cmd: any) => ({ name: "X" as const, payload: { v: cmd.payload.v } }),
+        Y: (cmd: any) => ({
+          name: "X" as const,
+          payload: { v: cmd.payload.v },
+        }),
       },
       apply: {
         X: (payload: any, state: any) => ({ v: payload.v }),

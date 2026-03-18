@@ -11,7 +11,7 @@ Defined in: [ddd/aggregate-root.ts:55](https://github.com/dogganidhal/noddde/blo
 
 ### T
 
-`T` *extends* [`AggregateTypes`](/api/type-aliases/aggregatetypes/) = [`AggregateTypes`](/api/type-aliases/aggregatetypes/)
+`T` _extends_ [`AggregateTypes`](/api/type-aliases/aggregatetypes/) = [`AggregateTypes`](/api/type-aliases/aggregatetypes/)
 
 ## Properties
 
@@ -21,7 +21,7 @@ Defined in: [ddd/aggregate-root.ts:55](https://github.com/dogganidhal/noddde/blo
 
 Defined in: [ddd/aggregate-root.ts:58](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/ddd/aggregate-root.ts#L58)
 
-***
+---
 
 ### commands
 
@@ -29,7 +29,7 @@ Defined in: [ddd/aggregate-root.ts:58](https://github.com/dogganidhal/noddde/blo
 
 Defined in: [ddd/aggregate-root.ts:57](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/ddd/aggregate-root.ts#L57)
 
-***
+---
 
 ### initialState
 

@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import { CQRSInfrastructure, Infrastructure } from "../infrastructure";
 import { Aggregate, Projection, Saga } from "../ddd";
 import {
@@ -509,13 +510,10 @@ export class Domain<
 
     if (isEventSourced) {
       // Event-sourced: replay events to rebuild state
-      currentState = (loaded as Event[]).reduce(
-        (state: any, event: Event) => {
-          const applyHandler = aggregate.apply[event.name];
-          return applyHandler ? applyHandler(event.payload, state) : state;
-        },
-        aggregate.initialState,
-      );
+      currentState = (loaded as Event[]).reduce((state: any, event: Event) => {
+        const applyHandler = aggregate.apply[event.name];
+        return applyHandler ? applyHandler(event.payload, state) : state;
+      }, aggregate.initialState);
     } else {
       // State-stored: use loaded state or initial state
       currentState = loaded ?? aggregate.initialState;

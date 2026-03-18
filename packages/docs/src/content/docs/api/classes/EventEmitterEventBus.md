@@ -33,7 +33,7 @@ Defined in: [engine/implementations/ee-event-bus.ts:7](https://github.com/doggan
 
 ##### TEvent
 
-`TEvent` *extends* [`Event`](/api/interfaces/event/)
+`TEvent` _extends_ [`Event`](/api/interfaces/event/)
 
 #### Parameters
 

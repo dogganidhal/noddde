@@ -28,6 +28,7 @@ You are the orchestrator of a 6-step spec-driven pipeline. The developer describ
 ```
 
 **Gate points** (where you pause for developer input):
+
 - **Gate 1**: After planning the spec — "Here's what I'll spec. Approve?"
 - **Breaking changes**: If detected during step 1 — "Breaking change. How to handle?"
 - **Stuck loop**: If step 3↔4 fails 3+ times on the same test — "I can't fix this. Here's what's happening."
@@ -40,15 +41,16 @@ You are the orchestrator of a 6-step spec-driven pipeline. The developer describ
 
 Determine what the developer wants:
 
-| Developer says... | Action |
-|------------------|--------|
-| "Add <feature>" / "Create <module>" / "New <thing>" | → New spec (full pipeline) |
-| "Fix <bug>" / "Handle <edge case>" | → Edit existing spec (find it first) |
-| "Change <API>" / "Rename <type>" / "Add field to <interface>" | → Edit existing spec (breaking change likely) |
-| "Implement <spec-path>" | → Skip to step 2 (spec already exists) |
-| "The tests are failing on <spec>" | → Skip to step 3 (tests exist, need implementation fix) |
+| Developer says...                                             | Action                                                  |
+| ------------------------------------------------------------- | ------------------------------------------------------- |
+| "Add <feature>" / "Create <module>" / "New <thing>"           | → New spec (full pipeline)                              |
+| "Fix <bug>" / "Handle <edge case>"                            | → Edit existing spec (find it first)                    |
+| "Change <API>" / "Rename <type>" / "Add field to <interface>" | → Edit existing spec (breaking change likely)           |
+| "Implement <spec-path>"                                       | → Skip to step 2 (spec already exists)                  |
+| "The tests are failing on <spec>"                             | → Skip to step 3 (tests exist, need implementation fix) |
 
 If the developer provides a spec path, read it and determine which step to start from based on current state:
+
 - Spec exists, no test file → start at step 2
 - Spec exists, test file exists, tests RED → start at step 3
 - Spec exists, tests GREEN → start at step 5 (validate)
@@ -74,6 +76,7 @@ If the developer provides a spec path, read it and determine which step to start
 2. Identify dependencies — search `specs/core/` for specs that export types this module will consume.
 
 3. Draft the spec outline and present at **Gate 1**:
+
    ```
    📋 Spec Plan: <title>
 
@@ -111,6 +114,7 @@ If the developer provides a spec path, read it and determine which step to start
 1. Read the spec and snapshot current state (exports, type signatures, requirements).
 2. Read downstream specs (`grep -rl "<module-path>" specs/core/ specs/integration/`).
 3. Draft the changes and present at **Gate 1**:
+
    ```
    📋 Spec Edit Plan: <title>
 
@@ -122,6 +126,7 @@ If the developer provides a spec path, read it and determine which step to start
 
    Approve? (or give feedback)
    ```
+
 4. **Wait for approval**, then apply changes.
 
 ### Breaking Change Detection (sub-gate)
@@ -152,6 +157,7 @@ Which approach?
 ```
 
 Wait for developer choice, then:
+
 - **Additive**: keep old exports, add new ones
 - **Deprecate**: add `@deprecated` JSDoc, write `## Migration` section, note version
 - **Accept**: infer version bump (minor for 0.x, major for ≥1.0), flag downstream specs for update
@@ -165,12 +171,14 @@ Wait for developer choice, then:
 **Run autonomously — no gate.**
 
 1. Determine test file path:
+
    - `specs/core/<path>/<name>.spec.md` → `packages/core/src/__tests__/<path>/<name>.test.ts`
    - `specs/integration/<name>.spec.md` → `packages/core/src/__tests__/integration/<name>.test.ts`
 
 2. Create parent directories if needed.
 
 3. Generate the test file:
+
    - Each `### Heading` in `## Test Scenarios` → one `it()` block
    - Group under `describe("<spec title>", () => { ... })`
    - Use `import { ... } from "@noddde/core"` for framework imports
@@ -178,11 +186,13 @@ Wait for developer choice, then:
    - If test file already exists: add new tests, update changed tests, preserve manually-added tests
 
 4. Run the tests:
+
    ```bash
    cd packages/core && CODEARTIFACT_AUTH_TOKEN="" npx vitest run --reporter=verbose <test-file>
    ```
 
 5. **Expect RED.** Categorize results:
+
    - Tests failing because implementation is a stub → correct (RED)
    - Tests failing because of test code errors → fix the test code NOW, then re-run
    - Type-level tests passing → fine (types may already exist)
@@ -203,6 +213,7 @@ Wait for developer choice, then:
 2. Update spec frontmatter: `status: implementing`
 
 3. Replace `throw new Error("Not implemented")` stubs with working code.
+
    - Implement behavioral requirements in numbered order
    - Follow conventions from CLAUDE.md:
      - Functional style: no classes for domain concepts
@@ -212,9 +223,11 @@ Wait for developer choice, then:
    - Do NOT modify the test file
 
 4. Run type check:
+
    ```bash
    cd packages/core && npx tsc --noEmit
    ```
+
    Fix type errors in the implementation (not in tests — the spec is the authority).
 
 5. Proceed directly to step 4.
@@ -226,6 +239,7 @@ Wait for developer choice, then:
 **Run autonomously — loop back to step 3 if needed.**
 
 1. Run tests:
+
    ```bash
    cd packages/core && CODEARTIFACT_AUTH_TOKEN="" npx vitest run --reporter=verbose <test-file>
    ```
@@ -233,6 +247,7 @@ Wait for developer choice, then:
 2. **If ALL GREEN**: proceed to step 5.
 
 3. **If some RED**: analyze each failure:
+
    - Is it a missing implementation? → go back to step 3, implement the specific requirement
    - Is it a bug in the implementation? → go back to step 3, fix the bug
    - Is it a test code issue? → fix the test (but flag it — the spec may need updating)
@@ -240,6 +255,7 @@ Wait for developer choice, then:
 4. **Loop**: go back to step 3 → fix → step 4 → test. Repeat.
 
 5. **Stuck detection**: If the SAME test fails 3 times in a row with the same error, STOP and escalate:
+
    ```
    🔴 Stuck on test: "<test name>"
 
@@ -298,9 +314,10 @@ Update spec frontmatter: `status: implemented`
    ```
 
 If no documentation updates are needed (internal-only change, no API surface affected):
-   ```
-   📖 Step 6 complete: No documentation updates needed
-   ```
+
+```
+📖 Step 6 complete: No documentation updates needed
+```
 
 ---
 
@@ -324,6 +341,7 @@ Present the complete result:
 ```
 
 If there are remaining gaps from validation:
+
 ```
 ⚠️  Minor gaps (non-blocking):
   - Invariant "<name>" not enforced at runtime (type-level only)

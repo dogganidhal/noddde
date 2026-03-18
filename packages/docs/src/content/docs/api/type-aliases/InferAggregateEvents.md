@@ -5,7 +5,7 @@ prev: false
 title: "InferAggregateEvents"
 ---
 
-> **InferAggregateEvents**\<`T`\> = `T` *extends* [`Aggregate`](/api/interfaces/aggregate/)\<infer U\> ? `U`\[`"events"`\] : `never`
+> **InferAggregateEvents**\<`T`\> = `T` _extends_ [`Aggregate`](/api/interfaces/aggregate/)\<infer U\> ? `U`\[`"events"`\] : `never`
 
 Defined in: [ddd/aggregate-root.ts:77](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/ddd/aggregate-root.ts#L77)
 
@@ -13,4 +13,4 @@ Defined in: [ddd/aggregate-root.ts:77](https://github.com/dogganidhal/noddde/blo
 
 ### T
 
-`T` *extends* [`Aggregate`](/api/interfaces/aggregate/)
+`T` _extends_ [`Aggregate`](/api/interfaces/aggregate/)

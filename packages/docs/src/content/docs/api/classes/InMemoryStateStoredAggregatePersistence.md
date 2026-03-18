@@ -47,7 +47,7 @@ Defined in: [engine/implementations/in-memory-aggregate-persistence.ts:25](https
 
 [`StateStoredAggregatePersistence`](/api/interfaces/statestoredaggregatepersistence/).[`load`](/api/interfaces/statestoredaggregatepersistence/#load)
 
-***
+---
 
 ### save()
 

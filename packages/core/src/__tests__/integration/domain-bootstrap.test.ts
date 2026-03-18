@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import { describe, it, expect, vi } from "vitest";
 import {
   defineAggregate,
@@ -37,12 +38,8 @@ describe("Domain bootstrap - minimal config", () => {
 
     expect(domain).toBeDefined();
     expect(domain.infrastructure).toBeDefined();
-    expect(domain.infrastructure.commandBus).toBeInstanceOf(
-      InMemoryCommandBus,
-    );
-    expect(domain.infrastructure.eventBus).toBeInstanceOf(
-      EventEmitterEventBus,
-    );
+    expect(domain.infrastructure.commandBus).toBeInstanceOf(InMemoryCommandBus);
+    expect(domain.infrastructure.eventBus).toBeInstanceOf(EventEmitterEventBus);
     expect(domain.infrastructure.queryBus).toBeInstanceOf(InMemoryQueryBus);
   });
 });

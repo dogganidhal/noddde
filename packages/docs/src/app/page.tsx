@@ -4,9 +4,21 @@ export default function HomePage() {
   return (
     <main className="fixed inset-0 flex flex-col items-center justify-center px-6">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/icon-light.png" alt="noddde" width={56} height={40} className="logo-light" />
+      <img
+        src="/icon-light.png"
+        alt="noddde"
+        width={56}
+        height={40}
+        className="logo-light"
+      />
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/icon-dark.png" alt="noddde" width={56} height={40} className="logo-dark" />
+      <img
+        src="/icon-dark.png"
+        alt="noddde"
+        width={56}
+        height={40}
+        className="logo-dark"
+      />
 
       <h1 className="mt-5 text-4xl font-bold tracking-tight text-fd-foreground">
         noddde

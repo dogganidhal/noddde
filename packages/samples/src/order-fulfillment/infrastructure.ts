@@ -1,3 +1,5 @@
+/* eslint-disable no-unused-vars */
+
 // ---- Clock (deterministic time injection) ----
 
 export interface Clock {

@@ -1,17 +1,14 @@
-import { describe, it, expect, vi } from "vitest";
+/* eslint-disable no-unused-vars */
+import { describe, expect, it, vi } from "vitest";
+import type { DefineCommands, DefineEvents } from "@noddde/core";
 import {
-  defineAggregate,
   configureDomain,
-  InMemoryEventSourcedAggregatePersistence,
-  InMemoryStateStoredAggregatePersistence,
-  InMemoryCommandBus,
-  InMemoryQueryBus,
+  defineAggregate,
   EventEmitterEventBus,
-} from "@noddde/core";
-import type {
-  DefineCommands,
-  DefineEvents,
-  AggregateTypes,
+  InMemoryCommandBus,
+  InMemoryEventSourcedAggregatePersistence,
+  InMemoryQueryBus,
+  InMemoryStateStoredAggregatePersistence,
 } from "@noddde/core";
 
 // ---- Shared counter aggregate ----

@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import { Infrastructure } from "../../infrastructure";
 import { Query, QueryResult } from "./query";
 

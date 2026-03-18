@@ -23,10 +23,12 @@ This is **step 4** of the 6-step pipeline:
 ## Step 1: Determine What to Run
 
 **If a spec path is provided**: Find the corresponding test file:
+
 - `specs/core/<path>/<name>.spec.md` → `packages/core/src/__tests__/<path>/<name>.test.ts`
 - `specs/integration/<name>.spec.md` → `packages/core/src/__tests__/integration/<name>.test.ts`
 
 **If a module name is provided**: Find test files matching:
+
 - `packages/core/src/__tests__/**/<module-name>*.test.ts`
 
 **If nothing is provided**: Run the full test suite.
@@ -42,11 +44,13 @@ Report any type errors. Type errors must be fixed before tests can meaningfully 
 ## Step 3: Run Tests
 
 **For a specific test file:**
+
 ```bash
 cd packages/core && CODEARTIFACT_AUTH_TOKEN="" npx vitest run --reporter=verbose <test-file-path>
 ```
 
 **For the full suite:**
+
 ```bash
 cd packages/core && CODEARTIFACT_AUTH_TOKEN="" npx vitest run --reporter=verbose
 ```
@@ -56,6 +60,7 @@ cd packages/core && CODEARTIFACT_AUTH_TOKEN="" npx vitest run --reporter=verbose
 Categorize the outcome:
 
 ### All GREEN
+
 Every test passes. The implementation matches the spec.
 
 ```
@@ -69,6 +74,7 @@ Next step:
 ```
 
 ### Some RED
+
 Some tests still fail. The implementation is incomplete or incorrect.
 
 ```
@@ -91,6 +97,7 @@ Next step:
 ```
 
 ### Compilation Failure
+
 Tests can't even run due to TypeScript errors.
 
 ```
@@ -107,6 +114,7 @@ Next step:
 ## Step 5: Update Spec Status (if all GREEN)
 
 If ALL tests pass and type checking passes:
+
 - Read the spec and update `status: implemented`
 - Confirm to the developer:
 

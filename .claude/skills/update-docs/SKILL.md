@@ -25,16 +25,19 @@ This is **step 6** of the 6-step pipeline:
 ## Step 1: Find Spec and Identify Changed Exports
 
 Accept either a spec path or source file path:
+
 - Spec → source: read `source_file` from frontmatter
 - Source → spec: replace `packages/core/src/` with `specs/core/`, `.ts` with `.spec.md`
 
 Read the spec completely. Extract:
+
 - The `exports` list from frontmatter
 - The `docs` list from frontmatter (if present)
 - All behavioral requirements (numbered items in `## Behavioral Requirements`)
 - Any `## Migration` or `## Deprecations` sections
 
 Determine what changed by comparing against the previous state:
+
 - **New spec**: Everything is new — all exports need documentation
 - **Edited spec**: Identify which exports were added, removed, or had their signatures changed; which behavioral requirements were added or modified
 
@@ -80,15 +83,15 @@ ls packages/docs/src/content/docs/api/*/
 
 For each affected page, determine the type of update needed:
 
-| What Changed in the Spec | Documentation Action |
-|--------------------------|---------------------|
-| New export added | Add documentation for the new export; create new page if it's a major feature |
-| Type/function signature changed | Update code examples showing the old signature |
-| Behavioral requirement added/changed | Update explanatory text describing the behavior |
-| Entirely new spec (new module) | Create stub documentation page(s) in the appropriate category |
-| Handler signature pattern changed | Update all code examples using the handler |
-| Deprecation introduced | Add deprecation notice/callout near deprecated API usage |
-| Export removed | Remove or update references to the removed export |
+| What Changed in the Spec             | Documentation Action                                                          |
+| ------------------------------------ | ----------------------------------------------------------------------------- |
+| New export added                     | Add documentation for the new export; create new page if it's a major feature |
+| Type/function signature changed      | Update code examples showing the old signature                                |
+| Behavioral requirement added/changed | Update explanatory text describing the behavior                               |
+| Entirely new spec (new module)       | Create stub documentation page(s) in the appropriate category                 |
+| Handler signature pattern changed    | Update all code examples using the handler                                    |
+| Deprecation introduced               | Add deprecation notice/callout near deprecated API usage                      |
+| Export removed                       | Remove or update references to the removed export                             |
 
 ## Step 4: Update Existing Documentation Pages
 
@@ -102,6 +105,7 @@ For each affected page, apply **surgical, targeted updates**:
 4. Update the code to reflect the new API signatures
 
 **Rules for code example updates**:
+
 - Code examples must compile against the new API
 - Preserve the example's intent and teaching purpose
 - If the example used a removed export, replace it with the recommended alternative
@@ -113,6 +117,7 @@ For each affected page, apply **surgical, targeted updates**:
 Only update prose if a **behavioral requirement changed**. Do NOT rewrite text just because an export was renamed.
 
 When updating prose:
+
 - Preserve the author's voice and writing style
 - Update only the specific sentences/paragraphs affected by the behavioral change
 - If a capability was added, add a brief mention in the relevant section
@@ -126,7 +131,8 @@ If the spec introduced deprecations (via `## Deprecations` or `@deprecated` mark
 2. Add a callout/admonition near the first usage:
    ```mdx
    <Callout type="warn">
-     `OldExportName` is deprecated and will be removed in a future version. Use `NewExportName` instead. See the [migration guide](/docs/migration).
+     `OldExportName` is deprecated and will be removed in a future version. Use
+     `NewExportName` instead. See the [migration guide](/docs/migration).
    </Callout>
    ```
 3. Update the code example to show the new API, with the old API shown as a comment or in a "Before/After" comparison
@@ -147,17 +153,17 @@ When the spec is **entirely new** (a new module, not an edit to an existing spec
 
 Map from module path to docs category:
 
-| Module Path Pattern | Docs Category |
-|--------------------|---------------|
-| `ddd/aggregate*` | `aggregates/` |
-| `ddd/projection*` | `projections/` |
-| `ddd/saga*` | `sagas/` |
-| `edd/event*` | `events/` |
-| `cqrs/command*` | `commands/` |
-| `cqrs/query*` | `queries/` |
-| `engine/implementations/*` | `infrastructure/` |
-| `engine/*` | `domain-configuration/` |
-| `infrastructure/*` | `infrastructure/` |
+| Module Path Pattern        | Docs Category           |
+| -------------------------- | ----------------------- |
+| `ddd/aggregate*`           | `aggregates/`           |
+| `ddd/projection*`          | `projections/`          |
+| `ddd/saga*`                | `sagas/`                |
+| `edd/event*`               | `events/`               |
+| `cqrs/command*`            | `commands/`             |
+| `cqrs/query*`              | `queries/`              |
+| `engine/implementations/*` | `infrastructure/`       |
+| `engine/*`                 | `domain-configuration/` |
+| `infrastructure/*`         | `infrastructure/`       |
 
 If the module doesn't fit any category, flag it in the report for manual placement.
 
@@ -224,11 +230,13 @@ If the spec added new exports, removed exports, or changed existing signatures:
 ### If no documentation updates are needed
 
 This can happen when:
+
 - The spec change was purely internal (implementation detail, no API surface change)
 - All affected documentation pages are already up to date
 - The spec has no `docs` frontmatter and grep found no references
 
 Report:
+
 ```
 📖 Step 6 complete: No documentation updates needed
   Reason: <why — e.g., "Internal implementation change, no API surface affected">

@@ -29,7 +29,7 @@ Defined in: [engine/domain.ts:17](https://github.com/dogganidhal/noddde/blob/7fc
 
 `Promise`\<`any`\>
 
-***
+---
 
 ### save()
 

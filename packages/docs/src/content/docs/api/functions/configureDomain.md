@@ -13,11 +13,11 @@ Defined in: [engine/domain.ts:103](https://github.com/dogganidhal/noddde/blob/7f
 
 ### TInfrastructure
 
-`TInfrastructure` *extends* [`Infrastructure`](/api/type-aliases/infrastructure/)
+`TInfrastructure` _extends_ [`Infrastructure`](/api/type-aliases/infrastructure/)
 
 ### TStandaloneCommandNames
 
-`TStandaloneCommandNames` *extends* `string` \| `symbol` = `string` \| `symbol`
+`TStandaloneCommandNames` _extends_ `string` \| `symbol` = `string` \| `symbol`
 
 ## Parameters
 

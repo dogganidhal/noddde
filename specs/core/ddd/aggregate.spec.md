@@ -3,8 +3,25 @@ title: "AggregateTypes, CommandHandler, Aggregate, defineAggregate & Infer Utili
 module: ddd/aggregate-root
 source_file: packages/core/src/ddd/aggregate-root.ts
 status: implemented
-exports: [AggregateTypes, CommandHandler, Aggregate, defineAggregate, InferAggregateID, InferAggregateState, InferAggregateEvents, InferAggregateCommands, InferAggregateInfrastructure]
-depends_on: [edd/event, edd/event-sourcing-handler, cqrs/command/command, infrastructure/index]
+exports:
+  [
+    AggregateTypes,
+    CommandHandler,
+    Aggregate,
+    defineAggregate,
+    InferAggregateID,
+    InferAggregateState,
+    InferAggregateEvents,
+    InferAggregateCommands,
+    InferAggregateInfrastructure,
+  ]
+depends_on:
+  [
+    edd/event,
+    edd/event-sourcing-handler,
+    cqrs/command/command,
+    infrastructure/index,
+  ]
 docs:
   - aggregates/overview.mdx
   - aggregates/defining-aggregates.mdx
@@ -20,17 +37,20 @@ docs:
 ## Type Contract
 
 - **`AggregateTypes`** is a type with four required fields:
+
   - `state: any` -- the aggregate state shape.
   - `events: Event` -- discriminated union of events the aggregate can emit.
   - `commands: AggregateCommand` -- discriminated union of commands the aggregate handles.
   - `infrastructure: Infrastructure` -- external dependencies for command handlers.
 
 - **`CommandHandler<TCommand, TState, TEvents, TInfrastructure>`** is a function type:
+
   - Parameters: `(command: TCommand, state: TState, infrastructure: TInfrastructure)`.
   - Return: `TEvents | TEvents[] | Promise<TEvents | TEvents[]>`.
   - `TCommand extends AggregateCommand`, `TEvents extends Event`, `TInfrastructure extends Infrastructure` (defaults to `Infrastructure`).
 
 - **`Aggregate<T extends AggregateTypes>`** is an interface with three fields:
+
   - `initialState: T["state"]` -- the zero-value state.
   - `commands: CommandHandlerMap<T>` -- a map of command handlers keyed by command `name`, where each handler is typed with `Extract<T["commands"], { name: K }>`.
   - `apply: ApplyHandlerMap<T>` -- a map of apply handlers keyed by event `name`, where each handler is typed with `Extract<T["events"], { name: K }>`.
@@ -85,7 +105,11 @@ docs:
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
-import type { DefineEvents, DefineCommands, Infrastructure } from "@noddde/core";
+import type {
+  DefineEvents,
+  DefineCommands,
+  Infrastructure,
+} from "@noddde/core";
 import { defineAggregate } from "@noddde/core";
 
 describe("defineAggregate", () => {
@@ -121,8 +145,12 @@ describe("defineAggregate", () => {
       }),
     },
     apply: {
-      Incremented: (payload, state) => ({ count: state.count + payload.amount }),
-      Decremented: (payload, state) => ({ count: state.count - payload.amount }),
+      Incremented: (payload, state) => ({
+        count: state.count + payload.amount,
+      }),
+      Decremented: (payload, state) => ({
+        count: state.count - payload.amount,
+      }),
     },
   });
 
@@ -146,7 +174,12 @@ describe("defineAggregate", () => {
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
-import type { CommandHandler, AggregateCommand, Event, Infrastructure } from "@noddde/core";
+import type {
+  CommandHandler,
+  AggregateCommand,
+  Event,
+  Infrastructure,
+} from "@noddde/core";
 
 describe("CommandHandler", () => {
   interface CreateAccountCommand extends AggregateCommand {
@@ -154,12 +187,22 @@ describe("CommandHandler", () => {
     payload: { owner: string };
   }
 
-  type AccountEvent = { name: "AccountCreated"; payload: { id: string; owner: string } };
+  type AccountEvent = {
+    name: "AccountCreated";
+    payload: { id: string; owner: string };
+  };
 
-  type Handler = CommandHandler<CreateAccountCommand, { balance: number }, AccountEvent, Infrastructure>;
+  type Handler = CommandHandler<
+    CreateAccountCommand,
+    { balance: number },
+    AccountEvent,
+    Infrastructure
+  >;
 
   it("should receive the specific command as first parameter", () => {
-    expectTypeOf<Parameters<Handler>[0]>().toEqualTypeOf<CreateAccountCommand>();
+    expectTypeOf<
+      Parameters<Handler>[0]
+    >().toEqualTypeOf<CreateAccountCommand>();
   });
 
   it("should receive state as second parameter", () => {
@@ -182,7 +225,11 @@ describe("CommandHandler", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
-import type { DefineEvents, DefineCommands, Infrastructure } from "@noddde/core";
+import type {
+  DefineEvents,
+  DefineCommands,
+  Infrastructure,
+} from "@noddde/core";
 import { defineAggregate } from "@noddde/core";
 
 describe("Aggregate exhaustive handlers", () => {
@@ -207,11 +254,19 @@ describe("Aggregate exhaustive handlers", () => {
     const cart = defineAggregate<CartTypes>({
       initialState: { items: [] },
       commands: {
-        AddItem: (cmd) => ({ name: "ItemAdded", payload: { item: cmd.payload.item } }),
-        RemoveItem: (cmd) => ({ name: "ItemRemoved", payload: { item: cmd.payload.item } }),
+        AddItem: (cmd) => ({
+          name: "ItemAdded",
+          payload: { item: cmd.payload.item },
+        }),
+        RemoveItem: (cmd) => ({
+          name: "ItemRemoved",
+          payload: { item: cmd.payload.item },
+        }),
       },
       apply: {
-        ItemAdded: (payload, state) => ({ items: [...state.items, payload.item] }),
+        ItemAdded: (payload, state) => ({
+          items: [...state.items, payload.item],
+        }),
         ItemRemoved: (payload, state) => ({
           items: state.items.filter((i) => i !== payload.item),
         }),
@@ -257,7 +312,10 @@ describe("Infer utilities", () => {
   const MyAggregate = defineAggregate<MyTypes>({
     initialState: { value: 0 },
     commands: {
-      Update: (cmd) => ({ name: "Updated", payload: { newValue: cmd.payload.newValue } }),
+      Update: (cmd) => ({
+        name: "Updated",
+        payload: { newValue: cmd.payload.newValue },
+      }),
     },
     apply: {
       Updated: (payload, _state) => ({ value: payload.newValue }),
@@ -265,19 +323,27 @@ describe("Infer utilities", () => {
   });
 
   it("should infer state type", () => {
-    expectTypeOf<InferAggregateState<typeof MyAggregate>>().toEqualTypeOf<MyState>();
+    expectTypeOf<
+      InferAggregateState<typeof MyAggregate>
+    >().toEqualTypeOf<MyState>();
   });
 
   it("should infer events type", () => {
-    expectTypeOf<InferAggregateEvents<typeof MyAggregate>>().toEqualTypeOf<MyEvent>();
+    expectTypeOf<
+      InferAggregateEvents<typeof MyAggregate>
+    >().toEqualTypeOf<MyEvent>();
   });
 
   it("should infer commands type", () => {
-    expectTypeOf<InferAggregateCommands<typeof MyAggregate>>().toEqualTypeOf<MyCommand>();
+    expectTypeOf<
+      InferAggregateCommands<typeof MyAggregate>
+    >().toEqualTypeOf<MyCommand>();
   });
 
   it("should infer infrastructure type", () => {
-    expectTypeOf<InferAggregateInfrastructure<typeof MyAggregate>>().toEqualTypeOf<MyInfra>();
+    expectTypeOf<
+      InferAggregateInfrastructure<typeof MyAggregate>
+    >().toEqualTypeOf<MyInfra>();
   });
 
   it("should infer aggregate ID from types bundle", () => {
@@ -290,7 +356,11 @@ describe("Infer utilities", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
-import type { DefineEvents, DefineCommands, Infrastructure } from "@noddde/core";
+import type {
+  DefineEvents,
+  DefineCommands,
+  Infrastructure,
+} from "@noddde/core";
 import { defineAggregate } from "@noddde/core";
 
 describe("Command handler return types", () => {
@@ -308,7 +378,10 @@ describe("Command handler return types", () => {
     const agg = defineAggregate<Types>({
       initialState: {},
       commands: {
-        DoIt: (cmd) => ({ name: "Done", payload: { id: cmd.targetAggregateId } }),
+        DoIt: (cmd) => ({
+          name: "Done",
+          payload: { id: cmd.targetAggregateId },
+        }),
         DoItTwice: (cmd) => [
           { name: "Done", payload: { id: cmd.targetAggregateId } },
           { name: "Done", payload: { id: cmd.targetAggregateId } },
@@ -328,18 +401,30 @@ describe("Command handler return types", () => {
 ```ts
 import { describe, it, expect } from "vitest";
 import { defineAggregate } from "@noddde/core";
-import type { DefineEvents, DefineCommands, Infrastructure } from "@noddde/core";
+import type {
+  DefineEvents,
+  DefineCommands,
+  Infrastructure,
+} from "@noddde/core";
 
 describe("defineAggregate identity", () => {
   type E = DefineEvents<{ X: { v: number } }>;
   type C = DefineCommands<{ Y: { v: number } }>;
-  type T = { state: { v: number }; events: E; commands: C; infrastructure: Infrastructure };
+  type T = {
+    state: { v: number };
+    events: E;
+    commands: C;
+    infrastructure: Infrastructure;
+  };
 
   it("should return the exact same config object", () => {
     const config = {
       initialState: { v: 0 },
       commands: {
-        Y: (cmd: any) => ({ name: "X" as const, payload: { v: cmd.payload.v } }),
+        Y: (cmd: any) => ({
+          name: "X" as const,
+          payload: { v: cmd.payload.v },
+        }),
       },
       apply: {
         X: (payload: any, state: any) => ({ v: payload.v }),

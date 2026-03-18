@@ -10,9 +10,21 @@ export default function Layout({ children }: { children: ReactNode }) {
         title: (
           <div className="flex items-center gap-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/icon-light.png" alt="" width={20} height={14} className="logo-light" />
+            <img
+              src="/icon-light.png"
+              alt=""
+              width={20}
+              height={14}
+              className="logo-light"
+            />
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/icon-dark.png" alt="" width={20} height={14} className="logo-dark" />
+            <img
+              src="/icon-dark.png"
+              alt=""
+              width={20}
+              height={14}
+              className="logo-dark"
+            />
             <span className="font-semibold">noddde</span>
           </div>
         ),

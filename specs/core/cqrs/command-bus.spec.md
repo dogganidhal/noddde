@@ -85,7 +85,9 @@ import type { CommandBus, Command } from "@noddde/core";
 
 describe("CommandBus non-generic dispatch", () => {
   it("should accept Command parameter type", () => {
-    expectTypeOf<CommandBus["dispatch"]>().parameter(0).toEqualTypeOf<Command>();
+    expectTypeOf<CommandBus["dispatch"]>()
+      .parameter(0)
+      .toEqualTypeOf<Command>();
   });
 });
 ```

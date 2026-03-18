@@ -43,10 +43,7 @@ describe("ApplyHandler", () => {
   // ### ApplyHandler works with primitive state
   describe("with primitive state", () => {
     type MyEvent = DefineEvents<{ ValueSet: { value: number } }>;
-    type Handler = ApplyHandler<
-      Extract<MyEvent, { name: "ValueSet" }>,
-      number
-    >;
+    type Handler = ApplyHandler<Extract<MyEvent, { name: "ValueSet" }>, number>;
 
     it("should accept and return a number", () => {
       expectTypeOf<Parameters<Handler>[1]>().toBeNumber();

@@ -19,7 +19,7 @@ Defined in: [edd/event-bus.ts:4](https://github.com/dogganidhal/noddde/blob/7fcd
 
 ##### TEvent
 
-`TEvent` *extends* [`Event`](/api/interfaces/event/)
+`TEvent` _extends_ [`Event`](/api/interfaces/event/)
 
 #### Parameters
 

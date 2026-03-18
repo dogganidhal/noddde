@@ -1,4 +1,4 @@
-import { defineProjection, ProjectionTypes } from "@noddde/core";
+import { defineProjection } from "@noddde/core";
 import { BankingInfrastructure } from "./infrastructure";
 import { BankAccountEvent } from "./events";
 import { BankAccountQuery, BankAccountView } from "./queries";
@@ -10,8 +10,8 @@ type BankAccountProjectionDef = {
   infrastructure: BankingInfrastructure;
 };
 
-export const BankAccountProjection =
-  defineProjection<BankAccountProjectionDef>({
+export const BankAccountProjection = defineProjection<BankAccountProjectionDef>(
+  {
     reducers: {
       BankAccountCreated: (event) => ({
         id: event.payload.id,
@@ -49,4 +49,5 @@ export const BankAccountProjection =
         };
       },
     },
-  });
+  },
+);

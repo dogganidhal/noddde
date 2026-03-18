@@ -87,10 +87,7 @@ export class InMemoryStateStoredAggregatePersistence
    * @param aggregateId - The unique identifier of the aggregate instance.
    * @returns The stored state, or `undefined` if not found.
    */
-  public async load(
-    aggregateName: string,
-    aggregateId: string,
-  ): Promise<any> {
+  public async load(aggregateName: string, aggregateId: string): Promise<any> {
     const key = `${aggregateName}:${aggregateId}`;
     return this.store.get(key);
   }

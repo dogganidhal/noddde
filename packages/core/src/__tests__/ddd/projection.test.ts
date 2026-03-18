@@ -1,13 +1,14 @@
-import { describe, it, expect, expectTypeOf } from "vitest";
+/* eslint-disable no-unused-vars */
+import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
   DefineEvents,
   DefineQueries,
+  InferProjectionEvents,
+  InferProjectionInfrastructure,
+  InferProjectionQueries,
+  InferProjectionView,
   Infrastructure,
   Query,
-  InferProjectionView,
-  InferProjectionEvents,
-  InferProjectionQueries,
-  InferProjectionInfrastructure,
 } from "@noddde/core";
 import { defineProjection } from "@noddde/core";
 
@@ -81,7 +82,10 @@ describe("Reducer event parameter", () => {
       reducers: {
         ItemAdded: (event, view) => {
           // event has both name and payload
-          expectTypeOf(event).toEqualTypeOf<{ name: "ItemAdded"; payload: { item: string } }>();
+          expectTypeOf(event).toEqualTypeOf<{
+            name: "ItemAdded";
+            payload: { item: string };
+          }>();
           expectTypeOf(event.name).toEqualTypeOf<"ItemAdded">();
           expectTypeOf(event.payload).toEqualTypeOf<{ item: string }>();
           return [...view, event.payload.item];
@@ -131,10 +135,14 @@ describe("Optional query handlers", () => {
 });
 
 describe("Projection Infer utilities", () => {
-  interface MyView { items: string[] }
+  interface MyView {
+    items: string[];
+  }
   type MyEvent = DefineEvents<{ Added: { item: string } }>;
   type MyQuery = DefineQueries<{ GetItems: { result: string[] } }>;
-  interface MyInfra extends Infrastructure { db: { query(): Promise<string[]> } }
+  interface MyInfra extends Infrastructure {
+    db: { query(): Promise<string[]> };
+  }
 
   type Def = {
     events: MyEvent;
@@ -159,11 +167,15 @@ describe("Projection Infer utilities", () => {
   });
 
   it("should infer queries type", () => {
-    expectTypeOf<InferProjectionQueries<typeof proj>>().toEqualTypeOf<MyQuery>();
+    expectTypeOf<
+      InferProjectionQueries<typeof proj>
+    >().toEqualTypeOf<MyQuery>();
   });
 
   it("should infer infrastructure type", () => {
-    expectTypeOf<InferProjectionInfrastructure<typeof proj>>().toEqualTypeOf<MyInfra>();
+    expectTypeOf<
+      InferProjectionInfrastructure<typeof proj>
+    >().toEqualTypeOf<MyInfra>();
   });
 });
 
@@ -191,7 +203,12 @@ describe("Async reducers", () => {
 
 describe("defineProjection identity", () => {
   type E = DefineEvents<{ X: { v: number } }>;
-  type Def = { events: E; queries: Query<any>; view: number; infrastructure: Infrastructure };
+  type Def = {
+    events: E;
+    queries: Query<any>;
+    view: number;
+    infrastructure: Infrastructure;
+  };
 
   it("should return the exact same config object", () => {
     const config = {

@@ -3,11 +3,7 @@ import { EcommerceInfrastructure } from "../infrastructure";
 import { PaymentCommand } from "./commands";
 import { PaymentEvent } from "./events";
 
-export type PaymentStatus =
-  | "pending"
-  | "completed"
-  | "failed"
-  | "refunded";
+export type PaymentStatus = "pending" | "completed" | "failed" | "refunded";
 
 export interface PaymentState {
   referenceId: string | null;

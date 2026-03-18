@@ -1,5 +1,5 @@
 import { defineAggregate } from "@noddde/core";
-import { EcommerceInfrastructure, Clock } from "../infrastructure";
+import { EcommerceInfrastructure } from "../infrastructure";
 import { OrderCommand } from "./commands";
 import { OrderEvent, OrderItem } from "./events";
 

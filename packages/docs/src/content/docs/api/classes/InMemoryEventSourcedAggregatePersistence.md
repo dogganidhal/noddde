@@ -47,7 +47,7 @@ Defined in: [engine/implementations/in-memory-aggregate-persistence.ts:10](https
 
 [`EventSourcedAggregatePersistence`](/api/interfaces/eventsourcedaggregatepersistence/).[`load`](/api/interfaces/eventsourcedaggregatepersistence/#load)
 
-***
+---
 
 ### save()
 

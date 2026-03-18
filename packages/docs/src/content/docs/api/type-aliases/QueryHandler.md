@@ -13,11 +13,11 @@ Defined in: [cqrs/query/query-handler.ts:4](https://github.com/dogganidhal/noddd
 
 ### TInfrastructure
 
-`TInfrastructure` *extends* [`Infrastructure`](/api/type-aliases/infrastructure/)
+`TInfrastructure` _extends_ [`Infrastructure`](/api/type-aliases/infrastructure/)
 
 ### TQuery
 
-`TQuery` *extends* [`Query`](/api/interfaces/query/)\<`any`\>
+`TQuery` _extends_ [`Query`](/api/interfaces/query/)\<`any`\>
 
 ## Parameters
 

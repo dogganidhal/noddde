@@ -57,9 +57,7 @@ describe("Persistence Interface Contracts", () => {
     }
 
     describe("InMemoryStateStoredAggregatePersistence", () => {
-      runContractTests(
-        () => new InMemoryStateStoredAggregatePersistence(),
-      );
+      runContractTests(() => new InMemoryStateStoredAggregatePersistence());
     });
   });
 
@@ -126,17 +124,13 @@ describe("Persistence Interface Contracts", () => {
     }
 
     describe("InMemoryEventSourcedAggregatePersistence", () => {
-      runContractTests(
-        () => new InMemoryEventSourcedAggregatePersistence(),
-      );
+      runContractTests(() => new InMemoryEventSourcedAggregatePersistence());
     });
   });
 
   // ### SagaPersistence contract: save, load, and not-found semantics
   describe("SagaPersistence contract", () => {
-    function runContractTests(
-      createPersistence: () => SagaPersistence,
-    ) {
+    function runContractTests(createPersistence: () => SagaPersistence) {
       it("should return the saved state on load", async () => {
         const persistence = createPersistence();
         const state = { status: "awaiting_payment" };

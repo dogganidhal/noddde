@@ -118,7 +118,9 @@ const Todo = defineAggregate<TodoTypes>({
 
 // -- Projection setup --
 
-type TodoView = { todos: Array<{ id: string; title: string; completed: boolean }> };
+type TodoView = {
+  todos: Array<{ id: string; title: string; completed: boolean }>;
+};
 
 type TodoQuery = DefineQueries<{
   GetAllTodos: { result: TodoView };
@@ -203,7 +205,11 @@ import {
   EventEmitterEventBus,
   defineAggregate,
 } from "@noddde/core";
-import type { DefineEvents, DefineCommands, ProjectionTypes } from "@noddde/core";
+import type {
+  DefineEvents,
+  DefineCommands,
+  ProjectionTypes,
+} from "@noddde/core";
 
 type ItemEvent = DefineEvents<{
   ItemCreated: { id: string; name: string; price: number };
@@ -244,7 +250,10 @@ const CatalogProjection = defineProjection<{
 }>({
   reducers: {
     ItemCreated: (event, view) => ({
-      items: [...(view?.items ?? []), { id: event.payload.id, name: event.payload.name }],
+      items: [
+        ...(view?.items ?? []),
+        { id: event.payload.id, name: event.payload.name },
+      ],
     }),
   },
   queryHandlers: {},

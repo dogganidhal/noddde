@@ -29,7 +29,7 @@ Defined in: [engine/domain.ts:26](https://github.com/dogganidhal/noddde/blob/7fc
 
 `Promise`\<[`Event`](/api/interfaces/event/)[]\>
 
-***
+---
 
 ### save()
 

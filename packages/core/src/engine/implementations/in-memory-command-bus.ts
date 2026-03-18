@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import { Command, CommandBus } from "../../cqrs";
 
 /** Handler function type for command bus registration. */
@@ -25,9 +26,7 @@ export class InMemoryCommandBus implements CommandBus {
    */
   public register(commandName: string, handler: CommandHandler): void {
     if (this.handlers.has(commandName)) {
-      throw new Error(
-        `Handler already registered for command: ${commandName}`,
-      );
+      throw new Error(`Handler already registered for command: ${commandName}`);
     }
     this.handlers.set(commandName, handler);
   }
@@ -43,9 +42,7 @@ export class InMemoryCommandBus implements CommandBus {
   public async dispatch(command: Command): Promise<void> {
     const handler = this.handlers.get(command.name);
     if (!handler) {
-      throw new Error(
-        `No handler registered for command: ${command.name}`,
-      );
+      throw new Error(`No handler registered for command: ${command.name}`);
     }
     await handler(command);
   }

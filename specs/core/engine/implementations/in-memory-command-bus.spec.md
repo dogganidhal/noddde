@@ -96,9 +96,9 @@ describe("InMemoryCommandBus", () => {
   it("should throw when dispatching a command with no registered handler", async () => {
     const bus = new InMemoryCommandBus();
 
-    await expect(
-      bus.dispatch({ name: "UnknownCommand" }),
-    ).rejects.toThrow(/no handler/i);
+    await expect(bus.dispatch({ name: "UnknownCommand" })).rejects.toThrow(
+      /no handler/i,
+    );
   });
 });
 ```
@@ -118,9 +118,9 @@ describe("InMemoryCommandBus", () => {
       throw new Error("Handler failed");
     });
 
-    await expect(
-      bus.dispatch({ name: "FailingCommand" }),
-    ).rejects.toThrow("Handler failed");
+    await expect(bus.dispatch({ name: "FailingCommand" })).rejects.toThrow(
+      "Handler failed",
+    );
   });
 });
 ```
@@ -140,9 +140,9 @@ describe("InMemoryCommandBus", () => {
       throw new Error("Async handler failed");
     });
 
-    await expect(
-      bus.dispatch({ name: "AsyncFail" }),
-    ).rejects.toThrow("Async handler failed");
+    await expect(bus.dispatch({ name: "AsyncFail" })).rejects.toThrow(
+      "Async handler failed",
+    );
   });
 });
 ```

@@ -1,9 +1,10 @@
-import { describe, it, expectTypeOf } from "vitest";
+/* eslint-disable no-unused-vars */
+import { describe, expectTypeOf, it } from "vitest";
 import type {
-  Infrastructure,
-  CQRSInfrastructure,
   CommandBus,
+  CQRSInfrastructure,
   EventBus,
+  Infrastructure,
   QueryBus,
 } from "@noddde/core";
 
@@ -27,7 +28,9 @@ describe("Infrastructure", () => {
 
 describe("CQRSInfrastructure", () => {
   it("should have commandBus", () => {
-    expectTypeOf<CQRSInfrastructure["commandBus"]>().toEqualTypeOf<CommandBus>();
+    expectTypeOf<
+      CQRSInfrastructure["commandBus"]
+    >().toEqualTypeOf<CommandBus>();
   });
 
   it("should have eventBus", () => {

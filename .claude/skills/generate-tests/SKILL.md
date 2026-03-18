@@ -25,6 +25,7 @@ This is **step 2** of the 6-step pipeline:
 ## Step 1: Find the Spec
 
 If a spec path is provided, read it directly. Otherwise, find it:
+
 - From a source file: replace `packages/core/src/` with `specs/core/` and `.ts` with `.spec.md`
 - From a module name: look in `specs/core/<module-path>.spec.md`
 - From a test file: reverse the mapping below
@@ -32,6 +33,7 @@ If a spec path is provided, read it directly. Otherwise, find it:
 ## Step 2: Read the Spec
 
 Read the full spec. Focus on:
+
 - `title` from frontmatter (used for `describe()` block name)
 - `status` from frontmatter (must be `ready` or later — refuse to generate tests from `draft` specs)
 - `## Test Scenarios` section (the source of truth for tests)
@@ -40,9 +42,9 @@ Read the full spec. Focus on:
 
 ## Step 3: Determine Test File Path
 
-| Spec path | Test file path |
-|-----------|---------------|
-| `specs/core/<path>/<name>.spec.md` | `packages/core/src/__tests__/<path>/<name>.test.ts` |
+| Spec path                          | Test file path                                           |
+| ---------------------------------- | -------------------------------------------------------- |
+| `specs/core/<path>/<name>.spec.md` | `packages/core/src/__tests__/<path>/<name>.test.ts`      |
 | `specs/integration/<name>.spec.md` | `packages/core/src/__tests__/integration/<name>.test.ts` |
 
 Create parent directories if they don't exist.
@@ -53,7 +55,7 @@ Create parent directories if they don't exist.
 
 ```typescript
 import { describe, it, expect, expectTypeOf } from "vitest";
-import { /* exports from spec */ } from "@noddde/core";
+import {} from /* exports from spec */ "@noddde/core";
 
 describe("<spec title>", () => {
   // One it() block per ### heading in Test Scenarios
@@ -77,6 +79,7 @@ describe("<spec title>", () => {
 ### Handling Existing Test Files
 
 If the test file already exists:
+
 1. Read it
 2. Identify which test scenarios are new (in spec but not in test file)
 3. Identify which test scenarios were modified (heading exists but code differs)
@@ -99,6 +102,7 @@ cd packages/core && CODEARTIFACT_AUTH_TOKEN="" npx vitest run --reporter=verbose
 - **Type-level tests (`expectTypeOf`)**: These may already pass if the type definitions exist. That's fine — type contracts are often complete before runtime behavior.
 
 **Distinguish between**:
+
 - Compilation failures → fix test code (bad imports, syntax)
 - Runtime failures from stubs (`throw new Error("Not implemented")`) → expected RED, leave as-is
 - Runtime failures from wrong assertions → fix test code

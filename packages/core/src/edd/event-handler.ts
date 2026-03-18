@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import { Event } from "./event";
 import { Infrastructure } from "../infrastructure";
 

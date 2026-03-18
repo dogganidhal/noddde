@@ -1,18 +1,14 @@
-import { describe, it, expect, vi } from "vitest";
+/* eslint-disable no-unused-vars */
+import { describe, expect, it } from "vitest";
+import type { DefineCommands, DefineEvents, DefineQueries } from "@noddde/core";
 import {
+  configureDomain,
   defineAggregate,
   defineProjection,
-  configureDomain,
-  InMemoryEventSourcedAggregatePersistence,
-  InMemoryCommandBus,
-  InMemoryQueryBus,
   EventEmitterEventBus,
-} from "@noddde/core";
-import type {
-  DefineCommands,
-  DefineEvents,
-  DefineQueries,
-  ProjectionTypes,
+  InMemoryCommandBus,
+  InMemoryEventSourcedAggregatePersistence,
+  InMemoryQueryBus,
 } from "@noddde/core";
 
 // ---- Scenario 1: Projection reducer updates view after event publication ----
@@ -322,8 +318,9 @@ describe("Async projection reducer", () => {
     });
 
     // After dispatch resolves, the async reducer should have completed.
-    const view =
-      domain.getProjectionView<{ entries: string[] }>("AsyncLogProjection");
+    const view = domain.getProjectionView<{ entries: string[] }>(
+      "AsyncLogProjection",
+    );
     expect(view).toEqual({ entries: ["hello world"] });
   });
 });

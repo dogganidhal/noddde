@@ -56,7 +56,12 @@ docs:
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
-import type { QueryHandler, DefineQueries, QueryResult, Infrastructure } from "@noddde/core";
+import type {
+  QueryHandler,
+  DefineQueries,
+  QueryResult,
+  Infrastructure,
+} from "@noddde/core";
 
 describe("QueryHandler", () => {
   interface AccountView {
@@ -106,7 +111,9 @@ describe("QueryHandler sync/async", () => {
   });
 
   it("should allow asynchronous handler", () => {
-    const handler: QueryHandler<Infrastructure, Query<number>> = async (_payload) => {
+    const handler: QueryHandler<Infrastructure, Query<number>> = async (
+      _payload,
+    ) => {
       return 42;
     };
     expect(handler({}, {})).resolves.toBe(42);
@@ -118,13 +125,20 @@ describe("QueryHandler sync/async", () => {
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
-import type { QueryHandler, Query, Infrastructure, CQRSInfrastructure } from "@noddde/core";
+import type {
+  QueryHandler,
+  Query,
+  Infrastructure,
+  CQRSInfrastructure,
+} from "@noddde/core";
 
 describe("QueryHandler infrastructure isolation", () => {
   type Handler = QueryHandler<Infrastructure, Query<string>>;
 
   it("should not have commandBus in infrastructure", () => {
-    expectTypeOf<Parameters<Handler>[1]>().not.toMatchTypeOf<CQRSInfrastructure>();
+    expectTypeOf<
+      Parameters<Handler>[1]
+    >().not.toMatchTypeOf<CQRSInfrastructure>();
   });
 });
 ```

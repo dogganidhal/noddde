@@ -1,9 +1,10 @@
-import { describe, it, expect, expectTypeOf } from "vitest";
+/* eslint-disable no-unused-vars */
+import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
-  EventHandler,
   DefineEvents,
-  Infrastructure,
   Event,
+  EventHandler,
+  Infrastructure,
 } from "@noddde/core";
 
 describe("EventHandler", () => {
@@ -43,7 +44,10 @@ describe("EventHandler sync/async", () => {
   });
 
   it("should allow asynchronous handler", () => {
-    const handler: EventHandler<Event, Infrastructure> = async (_payload, _infra) => {
+    const handler: EventHandler<Event, Infrastructure> = async (
+      _payload,
+      _infra,
+    ) => {
       // no-op, async
     };
     expect(handler).toBeDefined();

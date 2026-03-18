@@ -1,7 +1,6 @@
 {
   "name": "@noddde/core",
   "version": "0.0.0",
-  "private": true,
   "types": "dist/index.d.ts",
   "files": [
     "dist"

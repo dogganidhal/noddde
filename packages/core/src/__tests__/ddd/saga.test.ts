@@ -1,19 +1,19 @@
-import { describe, it, expect, expectTypeOf } from "vitest";
+/* eslint-disable no-unused-vars */
+import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
-  DefineEvents,
-  DefineCommands,
-  Infrastructure,
-  SagaReaction,
-  SagaEventHandler,
   Command,
   CQRSInfrastructure,
-  Saga,
-  SagaTypes,
-  InferSagaState,
-  InferSagaEvents,
+  DefineCommands,
+  DefineEvents,
   InferSagaCommands,
-  InferSagaInfrastructure,
+  InferSagaEvents,
   InferSagaId,
+  InferSagaInfrastructure,
+  InferSagaState,
+  Infrastructure,
+  Saga,
+  SagaEventHandler,
+  SagaReaction,
 } from "@noddde/core";
 import { defineSaga } from "@noddde/core";
 
@@ -49,11 +49,18 @@ describe("defineSaga", () => {
     },
     handlers: {
       OrderPlaced: (event, state) => ({
-        state: { ...state, status: "awaiting_payment", orderId: event.payload.orderId },
+        state: {
+          ...state,
+          status: "awaiting_payment",
+          orderId: event.payload.orderId,
+        },
         commands: {
           name: "RequestPayment",
           targetAggregateId: event.payload.orderId,
-          payload: { orderId: event.payload.orderId, amount: event.payload.total },
+          payload: {
+            orderId: event.payload.orderId,
+            amount: event.payload.total,
+          },
         },
       }),
       PaymentReceived: (_event, state) => ({
@@ -131,7 +138,12 @@ describe("SagaEventHandler", () => {
     logger: { log(msg: string): void };
   }
 
-  type Handler = SagaEventHandler<OrderPlacedEvent, MyState, MyCommand, MyInfra>;
+  type Handler = SagaEventHandler<
+    OrderPlacedEvent,
+    MyState,
+    MyCommand,
+    MyInfra
+  >;
 
   it("should receive full event as first parameter", () => {
     expectTypeOf<Parameters<Handler>[0]>().toEqualTypeOf<OrderPlacedEvent>();
@@ -142,12 +154,15 @@ describe("SagaEventHandler", () => {
   });
 
   it("should receive infrastructure merged with CQRSInfrastructure", () => {
-    expectTypeOf<Parameters<Handler>[2]>().toEqualTypeOf<MyInfra & CQRSInfrastructure>();
+    expectTypeOf<Parameters<Handler>[2]>().toEqualTypeOf<
+      MyInfra & CQRSInfrastructure
+    >();
   });
 
   it("should return SagaReaction or Promise of it", () => {
     expectTypeOf<ReturnType<Handler>>().toEqualTypeOf<
-      SagaReaction<MyState, MyCommand> | Promise<SagaReaction<MyState, MyCommand>>
+      | SagaReaction<MyState, MyCommand>
+      | Promise<SagaReaction<MyState, MyCommand>>
     >();
   });
 });
@@ -244,7 +259,9 @@ describe("Saga Infer utilities", () => {
   });
 
   it("should infer infrastructure type", () => {
-    expectTypeOf<InferSagaInfrastructure<typeof saga>>().toEqualTypeOf<MyInfra>();
+    expectTypeOf<
+      InferSagaInfrastructure<typeof saga>
+    >().toEqualTypeOf<MyInfra>();
   });
 
   it("should infer saga ID type (defaults to string)", () => {
@@ -255,7 +272,12 @@ describe("Saga Infer utilities", () => {
 describe("Saga with custom ID type", () => {
   type Events = DefineEvents<{ Started: { id: number } }>;
   type Cmds = Command & { name: "Continue" };
-  type Types = { state: {}; events: Events; commands: Cmds; infrastructure: Infrastructure };
+  type Types = {
+    state: {};
+    events: Events;
+    commands: Cmds;
+    infrastructure: Infrastructure;
+  };
 
   const saga = defineSaga<Types, number>({
     initialState: {},
@@ -273,7 +295,10 @@ describe("Saga with custom ID type", () => {
   });
 
   it("should type association return as number", () => {
-    const id = saga.associations.Started({ name: "Started", payload: { id: 42 } });
+    const id = saga.associations.Started({
+      name: "Started",
+      payload: { id: 42 },
+    });
     expectTypeOf(id).toBeNumber();
   });
 });
@@ -281,7 +306,12 @@ describe("Saga with custom ID type", () => {
 describe("defineSaga identity", () => {
   type E = DefineEvents<{ X: { v: number } }>;
   type C = Command & { name: "Y" };
-  type T = { state: {}; events: E; commands: C; infrastructure: Infrastructure };
+  type T = {
+    state: {};
+    events: E;
+    commands: C;
+    infrastructure: Infrastructure;
+  };
 
   it("should return the exact same config object", () => {
     const config = {

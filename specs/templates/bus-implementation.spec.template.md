@@ -4,12 +4,13 @@ module: engine/implementations/[bus-name]
 source_file: packages/[package]/src/[path]/[bus-name].ts
 status: draft
 exports: [[BusName]]
-depends_on: []
+depends_on:
+  []
   # Choose the relevant dependency:
   # - core/edd/event-bus       (for EventBus implementations)
   # - core/cqrs/command-bus    (for CommandBus implementations)
   # - core/cqrs/query-bus      (for QueryBus implementations)
-docs: []  # Documentation pages covering this module (paths relative to packages/docs/content/docs/)
+docs: [] # Documentation pages covering this module (paths relative to packages/docs/content/docs/)
 ---
 
 # [BusName] [BusType] Implementation

@@ -73,10 +73,15 @@ describe("StandaloneCommandHandler", () => {
     payload: { to: string; body: string };
   }
 
-  type Handler = StandaloneCommandHandler<NotificationInfra, SendNotificationCommand>;
+  type Handler = StandaloneCommandHandler<
+    NotificationInfra,
+    SendNotificationCommand
+  >;
 
   it("should receive the full command as first parameter", () => {
-    expectTypeOf<Parameters<Handler>[0]>().toEqualTypeOf<SendNotificationCommand>();
+    expectTypeOf<
+      Parameters<Handler>[0]
+    >().toEqualTypeOf<SendNotificationCommand>();
   });
 
   it("should receive infrastructure merged with CQRSInfrastructure", () => {
@@ -110,8 +115,14 @@ describe("StandaloneCommandHandler CQRS access", () => {
     ) => {
       // The handler has access to all three buses
       await infrastructure.commandBus.dispatch({ name: "FollowUp" });
-      await infrastructure.eventBus.dispatch({ name: "Processed", payload: {} });
-      await infrastructure.queryBus.dispatch({ name: "GetStatus", payload: {} });
+      await infrastructure.eventBus.dispatch({
+        name: "Processed",
+        payload: {},
+      });
+      await infrastructure.queryBus.dispatch({
+        name: "GetStatus",
+        payload: {},
+      });
     };
     expect(handler).toBeDefined();
   });

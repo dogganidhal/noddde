@@ -64,10 +64,7 @@ describe("Command, AggregateCommand, StandaloneCommand & DefineCommands", () => 
     });
 
     it("should include payload for non-void commands", () => {
-      type AuthCmd = Extract<
-        AccountCommand,
-        { name: "AuthorizeTransaction" }
-      >;
+      type AuthCmd = Extract<AccountCommand, { name: "AuthorizeTransaction" }>;
       expectTypeOf<AuthCmd>().toEqualTypeOf<{
         name: "AuthorizeTransaction";
         targetAggregateId: string;

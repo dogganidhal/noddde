@@ -26,21 +26,27 @@ docs:
 > One-paragraph summary of purpose.
 
 ## Type Contract
+
 Precise description of every exported type and function signature.
 
 ## Behavioral Requirements
+
 Numbered list of behavioral guarantees that constitute the contract.
 
 ## Invariants
+
 Things that must ALWAYS or NEVER be true.
 
 ## Edge Cases
+
 Boundary conditions and corner cases to handle.
 
 ## Integration Points
+
 How this module connects to others.
 
 ## Test Scenarios
+
 Vitest-compatible code blocks. Each ### heading becomes one `it()` block.
 ```
 
@@ -64,13 +70,13 @@ draft ──→ ready ──→ implementing ──→ implemented
                                   (replaced by new spec)
 ```
 
-| Status | Meaning | Transition trigger |
-|--------|---------|-------------------|
-| `draft` | Being written, not ready | Initial creation via `/new-spec` |
-| `ready` | Reviewed, ready for implementation | Developer approves the spec |
-| `implementing` | Claude is actively implementing | `/implement-spec` starts work |
-| `implemented` | Code + tests complete, all passing | `/implement-spec` finishes successfully |
-| `superseded` | Replaced by a newer spec | New spec created that replaces this one |
+| Status         | Meaning                            | Transition trigger                      |
+| -------------- | ---------------------------------- | --------------------------------------- |
+| `draft`        | Being written, not ready           | Initial creation via `/new-spec`        |
+| `ready`        | Reviewed, ready for implementation | Developer approves the spec             |
+| `implementing` | Claude is actively implementing    | `/implement-spec` starts work           |
+| `implemented`  | Code + tests complete, all passing | `/implement-spec` finishes successfully |
+| `superseded`   | Replaced by a newer spec           | New spec created that replaces this one |
 
 **Important**: When `/edit-spec` modifies the type contract or behavioral requirements of an `implemented` spec, the status automatically resets to `ready` — because the implementation no longer matches.
 
@@ -140,6 +146,7 @@ Claude orchestrates all 6 steps autonomously, only pausing at gate points:
 **Why RED before GREEN**: Tests are generated (step 2) before the implementation (step 3). This proves they catch missing behavior. You'll see `🔴 8 RED` become `✅ 8 GREEN`.
 
 **Gate points** (where Claude pauses):
+
 - After drafting the spec → "Does this look right?"
 - If a breaking change is detected → "How do you want to handle this?"
 - If stuck (same test fails 3+ times) → "Here's what's happening, what should I do?"
@@ -191,9 +198,9 @@ Before a spec reaches `ready`:
 
 The `## Test Scenarios` section maps directly to vitest test files:
 
-| Spec path | Test file path |
-|-----------|---------------|
-| `specs/core/<path>/<name>.spec.md` | `packages/core/src/__tests__/<path>/<name>.test.ts` |
+| Spec path                          | Test file path                                           |
+| ---------------------------------- | -------------------------------------------------------- |
+| `specs/core/<path>/<name>.spec.md` | `packages/core/src/__tests__/<path>/<name>.test.ts`      |
 | `specs/integration/<name>.spec.md` | `packages/core/src/__tests__/integration/<name>.test.ts` |
 
 - Each `### Heading` becomes one `it("heading", ...)` block
@@ -202,10 +209,10 @@ The `## Test Scenarios` section maps directly to vitest test files:
 
 ## Working with Claude
 
-| Command | Purpose |
-|---------|---------|
+| Command               | Purpose                                                                            |
+| --------------------- | ---------------------------------------------------------------------------------- |
 | `/spec <description>` | Full pipeline: spec → RED tests → implement → GREEN tests → validate → update docs |
-| `/spec-status` | Show all specs and their pipeline position |
+| `/spec-status`        | Show all specs and their pipeline position                                         |
 
 That's it. Two commands. Claude handles the rest.
 

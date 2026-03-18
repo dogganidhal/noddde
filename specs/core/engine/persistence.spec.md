@@ -3,7 +3,12 @@ title: "Persistence Interface Contracts"
 module: engine/domain
 source_file: packages/core/src/engine/domain.ts
 status: implemented
-exports: [StateStoredAggregatePersistence, EventSourcedAggregatePersistence, SagaPersistence]
+exports:
+  [
+    StateStoredAggregatePersistence,
+    EventSourcedAggregatePersistence,
+    SagaPersistence,
+  ]
 depends_on: [edd/event]
 docs:
   - domain-configuration/persistence.mdx
@@ -22,7 +27,11 @@ interface StateStoredAggregatePersistence {
 }
 
 interface EventSourcedAggregatePersistence {
-  save(aggregateName: string, aggregateId: string, events: Event[]): Promise<void>;
+  save(
+    aggregateName: string,
+    aggregateId: string,
+    events: Event[],
+  ): Promise<void>;
   load(aggregateName: string, aggregateId: string): Promise<Event[]>;
 }
 
@@ -64,6 +73,7 @@ interface SagaPersistence {
 ### PersistenceConfiguration (union discrimination)
 
 The domain engine must distinguish between the two aggregate persistence strategies. Possible discrimination approaches:
+
 - **Duck typing** -- Check the behavior of `load`: event-sourced always returns `Event[]`; state-stored returns a state object. This is fragile.
 - **Marker property** -- Add a `type: "event-sourced" | "state-stored"` discriminant. This is the recommended approach.
 - **instanceof** -- Check `instanceof InMemoryEventSourcedAggregatePersistence`. Only works with concrete classes, not custom implementations.
@@ -222,7 +232,9 @@ describe("EventSourcedAggregatePersistence contract", () => {
   }
 
   describe("InMemoryEventSourcedAggregatePersistence", () => {
-    const { InMemoryEventSourcedAggregatePersistence } = require("@noddde/core");
+    const {
+      InMemoryEventSourcedAggregatePersistence,
+    } = require("@noddde/core");
     runContractTests(() => new InMemoryEventSourcedAggregatePersistence());
   });
 });
@@ -269,7 +281,9 @@ describe("SagaPersistence contract", () => {
       await persistence.save("OrderFulfillment", "1", { a: true });
       await persistence.save("PaymentFlow", "1", { b: true });
 
-      expect(await persistence.load("OrderFulfillment", "1")).toEqual({ a: true });
+      expect(await persistence.load("OrderFulfillment", "1")).toEqual({
+        a: true,
+      });
       expect(await persistence.load("PaymentFlow", "1")).toEqual({ b: true });
     });
   }

@@ -28,9 +28,9 @@ describe("InMemoryQueryBus", () => {
   it("dispatch throws when no handler is registered", async () => {
     const bus = new InMemoryQueryBus();
 
-    await expect(
-      bus.dispatch({ name: "UnknownQuery" }),
-    ).rejects.toThrow(/no handler/i);
+    await expect(bus.dispatch({ name: "UnknownQuery" })).rejects.toThrow(
+      /no handler/i,
+    );
   });
 
   it("handler receives query payload not the full query object", async () => {
@@ -70,9 +70,9 @@ describe("InMemoryQueryBus", () => {
       throw new Error("Database connection failed");
     });
 
-    await expect(
-      bus.dispatch({ name: "BrokenQuery" }),
-    ).rejects.toThrow("Database connection failed");
+    await expect(bus.dispatch({ name: "BrokenQuery" })).rejects.toThrow(
+      "Database connection failed",
+    );
   });
 
   it("query with no payload passes undefined to handler", async () => {

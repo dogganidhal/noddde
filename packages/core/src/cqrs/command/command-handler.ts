@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import { Infrastructure, CQRSInfrastructure } from "../../infrastructure";
 import { StandaloneCommand } from "./command";
 

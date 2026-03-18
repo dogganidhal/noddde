@@ -5,7 +5,7 @@ prev: false
 title: "InferAggregateState"
 ---
 
-> **InferAggregateState**\<`T`\> = `T` *extends* [`Aggregate`](/api/interfaces/aggregate/)\<infer U\> ? `U`\[`"state"`\] : `never`
+> **InferAggregateState**\<`T`\> = `T` _extends_ [`Aggregate`](/api/interfaces/aggregate/)\<infer U\> ? `U`\[`"state"`\] : `never`
 
 Defined in: [ddd/aggregate-root.ts:74](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/ddd/aggregate-root.ts#L74)
 
@@ -13,4 +13,4 @@ Defined in: [ddd/aggregate-root.ts:74](https://github.com/dogganidhal/noddde/blo
 
 ### T
 
-`T` *extends* [`Aggregate`](/api/interfaces/aggregate/)
+`T` _extends_ [`Aggregate`](/api/interfaces/aggregate/)

@@ -1,5 +1,6 @@
-import { describe, it, expectTypeOf } from "vitest";
-import type { EventBus, Event, DefineEvents } from "@noddde/core";
+/* eslint-disable no-unused-vars */
+import { describe, expectTypeOf, it } from "vitest";
+import type { DefineEvents, Event, EventBus } from "@noddde/core";
 
 describe("EventBus", () => {
   // ### EventBus dispatch accepts any Event subtype

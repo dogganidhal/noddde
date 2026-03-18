@@ -35,7 +35,7 @@ Defined in: [engine/implementations/in-memory-query-bus.ts:6](https://github.com
 
 ##### TQuery
 
-`TQuery` *extends* [`Query`](/api/interfaces/query/)\<`any`, `string`\>
+`TQuery` _extends_ [`Query`](/api/interfaces/query/)\<`any`, `string`\>
 
 #### Parameters
 

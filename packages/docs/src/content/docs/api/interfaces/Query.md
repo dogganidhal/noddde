@@ -15,7 +15,7 @@ Defined in: [cqrs/query/query.ts:1](https://github.com/dogganidhal/noddde/blob/7
 
 ### TQueryNames
 
-`TQueryNames` *extends* `string` \| `symbol` = `string`
+`TQueryNames` _extends_ `string` \| `symbol` = `string`
 
 ## Properties
 
@@ -25,7 +25,7 @@ Defined in: [cqrs/query/query.ts:1](https://github.com/dogganidhal/noddde/blob/7
 
 Defined in: [cqrs/query/query.ts:2](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/cqrs/query/query.ts#L2)
 
-***
+---
 
 ### payload?
 

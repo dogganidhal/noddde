@@ -38,20 +38,30 @@ type DomainConfiguration<
 > = {
   writeModel: {
     aggregates: AggregateMap;
-    standaloneCommandHandlers?: StandaloneCommandHandlerMap<TInfrastructure, TStandaloneCommand>;
+    standaloneCommandHandlers?: StandaloneCommandHandlerMap<
+      TInfrastructure,
+      TStandaloneCommand
+    >;
   };
   readModel: {
     projections: ProjectionMap;
-    standaloneQueryHandlers?: StandaloneQueryHandlerMap<TInfrastructure, TStandaloneQuery>;
+    standaloneQueryHandlers?: StandaloneQueryHandlerMap<
+      TInfrastructure,
+      TStandaloneQuery
+    >;
   };
   processModel?: {
     sagas: SagaMap;
   };
   infrastructure: {
-    aggregatePersistence?: () => PersistenceConfiguration | Promise<PersistenceConfiguration>;
+    aggregatePersistence?: () =>
+      | PersistenceConfiguration
+      | Promise<PersistenceConfiguration>;
     sagaPersistence?: () => SagaPersistence | Promise<SagaPersistence>;
     provideInfrastructure?: () => Promise<TInfrastructure> | TInfrastructure;
-    cqrsInfrastructure?: (infrastructure: TInfrastructure) => CQRSInfrastructure | Promise<CQRSInfrastructure>;
+    cqrsInfrastructure?: (
+      infrastructure: TInfrastructure,
+    ) => CQRSInfrastructure | Promise<CQRSInfrastructure>;
   };
 };
 
@@ -62,12 +72,20 @@ class Domain<
 > {
   get infrastructure(): TInfrastructure & CQRSInfrastructure;
   init(): Promise<void>;
-  dispatchCommand<TCommand extends AggregateCommand<any>>(command: TCommand): Promise<TCommand["targetAggregateId"]>;
-  dispatchQuery<TQuery extends Query<any>>(query: TQuery): Promise<QueryResult<TQuery>>;
+  dispatchCommand<TCommand extends AggregateCommand<any>>(
+    command: TCommand,
+  ): Promise<TCommand["targetAggregateId"]>;
+  dispatchQuery<TQuery extends Query<any>>(
+    query: TQuery,
+  ): Promise<QueryResult<TQuery>>;
 }
 
 const configureDomain: <TInfrastructure, TStandaloneCommand, TStandaloneQuery>(
-  configuration: DomainConfiguration<TInfrastructure, TStandaloneCommand, TStandaloneQuery>,
+  configuration: DomainConfiguration<
+    TInfrastructure,
+    TStandaloneCommand,
+    TStandaloneQuery
+  >,
 ) => Promise<Domain<TInfrastructure, TStandaloneCommand, TStandaloneQuery>>;
 ```
 
@@ -503,7 +521,10 @@ type ItemEvent = DefineEvents<{
 }>;
 
 type ItemQuery = DefineQueries<{
-  GetItemById: { payload: { id: string }; result: { id: string; name: string } | null };
+  GetItemById: {
+    payload: { id: string };
+    result: { id: string; name: string } | null;
+  };
 }>;
 
 type ItemProjectionTypes = ProjectionTypes & {
@@ -523,9 +544,7 @@ const ItemProjection = defineProjection<ItemProjectionTypes>({
   queryHandlers: {
     GetItemById: (payload) => {
       // In a real implementation, this would read from a repository
-      return payload?.id === "item-1"
-        ? { id: "item-1", name: "Widget" }
-        : null;
+      return payload?.id === "item-1" ? { id: "item-1", name: "Widget" } : null;
     },
   },
 });
@@ -965,7 +984,10 @@ type ProductEvent = DefineEvents<{
 }>;
 
 type ProductQuery = DefineQueries<{
-  GetProductById: { payload: { id: string }; result: { id: string; name: string; price: number } | null };
+  GetProductById: {
+    payload: { id: string };
+    result: { id: string; name: string; price: number } | null;
+  };
 }>;
 
 type ProductProjectionTypes = ProjectionTypes & {

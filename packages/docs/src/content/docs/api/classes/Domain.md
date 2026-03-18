@@ -11,7 +11,7 @@ Defined in: [engine/domain.ts:80](https://github.com/dogganidhal/noddde/blob/7fc
 
 ### TInfrastructure
 
-`TInfrastructure` *extends* [`Infrastructure`](/api/type-aliases/infrastructure/)
+`TInfrastructure` _extends_ [`Infrastructure`](/api/type-aliases/infrastructure/)
 
 ## Constructors
 
@@ -57,7 +57,7 @@ Defined in: [engine/domain.ts:96](https://github.com/dogganidhal/noddde/blob/7fc
 
 ##### TCommand
 
-`TCommand` *extends* [`AggregateCommand`](/api/interfaces/aggregatecommand/)\<`any`\>
+`TCommand` _extends_ [`AggregateCommand`](/api/interfaces/aggregatecommand/)\<`any`\>
 
 #### Parameters
 
@@ -69,7 +69,7 @@ Defined in: [engine/domain.ts:96](https://github.com/dogganidhal/noddde/blob/7fc
 
 `Promise`\<`TCommand`\[`"targetAggregateId"`\]\>
 
-***
+---
 
 ### init()
 

@@ -59,7 +59,7 @@ const BankAccount = defineAggregate<BankAccountDef>({
 });
 ```
 
-This is not a simplified example. This is the actual API. No base class. No decorator. No registration. The object you write *is* the aggregate — `defineAggregate` is an identity function that exists only so TypeScript can infer the types.
+This is not a simplified example. This is the actual API. No base class. No decorator. No registration. The object you write _is_ the aggregate — `defineAggregate` is an identity function that exists only so TypeScript can infer the types.
 
 ## What makes this different
 
@@ -88,8 +88,10 @@ Need a clock? A logger? A payment gateway? Define an interface, add it to the ty
 
 ```typescript
 PlaceBid: (command, state, { clock }) => {
-  if (clock.now() > state.endsAt) { /* reject */ }
-}
+  if (clock.now() > state.endsAt) {
+    /* reject */
+  }
+};
 ```
 
 In production, you provide a `SystemClock`. In tests, you provide a `FixedClock`. No container. No binding syntax. No `@Inject()`. Just a function that receives what it needs.
@@ -145,10 +147,10 @@ yarn add @noddde/core
 
 Head to the [documentation](https://noddde.dev/docs/getting-started) for a walkthrough that builds a complete domain from scratch, or explore the [sample domains](packages/samples/src/) for real-world patterns:
 
-| Sample | What it shows |
-|--------|--------------|
-| [Auction](packages/samples/src/auction) | Commands, events, business rules, infrastructure injection |
-| [Banking](packages/samples/src/event-sourced-banking) | Event sourcing, projections, queries, repositories |
+| Sample                                                      | What it shows                                                     |
+| ----------------------------------------------------------- | ----------------------------------------------------------------- |
+| [Auction](packages/samples/src/auction)                     | Commands, events, business rules, infrastructure injection        |
+| [Banking](packages/samples/src/event-sourced-banking)       | Event sourcing, projections, queries, repositories                |
 | [Order Fulfillment](packages/samples/src/order-fulfillment) | 3 aggregates, saga orchestration, cross-context event correlation |
 
 ## License

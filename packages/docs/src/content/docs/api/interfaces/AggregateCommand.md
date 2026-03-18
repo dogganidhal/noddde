@@ -29,7 +29,7 @@ Defined in: [cqrs/command/command.ts:2](https://github.com/dogganidhal/noddde/bl
 
 [`Command`](/api/interfaces/command/).[`name`](/api/interfaces/command/#name)
 
-***
+---
 
 ### payload?
 
@@ -41,7 +41,7 @@ Defined in: [cqrs/command/command.ts:3](https://github.com/dogganidhal/noddde/bl
 
 [`Command`](/api/interfaces/command/).[`payload`](/api/interfaces/command/#payload)
 
-***
+---
 
 ### targetAggregateId
 

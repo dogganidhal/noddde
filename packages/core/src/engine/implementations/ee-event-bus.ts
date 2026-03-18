@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import { Event, EventBus } from "../../edd";
 import { EventEmitter } from "node:events";
 
@@ -33,10 +34,7 @@ export class EventEmitterEventBus implements EventBus {
    * @param eventName - The event name to subscribe to.
    * @param handler - The handler function. May return a `Promise`.
    */
-  public on(
-    eventName: string,
-    handler: AsyncEventHandler,
-  ): void {
+  public on(eventName: string, handler: AsyncEventHandler): void {
     const existing = this.handlers.get(eventName);
     if (existing) {
       existing.push(handler);

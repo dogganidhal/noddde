@@ -1,29 +1,27 @@
-import { describe, it, expect, vi } from "vitest";
-import {
-  configureDomain,
-  Domain,
-  EventEmitterEventBus,
-  InMemoryCommandBus,
-  InMemoryQueryBus,
-  InMemoryEventSourcedAggregatePersistence,
-  InMemoryStateStoredAggregatePersistence,
-  InMemorySagaPersistence,
-  defineAggregate,
-  defineProjection,
-  defineSaga,
-} from "@noddde/core";
+/* eslint-disable no-unused-vars */
+import { describe, expect, it, vi } from "vitest";
 import type {
-  Infrastructure,
-  CQRSInfrastructure,
+  AggregateTypes,
   DefineCommands,
   DefineEvents,
   DefineQueries,
-  AggregateTypes,
+  EventSourcedAggregatePersistence,
+  Infrastructure,
   ProjectionTypes,
   SagaTypes,
-  EventSourcedAggregatePersistence,
-  Event,
-  Query,
+} from "@noddde/core";
+import {
+  configureDomain,
+  defineAggregate,
+  defineProjection,
+  defineSaga,
+  Domain,
+  EventEmitterEventBus,
+  InMemoryCommandBus,
+  InMemoryEventSourcedAggregatePersistence,
+  InMemoryQueryBus,
+  InMemorySagaPersistence,
+  InMemoryStateStoredAggregatePersistence,
 } from "@noddde/core";
 
 // ============================================================
@@ -286,7 +284,10 @@ type ItemEvent = DefineEvents<{
 }>;
 
 type ItemQuery = DefineQueries<{
-  GetItemById: { payload: { id: string }; result: { id: string; name: string } | null };
+  GetItemById: {
+    payload: { id: string };
+    result: { id: string; name: string } | null;
+  };
 }>;
 
 type ItemProjectionTypes = ProjectionTypes & {
@@ -306,9 +307,7 @@ const ItemProjection = defineProjection<ItemProjectionTypes>({
   queryHandlers: {
     GetItemById: (payload) => {
       // In a real implementation, this would read from a repository
-      return payload?.id === "item-1"
-        ? { id: "item-1", name: "Widget" }
-        : null;
+      return payload?.id === "item-1" ? { id: "item-1", name: "Widget" } : null;
     },
   },
 });
@@ -667,7 +666,10 @@ type ProductEvent = DefineEvents<{
 }>;
 
 type ProductQuery = DefineQueries<{
-  GetProductById: { payload: { id: string }; result: { id: string; name: string; price: number } | null };
+  GetProductById: {
+    payload: { id: string };
+    result: { id: string; name: string; price: number } | null;
+  };
 }>;
 
 type ProductProjectionTypes = ProjectionTypes & {

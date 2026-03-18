@@ -88,11 +88,18 @@ describe("Infrastructure", () => {
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
-import type { CQRSInfrastructure, CommandBus, EventBus, QueryBus } from "@noddde/core";
+import type {
+  CQRSInfrastructure,
+  CommandBus,
+  EventBus,
+  QueryBus,
+} from "@noddde/core";
 
 describe("CQRSInfrastructure", () => {
   it("should have commandBus", () => {
-    expectTypeOf<CQRSInfrastructure["commandBus"]>().toEqualTypeOf<CommandBus>();
+    expectTypeOf<
+      CQRSInfrastructure["commandBus"]
+    >().toEqualTypeOf<CommandBus>();
   });
 
   it("should have eventBus", () => {
@@ -109,7 +116,11 @@ describe("CQRSInfrastructure", () => {
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
-import type { Infrastructure, CQRSInfrastructure, CommandBus } from "@noddde/core";
+import type {
+  Infrastructure,
+  CQRSInfrastructure,
+  CommandBus,
+} from "@noddde/core";
 
 describe("Infrastructure & CQRSInfrastructure intersection", () => {
   interface MyInfra extends Infrastructure {

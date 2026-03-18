@@ -13,4 +13,4 @@ Defined in: [ddd/aggregate-root.ts:71](https://github.com/dogganidhal/noddde/blo
 
 ### T
 
-`T` *extends* [`AggregateTypes`](/api/type-aliases/aggregatetypes/)
+`T` _extends_ [`AggregateTypes`](/api/type-aliases/aggregatetypes/)

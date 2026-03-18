@@ -3,8 +3,18 @@ title: "ProjectionTypes, Projection, defineProjection & Infer Utilities"
 module: ddd/projection
 source_file: packages/core/src/ddd/projection.ts
 status: implemented
-exports: [ProjectionTypes, Projection, defineProjection, InferProjectionView, InferProjectionEvents, InferProjectionQueries, InferProjectionInfrastructure]
-depends_on: [edd/event, cqrs/query/query, cqrs/query/query-handler, infrastructure/index]
+exports:
+  [
+    ProjectionTypes,
+    Projection,
+    defineProjection,
+    InferProjectionView,
+    InferProjectionEvents,
+    InferProjectionQueries,
+    InferProjectionInfrastructure,
+  ]
+depends_on:
+  [edd/event, cqrs/query/query, cqrs/query/query-handler, infrastructure/index]
 docs:
   - projections/overview.mdx
   - projections/functional-projections.mdx
@@ -19,19 +29,23 @@ docs:
 ## Type Contract
 
 - **`ProjectionTypes`** is a type with four required fields:
+
   - `events: Event` -- discriminated union of events this projection handles.
   - `queries: Query<any>` -- discriminated union of queries this projection answers.
   - `view: any` -- the read-optimized view model.
   - `infrastructure: Infrastructure` -- external dependencies for query handlers.
 
 - **`ReducerMap<T>`** (internal) maps each event name to:
+
   - `(event: Extract<T["events"], { name: EventName }>, view: T["view"]) => Promise<T["view"]> | T["view"]`
   - Reducers receive the FULL event (not just payload), unlike `ApplyHandler`.
 
 - **`QueryHandlerMap<T>`** (internal) maps each query name to an OPTIONAL `QueryHandler`:
+
   - `[QueryName]?: QueryHandler<T["infrastructure"], Extract<T["queries"], { name: QueryName }>>`
 
 - **`Projection<T extends ProjectionTypes>`** is an interface with two fields:
+
   - `reducers: ReducerMap<T>` -- required handler for every event name.
   - `queryHandlers: QueryHandlerMap<T>` -- optional handler per query name.
 
@@ -143,7 +157,12 @@ describe("defineProjection", () => {
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
-import type { DefineEvents, DefineQueries, Infrastructure, Query } from "@noddde/core";
+import type {
+  DefineEvents,
+  DefineQueries,
+  Infrastructure,
+  Query,
+} from "@noddde/core";
 import { defineProjection } from "@noddde/core";
 
 describe("Reducer event parameter", () => {
@@ -161,7 +180,10 @@ describe("Reducer event parameter", () => {
       reducers: {
         ItemAdded: (event, view) => {
           // event has both name and payload
-          expectTypeOf(event).toEqualTypeOf<{ name: "ItemAdded"; payload: { item: string } }>();
+          expectTypeOf(event).toEqualTypeOf<{
+            name: "ItemAdded";
+            payload: { item: string };
+          }>();
           expectTypeOf(event.name).toEqualTypeOf<"ItemAdded">();
           expectTypeOf(event.payload).toEqualTypeOf<{ item: string }>();
           return [...view, event.payload.item];
@@ -235,10 +257,14 @@ import type {
 import { defineProjection } from "@noddde/core";
 
 describe("Projection Infer utilities", () => {
-  interface MyView { items: string[] }
+  interface MyView {
+    items: string[];
+  }
   type MyEvent = DefineEvents<{ Added: { item: string } }>;
   type MyQuery = DefineQueries<{ GetItems: { result: string[] } }>;
-  interface MyInfra extends Infrastructure { db: { query(): Promise<string[]> } }
+  interface MyInfra extends Infrastructure {
+    db: { query(): Promise<string[]> };
+  }
 
   type Def = {
     events: MyEvent;
@@ -263,11 +289,15 @@ describe("Projection Infer utilities", () => {
   });
 
   it("should infer queries type", () => {
-    expectTypeOf<InferProjectionQueries<typeof proj>>().toEqualTypeOf<MyQuery>();
+    expectTypeOf<
+      InferProjectionQueries<typeof proj>
+    >().toEqualTypeOf<MyQuery>();
   });
 
   it("should infer infrastructure type", () => {
-    expectTypeOf<InferProjectionInfrastructure<typeof proj>>().toEqualTypeOf<MyInfra>();
+    expectTypeOf<
+      InferProjectionInfrastructure<typeof proj>
+    >().toEqualTypeOf<MyInfra>();
   });
 });
 ```
@@ -311,7 +341,12 @@ import type { DefineEvents, Infrastructure, Query } from "@noddde/core";
 
 describe("defineProjection identity", () => {
   type E = DefineEvents<{ X: { v: number } }>;
-  type Def = { events: E; queries: Query<any>; view: number; infrastructure: Infrastructure };
+  type Def = {
+    events: E;
+    queries: Query<any>;
+    view: number;
+    infrastructure: Infrastructure;
+  };
 
   it("should return the exact same config object", () => {
     const config = {

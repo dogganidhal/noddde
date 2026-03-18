@@ -23,6 +23,7 @@ This is **step 1** of the 6-step spec-driven development pipeline:
 ## Step 1: Understand Intent
 
 Ask the developer (if not already clear from context):
+
 - **What kind of module?** Aggregate, projection, saga, bus implementation, persistence implementation, or standalone?
 - **Which source file?** Existing file to spec, or new file to create?
 - **What problem does it solve?** One-sentence purpose.
@@ -31,20 +32,21 @@ Ask the developer (if not already clear from context):
 
 Pick the right template from `specs/templates/`:
 
-| Module type | Template |
-|------------|----------|
-| Aggregate | `specs/templates/aggregate.spec.template.md` |
-| Projection | `specs/templates/projection.spec.template.md` |
-| Saga | `specs/templates/saga.spec.template.md` |
-| Bus implementation (EventBus, CommandBus, QueryBus) | `specs/templates/bus-implementation.spec.template.md` |
-| Persistence implementation | `specs/templates/persistence-implementation.spec.template.md` |
-| Other (handler type, utility, infrastructure) | Start from the closest existing spec in `specs/core/` |
+| Module type                                         | Template                                                      |
+| --------------------------------------------------- | ------------------------------------------------------------- |
+| Aggregate                                           | `specs/templates/aggregate.spec.template.md`                  |
+| Projection                                          | `specs/templates/projection.spec.template.md`                 |
+| Saga                                                | `specs/templates/saga.spec.template.md`                       |
+| Bus implementation (EventBus, CommandBus, QueryBus) | `specs/templates/bus-implementation.spec.template.md`         |
+| Persistence implementation                          | `specs/templates/persistence-implementation.spec.template.md` |
+| Other (handler type, utility, infrastructure)       | Start from the closest existing spec in `specs/core/`         |
 
 Read the selected template to understand the expected sections.
 
 ## Step 3: Determine Spec Location
 
 The spec path mirrors the source path:
+
 - Source: `packages/core/src/<path>/<file>.ts`
 - Spec: `specs/core/<path>/<name>.spec.md`
 
@@ -53,6 +55,7 @@ Example: `packages/core/src/engine/implementations/postgres-event-store.ts` → 
 ## Step 4: Identify Dependencies
 
 Read existing specs that this module will depend on. Use the `depends_on` graph:
+
 - Search `specs/core/` for specs that export types this module will consume
 - Read those specs to understand the contracts you're building on
 - List them in the `depends_on` frontmatter field
@@ -80,10 +83,12 @@ Fill in every section:
 Check each of these conditions:
 
 1. **Modified type contracts**: Does this spec change the signature of any type or function already exported by an existing spec?
+
    - Search: `grep -r "exports:" specs/core/ specs/integration/` and cross-reference with the new spec's type contract
    - Look for: renamed fields, changed parameter types, narrowed return types, removed optional fields
 
 2. **Altered behavioral requirements**: Does this spec weaken or change guarantees made by existing specs?
+
    - Read the `depends_on` specs — does the new spec expect something different from them?
    - Read specs that depend on the module being modified — do they still hold?
 

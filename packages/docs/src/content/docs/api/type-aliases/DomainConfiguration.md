@@ -13,15 +13,15 @@ Defined in: [engine/domain.ts:50](https://github.com/dogganidhal/noddde/blob/7fc
 
 ### TInfrastructure
 
-`TInfrastructure` *extends* [`Infrastructure`](/api/type-aliases/infrastructure/)
+`TInfrastructure` _extends_ [`Infrastructure`](/api/type-aliases/infrastructure/)
 
 ### TStandaloneCommandNames
 
-`TStandaloneCommandNames` *extends* `string` \| `symbol` = `string` \| `symbol`
+`TStandaloneCommandNames` _extends_ `string` \| `symbol` = `string` \| `symbol`
 
 ### TStandaloneQueryNames
 
-`TStandaloneQueryNames` *extends* `string` \| `symbol` = `string` \| `symbol`
+`TStandaloneQueryNames` _extends_ `string` \| `symbol` = `string` \| `symbol`
 
 ## Properties
 
@@ -61,7 +61,7 @@ Defined in: [engine/domain.ts:69](https://github.com/dogganidhal/noddde/blob/7fc
 
 `Promise`\<`TInfrastructure`\> \| `TInfrastructure`
 
-***
+---
 
 ### readModel
 
@@ -77,7 +77,7 @@ Defined in: [engine/domain.ts:62](https://github.com/dogganidhal/noddde/blob/7fc
 
 > `optional` **standaloneQueryHandlers**: `StandaloneQueryHandlerMap`\<`TInfrastructure`, `TStandaloneQueryNames`\>
 
-***
+---
 
 ### writeModel
 

@@ -8,8 +8,7 @@ export const metadata = {
     default: "noddde",
     template: "%s | noddde",
   },
-  description:
-    "A TypeScript framework for DDD, CQRS, and Event Sourcing",
+  description: "A TypeScript framework for DDD, CQRS, and Event Sourcing",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

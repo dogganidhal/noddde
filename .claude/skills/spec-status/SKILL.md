@@ -11,11 +11,13 @@ Scan all specs and report implementation status across the entire project, mappi
 ## Step 1: Gather Data
 
 Find all spec files:
+
 ```bash
 find specs/core specs/integration -name "*.spec.md" | sort
 ```
 
 For each spec, extract:
+
 - `title` from frontmatter
 - `status` from frontmatter (`draft` | `ready` | `implementing` | `implemented` | `superseded`)
 - `source_file` from frontmatter
@@ -26,16 +28,17 @@ For each spec, extract:
 
 For each spec, check what artifacts exist:
 
-| Has spec? | Has tests? | Has impl (no stubs)? | Tests pass? | Pipeline step |
-|-----------|-----------|---------------------|-------------|--------------|
-| ✅ draft | — | — | — | Step 1 (needs review) |
-| ✅ ready | ❌ | — | — | Between step 1-2 (needs `/generate-tests`) |
-| ✅ ready | ✅ | ❌ stubs remain | 🔴 failing | Step 2 complete (RED tests, needs `/implement-spec`) |
-| ✅ implementing | ✅ | 🔧 partial | 🔴 some fail | Step 3 in progress |
-| ✅ implementing | ✅ | ✅ no stubs | ✅ passing | Step 4 complete (needs `/validate-spec`) |
-| ✅ implemented | ✅ | ✅ no stubs | ✅ passing | Step 5 complete |
+| Has spec?       | Has tests? | Has impl (no stubs)? | Tests pass?  | Pipeline step                                        |
+| --------------- | ---------- | -------------------- | ------------ | ---------------------------------------------------- |
+| ✅ draft        | —          | —                    | —            | Step 1 (needs review)                                |
+| ✅ ready        | ❌         | —                    | —            | Between step 1-2 (needs `/generate-tests`)           |
+| ✅ ready        | ✅         | ❌ stubs remain      | 🔴 failing   | Step 2 complete (RED tests, needs `/implement-spec`) |
+| ✅ implementing | ✅         | 🔧 partial           | 🔴 some fail | Step 3 in progress                                   |
+| ✅ implementing | ✅         | ✅ no stubs          | ✅ passing   | Step 4 complete (needs `/validate-spec`)             |
+| ✅ implemented  | ✅         | ✅ no stubs          | ✅ passing   | Step 5 complete                                      |
 
 Check for:
+
 - Test file existence at the expected path
 - Stubs in source file: `grep "throw new Error" <source-file>`
 - This is a lightweight check — don't actually run the full test suite
@@ -43,6 +46,7 @@ Check for:
 ## Step 3: Build Dependency Order
 
 Using the `depends_on` graph, determine the recommended implementation order:
+
 - Specs with no dependencies (leaves) should be implemented first
 - Specs whose dependencies are all `implemented` are ready to implement next
 - Specs with unimplemented dependencies are blocked
@@ -91,10 +95,10 @@ Blocked (waiting on dependencies):
 
 ### Pipeline Icons
 
-| Icon | Meaning |
-|------|---------|
-| 📝 | Step 1: Spec exists, needs tests |
-| 🔴 | Step 2: Tests exist and are RED, needs implementation |
-| 🔧 | Step 3: Implementation in progress |
-| ✅ | Steps 4-5: Tests GREEN, validated |
-| ⏭️ | Superseded by newer spec |
+| Icon | Meaning                                               |
+| ---- | ----------------------------------------------------- |
+| 📝   | Step 1: Spec exists, needs tests                      |
+| 🔴   | Step 2: Tests exist and are RED, needs implementation |
+| 🔧   | Step 3: Implementation in progress                    |
+| ✅   | Steps 4-5: Tests GREEN, validated                     |
+| ⏭️   | Superseded by newer spec                              |

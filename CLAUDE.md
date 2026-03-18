@@ -7,6 +7,7 @@ noddde is a TypeScript framework for building business applications using Domain
 **Current state**: The API surface (types, interfaces, `define*` identity functions) is complete. Runtime implementations are stubs (`throw new Error("Not implemented")`). Three sample domains exist as usage references. No tests exist yet.
 
 **Monorepo layout** (Turborepo + Yarn workspaces):
+
 - `packages/core/` — Framework library (`@noddde/core`)
 - `packages/samples/` — 3 sample domains (auction, banking, order-fulfillment)
 - `packages/docs/` — Fumadocs documentation site
@@ -17,7 +18,7 @@ noddde is a TypeScript framework for building business applications using Domain
 ### Core Source Files (`packages/core/src/`)
 
 | File                                                        | Purpose                                                                                       |
-|-------------------------------------------------------------|-----------------------------------------------------------------------------------------------|
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | `index.ts`                                                  | Re-exports all public API                                                                     |
 | **ddd/**                                                    |                                                                                               |
 | `ddd/aggregate-root.ts`                                     | `AggregateTypes`, `Aggregate`, `defineAggregate`, `CommandHandler`, `Infer*` types            |
@@ -55,11 +56,11 @@ noddde is a TypeScript framework for building business applications using Domain
 
 ### Sample Domains (`packages/samples/src/`)
 
-| Sample | Complexity | Concepts Demonstrated |
-|--------|-----------|----------------------|
-| `auction/` | Simple | Aggregate, commands, events, infrastructure (Clock) |
-| `event-sourced-banking/` | Medium | Aggregate, projection, queries, infrastructure (Logger, repositories) |
-| `order-fulfillment/` | Complex | 3 aggregates (Order, Payment, Shipping), saga, projection, cross-aggregate orchestration |
+| Sample                   | Complexity | Concepts Demonstrated                                                                    |
+| ------------------------ | ---------- | ---------------------------------------------------------------------------------------- |
+| `auction/`               | Simple     | Aggregate, commands, events, infrastructure (Clock)                                      |
+| `event-sourced-banking/` | Medium     | Aggregate, projection, queries, infrastructure (Logger, repositories)                    |
+| `order-fulfillment/`     | Complex    | 3 aggregates (Order, Payment, Shipping), saga, projection, cross-aggregate orchestration |
 
 ## Spec System
 
@@ -69,6 +70,7 @@ Specs live in `specs/` and mirror `packages/core/src/`. See `specs/README.md` fo
 Example: `packages/core/src/ddd/aggregate-root.ts` → `specs/core/ddd/aggregate.spec.md`
 
 **Spec sections**:
+
 - `## Type Contract` — What types/functions are exported and their signatures
 - `## Behavioral Requirements` — Numbered behavioral guarantees (the contract)
 - `## Invariants` — Always/never conditions
@@ -89,10 +91,10 @@ Example: `packages/core/src/ddd/aggregate-root.ts` → `specs/core/ddd/aggregate
   Step 6: DOCS          → Update documentation pages
 ```
 
-| Command | Purpose |
-|---------|---------|
+| Command               | Purpose                                                           |
+| --------------------- | ----------------------------------------------------------------- |
 | `/spec <description>` | Full pipeline: describe what you want, Claude handles all 6 steps |
-| `/spec-status` | Show all specs and their pipeline position |
+| `/spec-status`        | Show all specs and their pipeline position                        |
 
 ### How It Works
 
@@ -117,17 +119,18 @@ You never need to think about breaking changes separately — it's part of the f
 
 ### Gate Points
 
-| Gate | When | What Claude does |
-|------|------|-----------------|
-| **Spec plan** | After drafting the spec (step 1) | Shows type contract summary, requirements, test count → waits for "go" |
-| **Breaking change** | If detected during step 1 | Shows impact radius → asks for strategy |
-| **Stuck loop** | Step 3↔4 fails 3+ times on same test | Shows error + attempts → asks for guidance |
+| Gate                | When                                  | What Claude does                                                       |
+| ------------------- | ------------------------------------- | ---------------------------------------------------------------------- |
+| **Spec plan**       | After drafting the spec (step 1)      | Shows type contract summary, requirements, test count → waits for "go" |
+| **Breaking change** | If detected during step 1             | Shows impact radius → asks for strategy                                |
+| **Stuck loop**      | Step 3↔4 fails 3+ times on same test | Shows error + attempts → asks for guidance                             |
 
 Everything between gates runs without asking.
 
 ## Development Workflows
 
 ### New Feature
+
 ```
 /spec "Add a PostgreSQL event store"
   Claude:
@@ -141,6 +144,7 @@ Everything between gates runs without asking.
 ```
 
 ### Bug Fix
+
 ```
 /spec "dispatchCommand should handle empty event arrays gracefully"
   Claude:
@@ -154,6 +158,7 @@ Everything between gates runs without asking.
 ```
 
 ### Breaking Change
+
 ```
 /spec "Change command handlers to also receive the aggregate name"
   Claude:
@@ -167,6 +172,7 @@ Everything between gates runs without asking.
 ```
 
 ### Status Check
+
 ```
 /spec-status
   → scans all specs
@@ -177,12 +183,14 @@ Everything between gates runs without asking.
 ## Coding Conventions
 
 ### Style
+
 - **Functional style**: No classes for domain concepts (aggregates, projections, sagas). Classes only for infrastructure implementations.
 - **Strict TypeScript**: The project uses `strict: true`, `noUncheckedIndexedAccess: true`, target `ES2022`, module `NodeNext`.
 - **JSDoc**: All public types and functions must have JSDoc documentation.
 - **No decorators, no DI containers, no base classes** for domain concepts.
 
 ### Naming
+
 - **Events**: Past tense (`AccountCreated`, `BidPlaced`, `PaymentCompleted`)
 - **Commands**: Imperative (`CreateAccount`, `PlaceBid`, `CompletePayment`)
 - **Queries**: Get/List prefix (`GetAccountById`, `ListTransactions`)
@@ -191,6 +199,7 @@ Everything between gates runs without asking.
 - **Inference helpers**: `Infer*` prefix (`InferAggregateState`, `InferProjectionView`)
 
 ### Handler Signatures
+
 - **Command handlers** (aggregate): `(command, state, infrastructure) => Event | Event[] | Promise<Event | Event[]>`
 - **Apply handlers**: `(event.payload, state) => newState` — **pure, sync, no infrastructure**
 - **Event handlers**: `(event.payload, infrastructure) => void | Promise<void>` — impure, async OK
@@ -199,6 +208,7 @@ Everything between gates runs without asking.
 - **Projection reducers**: `(event, view) => view | Promise<view>` — receive full event, not just payload
 
 ### Persistence
+
 - Two strategies: `EventSourcedAggregatePersistence` (append events) and `StateStoredAggregatePersistence` (overwrite state)
 - Saga persistence is always state-stored
 - In-memory implementations use `Map<string, T>` with composite key `${name}:${id}`
@@ -207,13 +217,14 @@ Everything between gates runs without asking.
 
 Test files map from spec `## Test Scenarios`:
 
-| Spec Path | Test File Path |
-|-----------|---------------|
-| `specs/core/ddd/aggregate.spec.md` | `packages/core/src/__tests__/ddd/aggregate.test.ts` |
+| Spec Path                                                                   | Test File Path                                                                               |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `specs/core/ddd/aggregate.spec.md`                                          | `packages/core/src/__tests__/ddd/aggregate.test.ts`                                          |
 | `specs/core/engine/implementations/in-memory-aggregate-persistence.spec.md` | `packages/core/src/__tests__/engine/implementations/in-memory-aggregate-persistence.test.ts` |
-| `specs/integration/command-dispatch-lifecycle.spec.md` | `packages/core/src/__tests__/integration/command-dispatch-lifecycle.test.ts` |
+| `specs/integration/command-dispatch-lifecycle.spec.md`                      | `packages/core/src/__tests__/integration/command-dispatch-lifecycle.test.ts`                 |
 
 **Mapping rules**:
+
 - Each `### Heading` in Test Scenarios → `it("heading", async () => { ... })`
 - Group tests under `describe("<spec title>", () => { ... })`
 - TypeScript code fences are the test body

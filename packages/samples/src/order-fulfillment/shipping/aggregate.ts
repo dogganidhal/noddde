@@ -3,10 +3,7 @@ import { EcommerceInfrastructure } from "../infrastructure";
 import { ShippingCommand } from "./commands";
 import { ShippingEvent } from "./events";
 
-export type ShipmentStatus =
-  | "arranging"
-  | "dispatched"
-  | "delivered";
+export type ShipmentStatus = "arranging" | "dispatched" | "delivered";
 
 export interface ShipmentState {
   customerReference: string | null;

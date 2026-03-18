@@ -15,7 +15,7 @@ Defined in: [infrastructure/index.ts:6](https://github.com/dogganidhal/noddde/bl
 
 Defined in: [infrastructure/index.ts:7](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/infrastructure/index.ts#L7)
 
-***
+---
 
 ### eventBus
 
@@ -23,7 +23,7 @@ Defined in: [infrastructure/index.ts:7](https://github.com/dogganidhal/noddde/bl
 
 Defined in: [infrastructure/index.ts:8](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/infrastructure/index.ts#L8)
 
-***
+---
 
 ### queryBus
 

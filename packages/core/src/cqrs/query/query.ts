@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 /**
  * Base interface for all queries. Queries represent questions asked to the
  * read model and carry a phantom `TResult` type that encodes the expected
