@@ -5,6 +5,7 @@ import {
   Command,
   Query,
   QueryHandler,
+  QueryResult,
   StandaloneCommandHandler,
 } from "../cqrs";
 import { Event, EventBus } from "../edd";
@@ -586,6 +587,20 @@ export class Domain<
     // If no aggregate handles it, try the command bus (standalone handlers)
     await this._infrastructure.commandBus.dispatch(command);
     return command.targetAggregateId;
+  }
+
+  /**
+   * Dispatches a query to the registered query handler via the query bus.
+   * Returns the typed result from the handler.
+   *
+   * @typeParam TQuery - The specific query type being dispatched.
+   * @param query - The query to dispatch (must include `name` and optional `payload`).
+   * @returns The typed result from the query handler.
+   */
+  public async dispatchQuery<TQuery extends Query<any>>(
+    query: TQuery,
+  ): Promise<QueryResult<TQuery>> {
+    return this._infrastructure.queryBus.dispatch(query);
   }
 }
 

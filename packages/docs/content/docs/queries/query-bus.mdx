@@ -110,15 +110,13 @@ The query bus, along with the command bus and event bus, is provided through the
 
 ## Dispatching Queries from Application Code
 
-In a typical application, you access the query bus through the domain's infrastructure and dispatch queries from your API or service layer:
+The `Domain` class provides a `dispatchQuery` method that mirrors `dispatchCommand`, giving you a symmetric API for both the write and read sides:
 
 ```typescript
 // In an HTTP handler, GraphQL resolver, or service
 async function getAccountDetails(accountId: string) {
-  const queryBus = domain.infrastructure.queryBus;
-
   const account =
-    await queryBus.dispatch<GetBankAccountByIdQuery>({
+    await domain.dispatchQuery<GetBankAccountByIdQuery>({
       name: "GetBankAccountById",
       payload: { id: accountId },
     });
@@ -127,18 +125,18 @@ async function getAccountDetails(accountId: string) {
 }
 ```
 
+`dispatchQuery` delegates to the underlying query bus and preserves the typed result. The query bus is also accessible directly via `domain.infrastructure.queryBus` for advanced use cases.
+
 ### Dispatching from an Express Route
 
 ```typescript
 app.get("/accounts/:id", async (req, res) => {
   try {
     const account =
-      await domain.infrastructure.queryBus.dispatch<GetBankAccountByIdQuery>(
-        {
-          name: "GetBankAccountById",
-          payload: { id: req.params.id },
-        },
-      );
+      await domain.dispatchQuery<GetBankAccountByIdQuery>({
+        name: "GetBankAccountById",
+        payload: { id: req.params.id },
+      });
     res.json(account);
   } catch (error) {
     res.status(404).json({ error: "Account not found" });
@@ -147,16 +145,14 @@ app.get("/accounts/:id", async (req, res) => {
 
 app.get("/accounts/:id/transactions", async (req, res) => {
   const transactions =
-    await domain.infrastructure.queryBus.dispatch<ListBankAccountTransactionsQuery>(
-      {
-        name: "ListBankAccountTransactions",
-        payload: {
-          accountId: req.params.id,
-          limit: Number(req.query.limit) || 50,
-          offset: Number(req.query.offset) || 0,
-        },
+    await domain.dispatchQuery<ListBankAccountTransactionsQuery>({
+      name: "ListBankAccountTransactions",
+      payload: {
+        accountId: req.params.id,
+        limit: Number(req.query.limit) || 50,
+        offset: Number(req.query.offset) || 0,
       },
-    );
+    });
   res.json(transactions);
 });
 ```

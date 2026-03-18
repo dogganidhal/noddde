@@ -657,3 +657,95 @@ describe("Domain - persistence failure", () => {
     expect(eventSpy).not.toHaveBeenCalled();
   });
 });
+
+// ============================================================
+// dispatchQuery delegates to query bus and returns typed result
+// ============================================================
+
+type ProductEvent = DefineEvents<{
+  ProductAdded: { id: string; name: string; price: number };
+}>;
+
+type ProductQuery = DefineQueries<{
+  GetProductById: { payload: { id: string }; result: { id: string; name: string; price: number } | null };
+}>;
+
+type ProductProjectionTypes = ProjectionTypes & {
+  events: ProductEvent;
+  queries: ProductQuery;
+  view: Map<string, { id: string; name: string; price: number }>;
+  infrastructure: Infrastructure;
+};
+
+const ProductProjection = defineProjection<ProductProjectionTypes>({
+  reducers: {
+    ProductAdded: (event, view) => {
+      view.set(event.payload.id, event.payload);
+      return view;
+    },
+  },
+  queryHandlers: {
+    GetProductById: (payload) => {
+      return payload?.id === "prod-1"
+        ? { id: "prod-1", name: "Laptop", price: 999 }
+        : null;
+    },
+  },
+});
+
+describe("Domain.dispatchQuery", () => {
+  it("should delegate to the query bus and return the handler result", async () => {
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: {} },
+      readModel: { projections: { ProductProjection } },
+      infrastructure: {
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    const result = await domain.dispatchQuery({
+      name: "GetProductById",
+      payload: { id: "prod-1" },
+    } as ProductQuery);
+
+    expect(result).toEqual({ id: "prod-1", name: "Laptop", price: 999 });
+
+    const nullResult = await domain.dispatchQuery({
+      name: "GetProductById",
+      payload: { id: "nonexistent" },
+    } as ProductQuery);
+
+    expect(nullResult).toBeNull();
+  });
+});
+
+// ============================================================
+// dispatchQuery propagates errors when no handler is registered
+// ============================================================
+
+describe("Domain.dispatchQuery - error propagation", () => {
+  it("should propagate query bus errors when no handler is registered", async () => {
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: {} },
+      readModel: { projections: {} },
+      infrastructure: {
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    await expect(
+      domain.dispatchQuery({
+        name: "NonExistentQuery",
+        payload: {},
+      }),
+    ).rejects.toThrow("No handler registered for query: NonExistentQuery");
+  });
+});

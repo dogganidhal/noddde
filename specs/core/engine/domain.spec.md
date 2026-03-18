@@ -63,6 +63,7 @@ class Domain<
   get infrastructure(): TInfrastructure & CQRSInfrastructure;
   init(): Promise<void>;
   dispatchCommand<TCommand extends AggregateCommand<any>>(command: TCommand): Promise<TCommand["targetAggregateId"]>;
+  dispatchQuery<TQuery extends Query<any>>(query: TQuery): Promise<QueryResult<TQuery>>;
 }
 
 const configureDomain: <TInfrastructure, TStandaloneCommand, TStandaloneQuery>(
@@ -73,6 +74,7 @@ const configureDomain: <TInfrastructure, TStandaloneCommand, TStandaloneQuery>(
 - `DomainConfiguration` is fully generic over the infrastructure, standalone command, and standalone query types.
 - `Domain` stores the resolved infrastructure as `TInfrastructure & CQRSInfrastructure` -- custom dependencies merged with the CQRS buses.
 - `dispatchCommand` returns the `targetAggregateId` of the handled command, allowing callers to know which aggregate processed it.
+- `dispatchQuery` delegates to the query bus and returns the typed result. It is a convenience method providing API symmetry with `dispatchCommand`.
 - `configureDomain` is the primary entry point. It constructs a `Domain` and calls `init()` before returning.
 
 ## Behavioral Requirements
@@ -122,6 +124,15 @@ When an event arrives on the event bus for a registered saga:
 5. **Persist saga state** -- Call `sagaPersistence.save(sagaName, sagaId, reaction.state)`.
 6. **Dispatch commands** -- For each command in `reaction.commands`, dispatch it through the command bus.
 
+### Domain.dispatchQuery() -- Query Dispatch
+
+The `dispatchQuery` method delegates query dispatch to the underlying query bus:
+
+1. **Delegate** -- Call `this._infrastructure.queryBus.dispatch(query)`.
+2. **Return** -- Return the result from the query bus.
+
+`dispatchQuery` is a thin convenience wrapper. It performs no validation, error wrapping, or routing logic beyond delegation. Error propagation, handler lookup, and routing are the responsibility of the query bus implementation.
+
 ### configureDomain() -- Factory Function
 
 1. Create a new `Domain` instance with the given configuration.
@@ -131,6 +142,7 @@ When an event arrives on the event bus for a registered saga:
 ## Invariants
 
 - `Domain.infrastructure` must not be accessed before `init()` completes. The `!` non-null assertion on the private fields indicates they are set during init.
+- `dispatchQuery` must not be called before `init()` completes. The `_infrastructure` field (including the query bus) is not assigned until `init()` runs.
 - `init()` must be called exactly once. Calling it multiple times may re-register handlers, causing duplicate processing.
 - `configureDomain` always returns an initialized domain. If `init()` throws, the promise rejects.
 - The command bus enforces single-handler-per-command-name. If two aggregates define handlers for the same command name, registration must fail.
@@ -150,6 +162,8 @@ When an event arrives on the event bus for a registered saga:
 - **Saga handler returns no commands** -- `reaction.commands` is `undefined` or empty. Only the saga state is persisted; no commands are dispatched.
 - **init() factory throws** -- The error propagates through `configureDomain` and the domain is not usable.
 - **Circular saga-command loops** -- A saga dispatches a command that produces an event that triggers the same saga. The framework does not prevent infinite loops; the saga handler must include termination logic (e.g., checking state to avoid re-dispatching).
+- **dispatchQuery with no handler registered** -- The error from the query bus (e.g., "No handler registered for query: \<name\>") propagates unchanged through `dispatchQuery`.
+- **dispatchQuery handler throws** -- The handler error propagates through `dispatchQuery` unchanged.
 
 ## Integration Points
 
@@ -158,7 +172,7 @@ When an event arrives on the event bus for a registered saga:
 - **Aggregates** -- The domain reads `Aggregate.initialState`, `Aggregate.commands`, and `Aggregate.apply` to implement the command lifecycle.
 - **Projections** -- The domain reads `Projection.reducers` and `Projection.queryHandlers` to wire event listeners and query handlers.
 - **Sagas** -- The domain reads `Saga.initialState`, `Saga.startedBy`, `Saga.associations`, and `Saga.handlers` to wire event listeners and execute the saga lifecycle.
-- **External consumers** -- Applications interact with the domain via `domain.dispatchCommand(command)` and `domain.infrastructure.queryBus.dispatch(query)`.
+- **External consumers** -- Applications interact with the domain via `domain.dispatchCommand(command)` and `domain.dispatchQuery(query)`. The query bus remains accessible directly via `domain.infrastructure.queryBus` for advanced use cases.
 
 ## Test Scenarios
 
@@ -924,6 +938,122 @@ describe("Domain - persistence failure", () => {
 
     // Events must NOT have been published
     expect(eventSpy).not.toHaveBeenCalled();
+  });
+});
+```
+
+### dispatchQuery delegates to query bus and returns typed result
+
+```ts
+import { describe, it, expect } from "vitest";
+import {
+  configureDomain,
+  defineProjection,
+  EventEmitterEventBus,
+  InMemoryCommandBus,
+  InMemoryQueryBus,
+} from "@noddde/core";
+import type {
+  DefineEvents,
+  DefineQueries,
+  ProjectionTypes,
+  Infrastructure,
+} from "@noddde/core";
+
+type ProductEvent = DefineEvents<{
+  ProductAdded: { id: string; name: string; price: number };
+}>;
+
+type ProductQuery = DefineQueries<{
+  GetProductById: { payload: { id: string }; result: { id: string; name: string; price: number } | null };
+}>;
+
+type ProductProjectionTypes = ProjectionTypes & {
+  events: ProductEvent;
+  queries: ProductQuery;
+  view: Map<string, { id: string; name: string; price: number }>;
+  infrastructure: Infrastructure;
+};
+
+const ProductProjection = defineProjection<ProductProjectionTypes>({
+  reducers: {
+    ProductAdded: (event, view) => {
+      view.set(event.payload.id, event.payload);
+      return view;
+    },
+  },
+  queryHandlers: {
+    GetProductById: (payload) => {
+      return payload?.id === "prod-1"
+        ? { id: "prod-1", name: "Laptop", price: 999 }
+        : null;
+    },
+  },
+});
+
+describe("Domain.dispatchQuery", () => {
+  it("should delegate to the query bus and return the handler result", async () => {
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: {} },
+      readModel: { projections: { ProductProjection } },
+      infrastructure: {
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    const result = await domain.dispatchQuery({
+      name: "GetProductById",
+      payload: { id: "prod-1" },
+    } as ProductQuery);
+
+    expect(result).toEqual({ id: "prod-1", name: "Laptop", price: 999 });
+
+    const nullResult = await domain.dispatchQuery({
+      name: "GetProductById",
+      payload: { id: "nonexistent" },
+    } as ProductQuery);
+
+    expect(nullResult).toBeNull();
+  });
+});
+```
+
+### dispatchQuery propagates errors when no handler is registered
+
+```ts
+import { describe, it, expect } from "vitest";
+import {
+  configureDomain,
+  EventEmitterEventBus,
+  InMemoryCommandBus,
+  InMemoryQueryBus,
+} from "@noddde/core";
+import type { Infrastructure } from "@noddde/core";
+
+describe("Domain.dispatchQuery - error propagation", () => {
+  it("should propagate query bus errors when no handler is registered", async () => {
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: {} },
+      readModel: { projections: {} },
+      infrastructure: {
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    await expect(
+      domain.dispatchQuery({
+        name: "NonExistentQuery",
+        payload: {},
+      }),
+    ).rejects.toThrow("No handler registered for query: NonExistentQuery");
   });
 });
 ```
