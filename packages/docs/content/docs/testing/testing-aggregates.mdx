@@ -1,223 +1,172 @@
 ---
 title: Testing Aggregates
-description: Patterns for testing command handlers and apply handlers in noddde aggregates.
+description: Using testAggregate and evolveAggregate for Given-When-Then aggregate testing.
 ---
 
-Aggregates contain your core business logic. Testing them thoroughly ensures your domain rules are correct. Because noddde uses plain functions (not classes with internal state), aggregate testing is straightforward.
+Aggregates contain your core business logic. The `testAggregate` harness from `@noddde/testing` lets you express tests in the natural Given-When-Then pattern of the Decider, while `evolveAggregate` provides pure state reconstruction from events.
 
-## Testing Command Handlers
+## testAggregate
 
-Command handlers are the decision-makers. Access them directly on the aggregate object:
+The primary harness for testing command handlers. It replays given events through `apply` handlers to build state, executes the command handler, and returns the produced events and resulting state.
 
 ```ts
-import { describe, it, expect } from "vitest";
-import { BankAccount, BankAccountState } from "./aggregate";
+import { testAggregate } from "@noddde/testing";
 
-const mockInfrastructure = {
-  logger: { info: () => {}, error: () => {}, warn: () => {} },
-  bankAccountViewRepository: {} as any,
-  transactionViewRepository: {} as any,
+const result = await testAggregate(BankAccount)
+  .given(
+    { name: "AccountCreated", payload: { id: "acc-1" } },
+    { name: "DepositMade", payload: { amount: 1000 } },
+  )
+  .when({
+    name: "AuthorizeTransaction",
+    targetAggregateId: "acc-1",
+    payload: { amount: 500, merchant: "Amazon" },
+  })
+  .execute();
+
+expect(result.events).toEqual([
+  {
+    name: "TransactionAuthorized",
+    payload: expect.objectContaining({ amount: 500, merchant: "Amazon" }),
+  },
+]);
+expect(result.state.availableBalance).toBe(500);
+```
+
+### Builder API
+
+| Method | Purpose |
+|--------|---------|
+| `.given(...events)` | Prior events to replay through `apply` handlers. Can be called multiple times; events accumulate. |
+| `.when(command)` | The command to execute. Required before `.execute()`. |
+| `.withInfrastructure(infra)` | Custom infrastructure for the handler. Defaults to `{}`. |
+| `.execute()` | Runs the test and returns the result. Always async. |
+
+### Result Shape
+
+```ts
+type AggregateTestResult<TState, TEvents> = {
+  events: TEvents[];   // Events produced by the command handler
+  state: TState;       // State after applying produced events
+  error?: Error;       // Captured error (if handler threw)
 };
-
-describe("BankAccount.commands", () => {
-  describe("CreateBankAccount", () => {
-    it("returns a BankAccountCreated event", () => {
-      const result = BankAccount.commands.CreateBankAccount(
-        { name: "CreateBankAccount", targetAggregateId: "acc-123" },
-        BankAccount.initialState,
-        mockInfrastructure,
-      );
-
-      expect(result).toEqual({
-        name: "BankAccountCreated",
-        payload: { id: "acc-123" },
-      });
-    });
-  });
-
-  describe("AuthorizeTransaction", () => {
-    const stateWithBalance: BankAccountState = {
-      balance: 1000,
-      availableBalance: 1000,
-      transactions: [],
-    };
-
-    it("authorizes when sufficient funds", () => {
-      const result = BankAccount.commands.AuthorizeTransaction(
-        {
-          name: "AuthorizeTransaction",
-          targetAggregateId: "acc-123",
-          payload: { amount: 500, merchant: "Amazon" },
-        },
-        stateWithBalance,
-        mockInfrastructure,
-      );
-
-      expect(result).toMatchObject({
-        name: "TransactionAuthorized",
-        payload: expect.objectContaining({ amount: 500, merchant: "Amazon" }),
-      });
-    });
-
-    it("declines when insufficient funds", () => {
-      const result = BankAccount.commands.AuthorizeTransaction(
-        {
-          name: "AuthorizeTransaction",
-          targetAggregateId: "acc-123",
-          payload: { amount: 2000, merchant: "Luxury Store" },
-        },
-        stateWithBalance,
-        mockInfrastructure,
-      );
-
-      expect(result).toMatchObject({
-        name: "TransactionDeclined",
-        payload: expect.objectContaining({ amount: 2000 }),
-      });
-    });
-  });
-});
 ```
 
-### Key Points
+The harness **never throws** — errors are always captured in `result.error`.
 
-- **No framework setup** — Just import the aggregate and call handlers
-- **Mock infrastructure minimally** — Only provide what the handler actually uses
-- **Test both success and failure paths** — Commands can return different event types
-- **Use `initialState`** — The aggregate exports its initial state for convenience
+## Testing Without Prior Events
 
-## Testing Apply Handlers
-
-Apply handlers are pure functions — they take event payload + state and return new state. No infrastructure, no mocking:
+When no `.given()` is called, the command runs against `aggregate.initialState`:
 
 ```ts
-describe("BankAccount.apply", () => {
-  it("initializes state on BankAccountCreated", () => {
-    const result = BankAccount.apply.BankAccountCreated(
-      { id: "acc-123" },
-      BankAccount.initialState,
-    );
+const result = await testAggregate(BankAccount)
+  .when({
+    name: "CreateBankAccount",
+    targetAggregateId: "acc-1",
+  })
+  .execute();
 
-    expect(result).toEqual({
-      balance: 0,
-      availableBalance: 0,
-      transactions: [],
-    });
-  });
-
-  it("reduces available balance on TransactionAuthorized", () => {
-    const state: BankAccountState = {
-      balance: 1000,
-      availableBalance: 1000,
-      transactions: [],
-    };
-
-    const result = BankAccount.apply.TransactionAuthorized(
-      { id: "txn-1", timestamp: new Date(), amount: 200, merchant: "Store" },
-      state,
-    );
-
-    expect(result.availableBalance).toBe(800);
-    expect(result.transactions).toHaveLength(1);
-    expect(result.transactions[0].status).toBe("pending");
-  });
-
-  it("does not mutate original state", () => {
-    const state: BankAccountState = {
-      balance: 1000,
-      availableBalance: 1000,
-      transactions: [],
-    };
-
-    BankAccount.apply.TransactionAuthorized(
-      { id: "txn-1", timestamp: new Date(), amount: 200, merchant: "Store" },
-      state,
-    );
-
-    // Original state is unchanged
-    expect(state.availableBalance).toBe(1000);
-    expect(state.transactions).toHaveLength(0);
-  });
-});
+expect(result.events[0].name).toBe("BankAccountCreated");
 ```
 
-### Testing No-Op Handlers
+## Testing Rejection Cases
 
-Some events intentionally do not change state (like `BidRejected` in the auction domain):
+When a command handler throws (e.g., validation failure), the error is captured:
 
 ```ts
-it("BidRejected does not change state", () => {
-  const state = { /* auction state */ };
-  const result = Auction.apply.BidRejected(
-    { bidderId: "alice", amount: 100, reason: "Too low" },
-    state,
-  );
-  expect(result).toBe(state); // Same reference
-});
+const result = await testAggregate(Auction)
+  .given(
+    { name: "AuctionCreated", payload: { item: "Widget", endsAt: pastDate } },
+  )
+  .when({
+    name: "PlaceBid",
+    targetAggregateId: "auction-1",
+    payload: { bidderId: "alice", amount: 100 },
+  })
+  .withInfrastructure({ clock: { now: () => futureDate } })
+  .execute();
+
+expect(result.error).toBeDefined();
+expect(result.error!.message).toContain("ended");
+expect(result.events).toEqual([]);
 ```
 
-## Given-When-Then with Event Replay
+## Testing with Infrastructure
 
-For more realistic tests, build state by replaying events rather than constructing state manually:
+Pass infrastructure via `.withInfrastructure()`. This is how you inject clocks, loggers, or any domain-specific dependency:
 
 ```ts
-function replayEvents(
-  aggregate: typeof BankAccount,
-  events: Array<{ name: string; payload: any }>,
-) {
-  return events.reduce(
-    (state, event) => {
-      const handler = aggregate.apply[event.name as keyof typeof aggregate.apply];
-      return handler(event.payload, state);
-    },
-    aggregate.initialState,
-  );
-}
-
-describe("AuthorizeTransaction after multiple events", () => {
-  it("tracks cumulative available balance", () => {
-    // Given: account created + one authorized transaction
-    const state = replayEvents(BankAccount, [
-      { name: "BankAccountCreated", payload: { id: "acc-1" } },
-      { name: "TransactionAuthorized", payload: { id: "txn-1", timestamp: new Date(), amount: 300, merchant: "A" } },
-    ]);
-
-    // Available balance should be -300 (started at 0)
-    expect(state.availableBalance).toBe(-300);
-
-    // When: another transaction
-    const result = BankAccount.commands.AuthorizeTransaction(
-      {
-        name: "AuthorizeTransaction",
-        targetAggregateId: "acc-1",
-        payload: { amount: 100, merchant: "B" },
-      },
-      state,
-      mockInfrastructure,
-    );
-
-    // Then: declined (insufficient funds)
-    expect(result).toMatchObject({ name: "TransactionDeclined" });
-  });
-});
+const result = await testAggregate(Auction)
+  .given(auctionCreatedEvent)
+  .when(placeBidCommand)
+  .withInfrastructure({
+    clock: { now: () => new Date("2024-05-15T10:00:00Z") },
+  })
+  .execute();
 ```
 
-## Testing Async Command Handlers
+## Testing Multiple Events from One Command
 
-If a command handler is async (returns a `Promise`), await it:
+When a command handler returns an array of events, all are captured and applied:
 
 ```ts
-it("handles async command handler", async () => {
-  const result = await SomeAggregate.commands.SomeAsyncCommand(
-    command,
-    state,
-    infrastructure,
-  );
-  expect(result).toMatchObject({ name: "SomeEvent" });
-});
+const result = await testAggregate(BatchAggregate)
+  .when({
+    name: "ProcessBatch",
+    targetAggregateId: "b-1",
+    payload: { items: ["a", "b", "c"] },
+  })
+  .execute();
+
+expect(result.events).toHaveLength(3);
 ```
+
+## evolveAggregate
+
+A standalone pure function for replaying events through apply handlers. Useful when you need to reconstruct state without executing a command:
+
+```ts
+import { evolveAggregate } from "@noddde/testing";
+
+const state = evolveAggregate(BankAccount, [
+  { name: "BankAccountCreated", payload: { id: "acc-1" } },
+  { name: "TransactionAuthorized", payload: { id: "t1", amount: 300, merchant: "A", timestamp: now } },
+  { name: "TransactionProcessed", payload: { id: "t1", amount: 300, merchant: "A", timestamp: now } },
+]);
+
+expect(state.balance).toBe(300);
+```
+
+You can also pass a custom starting state:
+
+```ts
+const state = evolveAggregate(
+  BankAccount,
+  [{ name: "DepositMade", payload: { amount: 50 } }],
+  { balance: 100, availableBalance: 100, transactions: [] },
+);
+
+expect(state.balance).toBe(150);
+```
+
+## Direct Handler Testing
+
+You can always bypass the harness and call handlers directly:
+
+```ts
+// Command handler
+const events = BankAccount.commands.AuthorizeTransaction(
+  command, state, infrastructure,
+);
+
+// Apply handler (pure, sync)
+const newState = BankAccount.apply.TransactionAuthorized(payload, state);
+```
+
+The harness is recommended for most tests because it manages state reconstruction from events and provides consistent error handling, but direct calls are useful for focused unit tests of individual handlers.
 
 ## Next Steps
 
-- [Testing Projections](/docs/testing/testing-projections) — Testing read model builders
+- [Testing Projections](/docs/testing/testing-projections) — `testProjection` for read model testing
+- [Testing Sagas](/docs/testing/testing-sagas) — `testSaga` for workflow testing
 - [Testing Infrastructure](/docs/testing/testing-infrastructure) — Mocking patterns, Clock

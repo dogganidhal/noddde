@@ -257,8 +257,28 @@ expect(then.state.status).toBe("payment_failed");
 expect(then.commands).toMatchObject({ name: "CancelOrder" });
 ```
 
+## Using the testSaga Harness
+
+The `@noddde/testing` package provides a `testSaga` harness that simplifies the patterns above with automatic CQRS infrastructure injection and error capture. See [Testing Sagas](/docs/testing/testing-sagas) for the full guide.
+
+```ts
+import { testSaga } from "@noddde/testing";
+
+const result = await testSaga(OrderFulfillmentSaga)
+  .givenState({ status: "awaiting_payment", orderId: "o-1", paymentId: "p-1" })
+  .when({
+    name: "PaymentFailed",
+    payload: { paymentId: "p-1", referenceId: "o-1", reason: "Card declined", failedAt: new Date() },
+  })
+  .execute();
+
+expect(result.state.status).toBe("payment_failed");
+expect(result.commands[0].name).toBe("CancelOrder");
+```
+
 ## Next Steps
 
 - [Sagas Overview](/docs/sagas/overview) — Conceptual introduction to sagas
 - [Defining Sagas](/docs/sagas/defining-sagas) — The full saga definition API
+- [Testing Sagas (Toolkit)](/docs/testing/testing-sagas) — `testSaga` harness guide
 - [Testing Overview](/docs/testing/overview) — General testing patterns in noddde

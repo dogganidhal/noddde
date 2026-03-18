@@ -11,6 +11,7 @@ import {
   ConsoleLogger,
   InMemoryBankAccountViewRepository,
   InMemoryTransactionViewRepository,
+  SystemClock,
 } from "./infrastructure";
 import { BankAccountProjection } from "./projection";
 import { randomUUID } from "crypto";
@@ -31,6 +32,7 @@ const main = async () => {
       aggregatePersistence: () =>
         new InMemoryEventSourcedAggregatePersistence(),
       provideInfrastructure: () => ({
+        clock: new SystemClock(),
         logger: new ConsoleLogger(),
         bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
         transactionViewRepository: new InMemoryTransactionViewRepository(),

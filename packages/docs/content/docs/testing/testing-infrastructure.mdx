@@ -145,29 +145,19 @@ The pattern is always the same:
 
 ## Integration Testing
 
-For end-to-end tests, use `configureDomain` with in-memory implementations:
+For slice tests with multiple components, use `testDomain` from `@noddde/testing`:
 
 ```ts
+import { testDomain } from "@noddde/testing";
+
 describe("Banking domain integration", () => {
-  let domain: Domain<BankingInfrastructure>;
-
-  beforeEach(async () => {
-    domain = await configureDomain<BankingInfrastructure>({
-      writeModel: { aggregates: { BankAccount } },
-      readModel: { projections: { BankAccount: BankAccountProjection } },
-      infrastructure: {
-        aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
-        provideInfrastructure: () => createMockBankingInfrastructure(),
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
-      },
-    });
-  });
-
   it("creates a bank account and authorizes a transaction", async () => {
+    const { domain, spy } = await testDomain({
+      aggregates: { BankAccount },
+      projections: { BankAccount: BankAccountProjection },
+      infrastructure: createMockBankingInfrastructure(),
+    });
+
     await domain.dispatchCommand({
       name: "CreateBankAccount",
       targetAggregateId: "acc-1",
@@ -178,12 +168,17 @@ describe("Banking domain integration", () => {
       targetAggregateId: "acc-1",
       payload: { amount: 100, merchant: "Store" },
     });
+
+    expect(spy.publishedEvents).toHaveLength(2);
   });
 });
 ```
 
+For full control over persistence and bus implementations, use `configureDomain` from `@noddde/engine` directly. See [Testing Domains](/docs/testing/testing-domains) for when to choose each approach.
+
 ## Next Steps
 
+- [Testing Domains](/docs/testing/testing-domains) — `testDomain` for slice and integration tests
 - [Clock Pattern](/docs/patterns/clock-pattern) — Deep dive into the Clock pattern
 - [In-Memory Implementations](/docs/infrastructure/in-memory-implementations) — Built-in test infrastructure
 - [Testing Aggregates](/docs/testing/testing-aggregates) — Testing command and apply handlers

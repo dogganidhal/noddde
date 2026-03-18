@@ -1,133 +1,137 @@
 ---
 title: Testing Overview
-description: How noddde's functional design makes testing natural and straightforward.
+description: How noddde's functional design and @noddde/testing toolkit make testing natural and straightforward.
 ---
 
 noddde's functional architecture is built for testability. Command handlers are functions. Apply handlers are pure functions. Projection reducers are pure functions. Saga handlers return data. There is no framework to boot, no container to configure, and no decorators to mock.
 
-## What to Test
+The `@noddde/testing` package provides type-safe test harnesses that eliminate boilerplate and express tests in the natural **Given-When-Then** pattern of the Decider.
 
-A typical noddde application has five layers worth testing:
+## Install
 
-### 1. Command Handlers (Business Logic)
-
-The most important layer. Command handlers contain your business rules — the decisions about what events to produce given a command and the current state.
-
-```ts
-// Call the handler directly
-const events = BankAccount.commands.AuthorizeTransaction(
-  { name: "AuthorizeTransaction", targetAggregateId: "acc-1", payload: { amount: 100, merchant: "Store" } },
-  { balance: 500, availableBalance: 500, transactions: [] },
-  mockInfrastructure,
-);
+```bash
+npm install --save-dev @noddde/testing
+# or
+yarn add --dev @noddde/testing
 ```
 
-### 2. Apply Handlers (State Transitions)
+## Three Testing Levels
 
-Pure functions — no infrastructure, no async. Test them by calling directly with an event payload and state:
+### Level 1: Unit Tests (Handler Isolation)
 
-```ts
-const newState = BankAccount.apply.TransactionAuthorized(
-  { id: "txn-1", timestamp: new Date(), amount: 100, merchant: "Store" },
-  { balance: 500, availableBalance: 500, transactions: [] },
-);
-```
-
-### 3. Projection Reducers (Read Model Building)
-
-Projection reducers are per-event pure functions. Call them directly with an event and the current view:
+Test individual handlers without booting a domain. The harnesses replay events, call handlers, and return structured results.
 
 ```ts
-const newView = BankAccountProjection.reducers.TransactionAuthorized(
-  { name: "TransactionAuthorized", payload: { id: "txn-1", amount: 100, merchant: "Store" } },
-  { id: "acc-1", balance: 500, transactions: [] },
-);
+import { testAggregate } from "@noddde/testing";
 
-expect(newView.balance).toBe(400);
-```
-
-### 4. Saga Handlers (Workflow Coordination)
-
-Saga handlers return a `SagaReaction` — new state plus commands to dispatch. Test them by calling directly and asserting on both the returned state and commands:
-
-```ts
-const reaction = OrderFulfillmentSaga.handlers.OrderPlaced(
-  { name: "OrderPlaced", payload: { orderId: "ord-1", total: 99.99, /* ... */ } },
-  { status: null }, // initial state
-  mockInfrastructure,
-);
-
-// Assert state transition
-expect(reaction.state.status).toBe("awaiting_payment");
-
-// Assert dispatched commands
-expect(reaction.commands).toEqual(
-  expect.objectContaining({ name: "ProcessPayment" }),
-);
-```
-
-Saga associations can also be tested — they are plain functions that extract a saga ID from an event:
-
-```ts
-const sagaId = OrderFulfillmentSaga.associations.OrderPlaced(
-  { name: "OrderPlaced", payload: { orderId: "ord-1", /* ... */ } },
-);
-expect(sagaId).toBe("ord-1");
-```
-
-### 5. Integration (Full Dispatch Cycle)
-
-Use `configureDomain` with in-memory implementations to test the full command-to-event-to-projection-to-saga pipeline.
-
-## Testing Stack
-
-noddde does not require any special test utilities. Use any test runner you prefer:
-
-- **Vitest** (recommended) — Fast, TypeScript-native, ESM-first
-- **Jest** — Widely used, mature ecosystem
-- **Node.js test runner** — Built-in, zero dependencies
-
-No test fixtures, no special matchers, no framework test utilities. Just call functions and assert results.
-
-## The Given-When-Then Pattern
-
-For aggregate testing, the Given-When-Then pattern maps naturally:
-
-- **Given** — An initial state (or: initial state + events replayed through apply handlers)
-- **When** — A command is dispatched to the command handler
-- **Then** — The expected event(s) are returned
-
-```ts
-// Given: a bank account with $500 available
-const state: BankAccountState = {
-  balance: 500,
-  availableBalance: 500,
-  transactions: [],
-};
-
-// When: a $600 transaction is authorized
-const events = BankAccount.commands.AuthorizeTransaction(
-  {
+const result = await testAggregate(BankAccount)
+  .given(
+    { name: "AccountCreated", payload: { id: "acc-1" } },
+    { name: "DepositMade", payload: { amount: 500 } },
+  )
+  .when({
     name: "AuthorizeTransaction",
     targetAggregateId: "acc-1",
-    payload: { amount: 600, merchant: "Store" },
-  },
-  state,
-  mockInfrastructure,
-);
+    payload: { amount: 200 },
+  })
+  .execute();
 
-// Then: the transaction is declined
-expect(events).toEqual({
-  name: "TransactionDeclined",
-  payload: expect.objectContaining({ amount: 600 }),
+expect(result.events[0].name).toBe("TransactionAuthorized");
+expect(result.state.availableBalance).toBe(300);
+```
+
+Available unit harnesses:
+
+| Harness | Tests | Pattern |
+|---------|-------|---------|
+| `testAggregate` | Command handlers + apply | Given events, When command, Then events + state |
+| `testProjection` | Projection reducers | Given events, Then view |
+| `testSaga` | Saga event handlers | Given state, When event, Then state + commands |
+| `evolveAggregate` | Apply handlers only | Replay events to reconstruct state |
+
+### Level 2: Slice Tests (Pre-Wired Domain)
+
+Test multiple components together with zero infrastructure boilerplate. `testDomain` automatically wires in-memory buses, persistence, and installs spies.
+
+```ts
+import { testDomain } from "@noddde/testing";
+
+const { domain, spy } = await testDomain({
+  aggregates: { BankAccount },
+  projections: { BankAccountView },
+  sagas: { OrderFulfillment },
+});
+
+await domain.dispatchCommand({
+  name: "CreateBankAccount",
+  targetAggregateId: "acc-1",
+});
+
+expect(spy.publishedEvents).toContainEqual({
+  name: "BankAccountCreated",
+  payload: { id: "acc-1" },
 });
 ```
 
-For saga testing, the pattern adapts to: **Given** (saga state) → **When** (event received) → **Then** (new state + commands returned).
+### Level 3: Integration Tests
+
+Use `configureDomain` from `@noddde/engine` directly when you need full control over persistence, custom buses, or production-like wiring.
+
+## The Given-When-Then Pattern
+
+The Decider pattern maps naturally to Given-When-Then:
+
+| Concept | Given | When | Then |
+|---------|-------|------|------|
+| **Aggregate** | Prior events (replayed through apply) | Command | Produced events + new state |
+| **Projection** | Prior events (reduced through reducers) | — | Final view |
+| **Saga** | Prior saga state | Incoming event | New state + dispatched commands |
+
+For aggregates, "Given" means "these events already happened." The harness replays them through the aggregate's `apply` handlers to reconstruct the pre-command state, then executes the command handler.
+
+For sagas, this pattern is inverted: events come in, commands go out.
+
+## Error Testing
+
+All unit harnesses capture errors in the result instead of throwing. This makes testing rejection cases straightforward:
+
+```ts
+const result = await testAggregate(BankAccount)
+  .when({
+    name: "AuthorizeTransaction",
+    targetAggregateId: "acc-1",
+    payload: { amount: 999999 },
+  })
+  .execute();
+
+expect(result.error).toBeDefined();
+expect(result.error!.message).toContain("insufficient");
+expect(result.events).toEqual([]);
+```
+
+## Direct Handler Testing
+
+You can always call handlers directly without any harness. The aggregate, projection, and saga objects are plain JavaScript objects with function properties:
+
+```ts
+// Call a command handler directly
+const events = BankAccount.commands.AuthorizeTransaction(
+  command, state, infrastructure,
+);
+
+// Call an apply handler directly
+const newState = BankAccount.apply.TransactionAuthorized(payload, state);
+
+// Call a projection reducer directly
+const newView = BankProjection.reducers.TransactionAuthorized(event, view);
+```
+
+The harnesses add value by managing state reconstruction from events, normalizing results, and capturing errors — but they are optional.
 
 ## Next Steps
 
-- [Testing Aggregates](/docs/testing/testing-aggregates) — Detailed aggregate testing patterns
-- [Testing Projections](/docs/testing/testing-projections) — Testing projection reducers
-- [Testing Sagas](/docs/sagas/testing-sagas) — Testing saga handlers and associations
+- [Testing Aggregates](/docs/testing/testing-aggregates) — `testAggregate` and `evolveAggregate` in depth
+- [Testing Projections](/docs/testing/testing-projections) — `testProjection` patterns
+- [Testing Sagas](/docs/testing/testing-sagas) — `testSaga` for workflow testing
+- [Testing Domains](/docs/testing/testing-domains) — `testDomain` for slice and integration tests
 - [Testing Infrastructure](/docs/testing/testing-infrastructure) — Mocking infrastructure, Clock pattern

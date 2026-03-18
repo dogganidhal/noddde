@@ -1,0 +1,217 @@
+---
+title: Testing Domains
+description: Using testDomain for zero-boilerplate slice and integration tests with built-in spies.
+---
+
+The `testDomain` harness from `@noddde/testing` creates a fully wired domain with in-memory implementations and spy instrumentation. It eliminates the 15-20 lines of `configureDomain` boilerplate that every integration test otherwise requires.
+
+## testDomain
+
+```ts
+import { testDomain } from "@noddde/testing";
+
+const { domain, spy } = await testDomain({
+  aggregates: { BankAccount },
+  projections: { BankAccountView },
+});
+
+await domain.dispatchCommand({
+  name: "CreateBankAccount",
+  targetAggregateId: "acc-1",
+});
+
+await domain.dispatchCommand({
+  name: "AuthorizeTransaction",
+  targetAggregateId: "acc-1",
+  payload: { amount: 100, merchant: "Store" },
+});
+
+// Assert on events that flowed through the system
+expect(spy.publishedEvents).toHaveLength(2);
+expect(spy.publishedEvents[0].name).toBe("BankAccountCreated");
+expect(spy.publishedEvents[1].name).toBe("TransactionAuthorized");
+
+// Assert on projection views
+const view = domain.getProjectionView<BankAccountViewType>("BankAccountView");
+expect(view?.balance).toBe(-100);
+```
+
+### Configuration
+
+```ts
+type TestDomainConfig = {
+  aggregates?: Record<string, Aggregate>;    // Aggregate definitions
+  projections?: Record<string, Projection>;  // Projection definitions
+  sagas?: Record<string, Saga>;              // Saga definitions (optional)
+  infrastructure?: Infrastructure;            // Custom infrastructure (optional)
+};
+```
+
+Only specify what you are testing. Everything else is wired automatically:
+
+- **Command bus** — `InMemoryCommandBus` with spy
+- **Event bus** — `EventEmitterEventBus` with spy
+- **Query bus** — `InMemoryQueryBus`
+- **Aggregate persistence** — `InMemoryEventSourcedAggregatePersistence`
+- **Saga persistence** — `InMemorySagaPersistence` (only when sagas are configured)
+
+### Result Shape
+
+```ts
+type TestDomainResult = {
+  domain: Domain;     // The fully initialized domain
+  spy: DomainSpy;     // Spy accessors
+};
+
+type DomainSpy = {
+  publishedEvents: Event[];        // All events dispatched via the event bus
+  dispatchedCommands: Command[];   // All commands dispatched via the command bus
+};
+```
+
+## Spy: Published Events
+
+`spy.publishedEvents` records every event published on the event bus, in order. This captures events from aggregate command handlers after persistence:
+
+```ts
+const { domain, spy } = await testDomain({
+  aggregates: { Counter },
+});
+
+await domain.dispatchCommand({
+  name: "Increment",
+  targetAggregateId: "c-1",
+  payload: { amount: 5 },
+});
+
+await domain.dispatchCommand({
+  name: "Increment",
+  targetAggregateId: "c-1",
+  payload: { amount: 3 },
+});
+
+expect(spy.publishedEvents).toEqual([
+  { name: "Incremented", payload: { amount: 5 } },
+  { name: "Incremented", payload: { amount: 3 } },
+]);
+```
+
+## Spy: Dispatched Commands
+
+`spy.dispatchedCommands` records commands dispatched through the command bus. This is most useful for verifying saga behavior — sagas dispatch commands as reactions to events:
+
+```ts
+const { domain, spy } = await testDomain({
+  aggregates: {},
+  sagas: { OrderFulfillment },
+});
+
+// Trigger the saga via the event bus
+await domain.infrastructure.eventBus.dispatch({
+  name: "OrderPlaced",
+  payload: { orderId: "o-1", amount: 99.99 },
+});
+
+expect(spy.dispatchedCommands).toContainEqual({
+  name: "RequestPayment",
+  targetAggregateId: "o-1",
+  payload: { orderId: "o-1", amount: 99.99 },
+});
+```
+
+Commands dispatched by sagas that have no registered handler are captured by the spy but do not throw. This lets you test saga orchestration without wiring every downstream aggregate.
+
+## Testing Projection Views
+
+After dispatching commands, check the projection view directly:
+
+```ts
+const { domain } = await testDomain({
+  aggregates: { Counter },
+  projections: { CounterView },
+});
+
+await domain.dispatchCommand({
+  name: "Increment",
+  targetAggregateId: "c-1",
+  payload: { amount: 10 },
+});
+
+const view = domain.getProjectionView<{ total: number }>("CounterView");
+expect(view?.total).toBe(10);
+```
+
+## Custom Infrastructure
+
+Pass domain-specific dependencies that handlers need:
+
+```ts
+const mockLogger = { info: vi.fn(), error: vi.fn() };
+
+const { domain } = await testDomain<BankingInfrastructure>({
+  aggregates: { BankAccount },
+  infrastructure: {
+    logger: mockLogger,
+    bankAccountViewRepository: { getById: vi.fn() } as any,
+  },
+});
+
+await domain.dispatchCommand({
+  name: "CreateBankAccount",
+  targetAggregateId: "acc-1",
+});
+
+expect(mockLogger.info).toHaveBeenCalled();
+```
+
+## Full Slice Test Example
+
+Testing the complete order fulfillment flow — aggregate, projection, and saga together:
+
+```ts
+const { domain, spy } = await testDomain({
+  aggregates: { Order, Payment },
+  projections: { OrderSummary },
+  sagas: { OrderFulfillment },
+});
+
+// Place an order
+await domain.dispatchCommand({
+  name: "PlaceOrder",
+  targetAggregateId: "o-1",
+  payload: { customerId: "c-1", items: [{ sku: "WIDGET", qty: 2 }], total: 49.99 },
+});
+
+// Saga should have dispatched a payment command
+expect(spy.dispatchedCommands).toContainEqual(
+  expect.objectContaining({ name: "RequestPayment" }),
+);
+
+// Complete the payment
+await domain.dispatchCommand({
+  name: "CompletePayment",
+  targetAggregateId: "o-1",
+  payload: { transactionId: "txn-1" },
+});
+
+// Verify the projection shows the order status
+const summary = domain.getProjectionView<OrderSummaryView>("OrderSummary");
+expect(summary?.status).toBe("confirmed");
+```
+
+## When to Use testDomain vs. configureDomain
+
+| Scenario | Use |
+|----------|-----|
+| Testing handler logic in isolation | `testAggregate`, `testProjection`, `testSaga` |
+| Testing multiple components together | `testDomain` |
+| Custom persistence strategies | `configureDomain` from `@noddde/engine` |
+| Custom bus implementations | `configureDomain` from `@noddde/engine` |
+| Production-like environment tests | `configureDomain` from `@noddde/engine` |
+
+## Next Steps
+
+- [Testing Aggregates](/docs/testing/testing-aggregates) — Unit-level aggregate testing
+- [Testing Sagas](/docs/testing/testing-sagas) — Unit-level saga testing
+- [Testing Infrastructure](/docs/testing/testing-infrastructure) — Mocking patterns and Clock
+- [Domain Configuration](/docs/domain-configuration/overview) — Full `configureDomain` reference

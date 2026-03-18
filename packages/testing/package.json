@@ -1,0 +1,25 @@
+{
+  "name": "@noddde/testing",
+  "version": "0.0.0",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "lint": "eslint . --max-warnings 0",
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@noddde/core": "0.0.0",
+    "@noddde/engine": "0.0.0"
+  },
+  "devDependencies": {
+    "@noddde/typescript-config": "0.0.0",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3",
+    "vitest": "^4.1.0"
+  }
+}

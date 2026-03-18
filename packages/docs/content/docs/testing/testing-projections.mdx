@@ -1,157 +1,157 @@
 ---
 title: Testing Projections
-description: Testing strategies for both legacy and functional projection styles.
+description: Using testProjection to test read model construction from event streams.
 ---
 
-Projections build read models from event streams. Testing them ensures your views are correctly constructed from the events your aggregates produce.
+Projections build read models from event streams. The `testProjection` harness from `@noddde/testing` replays events through the projection's reducers and returns the final view.
 
-## Testing ProjectionV2 (Functional)
-
-`ProjectionV2` reducers are pure functions — the easiest thing to test:
+## testProjection
 
 ```ts
-import { describe, it, expect } from "vitest";
-import { BankAccountV2 } from "./projection";
+import { testProjection } from "@noddde/testing";
 
-describe("BankAccountV2 projection", () => {
-  const emptyView = { id: "", balance: 0, transactions: [] };
+const result = await testProjection(BankAccountProjection)
+  .given(
+    { name: "BankAccountCreated", payload: { id: "acc-1" } },
+    { name: "TransactionProcessed", payload: { id: "t1", amount: 500, merchant: "Salary", timestamp: now } },
+    { name: "TransactionProcessed", payload: { id: "t2", amount: -50, merchant: "Coffee", timestamp: now } },
+  )
+  .execute();
 
-  it("initializes on BankAccountCreated", () => {
-    const result = BankAccountV2.reducer(emptyView, {
-      name: "BankAccountCreated",
-      payload: { id: "acc-123" },
-    });
+expect(result.view.balance).toBe(450);
+expect(result.view.transactions).toHaveLength(2);
+```
 
-    expect(result).toEqual({
-      id: "acc-123",
-      balance: 0,
-      transactions: [],
-    });
-  });
+### Builder API
 
-  it("updates balance on TransactionProcessed", () => {
-    const view = { id: "acc-123", balance: 0, transactions: [] };
+| Method | Purpose |
+|--------|---------|
+| `.initialView(view)` | Starting view before events. If omitted, reducers receive `undefined` (matching real first-event behavior). |
+| `.given(...events)` | Events to replay through reducers. Can be called multiple times; events accumulate in order. |
+| `.execute()` | Runs the test and returns the result. Always async. |
 
-    const result = BankAccountV2.reducer(view, {
-      name: "TransactionProcessed",
-      payload: {
-        id: "txn-1",
-        timestamp: new Date("2024-01-15"),
-        amount: 100,
-        merchant: "Store",
-      },
-    });
+### Result Shape
 
-    expect(result.balance).toBe(100);
-    expect(result.transactions).toHaveLength(1);
-  });
+```ts
+type ProjectionTestResult<TView> = {
+  view: TView;      // Final view after all events
+  error?: Error;     // Captured error (if a reducer threw)
+};
+```
 
-  it("ignores TransactionDeclined", () => {
-    const view = { id: "acc-123", balance: 500, transactions: [] };
+## Initial View
 
-    const result = BankAccountV2.reducer(view, {
-      name: "TransactionDeclined",
-      payload: {
-        id: "txn-2",
-        timestamp: new Date(),
-        amount: 1000,
-        merchant: "Expensive",
-      },
-    });
+Control the starting state of the projection. This is useful when testing incremental updates rather than building from scratch:
 
-    expect(result).toBe(view); // Same reference, unchanged
-  });
+```ts
+const result = await testProjection(BankAccountProjection)
+  .initialView({
+    id: "acc-1",
+    balance: 1000,
+    transactions: [/* existing transactions */],
+  })
+  .given(
+    { name: "TransactionProcessed", payload: { id: "t3", amount: -200, merchant: "Store", timestamp: now } },
+  )
+  .execute();
+
+expect(result.view.balance).toBe(800);
+```
+
+When `.initialView()` is not called, the first reducer invocation receives `undefined` as the view. This matches real projection behavior when the first event arrives. Design your reducers to handle this:
+
+```ts
+reducers: {
+  AccountCreated: (event, view) => ({
+    id: event.payload.id,
+    balance: 0,              // Initialize from scratch
+    transactions: [],
+  }),
+  DepositMade: (event, view) => ({
+    ...view,                 // Spread existing view
+    balance: (view?.balance ?? 0) + event.payload.amount,
+  }),
+},
+```
+
+## Testing Full Event Streams
+
+Build a complete view from scratch by providing all events in order:
+
+```ts
+const result = await testProjection(OrderSummaryProjection)
+  .given(
+    { name: "OrderPlaced", payload: { orderId: "o-1", total: 99.99, items: 3 } },
+    { name: "PaymentCompleted", payload: { orderId: "o-1" } },
+    { name: "ShipmentDispatched", payload: { orderId: "o-1", trackingNumber: "TRK-123" } },
+  )
+  .execute();
+
+expect(result.view).toEqual({
+  orderId: "o-1",
+  status: "shipped",
+  trackingNumber: "TRK-123",
+  total: 99.99,
 });
 ```
 
-### Testing Full Event Stream Replay
+## Reducers Receive the Full Event
 
-You can test a complete event sequence by folding:
-
-```ts
-it("builds a complete view from event stream", () => {
-  const events = [
-    { name: "BankAccountCreated" as const, payload: { id: "acc-1" } },
-    { name: "TransactionProcessed" as const, payload: { id: "t1", timestamp: new Date(), amount: 500, merchant: "Salary" } },
-    { name: "TransactionProcessed" as const, payload: { id: "t2", timestamp: new Date(), amount: -50, merchant: "Coffee" } },
-  ];
-
-  const view = events.reduce(BankAccountV2.reducer, emptyView);
-
-  expect(view.id).toBe("acc-1");
-  expect(view.balance).toBe(450);
-  expect(view.transactions).toHaveLength(2);
-});
-```
-
-## Testing Legacy Projections
-
-Legacy projections require mock infrastructure since event handlers receive it as a parameter:
+Projection reducers receive the **full event object** (`{ name, payload }`), not just the payload. The event type is narrowed by name:
 
 ```ts
-import { describe, it, expect, vi } from "vitest";
-import { BankAccountProjection } from "./projection";
-
-describe("BankAccountProjection", () => {
-  const mockRepository = {
-    insert: vi.fn(),
-    update: vi.fn(),
-    getById: vi.fn(),
-  };
-
-  const mockInfrastructure = {
-    logger: { info: () => {}, error: () => {}, warn: () => {} },
-    bankAccountViewRepository: mockRepository,
-    transactionViewRepository: { listByBankAccountId: vi.fn() },
-  };
-
-  it("inserts a new view on BankAccountCreated", () => {
-    BankAccountProjection.eventHandlers.BankAccountCreated?.(
-      { id: "acc-123" },
-      mockInfrastructure,
-    );
-
-    expect(mockRepository.insert).toHaveBeenCalledWith({
-      id: "acc-123",
-      balance: 0,
-    });
-  });
-});
+reducers: {
+  AccountCreated: (event, view) => {
+    // event is { name: "AccountCreated", payload: { id: string } }
+    return { ...view, id: event.payload.id };
+  },
+},
 ```
 
-## Testing Query Handlers
+This is consistent with the runtime behavior in `@noddde/engine` and different from aggregate apply handlers, which receive only the payload.
 
-Query handlers also receive infrastructure:
+## Testing Async Reducers
+
+Reducers can be async. The harness awaits each one sequentially:
 
 ```ts
-describe("getBankAccountByIdQueryHandler", () => {
-  it("returns the account from repository", async () => {
-    const mockRepo = {
-      getById: vi.fn().mockResolvedValue({ id: "acc-1", balance: 500 }),
-    };
+const result = await testProjection(AsyncProjection)
+  .given(
+    { name: "DataFetched", payload: { url: "https://example.com" } },
+  )
+  .execute();
 
-    const result = await getBankAccountByIdQueryHandler(
-      { id: "acc-1" },
-      { bankAccountViewRepository: mockRepo } as any,
-    );
-
-    expect(result).toEqual({ id: "acc-1", balance: 500 });
-    expect(mockRepo.getById).toHaveBeenCalledWith("acc-1");
-  });
-});
+expect(result.view.fetched).toBe(true);
 ```
 
-## Choosing What to Test
+## Error Handling
 
-| Projection Style | What to Test | Mocks Needed? |
-|---|---|---|
-| `ProjectionV2` reducer | Event → View transformations | No |
-| `Projection` event handlers | Side effects (repository calls) | Yes |
-| `Projection` query handlers | Return values from infrastructure | Yes |
+If a reducer throws, the error is captured in the result:
 
-For `ProjectionV2`, you are testing pure transformations. For legacy `Projection`, you are testing interactions with infrastructure.
+```ts
+const result = await testProjection(StrictProjection)
+  .given({ name: "InvalidEvent", payload: { bad: true } })
+  .execute();
+
+expect(result.error).toBeDefined();
+expect(result.error!.message).toContain("invalid");
+```
+
+## Direct Reducer Testing
+
+You can always call reducers directly for focused tests:
+
+```ts
+const newView = BankAccountProjection.reducers.TransactionProcessed(
+  { name: "TransactionProcessed", payload: { id: "t1", amount: 100, merchant: "Store", timestamp: now } },
+  { id: "acc-1", balance: 0, transactions: [] },
+);
+
+expect(newView.balance).toBe(100);
+```
 
 ## Next Steps
 
-- [Testing Aggregates](/docs/testing/testing-aggregates) — Testing command and apply handlers
-- [Testing Infrastructure](/docs/testing/testing-infrastructure) — Mock patterns and the Clock pattern
+- [Testing Aggregates](/docs/testing/testing-aggregates) — `testAggregate` for command handler testing
+- [Testing Sagas](/docs/testing/testing-sagas) — `testSaga` for workflow testing
+- [Testing Domains](/docs/testing/testing-domains) — `testDomain` for slice tests with projections

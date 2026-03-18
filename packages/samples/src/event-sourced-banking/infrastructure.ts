@@ -2,6 +2,23 @@
 import { BankAccountView, TransactionView } from "./queries";
 import { SetRequired } from "type-fest";
 
+export interface Clock {
+  now(): Date;
+}
+
+export class SystemClock implements Clock {
+  now(): Date {
+    return new Date();
+  }
+}
+
+export class FixedClock implements Clock {
+  constructor(private readonly date: Date) {}
+  now(): Date {
+    return this.date;
+  }
+}
+
 export type Logger = {
   info: (message: string) => void;
   error: (message: string) => void;
@@ -61,6 +78,7 @@ export class ConsoleLogger implements Logger {
 }
 
 export interface BankingInfrastructure {
+  clock: Clock;
   logger: Logger;
 
   bankAccountViewRepository: BankAccountViewRepository;

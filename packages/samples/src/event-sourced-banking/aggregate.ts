@@ -38,7 +38,7 @@ export const BankAccount = defineAggregate<BankAccountDef>({
       };
     },
 
-    AuthorizeTransaction: (command, state, { logger }) => {
+    AuthorizeTransaction: (command, state, { clock, logger }) => {
       const { amount, merchant } = command.payload;
 
       if (state.availableBalance < amount) {
@@ -47,7 +47,7 @@ export const BankAccount = defineAggregate<BankAccountDef>({
           name: "TransactionDeclined",
           payload: {
             id: command.targetAggregateId,
-            timestamp: new Date(),
+            timestamp: clock.now(),
             amount,
             merchant,
           },
@@ -59,7 +59,7 @@ export const BankAccount = defineAggregate<BankAccountDef>({
         name: "TransactionAuthorized",
         payload: {
           id: command.targetAggregateId,
-          timestamp: new Date(),
+          timestamp: clock.now(),
           amount,
           merchant,
         },
