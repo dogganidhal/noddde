@@ -19,10 +19,14 @@ Aggregates are consistency boundaries — the units that process commands and en
 const BankAccount = defineAggregate<BankAccountDef>({
   initialState: { balance: 0, transactions: [] },
   commands: {
-    AuthorizeTransaction: (command, state, infra) => { /* return events */ },
+    AuthorizeTransaction: (command, state, infra) => {
+      /* return events */
+    },
   },
   apply: {
-    TransactionAuthorized: (event, state) => { /* return new state */ },
+    TransactionAuthorized: (event, state) => {
+      /* return new state */
+    },
   },
 });
 ```
@@ -59,9 +63,14 @@ Projections build **read-optimized views** from event streams. They are the quer
 const BankAccountProjection = defineProjection<BankAccountProjectionDef>({
   reducers: {
     BankAccountCreated: (event, view) => ({ ...view, id: event.payload.id }),
-    TransactionAuthorized: (event, view) => ({ ...view, balance: view.balance + event.payload.amount }),
+    TransactionAuthorized: (event, view) => ({
+      ...view,
+      balance: view.balance + event.payload.amount,
+    }),
   },
-  queryHandlers: { /* ... */ },
+  queryHandlers: {
+    /* ... */
+  },
 });
 ```
 
@@ -92,21 +101,23 @@ const domain = await configureDomain<MyInfrastructure>({
   writeModel: { aggregates: { BankAccount } },
   readModel: { projections: { BankAccount: BankAccountProjection } },
   processModel: { sagas: { OrderFulfillment: OrderFulfillmentSaga } },
-  infrastructure: { /* persistence, buses, custom infra */ },
+  infrastructure: {
+    /* persistence, buses, custom infra */
+  },
 });
 ```
 
 ## How noDDDe Differs
 
-| | Traditional DDD | noDDDe |
-|---|---|---|
-| Aggregates | Classes extending `AggregateRoot` | Plain objects via `defineAggregate` |
-| State changes | `this.apply(event)` mutates state | Apply handlers return new state (immutable) |
-| Command handling | Decorated methods | Typed handler maps |
-| Type safety | Manual generic parameters | Inferred from `AggregateTypes` bundle |
-| Event definitions | Enum + interface + union | `DefineEvents<{ ... }>` single declaration |
-| Testing | Requires framework setup | Call functions directly |
-| Infrastructure | Decorator-based injection | Function parameter injection |
+|                   | Traditional DDD                   | noDDDe                                      |
+| ----------------- | --------------------------------- | ------------------------------------------- |
+| Aggregates        | Classes extending `AggregateRoot` | Plain objects via `defineAggregate`         |
+| State changes     | `this.apply(event)` mutates state | Apply handlers return new state (immutable) |
+| Command handling  | Decorated methods                 | Typed handler maps                          |
+| Type safety       | Manual generic parameters         | Inferred from `AggregateTypes` bundle       |
+| Event definitions | Enum + interface + union          | `DefineEvents<{ ... }>` single declaration  |
+| Testing           | Requires framework setup          | Call functions directly                     |
+| Infrastructure    | Decorator-based injection         | Function parameter injection                |
 
 noDDDe draws inspiration from modern TypeScript API design (Zod, tRPC, Drizzle) — declarative, inference-heavy, zero-boilerplate.
 
@@ -116,7 +127,7 @@ noDDDe is for TypeScript developers building **event-driven** or **domain-rich**
 
 - Type-safe domain modeling without class hierarchies
 - Testable business logic without mock frameworks
-- Flexible persistence (event sourcing or state storage)
+- Flexible persistence (event sourcing or state storage) with built-in adapters for [Drizzle, Prisma, and TypeORM](/docs/infrastructure/orm-adapters)
 - A functional approach to DDD patterns
 
 ## Next Steps

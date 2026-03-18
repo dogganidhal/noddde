@@ -23,6 +23,23 @@ pnpm add @noddde/core @noddde/engine
 
 `@noddde/core` provides the type definitions, identity functions, and interfaces for defining your domain (aggregates, commands, events, queries, projections, sagas). `@noddde/engine` provides the runtime implementations (`configureDomain`, in-memory buses, persistence, and the event emitter event bus).
 
+### ORM Adapters (optional)
+
+For production persistence backed by a real database, install one of the ORM adapter packages:
+
+```bash
+# Drizzle ORM (SQLite, PostgreSQL, MySQL)
+yarn add @noddde/drizzle drizzle-orm
+
+# Prisma (any Prisma-supported database)
+yarn add @noddde/prisma @prisma/client
+
+# TypeORM (any TypeORM-supported database)
+yarn add @noddde/typeorm typeorm reflect-metadata
+```
+
+Each adapter provides event-sourced persistence, state-stored persistence, saga persistence, and a database-backed unit of work — all wired through a single factory function. See [ORM Adapters](/docs/infrastructure/orm-adapters) for setup details.
+
 ## Requirements
 
 - **Node.js** >= 18
@@ -44,6 +61,7 @@ noDDDe relies on TypeScript's strict mode for full type safety. Ensure your `tsc
 ```
 
 Key settings:
+
 - **`strict: true`** — Required for correct discriminated union narrowing and type inference
 - **`target: ES2022`** or later — For modern JavaScript features used by the framework
 - **`moduleResolution: "Node16"`** — For proper ESM/CJS resolution

@@ -104,26 +104,71 @@ This means you can:
 
 The strategy is a configuration choice, not a modeling choice.
 
-## Implementing Custom Persistence
+## Built-in Implementations
 
-To implement production persistence, implement either interface:
+noddde ships with persistence implementations for every stage of your project:
+
+### In-Memory (development and testing)
+
+The `@noddde/engine` package includes in-memory implementations that require no external dependencies:
+
+| Implementation                             | Strategy       | Use case                                    |
+| ------------------------------------------ | -------------- | ------------------------------------------- |
+| `InMemoryEventSourcedAggregatePersistence` | Event sourcing | Development, testing, prototyping           |
+| `InMemoryStateStoredAggregatePersistence`  | State storage  | Development, testing, prototyping           |
+| `InMemorySagaPersistence`                  | State storage  | Saga state in development/testing           |
+| `InMemoryUnitOfWork`                       | —              | Transactional boundaries without a database |
+
+Data is lost when the process exits. See [In-Memory Implementations](/docs/infrastructure/in-memory-implementations) for details.
+
+### ORM Adapters (production)
+
+Three ORM adapter packages provide database-backed persistence with real transaction support via the [Unit of Work](/docs/domain-configuration/unit-of-work) pattern:
+
+| Package           | ORM         | Databases                 | What it provides                                      |
+| ----------------- | ----------- | ------------------------- | ----------------------------------------------------- |
+| `@noddde/drizzle` | Drizzle ORM | SQLite, PostgreSQL, MySQL | All persistence + UoW with dialect-specific schemas   |
+| `@noddde/prisma`  | Prisma      | Any Prisma-supported DB   | All persistence + UoW via interactive transactions    |
+| `@noddde/typeorm` | TypeORM     | Any TypeORM-supported DB  | All persistence + UoW via entity manager transactions |
+
+Each adapter provides a single factory function that creates all persistence implementations and a unit of work factory, wired to share a database transaction context:
 
 ```ts
-class PostgresEventStore implements EventSourcedAggregatePersistence {
+import { createDrizzlePersistence } from "@noddde/drizzle";
+import { events, aggregateStates, sagaStates } from "@noddde/drizzle/pg";
+
+const infra = createDrizzlePersistence(db, {
+  events,
+  aggregateStates,
+  sagaStates,
+});
+
+const domain = await configureDomain({
+  infrastructure: {
+    aggregatePersistence: () => infra.eventSourcedPersistence,
+    sagaPersistence: () => infra.sagaPersistence,
+    unitOfWorkFactory: () => infra.unitOfWorkFactory,
+  },
+});
+```
+
+Your aggregate and projection code remains unchanged — only the infrastructure factories in `configureDomain` need to be updated. See [ORM Adapters](/docs/infrastructure/orm-adapters) for setup details per adapter.
+
+## Implementing Custom Persistence
+
+If the built-in implementations do not fit your needs, the persistence interfaces are deliberately minimal — `save` and `load` are the only two operations. This makes it straightforward to implement for any storage backend (EventStoreDB, MongoDB, DynamoDB, Redis, etc.):
+
+```ts
+class MyEventStore implements EventSourcedAggregatePersistence {
   async save(aggregateName: string, aggregateId: string, events: Event[]) {
-    // INSERT INTO events (aggregate_name, aggregate_id, event_name, payload, sequence)
-    // VALUES ($1, $2, $3, $4, nextval('events_seq'))
+    // Append events to your storage backend
   }
 
   async load(aggregateName: string, aggregateId: string): Promise<Event[]> {
-    // SELECT * FROM events
-    // WHERE aggregate_name = $1 AND aggregate_id = $2
-    // ORDER BY sequence ASC
+    // Load events from your storage backend, ordered by sequence
   }
 }
 ```
-
-The interface is deliberately minimal — `save` and `load` are the only two operations. This makes it straightforward to implement for any storage backend (PostgreSQL, MongoDB, DynamoDB, Redis, etc.).
 
 ## Next Steps
 
