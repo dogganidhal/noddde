@@ -1,0 +1,29 @@
+{
+  "name": "@noddde/drizzle",
+  "version": "0.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "lint": "eslint . --max-warnings 0",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@noddde/core": "0.0.0"
+  },
+  "peerDependencies": {
+    "drizzle-orm": ">=0.30.0"
+  },
+  "devDependencies": {
+    "@noddde/typescript-config": "0.0.0",
+    "better-sqlite3": "^11.0.0",
+    "drizzle-orm": "^0.30.0",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3",
+    "vitest": "^4.1.0"
+  }
+}

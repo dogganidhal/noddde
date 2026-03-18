@@ -1,0 +1,29 @@
+{
+  "name": "@noddde/typeorm",
+  "version": "0.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "lint": "eslint . --max-warnings 0",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@noddde/core": "0.0.0"
+  },
+  "peerDependencies": {
+    "typeorm": ">=0.3.0"
+  },
+  "devDependencies": {
+    "@noddde/typescript-config": "0.0.0",
+    "better-sqlite3": "^11.0.0",
+    "eslint": "^8.56.0",
+    "typeorm": "^0.3.20",
+    "typescript": "^5.3.3",
+    "vitest": "^4.1.0"
+  }
+}

@@ -1,0 +1,130 @@
+---
+title: ORM Adapters
+description: Production-ready persistence using Drizzle, Prisma, or TypeORM with any supported database.
+---
+
+noddde provides three ORM adapter packages that implement all persistence interfaces and `UnitOfWork` using your ORM's native transaction mechanism. Pick the ORM you already use — each adapter works with whatever database your ORM supports (PostgreSQL, MySQL, SQLite, etc.).
+
+## Available Adapters
+
+| Package | ORM | Transaction API | Schema |
+|---------|-----|----------------|--------|
+| `@noddde/drizzle` | Drizzle ORM | `BEGIN`/`COMMIT`/`ROLLBACK` | TypeScript table builders |
+| `@noddde/prisma` | Prisma | `$transaction()` (interactive) | `.prisma` schema file |
+| `@noddde/typeorm` | TypeORM | `manager.transaction()` | TypeScript entity decorators |
+
+Each package exports a single factory function that returns all persistence implementations wired to share a transaction context:
+
+```ts
+const infra = createDrizzlePersistence(db);
+// or: createPrismaPersistence(prisma)
+// or: createTypeORMPersistence(dataSource)
+
+// Returns:
+// infra.eventSourcedPersistence  — EventSourcedAggregatePersistence
+// infra.stateStoredPersistence   — StateStoredAggregatePersistence
+// infra.sagaPersistence          — SagaPersistence
+// infra.unitOfWorkFactory        — UnitOfWorkFactory (real DB transactions)
+```
+
+## Drizzle
+
+```ts
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { createDrizzlePersistence, nodddeEvents, nodddeAggregateStates, nodddeSagaStates } from "@noddde/drizzle";
+
+const db = drizzle(new Database("app.db"));
+const infra = createDrizzlePersistence(db);
+
+const domain = await configureDomain({
+  writeModel: { aggregates: { Order } },
+  readModel: { projections: {} },
+  infrastructure: {
+    aggregatePersistence: () => infra.eventSourcedPersistence,
+    sagaPersistence: () => infra.sagaPersistence,
+    unitOfWorkFactory: () => infra.unitOfWorkFactory,
+  },
+});
+```
+
+The package exports Drizzle table definitions (`nodddeEvents`, `nodddeAggregateStates`, `nodddeSagaStates`) that you include in your schema.
+
+## Prisma
+
+```ts
+import { PrismaClient } from "@prisma/client";
+import { createPrismaPersistence } from "@noddde/prisma";
+
+const prisma = new PrismaClient();
+const infra = createPrismaPersistence(prisma);
+
+const domain = await configureDomain({
+  writeModel: { aggregates: { Order } },
+  readModel: { projections: {} },
+  infrastructure: {
+    aggregatePersistence: () => infra.eventSourcedPersistence,
+    sagaPersistence: () => infra.sagaPersistence,
+    unitOfWorkFactory: () => infra.unitOfWorkFactory,
+  },
+});
+```
+
+The package ships with a Prisma schema at `@noddde/prisma/prisma/schema.prisma` defining the three models. Copy the model definitions into your own schema, or extend it as a base.
+
+## TypeORM
+
+```ts
+import { DataSource } from "typeorm";
+import {
+  createTypeORMPersistence,
+  NodddeEventEntity,
+  NodddeAggregateStateEntity,
+  NodddeSagaStateEntity,
+} from "@noddde/typeorm";
+
+const dataSource = new DataSource({
+  type: "postgres",
+  url: process.env.DATABASE_URL,
+  entities: [NodddeEventEntity, NodddeAggregateStateEntity, NodddeSagaStateEntity],
+  synchronize: true, // use migrations in production
+});
+await dataSource.initialize();
+
+const infra = createTypeORMPersistence(dataSource);
+
+const domain = await configureDomain({
+  writeModel: { aggregates: { Order } },
+  readModel: { projections: {} },
+  infrastructure: {
+    aggregatePersistence: () => infra.eventSourcedPersistence,
+    sagaPersistence: () => infra.sagaPersistence,
+    unitOfWorkFactory: () => infra.unitOfWorkFactory,
+  },
+});
+```
+
+The package exports TypeORM entity classes that you register in your `DataSource` configuration.
+
+## How Transactions Work
+
+All three adapters implement `UnitOfWork` by wrapping the ORM's native transaction mechanism. When `domain.withUnitOfWork()` (or an implicit command dispatch) calls `commit()`:
+
+1. The adapter opens a database transaction
+2. All enlisted persistence operations execute within that transaction
+3. On success, the transaction commits and deferred events are returned for publishing
+4. On failure, the transaction rolls back and no events are published
+
+The persistence classes and `UnitOfWork` share a transaction store — when a transaction is active, all queries automatically route through it.
+
+## Database Tables
+
+All three adapters use the same logical schema:
+
+| Table | Purpose | Columns |
+|-------|---------|---------|
+| `noddde_events` | Event streams | `id`, `aggregate_name`, `aggregate_id`, `sequence_number`, `event_name`, `payload` (JSON) |
+| `noddde_aggregate_states` | State snapshots | `aggregate_name`, `aggregate_id`, `state` (JSON) |
+| `noddde_saga_states` | Saga state | `saga_name`, `saga_id`, `state` (JSON) |
+
+States and event payloads are serialized as JSON strings, making the schema database-agnostic.

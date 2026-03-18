@@ -1,0 +1,40 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// Events table for event-sourced aggregate persistence.
+model NodddeEvent {
+  id             Int    @id @default(autoincrement())
+  aggregateName  String @map("aggregate_name")
+  aggregateId    String @map("aggregate_id")
+  sequenceNumber Int    @map("sequence_number")
+  eventName      String @map("event_name")
+  payload        String
+
+  @@map("noddde_events")
+}
+
+/// Aggregate states table for state-stored aggregate persistence.
+model NodddeAggregateState {
+  aggregateName String @map("aggregate_name")
+  aggregateId   String @map("aggregate_id")
+  state         String
+
+  @@id([aggregateName, aggregateId])
+  @@map("noddde_aggregate_states")
+}
+
+/// Saga states table for saga persistence.
+model NodddeSagaState {
+  sagaName String @map("saga_name")
+  sagaId   String @map("saga_id")
+  state    String
+
+  @@id([sagaName, sagaId])
+  @@map("noddde_saga_states")
+}
