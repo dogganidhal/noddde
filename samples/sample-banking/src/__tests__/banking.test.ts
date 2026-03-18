@@ -78,7 +78,7 @@ describe("BankAccount aggregate — unit tests", () => {
         transactions: [],
       };
 
-      const result = await testAggregate(BankAccount)
+      await testAggregate(BankAccount)
         .given(accountCreated)
         .when({
           name: "AuthorizeTransaction",

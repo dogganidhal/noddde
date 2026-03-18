@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import type { Aggregate, AggregateTypes } from "@noddde/core";
 import type { AggregateTestResult } from "./types";
 

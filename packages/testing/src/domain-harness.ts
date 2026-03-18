@@ -5,10 +5,6 @@ import type {
   Infrastructure,
   Command,
   Event,
-  QueryHandler,
-  StandaloneCommandHandler,
-  Query,
-  QueryResult,
 } from "@noddde/core";
 import {
   configureDomain,

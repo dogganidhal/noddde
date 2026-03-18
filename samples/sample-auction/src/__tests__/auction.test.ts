@@ -5,7 +5,6 @@ import { Auction } from "../aggregate";
 // ---- Shared fixtures ----
 
 const futureDate = new Date("2030-01-01T00:00:00Z");
-const pastDate = new Date("2020-01-01T00:00:00Z");
 const now = new Date("2025-06-15T12:00:00Z");
 
 const auctionCreated = {

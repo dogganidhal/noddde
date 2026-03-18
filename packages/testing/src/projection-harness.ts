@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import type { Projection, ProjectionTypes } from "@noddde/core";
 import type { ProjectionTestResult } from "./types";
 

@@ -1,7 +1,7 @@
+/* eslint-disable no-unused-vars */
 import type {
   Saga,
   SagaTypes,
-  Command,
   CQRSInfrastructure,
 } from "@noddde/core";
 import type { SagaTestResult } from "./types";
