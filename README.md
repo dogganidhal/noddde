@@ -126,18 +126,30 @@ noddde supports event sourcing and state snapshots through the same aggregate de
 
 Switch from event sourcing to state snapshots by changing one line in your domain configuration. Your domain code doesn't know and doesn't care.
 
+For production, noddde provides ORM adapter packages that plug into your existing database setup:
+
+```bash
+yarn add @noddde/drizzle drizzle-orm   # Drizzle ORM (SQLite, PostgreSQL, MySQL)
+yarn add @noddde/prisma @prisma/client  # Prisma (any Prisma-supported database)
+yarn add @noddde/typeorm typeorm        # TypeORM (any TypeORM-supported database)
+```
+
+Each adapter provides all persistence implementations and a database-backed Unit of Work through a single factory function — no custom code required.
+
 ## What it includes
 
-The framework ships with everything you need to build and test a domain locally:
+The framework ships with everything you need to build, test, and deploy a domain:
 
 - **Aggregates** with the Decider pattern (decide + evolve)
 - **Projections** that fold events into read models with typed query handlers
 - **Sagas** for cross-aggregate workflow orchestration with typed event correlation
 - **Command Bus, Query Bus, Event Bus** — in-memory implementations included, interfaces for your own
 - **Two persistence strategies** — event sourcing and state snapshots, swappable at configuration time
+- **Unit of Work** — atomic multi-command transactions with deferred event publishing
+- **ORM adapters** — production-ready persistence for [Drizzle](https://noddde.dev/docs/infrastructure/orm-adapters), [Prisma](https://noddde.dev/docs/infrastructure/orm-adapters), and [TypeORM](https://noddde.dev/docs/infrastructure/orm-adapters) with real database transactions
 - **`configureDomain`** — a single function that wires write model, read model, process model, and infrastructure into a running system
 
-The in-memory implementations are designed for development and testing. For production, implement the `EventBus`, `CommandBus`, `QueryBus`, and persistence interfaces with your infrastructure of choice — Kafka, PostgreSQL, Redis, whatever your stack requires.
+The in-memory implementations are designed for development and testing. For production persistence, use one of the ORM adapter packages (`@noddde/drizzle`, `@noddde/prisma`, `@noddde/typeorm`) or implement the interfaces with your own storage backend.
 
 ## Testing
 
@@ -188,7 +200,10 @@ const { domain, spy } = await testDomain({
 
 await domain.dispatchCommand(depositCommand);
 
-expect(spy.publishedEvents).toContainEqual({ name: "DepositMade", payload: { amount: 500 } });
+expect(spy.publishedEvents).toContainEqual({
+  name: "DepositMade",
+  payload: { amount: 500 },
+});
 expect(domain.getProjectionView("BankAccountView")).toEqual({ balance: 500 });
 ```
 
@@ -201,13 +216,14 @@ yarn add @noddde/core @noddde/engine
 yarn add --dev @noddde/testing
 ```
 
-Head to the [documentation](https://noddde.dev/docs/getting-started) for a walkthrough that builds a complete domain from scratch, or explore the [sample domains](packages/samples/src/) for real-world patterns:
+Head to the [documentation](https://noddde.dev/docs/getting-started) for a walkthrough that builds a complete domain from scratch, or explore the [sample domains](samples/) for real-world patterns:
 
-| Sample                                                      | What it shows                                                     |
-| ----------------------------------------------------------- | ----------------------------------------------------------------- |
-| [Auction](packages/samples/src/auction)                     | Commands, events, business rules, infrastructure injection        |
-| [Banking](packages/samples/src/event-sourced-banking)       | Event sourcing, projections, queries, repositories                |
-| [Order Fulfillment](packages/samples/src/order-fulfillment) | 3 aggregates, saga orchestration, cross-context event correlation |
+| Sample                                     | Persistence      | What it shows                                                     |
+| ------------------------------------------ | ---------------- | ----------------------------------------------------------------- |
+| [Auction](samples/sample-auction)          | Drizzle + SQLite | Commands, events, business rules, infrastructure injection        |
+| [Banking](samples/sample-banking)          | Prisma + SQLite  | Event sourcing, projections, queries, repositories                |
+| [Order Fulfillment](samples/sample-orders) | TypeORM + SQLite | 3 aggregates, saga orchestration, cross-context event correlation |
+| [Fund Transfer](samples/sample-transfers)  | In-memory        | Atomic multi-command transactions with `withUnitOfWork()`         |
 
 ## License
 
