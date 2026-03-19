@@ -113,6 +113,7 @@ model NodddeEvent {
   eventName      String @map("event_name")
   payload        String
 
+  @@unique([aggregateName, aggregateId, sequenceNumber])
   @@map("noddde_events")
 }
 
@@ -120,6 +121,7 @@ model NodddeAggregateState {
   aggregateName String @map("aggregate_name")
   aggregateId   String @map("aggregate_id")
   state         String
+  version       Int    @default(0)
 
   @@id([aggregateName, aggregateId])
   @@map("noddde_aggregate_states")
@@ -231,15 +233,50 @@ All three adapters follow the same pattern for integrating with the [Unit of Wor
 
 This shared transaction store pattern means persistence classes do not need to know whether they are operating inside a unit of work or not -- they always read from `txStore.current`, which is `null` outside a transaction and points to the active transaction client inside one.
 
+## Concurrency Control
+
+All three adapters support both optimistic and pessimistic concurrency strategies. See [Concurrency Strategies](/docs/running/persistence#concurrency-control) for the full explanation.
+
+### Optimistic Concurrency (built-in)
+
+Enforced at the database level via unique constraints and version columns:
+
+- **Event-sourced**: A unique constraint on `(aggregate_name, aggregate_id, sequence_number)` prevents concurrent appends. The `save()` method uses `expectedVersion + index + 1` for sequence numbers instead of querying `MAX(sequence_number)`.
+- **State-stored**: A `version` integer column (default 0) enables optimistic locking. On update, `WHERE version = expectedVersion` ensures the state has not changed since it was loaded.
+
+Both strategies throw `ConcurrencyError` when a conflict is detected.
+
+### Pessimistic Concurrency (advisory lockers)
+
+Each adapter exports an advisory locker that uses database-native locking:
+
+```ts
+import { DrizzleAdvisoryLocker } from "@noddde/drizzle";
+import { PrismaAdvisoryLocker } from "@noddde/prisma";
+import { TypeORMAdvisoryLocker } from "@noddde/typeorm";
+```
+
+| Adapter                                 | PostgreSQL                    | MySQL                         | SQLite        |
+| --------------------------------------- | ----------------------------- | ----------------------------- | ------------- |
+| `DrizzleAdvisoryLocker(db, dialect)`    | `pg_advisory_lock(bigint)`    | `GET_LOCK(string, timeout)`   | Not supported |
+| `PrismaAdvisoryLocker(prisma, dialect)` | Same via `$queryRawUnsafe`    | Same via `$queryRawUnsafe`    | Not supported |
+| `TypeORMAdvisoryLocker(dataSource)`     | Same via `DataSource.query()` | Same via `DataSource.query()` | Not supported |
+
+The TypeORM locker auto-detects the dialect from `dataSource.options.type`. The Drizzle and Prisma lockers require an explicit dialect parameter.
+
+Advisory locks are session-level (not transaction-level), which means they span beyond the database transaction boundary. This is correct because the lock must cover the entire load-execute-save lifecycle.
+
+For SQLite, use `InMemoryAggregateLocker` from `@noddde/engine` for single-process deployments.
+
 ## Database Tables
 
 All three adapters use the same logical schema:
 
-| Table                     | Purpose         | Key                                          | Columns                                                                             |
-| ------------------------- | --------------- | -------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `noddde_events`           | Event streams   | Auto-increment `id`                          | `aggregate_name`, `aggregate_id`, `sequence_number`, `event_name`, `payload` (JSON) |
-| `noddde_aggregate_states` | State snapshots | Composite (`aggregate_name`, `aggregate_id`) | `state` (JSON)                                                                      |
-| `noddde_saga_states`      | Saga state      | Composite (`saga_name`, `saga_id`)           | `state` (JSON)                                                                      |
+| Table                     | Purpose         | Key                                          | Columns                                                                                                                                                      |
+| ------------------------- | --------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `noddde_events`           | Event streams   | Auto-increment `id`                          | `aggregate_name`, `aggregate_id`, `sequence_number`, `event_name`, `payload` (JSON). Unique constraint on `(aggregate_name, aggregate_id, sequence_number)`. |
+| `noddde_aggregate_states` | State snapshots | Composite (`aggregate_name`, `aggregate_id`) | `state` (JSON), `version` (integer, default 0)                                                                                                               |
+| `noddde_saga_states`      | Saga state      | Composite (`saga_name`, `saga_id`)           | `state` (JSON)                                                                                                                                               |
 
 States and event payloads are serialized as JSON strings, making the schema database-agnostic.
 
