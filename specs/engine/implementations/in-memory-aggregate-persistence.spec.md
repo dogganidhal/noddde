@@ -28,14 +28,23 @@ class InMemoryEventSourcedAggregatePersistence
     aggregateName: string,
     aggregateId: string,
     events: Event[],
+    expectedVersion: number,
   ): Promise<void>;
 }
 
 class InMemoryStateStoredAggregatePersistence
   implements StateStoredAggregatePersistence
 {
-  load(aggregateName: string, aggregateId: string): Promise<any>;
-  save(aggregateName: string, aggregateId: string, state: any): Promise<void>;
+  load(
+    aggregateName: string,
+    aggregateId: string,
+  ): Promise<{ state: any; version: number } | null>;
+  save(
+    aggregateName: string,
+    aggregateId: string,
+    state: any,
+    expectedVersion: number,
+  ): Promise<void>;
 }
 ```
 
@@ -46,19 +55,21 @@ class InMemoryStateStoredAggregatePersistence
 
 ### InMemoryEventSourcedAggregatePersistence
 
-1. **Save appends events** -- `save(name, id, events)` appends the given events to the existing event stream for `(name, id)`. If no stream exists, it creates one.
-2. **Load returns full stream** -- `load(name, id)` returns all events previously saved for `(name, id)`, in insertion order.
-3. **Load returns empty array for unknown aggregate** -- If no events have been saved for `(name, id)`, `load` returns `[]` (not `null` or `undefined`).
+1. **Save appends events with version check** -- `save(name, id, events, expectedVersion)` appends the given events to the existing event stream for `(name, id)`. Before appending, checks that `expectedVersion` equals the current stream length. If not, throws `ConcurrencyError`. If no stream exists (length 0), `expectedVersion` must be 0.
+2. **Load returns full stream** -- `load(name, id)` returns all events previously saved for `(name, id)`, in insertion order. The version is implicitly `events.length`.
+3. **Load returns empty array for unknown aggregate** -- If no events have been saved for `(name, id)`, `load` returns `[]` (not `null` or `undefined`). Version is implicitly 0.
 4. **Namespace isolation** -- Events for `("Order", "1")` and `("Account", "1")` are stored independently. The aggregate name acts as a namespace.
 5. **Event ordering** -- Events are returned in the order they were appended across all `save` calls. If `save` is called twice with `[e1, e2]` then `[e3]`, `load` returns `[e1, e2, e3]`.
+6. **Concurrency error on version mismatch** -- If `expectedVersion !== currentStreamLength`, `save` throws `ConcurrencyError` with the aggregate name, ID, expected version, and actual version (stream length).
 
 ### InMemoryStateStoredAggregatePersistence
 
-1. **Save overwrites state** -- `save(name, id, state)` stores the state snapshot, replacing any previously stored state for `(name, id)`.
-2. **Load returns latest state** -- `load(name, id)` returns the most recently saved state for `(name, id)`.
-3. **Load returns undefined/null for unknown aggregate** -- If no state has been saved for `(name, id)`, `load` returns `undefined` or `null`.
+1. **Save overwrites state with version check** -- `save(name, id, state, expectedVersion)` stores the state snapshot, replacing any previously stored state. Before writing, checks that `expectedVersion` matches the current stored version (0 for new aggregates). If not, throws `ConcurrencyError`. On success, the stored version becomes `expectedVersion + 1`.
+2. **Load returns latest state and version** -- `load(name, id)` returns `{ state, version }` for the most recently saved state, or `null` if no state exists. Version starts at 0 for new aggregates and increments by 1 on each successful save.
+3. **Load returns null for unknown aggregate** -- If no state has been saved for `(name, id)`, `load` returns `null`.
 4. **Namespace isolation** -- State for `("Order", "1")` and `("Account", "1")` are stored independently.
 5. **State is stored by reference** -- The in-memory implementation may store the state object by reference. Callers should treat loaded state as immutable to avoid aliasing bugs.
+6. **Concurrency error on version mismatch** -- If `expectedVersion !== currentVersion`, `save` throws `ConcurrencyError` with the aggregate name, ID, expected version, and actual version.
 
 ## Invariants
 
@@ -96,7 +107,7 @@ describe("InMemoryEventSourcedAggregatePersistence", () => {
       { name: "DepositMade", payload: { amount: 100 } },
     ];
 
-    await persistence.save("BankAccount", "acc-1", events);
+    await persistence.save("BankAccount", "acc-1", events, 0);
 
     const loaded = await persistence.load("BankAccount", "acc-1");
 
@@ -132,13 +143,21 @@ describe("InMemoryEventSourcedAggregatePersistence", () => {
   it("should append events across multiple save calls", async () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
 
-    await persistence.save("BankAccount", "acc-1", [
-      { name: "AccountCreated", payload: { id: "acc-1" } },
-    ]);
-    await persistence.save("BankAccount", "acc-1", [
-      { name: "DepositMade", payload: { amount: 50 } },
-      { name: "DepositMade", payload: { amount: 75 } },
-    ]);
+    await persistence.save(
+      "BankAccount",
+      "acc-1",
+      [{ name: "AccountCreated", payload: { id: "acc-1" } }],
+      0,
+    );
+    await persistence.save(
+      "BankAccount",
+      "acc-1",
+      [
+        { name: "DepositMade", payload: { amount: 50 } },
+        { name: "DepositMade", payload: { amount: 75 } },
+      ],
+      1,
+    );
 
     const loaded = await persistence.load("BankAccount", "acc-1");
 
@@ -163,12 +182,18 @@ describe("InMemoryEventSourcedAggregatePersistence", () => {
   it("should isolate events between different aggregate names", async () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
 
-    await persistence.save("Order", "1", [
-      { name: "OrderPlaced", payload: { total: 200 } },
-    ]);
-    await persistence.save("Account", "1", [
-      { name: "AccountCreated", payload: { owner: "Bob" } },
-    ]);
+    await persistence.save(
+      "Order",
+      "1",
+      [{ name: "OrderPlaced", payload: { total: 200 } }],
+      0,
+    );
+    await persistence.save(
+      "Account",
+      "1",
+      [{ name: "AccountCreated", payload: { owner: "Bob" } }],
+      0,
+    );
 
     const orderEvents = await persistence.load("Order", "1");
     const accountEvents = await persistence.load("Account", "1");
@@ -192,10 +217,13 @@ describe("InMemoryEventSourcedAggregatePersistence", () => {
   it("should not alter the stream when saving an empty events array", async () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
 
-    await persistence.save("BankAccount", "acc-1", [
-      { name: "AccountCreated", payload: { id: "acc-1" } },
-    ]);
-    await persistence.save("BankAccount", "acc-1", []);
+    await persistence.save(
+      "BankAccount",
+      "acc-1",
+      [{ name: "AccountCreated", payload: { id: "acc-1" } }],
+      0,
+    );
+    await persistence.save("BankAccount", "acc-1", [], 1);
 
     const loaded = await persistence.load("BankAccount", "acc-1");
     expect(loaded).toHaveLength(1);
@@ -214,11 +242,11 @@ describe("InMemoryStateStoredAggregatePersistence", () => {
     const persistence = new InMemoryStateStoredAggregatePersistence();
 
     const state = { id: "acc-1", balance: 250, owner: "Alice" };
-    await persistence.save("BankAccount", "acc-1", state);
+    await persistence.save("BankAccount", "acc-1", state, 0);
 
     const loaded = await persistence.load("BankAccount", "acc-1");
 
-    expect(loaded).toEqual(state);
+    expect(loaded).toEqual({ state, version: 1 });
   });
 });
 ```
@@ -230,12 +258,12 @@ import { describe, it, expect } from "vitest";
 import { InMemoryStateStoredAggregatePersistence } from "@noddde/core";
 
 describe("InMemoryStateStoredAggregatePersistence", () => {
-  it("should return undefined or null when no state exists", async () => {
+  it("should return null when no state exists", async () => {
     const persistence = new InMemoryStateStoredAggregatePersistence();
 
-    const state = await persistence.load("BankAccount", "nonexistent");
+    const loaded = await persistence.load("BankAccount", "nonexistent");
 
-    expect(state == null).toBe(true);
+    expect(loaded).toBeNull();
   });
 });
 ```
@@ -250,12 +278,12 @@ describe("InMemoryStateStoredAggregatePersistence", () => {
   it("should overwrite state on subsequent saves", async () => {
     const persistence = new InMemoryStateStoredAggregatePersistence();
 
-    await persistence.save("BankAccount", "acc-1", { balance: 100 });
-    await persistence.save("BankAccount", "acc-1", { balance: 250 });
+    await persistence.save("BankAccount", "acc-1", { balance: 100 }, 0);
+    await persistence.save("BankAccount", "acc-1", { balance: 250 }, 1);
 
     const loaded = await persistence.load("BankAccount", "acc-1");
 
-    expect(loaded).toEqual({ balance: 250 });
+    expect(loaded).toEqual({ state: { balance: 250 }, version: 2 });
   });
 });
 ```
@@ -270,14 +298,68 @@ describe("InMemoryStateStoredAggregatePersistence", () => {
   it("should isolate state between different aggregate names", async () => {
     const persistence = new InMemoryStateStoredAggregatePersistence();
 
-    await persistence.save("Order", "1", { status: "placed" });
-    await persistence.save("Account", "1", { balance: 500 });
+    await persistence.save("Order", "1", { status: "placed" }, 0);
+    await persistence.save("Account", "1", { balance: 500 }, 0);
 
     const orderState = await persistence.load("Order", "1");
     const accountState = await persistence.load("Account", "1");
 
-    expect(orderState).toEqual({ status: "placed" });
-    expect(accountState).toEqual({ balance: 500 });
+    expect(orderState).toEqual({ state: { status: "placed" }, version: 1 });
+    expect(accountState).toEqual({ state: { balance: 500 }, version: 1 });
+  });
+});
+```
+
+### Event-sourced: concurrency error on version mismatch
+
+```ts
+import { describe, it, expect } from "vitest";
+import {
+  InMemoryEventSourcedAggregatePersistence,
+  ConcurrencyError,
+} from "@noddde/core";
+
+describe("InMemoryEventSourcedAggregatePersistence", () => {
+  it("should throw ConcurrencyError when expectedVersion does not match stream length", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+
+    await persistence.save(
+      "Account",
+      "acc-1",
+      [{ name: "AccountCreated", payload: { id: "acc-1" } }],
+      0,
+    );
+
+    await expect(
+      persistence.save(
+        "Account",
+        "acc-1",
+        [{ name: "DepositMade", payload: { amount: 50 } }],
+        0,
+      ),
+    ).rejects.toThrow(ConcurrencyError);
+  });
+});
+```
+
+### State-stored: concurrency error on version mismatch
+
+```ts
+import { describe, it, expect } from "vitest";
+import {
+  InMemoryStateStoredAggregatePersistence,
+  ConcurrencyError,
+} from "@noddde/core";
+
+describe("InMemoryStateStoredAggregatePersistence", () => {
+  it("should throw ConcurrencyError when expectedVersion does not match stored version", async () => {
+    const persistence = new InMemoryStateStoredAggregatePersistence();
+
+    await persistence.save("Account", "acc-1", { balance: 100 }, 0);
+
+    await expect(
+      persistence.save("Account", "acc-1", { balance: 200 }, 0),
+    ).rejects.toThrow(ConcurrencyError);
   });
 });
 ```

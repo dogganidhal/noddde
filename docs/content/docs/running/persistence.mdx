@@ -19,13 +19,14 @@ interface EventSourcedAggregatePersistence {
     aggregateName: string,
     aggregateId: string,
     events: Event[],
+    expectedVersion: number,
   ): Promise<void>;
   load(aggregateName: string, aggregateId: string): Promise<Event[]>;
 }
 ```
 
-- **`save`** appends new events to the aggregate's event stream
-- **`load`** returns all events for an aggregate instance, in order
+- **`save`** appends new events to the aggregate's event stream. The `expectedVersion` must match the current stream length -- if another command was saved concurrently, a `ConcurrencyError` is thrown.
+- **`load`** returns all events for an aggregate instance, in order. The version is implicitly `events.length`.
 
 Each aggregate instance has its own event stream, identified by the combination of `aggregateName` and `aggregateId`. Streams are independent -- loading events for one instance does not include events from another.
 
@@ -35,13 +36,21 @@ With state storage, the current state is saved directly. No event replay is need
 
 ```ts
 interface StateStoredAggregatePersistence {
-  save(aggregateName: string, aggregateId: string, state: any): Promise<void>;
-  load(aggregateName: string, aggregateId: string): Promise<any>;
+  save(
+    aggregateName: string,
+    aggregateId: string,
+    state: any,
+    expectedVersion: number,
+  ): Promise<void>;
+  load(
+    aggregateName: string,
+    aggregateId: string,
+  ): Promise<{ state: any; version: number } | null>;
 }
 ```
 
-- **`save`** overwrites the current state snapshot
-- **`load`** returns the last saved state (or `null` for new aggregates)
+- **`save`** overwrites the current state snapshot. The `expectedVersion` must match the stored version -- if it does not, a `ConcurrencyError` is thrown.
+- **`load`** returns the last saved state and version as `{ state, version }`, or `null` for new aggregates (version 0).
 
 ### Saga Persistence
 
@@ -71,16 +80,43 @@ const domain = await configureDomain<BankingInfrastructure>({
   writeModel: { aggregates: { BankAccount } },
   readModel: { projections: { BankAccount: BankAccountProjection } },
   infrastructure: {
-    aggregatePersistence: () =>
-      new InMemoryEventSourcedAggregatePersistence(),
-    sagaPersistence: () =>
-      new InMemorySagaPersistence(),
+    aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
+    sagaPersistence: () => new InMemorySagaPersistence(),
     // ...other providers
   },
 });
 ```
 
 The `aggregatePersistence` factory returns either an `EventSourcedAggregatePersistence` or a `StateStoredAggregatePersistence`. The framework uses it to load and save state for all aggregates in the domain.
+
+## Optimistic Concurrency Control
+
+Both persistence strategies enforce optimistic concurrency via a version check on `save()`. When two concurrent commands load the same aggregate, the first to save succeeds. The second detects the version mismatch and throws `ConcurrencyError`.
+
+```ts
+import { ConcurrencyError } from "@noddde/core";
+```
+
+The domain handles this automatically. You can configure retry behavior via `aggregateConcurrency`:
+
+```ts
+const domain = await configureDomain<MyInfrastructure>({
+  writeModel: { aggregates: { BankAccount } },
+  readModel: { projections: {} },
+  infrastructure: {
+    aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
+    aggregateConcurrency: {
+      maxRetries: 3, // retry up to 3 times on ConcurrencyError
+    },
+  },
+});
+```
+
+When a retry occurs, the domain re-loads the aggregate, re-executes the command handler against the updated state, and re-attempts the save. Command handlers may be called multiple times during retry and should be side-effect-free (the Decider pattern already ensures this: handlers only produce events).
+
+If `maxRetries` is 0 (the default), `ConcurrencyError` propagates immediately to the caller.
+
+Inside an explicit `withUnitOfWork()`, `ConcurrencyError` is never retried -- it propagates immediately. The caller is responsible for retrying the entire unit of work.
 
 ## Built-in In-Memory Implementations
 
@@ -160,7 +196,11 @@ The strategy is a configuration choice, not a modeling choice.
 The persistence interfaces are deliberately minimal -- `save` and `load` are the only two operations. This makes it straightforward to implement for any storage backend:
 
 ```ts
-import { Event, EventSourcedAggregatePersistence } from "@noddde/core";
+import {
+  Event,
+  EventSourcedAggregatePersistence,
+  ConcurrencyError,
+} from "@noddde/core";
 
 class PostgresEventStore implements EventSourcedAggregatePersistence {
   constructor(private readonly pool: Pool) {}
@@ -182,12 +222,30 @@ class PostgresEventStore implements EventSourcedAggregatePersistence {
     aggregateName: string,
     aggregateId: string,
     events: Event[],
+    expectedVersion: number,
   ): Promise<void> {
-    for (const event of events) {
-      await this.pool.query(
-        `INSERT INTO events (aggregate_name, aggregate_id, name, payload)
-         VALUES ($1, $2, $3, $4)`,
-        [aggregateName, aggregateId, event.name, event.payload],
+    try {
+      for (let i = 0; i < events.length; i++) {
+        const event = events[i]!;
+        await this.pool.query(
+          `INSERT INTO events (aggregate_name, aggregate_id, sequence_number, name, payload)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [
+            aggregateName,
+            aggregateId,
+            expectedVersion + i + 1,
+            event.name,
+            event.payload,
+          ],
+        );
+      }
+    } catch (error) {
+      // Unique constraint violation on (aggregate_name, aggregate_id, sequence_number)
+      throw new ConcurrencyError(
+        aggregateName,
+        aggregateId,
+        expectedVersion,
+        -1,
       );
     }
   }
@@ -196,8 +254,9 @@ class PostgresEventStore implements EventSourcedAggregatePersistence {
 
 Key implementation considerations:
 
-- **Ordering** -- Events must be loaded in the order they were saved. Use a sequence number or timestamp column.
+- **Ordering** -- Events must be loaded in the order they were saved. Use a sequence number column.
 - **Atomicity** -- All events from a single command must be saved atomically (within one transaction).
+- **Concurrency** -- Use a unique constraint on `(aggregate_name, aggregate_id, sequence_number)` to detect concurrent writes. The `expectedVersion` tells you which sequence numbers to use for the new events.
 - **Serialization** -- Event payloads must round-trip correctly. JSON is the common choice, but be careful with types like `Date` that do not survive `JSON.parse`.
 
 For production-ready persistence with transaction support, consider the [ORM Adapters](/docs/running/orm-adapters) packages instead of writing custom implementations.

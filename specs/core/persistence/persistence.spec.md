@@ -8,6 +8,7 @@ exports:
     StateStoredAggregatePersistence,
     EventSourcedAggregatePersistence,
     SagaPersistence,
+    ConcurrencyError,
   ]
 depends_on: [edd/event]
 docs:
@@ -22,8 +23,16 @@ docs:
 
 ```ts
 interface StateStoredAggregatePersistence {
-  save(aggregateName: string, aggregateId: string, state: any): Promise<void>;
-  load(aggregateName: string, aggregateId: string): Promise<any>;
+  save(
+    aggregateName: string,
+    aggregateId: string,
+    state: any,
+    expectedVersion: number,
+  ): Promise<void>;
+  load(
+    aggregateName: string,
+    aggregateId: string,
+  ): Promise<{ state: any; version: number } | null>;
 }
 
 interface EventSourcedAggregatePersistence {
@@ -31,6 +40,7 @@ interface EventSourcedAggregatePersistence {
     aggregateName: string,
     aggregateId: string,
     events: Event[],
+    expectedVersion: number,
   ): Promise<void>;
   load(aggregateName: string, aggregateId: string): Promise<Event[]>;
 }
@@ -43,26 +53,51 @@ interface SagaPersistence {
   save(sagaName: string, sagaId: string, state: any): Promise<void>;
   load(sagaName: string, sagaId: string): Promise<any | undefined | null>;
 }
+
+class ConcurrencyError extends Error {
+  readonly name: "ConcurrencyError";
+  readonly aggregateName: string;
+  readonly aggregateId: string;
+  readonly expectedVersion: number;
+  readonly actualVersion: number;
+
+  constructor(
+    aggregateName: string,
+    aggregateId: string,
+    expectedVersion: number,
+    actualVersion: number,
+  );
+}
 ```
 
 - `PersistenceConfiguration` is a union type. The domain engine must determine at runtime which variant is in use (event-sourced vs. state-stored) to decide the load/save/replay strategy.
 - All methods return Promises, enabling async storage backends (databases, network stores).
 - The `any` state type is intentional: persistence is generic across all aggregate/saga types. Type safety is enforced at the aggregate/saga definition layer, not the persistence layer.
+- `ConcurrencyError` is thrown by `save()` when the actual version in the store does not match `expectedVersion`. For event-sourced persistence, the version is the event count (`events.length`). For state-stored persistence, the version is an integer stored alongside the state.
+- `StateStoredAggregatePersistence.load()` returns `{ state, version }` or `null` for new aggregates (version 0). This differs from event-sourced where version is derived from `events.length`.
 
 ## Behavioral Requirements
 
 ### StateStoredAggregatePersistence
 
-1. **save(aggregateName, aggregateId, state)** -- Persists the full state snapshot. Implementations must overwrite any previously stored state for the same `(aggregateName, aggregateId)` pair.
-2. **load(aggregateName, aggregateId)** -- Returns the latest state snapshot. If no state exists, implementations should return `undefined` or `null`. The domain engine interprets the absence as a "new aggregate" and uses `Aggregate.initialState`.
+1. **save(aggregateName, aggregateId, state, expectedVersion)** -- Persists the full state snapshot. Implementations must overwrite any previously stored state for the same `(aggregateName, aggregateId)` pair. Before writing, implementations must verify that the current version in the store matches `expectedVersion`. If the versions differ, implementations must throw `ConcurrencyError`. On success, the stored version is incremented (to `expectedVersion + 1`).
+2. **load(aggregateName, aggregateId)** -- Returns the latest state snapshot and version as `{ state, version }`. If no state exists, returns `null`. The domain engine interprets `null` as a "new aggregate" (version 0) and uses `Aggregate.initialState`.
 3. **Namespace semantics** -- `aggregateName` serves as a namespace. Two aggregates with the same ID but different names are entirely separate.
+4. **Optimistic concurrency** -- The version is a monotonically increasing integer starting at 0 (new aggregate). Each successful `save()` increments the version by 1. Concurrent saves with the same `expectedVersion` result in one succeeding and the other throwing `ConcurrencyError`.
 
 ### EventSourcedAggregatePersistence
 
-1. **save(aggregateName, aggregateId, events)** -- Appends new events to the aggregate's event stream. Must preserve ordering. Must not overwrite previously stored events.
-2. **load(aggregateName, aggregateId)** -- Returns the full event stream in insertion order. If no events exist, returns an empty array `[]` (never `null` or `undefined`).
+1. **save(aggregateName, aggregateId, events, expectedVersion)** -- Appends new events to the aggregate's event stream. Must preserve ordering. Must not overwrite previously stored events. Before appending, implementations must verify that the current event count (stream length) matches `expectedVersion`. If it differs, implementations must throw `ConcurrencyError`.
+2. **load(aggregateName, aggregateId)** -- Returns the full event stream in insertion order. If no events exist, returns an empty array `[]` (never `null` or `undefined`). The version is derived as `events.length` by the caller.
 3. **Append-only invariant** -- Events in the stream are immutable once saved. Implementations must not allow deletion or modification of stored events.
 4. **Namespace semantics** -- Same as state-stored: `aggregateName` is a namespace.
+5. **Optimistic concurrency** -- The version is the event count in the stream. `expectedVersion` must equal the number of events currently stored. This prevents concurrent appends from producing an inconsistent event stream.
+
+### ConcurrencyError
+
+1. **Thrown on version mismatch** -- When `save()` detects that `actualVersion !== expectedVersion`, it throws a `ConcurrencyError` with the aggregate name, ID, expected version, and actual version.
+2. **Error properties** -- `aggregateName`, `aggregateId`, `expectedVersion`, `actualVersion` are public readonly properties. `name` is `"ConcurrencyError"`. `message` includes all four values for diagnostics.
+3. **Extends Error** -- `ConcurrencyError` extends the built-in `Error` class. It can be caught with `instanceof ConcurrencyError`.
 
 ### SagaPersistence
 
@@ -86,10 +121,15 @@ The framework should define a clear discrimination mechanism so that custom pers
 - Persistence implementations must be stateless across different `(name, id)` pairs -- there is no cross-aggregate or cross-saga transactional guarantee at the interface level.
 - The persistence layer does not enforce business rules. It stores and retrieves data as-is. Validation is the domain's responsibility.
 - Persistence is configured via factory functions in `DomainConfiguration.infrastructure`. The factory is called once during `Domain.init()`.
+- `save()` must throw `ConcurrencyError` if `actualVersion !== expectedVersion`. This is a hard invariant for all implementations.
+- For event-sourced persistence, the version is always equal to the number of stored events (stream length). `expectedVersion` on `save()` must equal the current stream length.
+- For state-stored persistence, the version starts at 0 for new aggregates and increments by 1 on each successful `save()`.
 
 ## Edge Cases
 
-- **Concurrent saves to the same aggregate** -- The interface does not define concurrency semantics. In-memory implementations are safe (single-threaded JS). Database-backed implementations should use optimistic concurrency (version checks) or pessimistic locks, but this is outside the interface contract.
+- **Concurrent saves to the same aggregate** -- Both persistence strategies use optimistic concurrency control via version checking. The first save succeeds; subsequent saves with the same `expectedVersion` throw `ConcurrencyError`. The domain engine may retry on `ConcurrencyError` (configurable via `aggregateConcurrency.maxRetries`).
+- **Save with expectedVersion 0 on new aggregate** -- For event-sourced: appends events to a new stream (stream was empty, so `length === 0 === expectedVersion`). For state-stored: inserts new state at version 1.
+- **Save with expectedVersion 0 on existing aggregate** -- Must throw `ConcurrencyError` (the aggregate already has events/state at a higher version).
 - **Very large event streams** -- `EventSourcedAggregatePersistence.load` returns the full stream. For aggregates with thousands of events, implementations may want to support snapshots, but the current interface does not define a snapshot mechanism.
 - **Null vs undefined** -- `SagaPersistence.load` returns `any | undefined | null`. The domain engine should check `state == null` (loose equality) to handle both.
 - **Empty string as name or ID** -- Valid per the interface but likely a bug. Implementations should not reject them; validation belongs at a higher layer.
@@ -111,52 +151,50 @@ import { describe, it, expect } from "vitest";
 import type { StateStoredAggregatePersistence } from "@noddde/core";
 
 describe("StateStoredAggregatePersistence contract", () => {
-  /**
-   * Contract test factory -- can be used to verify any implementation.
-   * Replace `createPersistence` with the implementation under test.
-   */
   function runContractTests(
     createPersistence: () => StateStoredAggregatePersistence,
   ) {
-    it("should return the saved state on load", async () => {
+    it("should return the saved state and version on load", async () => {
       const persistence = createPersistence();
       const state = { balance: 100, owner: "Alice" };
 
-      await persistence.save("BankAccount", "acc-1", state);
+      await persistence.save("BankAccount", "acc-1", state, 0);
       const loaded = await persistence.load("BankAccount", "acc-1");
 
-      expect(loaded).toEqual(state);
+      expect(loaded).toEqual({ state, version: 1 });
     });
 
-    it("should return null or undefined for an unknown aggregate", async () => {
+    it("should return null for an unknown aggregate", async () => {
       const persistence = createPersistence();
       const loaded = await persistence.load("BankAccount", "nonexistent");
 
-      expect(loaded == null).toBe(true);
+      expect(loaded).toBeNull();
     });
 
-    it("should overwrite state on repeated saves", async () => {
+    it("should overwrite state on repeated saves with correct versions", async () => {
       const persistence = createPersistence();
 
-      await persistence.save("BankAccount", "acc-1", { balance: 100 });
-      await persistence.save("BankAccount", "acc-1", { balance: 200 });
+      await persistence.save("BankAccount", "acc-1", { balance: 100 }, 0);
+      await persistence.save("BankAccount", "acc-1", { balance: 200 }, 1);
       const loaded = await persistence.load("BankAccount", "acc-1");
 
-      expect(loaded).toEqual({ balance: 200 });
+      expect(loaded).toEqual({ state: { balance: 200 }, version: 2 });
     });
 
     it("should isolate by aggregate name", async () => {
       const persistence = createPersistence();
 
-      await persistence.save("Order", "1", { total: 50 });
-      await persistence.save("Account", "1", { balance: 999 });
+      await persistence.save("Order", "1", { total: 50 }, 0);
+      await persistence.save("Account", "1", { balance: 999 }, 0);
 
-      expect(await persistence.load("Order", "1")).toEqual({ total: 50 });
-      expect(await persistence.load("Account", "1")).toEqual({ balance: 999 });
+      const order = await persistence.load("Order", "1");
+      const account = await persistence.load("Account", "1");
+
+      expect(order).toEqual({ state: { total: 50 }, version: 1 });
+      expect(account).toEqual({ state: { balance: 999 }, version: 1 });
     });
   }
 
-  // Run contract against the in-memory implementation
   describe("InMemoryStateStoredAggregatePersistence", () => {
     const { InMemoryStateStoredAggregatePersistence } = require("@noddde/core");
     runContractTests(() => new InMemoryStateStoredAggregatePersistence());
@@ -181,7 +219,7 @@ describe("EventSourcedAggregatePersistence contract", () => {
         { name: "DepositMade", payload: { amount: 100 } },
       ];
 
-      await persistence.save("BankAccount", "acc-1", events);
+      await persistence.save("BankAccount", "acc-1", events, 0);
       const loaded = await persistence.load("BankAccount", "acc-1");
 
       expect(loaded).toEqual(events);
@@ -197,12 +235,18 @@ describe("EventSourcedAggregatePersistence contract", () => {
     it("should append events across multiple saves preserving order", async () => {
       const persistence = createPersistence();
 
-      await persistence.save("BankAccount", "acc-1", [
-        { name: "AccountCreated", payload: { id: "acc-1" } },
-      ]);
-      await persistence.save("BankAccount", "acc-1", [
-        { name: "DepositMade", payload: { amount: 50 } },
-      ]);
+      await persistence.save(
+        "BankAccount",
+        "acc-1",
+        [{ name: "AccountCreated", payload: { id: "acc-1" } }],
+        0,
+      );
+      await persistence.save(
+        "BankAccount",
+        "acc-1",
+        [{ name: "DepositMade", payload: { amount: 50 } }],
+        1,
+      );
 
       const loaded = await persistence.load("BankAccount", "acc-1");
 
@@ -214,12 +258,18 @@ describe("EventSourcedAggregatePersistence contract", () => {
     it("should isolate by aggregate name", async () => {
       const persistence = createPersistence();
 
-      await persistence.save("Order", "1", [
-        { name: "OrderPlaced", payload: { total: 200 } },
-      ]);
-      await persistence.save("Account", "1", [
-        { name: "AccountCreated", payload: { owner: "Bob" } },
-      ]);
+      await persistence.save(
+        "Order",
+        "1",
+        [{ name: "OrderPlaced", payload: { total: 200 } }],
+        0,
+      );
+      await persistence.save(
+        "Account",
+        "1",
+        [{ name: "AccountCreated", payload: { owner: "Bob" } }],
+        0,
+      );
 
       const orderEvents = await persistence.load("Order", "1");
       const accountEvents = await persistence.load("Account", "1");
@@ -236,6 +286,123 @@ describe("EventSourcedAggregatePersistence contract", () => {
       InMemoryEventSourcedAggregatePersistence,
     } = require("@noddde/core");
     runContractTests(() => new InMemoryEventSourcedAggregatePersistence());
+  });
+});
+```
+
+### ConcurrencyError: event-sourced save throws on version mismatch
+
+```ts
+import { describe, it, expect } from "vitest";
+import {
+  InMemoryEventSourcedAggregatePersistence,
+  ConcurrencyError,
+} from "@noddde/core";
+
+describe("EventSourcedAggregatePersistence concurrency", () => {
+  it("should throw ConcurrencyError when expectedVersion does not match stream length", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+
+    await persistence.save(
+      "Account",
+      "acc-1",
+      [{ name: "AccountCreated", payload: { id: "acc-1" } }],
+      0,
+    );
+
+    // Attempt to save with stale version (0 instead of 1)
+    await expect(
+      persistence.save(
+        "Account",
+        "acc-1",
+        [{ name: "DepositMade", payload: { amount: 50 } }],
+        0,
+      ),
+    ).rejects.toThrow(ConcurrencyError);
+
+    // Verify the error properties
+    try {
+      await persistence.save(
+        "Account",
+        "acc-1",
+        [{ name: "DepositMade", payload: { amount: 50 } }],
+        0,
+      );
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConcurrencyError);
+      const concurrencyError = error as ConcurrencyError;
+      expect(concurrencyError.aggregateName).toBe("Account");
+      expect(concurrencyError.aggregateId).toBe("acc-1");
+      expect(concurrencyError.expectedVersion).toBe(0);
+      expect(concurrencyError.actualVersion).toBe(1);
+    }
+  });
+
+  it("should succeed when expectedVersion matches stream length", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+
+    await persistence.save(
+      "Account",
+      "acc-1",
+      [{ name: "AccountCreated", payload: { id: "acc-1" } }],
+      0,
+    );
+
+    // Save with correct version
+    await persistence.save(
+      "Account",
+      "acc-1",
+      [{ name: "DepositMade", payload: { amount: 50 } }],
+      1,
+    );
+
+    const loaded = await persistence.load("Account", "acc-1");
+    expect(loaded).toHaveLength(2);
+  });
+});
+```
+
+### ConcurrencyError: state-stored save throws on version mismatch
+
+```ts
+import { describe, it, expect } from "vitest";
+import {
+  InMemoryStateStoredAggregatePersistence,
+  ConcurrencyError,
+} from "@noddde/core";
+
+describe("StateStoredAggregatePersistence concurrency", () => {
+  it("should throw ConcurrencyError when expectedVersion does not match stored version", async () => {
+    const persistence = new InMemoryStateStoredAggregatePersistence();
+
+    await persistence.save("Account", "acc-1", { balance: 100 }, 0);
+
+    // Attempt to save with stale version (0 instead of 1)
+    await expect(
+      persistence.save("Account", "acc-1", { balance: 200 }, 0),
+    ).rejects.toThrow(ConcurrencyError);
+
+    // Verify the error properties
+    try {
+      await persistence.save("Account", "acc-1", { balance: 200 }, 0);
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConcurrencyError);
+      const concurrencyError = error as ConcurrencyError;
+      expect(concurrencyError.aggregateName).toBe("Account");
+      expect(concurrencyError.aggregateId).toBe("acc-1");
+      expect(concurrencyError.expectedVersion).toBe(0);
+      expect(concurrencyError.actualVersion).toBe(1);
+    }
+  });
+
+  it("should succeed when expectedVersion matches stored version", async () => {
+    const persistence = new InMemoryStateStoredAggregatePersistence();
+
+    await persistence.save("Account", "acc-1", { balance: 100 }, 0);
+    await persistence.save("Account", "acc-1", { balance: 200 }, 1);
+
+    const loaded = await persistence.load("Account", "acc-1");
+    expect(loaded).toEqual({ state: { balance: 200 }, version: 2 });
   });
 });
 ```

@@ -57,6 +57,9 @@ type DomainConfiguration<
     aggregatePersistence?: () =>
       | PersistenceConfiguration
       | Promise<PersistenceConfiguration>;
+    aggregateConcurrency?: {
+      maxRetries?: number; // default: 0 (propagate ConcurrencyError immediately)
+    };
     sagaPersistence?: () => SagaPersistence | Promise<SagaPersistence>;
     provideInfrastructure?: () => Promise<TInfrastructure> | TInfrastructure;
     cqrsInfrastructure?: (
@@ -119,15 +122,25 @@ The `dispatchCommand` method executes the following lifecycle for aggregate comm
 
 1. **Route** -- Look up the aggregate whose `commands` map contains a handler for `command.name`. If no aggregate handles this command, check standalone command handlers.
 2. **Load** -- Using the resolved persistence:
-   - **Event-sourced**: Call `persistence.load(aggregateName, command.targetAggregateId)` to get the event stream. Replay all events through `Aggregate.apply` handlers, starting from `Aggregate.initialState`, to rebuild the current state.
-   - **State-stored**: Call `persistence.load(aggregateName, command.targetAggregateId)` to get the state snapshot. If `null`/`undefined`, use `Aggregate.initialState`.
+   - **Event-sourced**: Call `persistence.load(aggregateName, command.targetAggregateId)` to get the event stream. Derive `version = events.length`. Replay all events through `Aggregate.apply` handlers, starting from `Aggregate.initialState`, to rebuild the current state.
+   - **State-stored**: Call `persistence.load(aggregateName, command.targetAggregateId)` to get `{ state, version }` or `null`. If `null`, use `Aggregate.initialState` with `version = 0`.
 3. **Execute** -- Invoke the aggregate's command handler: `aggregate.commands[command.name](command, currentState, infrastructure)`. The handler returns one or more events.
 4. **Apply** -- For each returned event, apply it to the state via `aggregate.apply[event.name](event.payload, state)` to compute the new state. This ensures the aggregate's in-memory state is consistent with the events.
-5. **Persist** -- Save the results:
-   - **Event-sourced**: Call `persistence.save(aggregateName, command.targetAggregateId, newEvents)` to append the new events.
-   - **State-stored**: Call `persistence.save(aggregateName, command.targetAggregateId, newState)` to store the updated state.
+5. **Persist** -- Save the results with optimistic concurrency:
+   - **Event-sourced**: Call `persistence.save(aggregateName, command.targetAggregateId, newEvents, version)` to append the new events. `version` is the stream length observed at load time.
+   - **State-stored**: Call `persistence.save(aggregateName, command.targetAggregateId, newState, version)` to store the updated state. `version` is the version observed at load time.
 6. **Publish** -- For each new event, call `eventBus.dispatch(event)`. This triggers projections and sagas.
 7. **Return** -- Return `command.targetAggregateId`.
+
+### Domain.dispatchCommand() -- Concurrency Retry
+
+When `dispatchCommand` creates its own implicit UnitOfWork (no outer `withUnitOfWork`), the full load→execute→apply→persist→publish cycle is wrapped in a retry loop:
+
+1. **Retry loop** -- If `save()` throws `ConcurrencyError` and the retry count has not exceeded `aggregateConcurrency.maxRetries` (default: 0), the domain re-executes the entire lifecycle from step 2 (Load) with a fresh UnitOfWork. This re-loads the latest state, re-executes the command handler against the updated state, and re-attempts the save.
+2. **No retry inside explicit UoW** -- When running inside `withUnitOfWork()`, `ConcurrencyError` propagates immediately without retry. The caller who set up the explicit UoW is responsible for handling the error.
+3. **No retry inside saga UoW** -- When a saga dispatches a command, the command runs inside the saga's UoW. `ConcurrencyError` propagates to the saga handler without retry.
+4. **Max retries exhausted** -- If all retries are exhausted, the `ConcurrencyError` from the last attempt propagates to the caller.
+5. **Handler re-execution** -- Command handlers may be called multiple times during retry. Handlers should be side-effect-free (the Decider pattern already implies this: handlers only produce events, they don't perform side effects).
 
 ### Saga Event Handling Lifecycle
 
@@ -1076,6 +1089,138 @@ describe("Domain.dispatchQuery - error propagation", () => {
         payload: {},
       }),
     ).rejects.toThrow("No handler registered for query: NonExistentQuery");
+  });
+});
+```
+
+### dispatchCommand retries on ConcurrencyError with maxRetries
+
+```ts
+import { describe, it, expect } from "vitest";
+import {
+  configureDomain,
+  defineAggregate,
+  EventEmitterEventBus,
+  InMemoryCommandBus,
+  InMemoryQueryBus,
+  InMemoryEventSourcedAggregatePersistence,
+  ConcurrencyError,
+} from "@noddde/core";
+import type {
+  DefineCommands,
+  DefineEvents,
+  AggregateTypes,
+  Infrastructure,
+  EventSourcedAggregatePersistence,
+  Event,
+} from "@noddde/core";
+
+type CounterState = { count: number };
+type CounterEvent = DefineEvents<{ Incremented: { by: number } }>;
+type CounterCommand = DefineCommands<{ Increment: { by: number } }>;
+type CounterTypes = AggregateTypes & {
+  state: CounterState;
+  events: CounterEvent;
+  commands: CounterCommand;
+  infrastructure: Infrastructure;
+};
+
+const Counter = defineAggregate<CounterTypes>({
+  initialState: { count: 0 },
+  commands: {
+    Increment: (cmd) => ({
+      name: "Incremented",
+      payload: { by: cmd.payload.by },
+    }),
+  },
+  apply: {
+    Incremented: (payload, state) => ({ count: state.count + payload.by }),
+  },
+});
+
+describe("Domain.dispatchCommand - concurrency retry", () => {
+  it("should retry on ConcurrencyError and succeed on second attempt", async () => {
+    let saveCallCount = 0;
+
+    // Persistence that fails on first save, succeeds on second
+    const inner = new InMemoryEventSourcedAggregatePersistence();
+    const wrappedPersistence: EventSourcedAggregatePersistence = {
+      load: (name, id) => inner.load(name, id),
+      save: async (name, id, events, expectedVersion) => {
+        saveCallCount++;
+        if (saveCallCount === 1) {
+          // Simulate concurrent write by sneaking an event in
+          await inner.save(
+            name,
+            id,
+            [{ name: "Incremented", payload: { by: 1 } }],
+            expectedVersion,
+          );
+          // Now the version is wrong for the original caller
+          throw new ConcurrencyError(
+            name,
+            id,
+            expectedVersion,
+            expectedVersion + 1,
+          );
+        }
+        return inner.save(name, id, events, expectedVersion);
+      },
+    };
+
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: () => wrappedPersistence,
+        aggregateConcurrency: { maxRetries: 3 },
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    // Should succeed despite first attempt failing
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "counter-1",
+      payload: { by: 5 },
+    });
+
+    expect(saveCallCount).toBe(2);
+  });
+
+  it("should propagate ConcurrencyError when maxRetries is 0", async () => {
+    const failingPersistence: EventSourcedAggregatePersistence = {
+      load: async () => [],
+      save: async (name, id) => {
+        throw new ConcurrencyError(name, id, 0, 1);
+      },
+    };
+
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: () => failingPersistence,
+        aggregateConcurrency: { maxRetries: 0 },
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    await expect(
+      domain.dispatchCommand({
+        name: "Increment",
+        targetAggregateId: "counter-1",
+        payload: { by: 5 },
+      }),
+    ).rejects.toThrow(ConcurrencyError);
   });
 });
 ```

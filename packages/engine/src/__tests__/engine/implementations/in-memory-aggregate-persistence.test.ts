@@ -13,7 +13,7 @@ describe("InMemoryEventSourcedAggregatePersistence", () => {
       { name: "DepositMade", payload: { amount: 100 } },
     ];
 
-    await persistence.save("BankAccount", "acc-1", events);
+    await persistence.save("BankAccount", "acc-1", events, 0);
 
     const loaded = await persistence.load("BankAccount", "acc-1");
 
@@ -31,13 +31,21 @@ describe("InMemoryEventSourcedAggregatePersistence", () => {
   it("multiple saves append events in order", async () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
 
-    await persistence.save("BankAccount", "acc-1", [
-      { name: "AccountCreated", payload: { id: "acc-1" } },
-    ]);
-    await persistence.save("BankAccount", "acc-1", [
-      { name: "DepositMade", payload: { amount: 50 } },
-      { name: "DepositMade", payload: { amount: 75 } },
-    ]);
+    await persistence.save(
+      "BankAccount",
+      "acc-1",
+      [{ name: "AccountCreated", payload: { id: "acc-1" } }],
+      0,
+    );
+    await persistence.save(
+      "BankAccount",
+      "acc-1",
+      [
+        { name: "DepositMade", payload: { amount: 50 } },
+        { name: "DepositMade", payload: { amount: 75 } },
+      ],
+      1,
+    );
 
     const loaded = await persistence.load("BankAccount", "acc-1");
 
@@ -53,12 +61,18 @@ describe("InMemoryEventSourcedAggregatePersistence", () => {
   it("namespace isolation between aggregate types", async () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
 
-    await persistence.save("Order", "1", [
-      { name: "OrderPlaced", payload: { total: 200 } },
-    ]);
-    await persistence.save("Account", "1", [
-      { name: "AccountCreated", payload: { owner: "Bob" } },
-    ]);
+    await persistence.save(
+      "Order",
+      "1",
+      [{ name: "OrderPlaced", payload: { total: 200 } }],
+      0,
+    );
+    await persistence.save(
+      "Account",
+      "1",
+      [{ name: "AccountCreated", payload: { owner: "Bob" } }],
+      0,
+    );
 
     const orderEvents = await persistence.load("Order", "1");
     const accountEvents = await persistence.load("Account", "1");
@@ -73,10 +87,13 @@ describe("InMemoryEventSourcedAggregatePersistence", () => {
   it("saving empty array is a no-op", async () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
 
-    await persistence.save("BankAccount", "acc-1", [
-      { name: "AccountCreated", payload: { id: "acc-1" } },
-    ]);
-    await persistence.save("BankAccount", "acc-1", []);
+    await persistence.save(
+      "BankAccount",
+      "acc-1",
+      [{ name: "AccountCreated", payload: { id: "acc-1" } }],
+      0,
+    );
+    await persistence.save("BankAccount", "acc-1", [], 1);
 
     const loaded = await persistence.load("BankAccount", "acc-1");
     expect(loaded).toHaveLength(1);
@@ -88,11 +105,11 @@ describe("InMemoryStateStoredAggregatePersistence", () => {
     const persistence = new InMemoryStateStoredAggregatePersistence();
 
     const state = { id: "acc-1", balance: 250, owner: "Alice" };
-    await persistence.save("BankAccount", "acc-1", state);
+    await persistence.save("BankAccount", "acc-1", state, 0);
 
     const loaded = await persistence.load("BankAccount", "acc-1");
 
-    expect(loaded).toEqual(state);
+    expect(loaded).toEqual({ state, version: 1 });
   });
 
   it("load returns undefined for unknown aggregate", async () => {
@@ -106,24 +123,24 @@ describe("InMemoryStateStoredAggregatePersistence", () => {
   it("save overwrites previous state", async () => {
     const persistence = new InMemoryStateStoredAggregatePersistence();
 
-    await persistence.save("BankAccount", "acc-1", { balance: 100 });
-    await persistence.save("BankAccount", "acc-1", { balance: 250 });
+    await persistence.save("BankAccount", "acc-1", { balance: 100 }, 0);
+    await persistence.save("BankAccount", "acc-1", { balance: 250 }, 1);
 
     const loaded = await persistence.load("BankAccount", "acc-1");
 
-    expect(loaded).toEqual({ balance: 250 });
+    expect(loaded).toEqual({ state: { balance: 250 }, version: 2 });
   });
 
   it("namespace isolation between aggregate types", async () => {
     const persistence = new InMemoryStateStoredAggregatePersistence();
 
-    await persistence.save("Order", "1", { status: "placed" });
-    await persistence.save("Account", "1", { balance: 500 });
+    await persistence.save("Order", "1", { status: "placed" }, 0);
+    await persistence.save("Account", "1", { balance: 500 }, 0);
 
     const orderState = await persistence.load("Order", "1");
     const accountState = await persistence.load("Account", "1");
 
-    expect(orderState).toEqual({ status: "placed" });
-    expect(accountState).toEqual({ balance: 500 });
+    expect(orderState).toEqual({ state: { status: "placed" }, version: 1 });
+    expect(accountState).toEqual({ state: { balance: 500 }, version: 1 });
   });
 });

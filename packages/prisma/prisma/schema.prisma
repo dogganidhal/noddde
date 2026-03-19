@@ -16,6 +16,7 @@ model NodddeEvent {
   eventName      String @map("event_name")
   payload        String
 
+  @@unique([aggregateName, aggregateId, sequenceNumber])
   @@map("noddde_events")
 }
 
@@ -24,6 +25,7 @@ model NodddeAggregateState {
   aggregateName String @map("aggregate_name")
   aggregateId   String @map("aggregate_id")
   state         String
+  version       Int    @default(0)
 
   @@id([aggregateName, aggregateId])
   @@map("noddde_aggregate_states")

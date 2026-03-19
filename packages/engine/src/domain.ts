@@ -21,6 +21,7 @@ import type {
   UnitOfWork,
   UnitOfWorkFactory,
 } from "@noddde/core";
+import { ConcurrencyError } from "@noddde/core";
 import { InMemoryCommandBus } from "./implementations/in-memory-command-bus";
 import { EventEmitterEventBus } from "./implementations/ee-event-bus";
 import { InMemoryQueryBus } from "./implementations/in-memory-query-bus";
@@ -115,6 +116,17 @@ export type DomainConfiguration<
       | PersistenceConfiguration
       | Promise<PersistenceConfiguration>;
     /**
+     * Concurrency control settings for aggregate persistence.
+     * When `save()` throws {@link ConcurrencyError}, the domain can
+     * automatically retry the full load→execute→save cycle.
+     *
+     * @default `{ maxRetries: 0 }` — propagate ConcurrencyError immediately.
+     */
+    aggregateConcurrency?: {
+      /** Maximum number of retries on ConcurrencyError. Default: 0. */
+      maxRetries?: number;
+    };
+    /**
      * Factory for saga persistence. Required if `processModel` is configured.
      *
      * @see {@link InMemorySagaPersistence} for the built-in in-memory implementation.
@@ -160,6 +172,7 @@ export class Domain<
   private _persistence!: PersistenceConfiguration;
   private _sagaPersistence?: SagaPersistence;
   private _unitOfWorkFactory!: UnitOfWorkFactory;
+  private _maxRetries = 0;
   private readonly _uowStorage = new AsyncLocalStorage<UnitOfWork>();
   private readonly _projectionViews = new Map<string, any>();
 
@@ -239,6 +252,10 @@ export class Domain<
     this._unitOfWorkFactory = configuration.infrastructure.unitOfWorkFactory
       ? await configuration.infrastructure.unitOfWorkFactory()
       : createInMemoryUnitOfWork;
+
+    // Step 5.6: Resolve concurrency settings
+    this._maxRetries =
+      configuration.infrastructure.aggregateConcurrency?.maxRetries ?? 0;
 
     const { commandBus, eventBus, queryBus } = this._infrastructure;
 
@@ -415,7 +432,9 @@ export class Domain<
     await this._uowStorage.run(uow, async () => {
       try {
         // Enlist saga state persistence
-        uow.enlist(() => sagaPersistence.save(sagaName, sagaId, reaction.state));
+        uow.enlist(() =>
+          sagaPersistence.save(sagaName, sagaId, reaction.state),
+        );
 
         // Step 6: Dispatch commands (within the saga's UoW)
         if (reaction.commands) {
@@ -452,6 +471,9 @@ export class Domain<
    * If a UnitOfWork is active (via {@link withUnitOfWork} or saga handling),
    * persistence and event publishing are deferred to the owning UoW.
    * Otherwise, an implicit UoW is created and committed immediately.
+   *
+   * When the implicit UoW path encounters a {@link ConcurrencyError},
+   * the entire lifecycle is retried up to `_maxRetries` times.
    */
   private async executeAggregateCommand(
     aggregateName: string,
@@ -462,93 +484,132 @@ export class Domain<
     const eventBus = this._infrastructure.eventBus;
 
     const existingUow = this._uowStorage.getStore();
-    const uow = existingUow ?? this._unitOfWorkFactory();
     const ownsUow = !existingUow;
 
-    try {
-      // Step 1: Load
-      const loaded = await persistence.load(
-        aggregateName,
-        command.targetAggregateId,
-      );
-
-      let currentState: any;
-      const isEventSourced = Array.isArray(loaded);
-
-      if (isEventSourced) {
-        // Event-sourced: replay events to rebuild state
-        currentState = (loaded as Event[]).reduce(
-          (state: any, event: Event) => {
-            const applyHandler = aggregate.apply[event.name];
-            return applyHandler ? applyHandler(event.payload, state) : state;
-          },
-          aggregate.initialState,
-        );
-      } else {
-        // State-stored: use loaded state or initial state
-        currentState = loaded ?? aggregate.initialState;
-      }
-
-      // Step 2: Execute command handler
-      const handler = aggregate.commands[command.name];
-      if (!handler) {
-        throw new Error(
-          `No command handler found for command: ${command.name} on aggregate: ${aggregateName}`,
-        );
-      }
-      const result = await handler(command, currentState, this._infrastructure);
-
-      // Step 3: Normalize to array
-      const newEvents: Event[] = Array.isArray(result) ? result : [result];
-
-      // Step 4: Apply events to get new state
-      let newState = currentState;
-      for (const event of newEvents) {
-        const applyHandler = aggregate.apply[event.name];
-        if (applyHandler) {
-          newState = applyHandler(event.payload, newState);
-        }
-      }
-
-      // Step 5: Enlist persistence in UoW (deferred until commit)
-      if (isEventSourced) {
-        uow.enlist(() =>
-          (persistence as EventSourcedAggregatePersistence).save(
-            aggregateName,
-            command.targetAggregateId,
-            newEvents,
-          ),
-        );
-      } else {
-        uow.enlist(() =>
-          (persistence as StateStoredAggregatePersistence).save(
-            aggregateName,
-            command.targetAggregateId,
-            newState,
-          ),
-        );
-      }
-
-      // Step 6: Defer event publishing (published after commit)
-      uow.deferPublish(...newEvents);
-
-      // Step 7: Commit if we own the UoW (implicit unit of work)
-      if (ownsUow) {
-        const events = await uow.commit();
-        for (const event of events) {
-          await eventBus.dispatch(event);
-        }
-      }
-    } catch (error) {
-      if (ownsUow) {
+    if (ownsUow) {
+      // Implicit UoW path — supports retry on ConcurrencyError
+      for (let attempt = 0; attempt <= this._maxRetries; attempt++) {
+        const uow = this._unitOfWorkFactory();
         try {
-          await uow.rollback();
-        } catch {
-          // UoW may already be completed if commit failed partway through
+          await this.executeCommandLifecycle(
+            aggregateName,
+            aggregate,
+            command,
+            persistence,
+            uow,
+          );
+          const events = await uow.commit();
+          for (const event of events) {
+            await eventBus.dispatch(event);
+          }
+          return;
+        } catch (error) {
+          try {
+            await uow.rollback();
+          } catch {
+            // UoW may already be completed if commit failed partway through
+          }
+          if (error instanceof ConcurrencyError && attempt < this._maxRetries) {
+            continue;
+          }
+          throw error;
         }
       }
-      throw error;
+    } else {
+      // Explicit UoW path — no retry, ConcurrencyError propagates
+      await this.executeCommandLifecycle(
+        aggregateName,
+        aggregate,
+        command,
+        persistence,
+        existingUow!,
+      );
     }
+  }
+
+  /**
+   * The core load→execute→apply→enlist→defer cycle, extracted to support
+   * retry in the implicit UoW path.
+   */
+  private async executeCommandLifecycle(
+    aggregateName: string,
+    aggregate: Aggregate<any>,
+    command: AggregateCommand,
+    persistence: PersistenceConfiguration,
+    uow: UnitOfWork,
+  ): Promise<void> {
+    // Step 1: Load
+    const loaded = await persistence.load(
+      aggregateName,
+      command.targetAggregateId,
+    );
+
+    let currentState: any;
+    let version: number;
+    const isEventSourced = Array.isArray(loaded);
+
+    if (isEventSourced) {
+      // Event-sourced: replay events to rebuild state; version = stream length
+      const events = loaded as Event[];
+      version = events.length;
+      currentState = events.reduce((state: any, event: Event) => {
+        const applyHandler = aggregate.apply[event.name];
+        return applyHandler ? applyHandler(event.payload, state) : state;
+      }, aggregate.initialState);
+    } else {
+      // State-stored: load returns { state, version } | null
+      const stateResult = loaded as {
+        state: any;
+        version: number;
+      } | null;
+      version = stateResult?.version ?? 0;
+      currentState = stateResult?.state ?? aggregate.initialState;
+    }
+
+    // Step 2: Execute command handler
+    const handler = aggregate.commands[command.name];
+    if (!handler) {
+      throw new Error(
+        `No command handler found for command: ${command.name} on aggregate: ${aggregateName}`,
+      );
+    }
+    const result = await handler(command, currentState, this._infrastructure);
+
+    // Step 3: Normalize to array
+    const newEvents: Event[] = Array.isArray(result) ? result : [result];
+
+    // Step 4: Apply events to get new state
+    let newState = currentState;
+    for (const event of newEvents) {
+      const applyHandler = aggregate.apply[event.name];
+      if (applyHandler) {
+        newState = applyHandler(event.payload, newState);
+      }
+    }
+
+    // Step 5: Enlist persistence in UoW with version (deferred until commit)
+    if (isEventSourced) {
+      uow.enlist(() =>
+        (persistence as EventSourcedAggregatePersistence).save(
+          aggregateName,
+          command.targetAggregateId,
+          newEvents,
+          version,
+        ),
+      );
+    } else {
+      uow.enlist(() =>
+        (persistence as StateStoredAggregatePersistence).save(
+          aggregateName,
+          command.targetAggregateId,
+          newState,
+          version,
+        ),
+      );
+    }
+
+    // Step 6: Defer event publishing (published after commit)
+    uow.deferPublish(...newEvents);
   }
 
   /**

@@ -1,18 +1,35 @@
-import { pgTable, text, serial, integer, jsonb } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  serial,
+  integer,
+  jsonb,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 
 /**
  * PostgreSQL table definition for event-sourced aggregate persistence.
  * Stores domain events as an append-only stream per aggregate instance.
  * Uses `serial` for auto-increment PK and `jsonb` for payload storage.
  */
-export const events = pgTable("noddde_events", {
-  id: serial("id").primaryKey(),
-  aggregateName: text("aggregate_name").notNull(),
-  aggregateId: text("aggregate_id").notNull(),
-  sequenceNumber: integer("sequence_number").notNull(),
-  eventName: text("event_name").notNull(),
-  payload: jsonb("payload").notNull(),
-});
+export const events = pgTable(
+  "noddde_events",
+  {
+    id: serial("id").primaryKey(),
+    aggregateName: text("aggregate_name").notNull(),
+    aggregateId: text("aggregate_id").notNull(),
+    sequenceNumber: integer("sequence_number").notNull(),
+    eventName: text("event_name").notNull(),
+    payload: jsonb("payload").notNull(),
+  },
+  (table) => ({
+    streamVersionIdx: uniqueIndex("noddde_events_stream_version_idx").on(
+      table.aggregateName,
+      table.aggregateId,
+      table.sequenceNumber,
+    ),
+  }),
+);
 
 /**
  * PostgreSQL table definition for state-stored aggregate persistence.
@@ -23,6 +40,7 @@ export const aggregateStates = pgTable("noddde_aggregate_states", {
   aggregateName: text("aggregate_name").notNull(),
   aggregateId: text("aggregate_id").notNull(),
   state: jsonb("state").notNull(),
+  version: integer("version").notNull().default(0),
 });
 
 /**

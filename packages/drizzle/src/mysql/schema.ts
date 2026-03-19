@@ -1,4 +1,11 @@
-import { mysqlTable, varchar, int, text, json } from "drizzle-orm/mysql-core";
+import {
+  mysqlTable,
+  varchar,
+  int,
+  text,
+  json,
+  uniqueIndex,
+} from "drizzle-orm/mysql-core";
 
 /**
  * MySQL table definition for event-sourced aggregate persistence.
@@ -6,14 +13,24 @@ import { mysqlTable, varchar, int, text, json } from "drizzle-orm/mysql-core";
  * Uses `int` with auto-increment for PK, `varchar(255)` for name columns,
  * and `json` for payload storage.
  */
-export const events = mysqlTable("noddde_events", {
-  id: int("id").primaryKey().autoincrement(),
-  aggregateName: varchar("aggregate_name", { length: 255 }).notNull(),
-  aggregateId: varchar("aggregate_id", { length: 255 }).notNull(),
-  sequenceNumber: int("sequence_number").notNull(),
-  eventName: varchar("event_name", { length: 255 }).notNull(),
-  payload: json("payload").notNull(),
-});
+export const events = mysqlTable(
+  "noddde_events",
+  {
+    id: int("id").primaryKey().autoincrement(),
+    aggregateName: varchar("aggregate_name", { length: 255 }).notNull(),
+    aggregateId: varchar("aggregate_id", { length: 255 }).notNull(),
+    sequenceNumber: int("sequence_number").notNull(),
+    eventName: varchar("event_name", { length: 255 }).notNull(),
+    payload: json("payload").notNull(),
+  },
+  (table) => ({
+    streamVersionIdx: uniqueIndex("noddde_events_stream_version_idx").on(
+      table.aggregateName,
+      table.aggregateId,
+      table.sequenceNumber,
+    ),
+  }),
+);
 
 /**
  * MySQL table definition for state-stored aggregate persistence.
@@ -23,6 +40,7 @@ export const aggregateStates = mysqlTable("noddde_aggregate_states", {
   aggregateName: varchar("aggregate_name", { length: 255 }).notNull(),
   aggregateId: varchar("aggregate_id", { length: 255 }).notNull(),
   state: text("state").notNull(),
+  version: int("version").notNull().default(0),
 });
 
 /**

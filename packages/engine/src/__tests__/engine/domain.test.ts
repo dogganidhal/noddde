@@ -10,11 +10,7 @@ import type {
   ProjectionTypes,
   SagaTypes,
 } from "@noddde/core";
-import {
-  defineAggregate,
-  defineProjection,
-  defineSaga,
-} from "@noddde/core";
+import { defineAggregate, defineProjection, defineSaga } from "@noddde/core";
 import {
   configureDomain,
   createInMemoryUnitOfWork,
@@ -538,8 +534,11 @@ describe("Domain - state-stored persistence", () => {
       payload: { item: "Walk dog" },
     });
 
-    const state = await persistence.load("TodoList", "list-1");
-    expect(state).toEqual({ items: ["Buy milk", "Walk dog"] });
+    const loaded = await persistence.load("TodoList", "list-1");
+    expect(loaded).toEqual({
+      state: { items: ["Buy milk", "Walk dog"] },
+      version: 2,
+    });
   });
 });
 
@@ -630,7 +629,7 @@ describe("Domain - persistence failure", () => {
 
     const failingPersistence: EventSourcedAggregatePersistence = {
       load: async () => [],
-      save: async () => {
+      save: async (_name, _id, _events, _expectedVersion) => {
         throw new Error("Persistence failure");
       },
     };
@@ -791,15 +790,16 @@ describe("Domain.withUnitOfWork", () => {
         targetAggregateId: "c-1",
       });
       await domain.dispatchCommand({
-        name: "Increment",
-        targetAggregateId: "c-1",
-        payload: { by: 10 },
+        name: "CreateCounter",
+        targetAggregateId: "c-1b",
       });
     });
 
     // Both commands persisted
-    const events = await persistence.load("Counter", "c-1");
-    expect(events).toHaveLength(2);
+    const events1 = await persistence.load("Counter", "c-1");
+    const events2 = await persistence.load("Counter", "c-1b");
+    expect(events1).toHaveLength(1);
+    expect(events2).toHaveLength(1);
 
     // Both events published after commit
     expect(publishedEvents).toHaveLength(2);
@@ -820,9 +820,6 @@ describe("Domain.withUnitOfWork", () => {
     eventBus.on("CounterCreated", () => {
       timeline.push("publish:CounterCreated");
     });
-    eventBus.on("Incremented", () => {
-      timeline.push("publish:Incremented");
-    });
 
     const domain = await configureDomain<Infrastructure>({
       writeModel: { aggregates: { Counter } },
@@ -840,12 +837,11 @@ describe("Domain.withUnitOfWork", () => {
     await domain.withUnitOfWork(async () => {
       await domain.dispatchCommand({
         name: "CreateCounter",
-        targetAggregateId: "c-2",
+        targetAggregateId: "c-2a",
       });
       await domain.dispatchCommand({
-        name: "Increment",
-        targetAggregateId: "c-2",
-        payload: { by: 3 },
+        name: "CreateCounter",
+        targetAggregateId: "c-2b",
       });
     });
 
@@ -854,7 +850,7 @@ describe("Domain.withUnitOfWork", () => {
       "persist",
       "persist",
       "publish:CounterCreated",
-      "publish:Incremented",
+      "publish:CounterCreated",
     ]);
   });
 
