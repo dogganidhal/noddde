@@ -139,13 +139,13 @@ The lock is acquired before loading, held during command execution, and released
 
 For production, use database-backed advisory lockers instead of the in-memory implementation:
 
-| Package           | Locker                  | PostgreSQL                         | MySQL                      |
-| ----------------- | ----------------------- | ---------------------------------- | -------------------------- |
-| `@noddde/drizzle` | `DrizzleAdvisoryLocker` | `pg_advisory_lock`                 | `GET_LOCK`                 |
-| `@noddde/prisma`  | `PrismaAdvisoryLocker`  | `pg_advisory_lock` via `$queryRaw` | `GET_LOCK` via `$queryRaw` |
-| `@noddde/typeorm` | `TypeORMAdvisoryLocker` | `pg_advisory_lock` via `query()`   | `GET_LOCK` via `query()`   |
+| Package           | Locker                  | PostgreSQL         | MySQL / MariaDB | MSSQL           |
+| ----------------- | ----------------------- | ------------------ | --------------- | --------------- |
+| `@noddde/drizzle` | `DrizzleAdvisoryLocker` | `pg_advisory_lock` | `GET_LOCK`      | —               |
+| `@noddde/prisma`  | `PrismaAdvisoryLocker`  | `pg_advisory_lock` | `GET_LOCK`      | —               |
+| `@noddde/typeorm` | `TypeORMAdvisoryLocker` | `pg_advisory_lock` | `GET_LOCK`      | `sp_getapplock` |
 
-SQLite does not support advisory locks -- use `InMemoryAggregateLocker` for single-process SQLite deployments.
+SQLite does not support advisory locks -- use `InMemoryAggregateLocker` for single-process SQLite deployments. See the [Dialect Support Matrix](/docs/running/orm-adapters#dialect-support-matrix) for full details.
 
 ### When to Choose Each Strategy
 

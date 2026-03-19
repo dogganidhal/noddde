@@ -23,7 +23,7 @@ This report catalogs every gap between noddde's current state and what a product
 - `Domain.executeAggregateCommand()` must catch `ConcurrencyError` and support retry strategy (configurable: retry N times, or propagate)
 - Drizzle adapter: use `WHERE sequence_number = expectedVersion` guard on insert, or database-level unique constraint on `(aggregate_name, aggregate_id, sequence_number)`
 
-**Files to modify**: `packages/core/src/persistence/index.ts`, `packages/engine/src/domain.ts`, `packages/drizzle/src/persistence.ts`, all ORM adapter persistence classes
+**Files to modify**: `packages/core/src/persistence/index.ts`, `packages/engine/src/domain.ts`, `packages/adapters/drizzle/src/persistence.ts`, all ORM adapter persistence classes
 
 ---
 

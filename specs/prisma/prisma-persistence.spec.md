@@ -1,7 +1,7 @@
 ---
 title: "Prisma Persistence"
 module: prisma/persistence
-source_file: packages/prisma/src/index.ts
+source_file: packages/adapters/prisma/src/index.ts
 status: implemented
 exports:
   - createPrismaPersistence

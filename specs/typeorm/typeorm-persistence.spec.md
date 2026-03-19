@@ -1,7 +1,7 @@
 ---
 title: "TypeORM Persistence"
 module: typeorm/persistence
-source_file: packages/typeorm/src/index.ts
+source_file: packages/adapters/typeorm/src/index.ts
 status: implemented
 exports:
   - createTypeORMPersistence

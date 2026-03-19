@@ -1,7 +1,7 @@
 ---
 title: "Drizzle Multi-Dialect Persistence"
 module: drizzle/persistence
-source_file: packages/drizzle/src/index.ts
+source_file: packages/adapters/drizzle/src/index.ts
 status: implemented
 exports:
   - createDrizzlePersistence
