@@ -9,6 +9,9 @@ exports:
     EventSourcedAggregatePersistence,
     SagaPersistence,
     ConcurrencyError,
+    AggregateLocker,
+    LockTimeoutError,
+    fnv1a64,
   ]
 depends_on: [edd/event]
 docs:
@@ -68,6 +71,26 @@ class ConcurrencyError extends Error {
     actualVersion: number,
   );
 }
+
+interface AggregateLocker {
+  acquire(
+    aggregateName: string,
+    aggregateId: string,
+    timeoutMs?: number,
+  ): Promise<void>;
+  release(aggregateName: string, aggregateId: string): Promise<void>;
+}
+
+class LockTimeoutError extends Error {
+  readonly name: "LockTimeoutError";
+  readonly aggregateName: string;
+  readonly aggregateId: string;
+  readonly timeoutMs: number;
+
+  constructor(aggregateName: string, aggregateId: string, timeoutMs: number);
+}
+
+function fnv1a64(key: string): bigint;
 ```
 
 - `PersistenceConfiguration` is a union type. The domain engine must determine at runtime which variant is in use (event-sourced vs. state-stored) to decide the load/save/replay strategy.
@@ -75,6 +98,9 @@ class ConcurrencyError extends Error {
 - The `any` state type is intentional: persistence is generic across all aggregate/saga types. Type safety is enforced at the aggregate/saga definition layer, not the persistence layer.
 - `ConcurrencyError` is thrown by `save()` when the actual version in the store does not match `expectedVersion`. For event-sourced persistence, the version is the event count (`events.length`). For state-stored persistence, the version is an integer stored alongside the state.
 - `StateStoredAggregatePersistence.load()` returns `{ state, version }` or `null` for new aggregates (version 0). This differs from event-sourced where version is derived from `events.length`.
+- `AggregateLocker` is the interface for pessimistic concurrency control. Implementations acquire/release exclusive locks per aggregate instance. Used by `PessimisticConcurrencyStrategy` in the domain engine.
+- `LockTimeoutError` is thrown when lock acquisition times out. It is distinct from `ConcurrencyError` (different failure mode: lock timeout vs. version mismatch).
+- `fnv1a64` is an FNV-1a 64-bit hash function that converts a string key to a signed `bigint`, suitable for PostgreSQL `pg_advisory_lock` keys.
 
 ## Behavioral Requirements
 
@@ -98,6 +124,28 @@ class ConcurrencyError extends Error {
 1. **Thrown on version mismatch** -- When `save()` detects that `actualVersion !== expectedVersion`, it throws a `ConcurrencyError` with the aggregate name, ID, expected version, and actual version.
 2. **Error properties** -- `aggregateName`, `aggregateId`, `expectedVersion`, `actualVersion` are public readonly properties. `name` is `"ConcurrencyError"`. `message` includes all four values for diagnostics.
 3. **Extends Error** -- `ConcurrencyError` extends the built-in `Error` class. It can be caught with `instanceof ConcurrencyError`.
+
+### AggregateLocker
+
+1. **acquire(aggregateName, aggregateId, timeoutMs?)** -- Acquires an exclusive lock for the given aggregate instance. Blocks until the lock is available or the timeout expires. If `timeoutMs` is provided and positive, throws `LockTimeoutError` if the lock cannot be acquired within that duration. If `timeoutMs` is 0 or undefined, blocks indefinitely.
+2. **release(aggregateName, aggregateId)** -- Releases a previously acquired lock. Must be called in a `finally` block to prevent lock leaks. Idempotent: releasing an already-released lock is a no-op.
+3. **Mutual exclusion** -- Two concurrent `acquire()` calls for the same `(aggregateName, aggregateId)` key must not both succeed simultaneously. The second caller blocks until the first releases.
+4. **Non-reentrant** -- Acquiring a lock you already hold will block (not re-enter). This is intentional: aggregate commands should not be nested.
+5. **Key isolation** -- Locks for different `(aggregateName, aggregateId)` pairs are independent. Acquiring a lock on `("Order", "1")` does not block `("Order", "2")` or `("Account", "1")`.
+
+### LockTimeoutError
+
+1. **Thrown on lock timeout** -- When `AggregateLocker.acquire()` cannot obtain the lock within the specified `timeoutMs`, it throws a `LockTimeoutError`.
+2. **Error properties** -- `aggregateName`, `aggregateId`, `timeoutMs` are public readonly properties. `name` is `"LockTimeoutError"`. `message` includes all three values for diagnostics.
+3. **Extends Error** -- `LockTimeoutError` extends the built-in `Error` class. It can be caught with `instanceof LockTimeoutError`.
+4. **Not a ConcurrencyError** -- `LockTimeoutError` is a distinct error class. `instanceof ConcurrencyError` returns `false`. They represent different failure modes: lock timeout (pessimistic) vs. version mismatch (optimistic).
+
+### fnv1a64
+
+1. **Deterministic** -- The same input string always produces the same output bigint.
+2. **FNV-1a 64-bit algorithm** -- Uses offset basis `0xcbf29ce484222325` and prime `0x100000001b3`. Iterates over each character's `charCodeAt` value.
+3. **Signed 64-bit output** -- The output is a signed `bigint` that fits in PostgreSQL's `bigint` type (range: -2^63 to 2^63-1). Unsigned values >= 2^63 are converted to negative signed values.
+4. **Purpose** -- Converts `${aggregateName}:${aggregateId}` composite keys to integer lock keys for database advisory locks (e.g., PostgreSQL `pg_advisory_lock`).
 
 ### SagaPersistence
 
@@ -458,6 +506,61 @@ describe("SagaPersistence contract", () => {
   describe("InMemorySagaPersistence", () => {
     const { InMemorySagaPersistence } = require("@noddde/core");
     runContractTests(() => new InMemorySagaPersistence());
+  });
+});
+```
+
+### fnv1a64: deterministic hash output
+
+```ts
+import { describe, it, expect } from "vitest";
+import { fnv1a64 } from "@noddde/core";
+
+describe("fnv1a64", () => {
+  it("should produce the same hash for the same input", () => {
+    const hash1 = fnv1a64("BankAccount:acc-1");
+    const hash2 = fnv1a64("BankAccount:acc-1");
+    expect(hash1).toBe(hash2);
+  });
+
+  it("should produce different hashes for different inputs", () => {
+    const hash1 = fnv1a64("BankAccount:acc-1");
+    const hash2 = fnv1a64("BankAccount:acc-2");
+    expect(hash1).not.toBe(hash2);
+  });
+
+  it("should return a bigint", () => {
+    const hash = fnv1a64("test");
+    expect(typeof hash).toBe("bigint");
+  });
+});
+```
+
+### LockTimeoutError: properties and inheritance
+
+```ts
+import { describe, it, expect } from "vitest";
+import { LockTimeoutError, ConcurrencyError } from "@noddde/core";
+
+describe("LockTimeoutError", () => {
+  it("should have correct name, message, and properties", () => {
+    const error = new LockTimeoutError("Account", "acc-1", 5000);
+    expect(error.name).toBe("LockTimeoutError");
+    expect(error.aggregateName).toBe("Account");
+    expect(error.aggregateId).toBe("acc-1");
+    expect(error.timeoutMs).toBe(5000);
+    expect(error.message).toContain("Account:acc-1");
+    expect(error.message).toContain("5000");
+  });
+
+  it("should be an instance of Error", () => {
+    const error = new LockTimeoutError("Account", "acc-1", 5000);
+    expect(error).toBeInstanceOf(Error);
+  });
+
+  it("should NOT be an instance of ConcurrencyError", () => {
+    const error = new LockTimeoutError("Account", "acc-1", 5000);
+    expect(error).not.toBeInstanceOf(ConcurrencyError);
   });
 });
 ```

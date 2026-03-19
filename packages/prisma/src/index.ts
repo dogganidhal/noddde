@@ -3,7 +3,11 @@ export {
   PrismaStateStoredAggregatePersistence,
   PrismaSagaPersistence,
 } from "./persistence";
-export { PrismaUnitOfWork, createPrismaUnitOfWorkFactory } from "./unit-of-work";
+export { PrismaAdvisoryLocker } from "./advisory-locker";
+export {
+  PrismaUnitOfWork,
+  createPrismaUnitOfWorkFactory,
+} from "./unit-of-work";
 export type { PrismaTransactionStore } from "./unit-of-work";
 
 import type { PrismaClient } from "@prisma/client";
@@ -62,8 +66,14 @@ export function createPrismaPersistence(
   const txStore: PrismaTransactionStore = { current: null };
 
   return {
-    eventSourcedPersistence: new PrismaEventSourcedAggregatePersistence(prisma, txStore),
-    stateStoredPersistence: new PrismaStateStoredAggregatePersistence(prisma, txStore),
+    eventSourcedPersistence: new PrismaEventSourcedAggregatePersistence(
+      prisma,
+      txStore,
+    ),
+    stateStoredPersistence: new PrismaStateStoredAggregatePersistence(
+      prisma,
+      txStore,
+    ),
     sagaPersistence: new PrismaSagaPersistence(prisma, txStore),
     unitOfWorkFactory: createPrismaUnitOfWorkFactory(prisma, txStore),
   };

@@ -29,6 +29,7 @@ For production persistence with a real database, see [ORM Adapters](/docs/runnin
 ## What We Will Build
 
 A bank account that supports:
+
 - **Creating** a new account
 - **Authorizing transactions** (with balance validation)
 - Two possible outcomes: authorized or declined
@@ -103,7 +104,7 @@ type BankAccountDef = {
   state: BankAccountState;
   events: BankAccountEvent;
   commands: BankAccountCommand;
-  infrastructure: {};  // No custom infrastructure for this example
+  infrastructure: {}; // No custom infrastructure for this example
 };
 ```
 
@@ -250,6 +251,8 @@ The full flow for each `dispatchCommand` call:
 5. **Event persisted** — Saved to the event store
 6. **State updated** — Apply handler called: `apply.TransactionAuthorized(event, state)` returns new state
 7. **Event published** — Sent to EventBus for projections to consume
+
+This example uses optimistic concurrency with no retries (the default). For high-contention aggregates, you can configure automatic retries or pessimistic locking — see [Concurrency Strategies](/docs/running/persistence#concurrency-control).
 
 ## Next Steps
 

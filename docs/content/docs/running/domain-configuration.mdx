@@ -68,7 +68,9 @@ type DomainConfiguration<TInfrastructure extends Infrastructure> = {
   };
   infrastructure: {
     aggregatePersistence?: () => PersistenceConfiguration | Promise<PersistenceConfiguration>;
-    aggregateConcurrency?: { maxRetries?: number };
+    aggregateConcurrency?:
+      | { strategy?: "optimistic"; maxRetries?: number }
+      | { strategy: "pessimistic"; locker: AggregateLocker; lockTimeoutMs?: number };
     sagaPersistence?: () => SagaPersistence | Promise<SagaPersistence>;
     provideInfrastructure?: () => TInfrastructure | Promise<TInfrastructure>;
     cqrsInfrastructure?: (infra: TInfrastructure) => CQRSInfrastructure | Promise<CQRSInfrastructure>;
@@ -212,7 +214,7 @@ The four providers are:
 - **`provideInfrastructure`** -- Your custom domain infrastructure (loggers, repositories, clients)
 - **`cqrsInfrastructure`** -- The three CQRS buses (CommandBus, EventBus, QueryBus)
 - **`aggregatePersistence`** -- The persistence strategy for aggregate state
-- **`aggregateConcurrency`** -- Retry settings for `ConcurrencyError` during command dispatch (default: `{ maxRetries: 0 }`)
+- **`aggregateConcurrency`** -- Concurrency strategy: optimistic (version check + retry, throws `ConcurrencyError`) or pessimistic (exclusive lock before load, throws `LockTimeoutError` on timeout). See [Concurrency Strategies](/docs/running/persistence#concurrency-control).
 - **`unitOfWorkFactory`** -- The factory for atomic command dispatch boundaries
 
 For a full treatment of each provider, how they are initialized, and how to swap them for testing, see the [Infrastructure](/docs/running/infrastructure) page.

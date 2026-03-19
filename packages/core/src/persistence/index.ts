@@ -2,6 +2,9 @@
 import type { Event } from "../edd";
 
 export { ConcurrencyError } from "./concurrency-error";
+export type { AggregateLocker } from "./aggregate-locker";
+export { LockTimeoutError } from "./lock-timeout-error";
+export { fnv1a64 } from "./hash";
 
 /**
  * Persistence strategy that stores the current aggregate state directly.

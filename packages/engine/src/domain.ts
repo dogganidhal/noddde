@@ -21,13 +21,18 @@ import type {
   UnitOfWork,
   UnitOfWorkFactory,
 } from "@noddde/core";
-import { ConcurrencyError } from "@noddde/core";
+import type { AggregateLocker } from "@noddde/core";
 import { InMemoryCommandBus } from "./implementations/in-memory-command-bus";
 import { EventEmitterEventBus } from "./implementations/ee-event-bus";
 import { InMemoryQueryBus } from "./implementations/in-memory-query-bus";
 import { InMemoryEventSourcedAggregatePersistence } from "./implementations/in-memory-aggregate-persistence";
 import { InMemorySagaPersistence } from "./implementations/in-memory-saga-persistence";
 import { createInMemoryUnitOfWork } from "./implementations/in-memory-unit-of-work";
+import type { ConcurrencyStrategy } from "./concurrency-strategy";
+import {
+  OptimisticConcurrencyStrategy,
+  PessimisticConcurrencyStrategy,
+} from "./concurrency-strategy";
 
 type AggregateMap = Record<string | symbol, Aggregate<any>>;
 
@@ -116,16 +121,38 @@ export type DomainConfiguration<
       | PersistenceConfiguration
       | Promise<PersistenceConfiguration>;
     /**
-     * Concurrency control settings for aggregate persistence.
-     * When `save()` throws {@link ConcurrencyError}, the domain can
-     * automatically retry the full load→execute→save cycle.
+     * Concurrency control strategy for aggregate persistence.
      *
-     * @default `{ maxRetries: 0 }` — propagate ConcurrencyError immediately.
+     * - **Optimistic** (default): execute the command, check version on save.
+     *   If a concurrent write is detected (`ConcurrencyError`), retry the
+     *   full load→execute→save cycle up to `maxRetries` times.
+     *
+     * - **Pessimistic**: acquire an exclusive lock before loading the aggregate.
+     *   The lock serializes all commands to the same aggregate instance,
+     *   preventing concurrent writes entirely.
+     *
+     * @default `{ strategy: "optimistic", maxRetries: 0 }`
+     *
+     * @example
+     * ```ts
+     * // Optimistic with 3 retries (backward compatible)
+     * aggregateConcurrency: { maxRetries: 3 }
+     *
+     * // Pessimistic with in-memory locker
+     * aggregateConcurrency: {
+     *   strategy: "pessimistic",
+     *   locker: new InMemoryAggregateLocker(),
+     *   lockTimeoutMs: 5000,
+     * }
+     * ```
      */
-    aggregateConcurrency?: {
-      /** Maximum number of retries on ConcurrencyError. Default: 0. */
-      maxRetries?: number;
-    };
+    aggregateConcurrency?:
+      | { strategy?: "optimistic"; maxRetries?: number }
+      | {
+          strategy: "pessimistic";
+          locker: AggregateLocker;
+          lockTimeoutMs?: number;
+        };
     /**
      * Factory for saga persistence. Required if `processModel` is configured.
      *
@@ -172,7 +199,7 @@ export class Domain<
   private _persistence!: PersistenceConfiguration;
   private _sagaPersistence?: SagaPersistence;
   private _unitOfWorkFactory!: UnitOfWorkFactory;
-  private _maxRetries = 0;
+  private _concurrencyStrategy!: ConcurrencyStrategy;
   private readonly _uowStorage = new AsyncLocalStorage<UnitOfWork>();
   private readonly _projectionViews = new Map<string, any>();
 
@@ -253,9 +280,22 @@ export class Domain<
       ? await configuration.infrastructure.unitOfWorkFactory()
       : createInMemoryUnitOfWork;
 
-    // Step 5.6: Resolve concurrency settings
-    this._maxRetries =
-      configuration.infrastructure.aggregateConcurrency?.maxRetries ?? 0;
+    // Step 5.6: Resolve concurrency strategy
+    const concurrency = configuration.infrastructure.aggregateConcurrency;
+    if (
+      concurrency &&
+      "strategy" in concurrency &&
+      concurrency.strategy === "pessimistic"
+    ) {
+      this._concurrencyStrategy = new PessimisticConcurrencyStrategy(
+        concurrency.locker,
+        concurrency.lockTimeoutMs,
+      );
+    } else {
+      this._concurrencyStrategy = new OptimisticConcurrencyStrategy(
+        (concurrency as { maxRetries?: number } | undefined)?.maxRetries ?? 0,
+      );
+    }
 
     const { commandBus, eventBus, queryBus } = this._infrastructure;
 
@@ -468,12 +508,13 @@ export class Domain<
    * Executes the full aggregate command lifecycle:
    * load, execute, apply, persist, publish.
    *
+   * Delegates concurrency control to {@link ConcurrencyStrategy}:
+   * - **Optimistic**: retries the attempt on {@link ConcurrencyError}
+   * - **Pessimistic**: acquires a lock before the attempt, releases after
+   *
    * If a UnitOfWork is active (via {@link withUnitOfWork} or saga handling),
    * persistence and event publishing are deferred to the owning UoW.
    * Otherwise, an implicit UoW is created and committed immediately.
-   *
-   * When the implicit UoW path encounters a {@link ConcurrencyError},
-   * the entire lifecycle is retried up to `_maxRetries` times.
    */
   private async executeAggregateCommand(
     aggregateName: string,
@@ -486,43 +527,47 @@ export class Domain<
     const existingUow = this._uowStorage.getStore();
     const ownsUow = !existingUow;
 
-    if (ownsUow) {
-      // Implicit UoW path — supports retry on ConcurrencyError
-      for (let attempt = 0; attempt <= this._maxRetries; attempt++) {
-        const uow = this._unitOfWorkFactory();
-        try {
-          await this.executeCommandLifecycle(
-            aggregateName,
-            aggregate,
-            command,
-            persistence,
-            uow,
-          );
-          const events = await uow.commit();
-          for (const event of events) {
-            await eventBus.dispatch(event);
-          }
-          return;
-        } catch (error) {
-          try {
-            await uow.rollback();
-          } catch {
-            // UoW may already be completed if commit failed partway through
-          }
-          if (error instanceof ConcurrencyError && attempt < this._maxRetries) {
-            continue;
-          }
-          throw error;
-        }
-      }
-    } else {
-      // Explicit UoW path — no retry, ConcurrencyError propagates
-      await this.executeCommandLifecycle(
+    const runLifecycle = (uow: UnitOfWork) =>
+      this.executeCommandLifecycle(
         aggregateName,
         aggregate,
         command,
         persistence,
-        existingUow!,
+        uow,
+      );
+
+    if (ownsUow) {
+      // Implicit UoW — strategy wraps the full attempt (UoW create + commit)
+      const events = await this._concurrencyStrategy.execute(
+        aggregateName,
+        command.targetAggregateId,
+        async () => {
+          const uow = this._unitOfWorkFactory();
+          try {
+            await runLifecycle(uow);
+            return await uow.commit();
+          } catch (error) {
+            try {
+              await uow.rollback();
+            } catch {
+              // UoW may already be completed if commit failed partway through
+            }
+            throw error;
+          }
+        },
+      );
+      for (const event of events) {
+        await eventBus.dispatch(event);
+      }
+    } else {
+      // Explicit UoW — strategy wraps just the lifecycle (for pessimistic locking)
+      await this._concurrencyStrategy.execute(
+        aggregateName,
+        command.targetAggregateId,
+        async () => {
+          await runLifecycle(existingUow!);
+          return [];
+        },
       );
     }
   }
