@@ -1,11 +1,4 @@
 {
   "title": "Testing",
-  "pages": [
-    "overview",
-    "testing-aggregates",
-    "testing-projections",
-    "testing-sagas",
-    "testing-domains",
-    "testing-infrastructure"
-  ]
+  "pages": ["overview", "testing-aggregates-and-projections", "testing-sagas", "testing-domains"]
 }

@@ -1,4 +1,0 @@
-{
-  "title": "Aggregates",
-  "pages": ["overview", "defining-aggregates", "state-design", "command-routing", "type-inference"]
-}

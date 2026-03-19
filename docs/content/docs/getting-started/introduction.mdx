@@ -13,7 +13,7 @@ It provides building blocks — not an opinionated runtime. You define your doma
 
 ### Aggregates
 
-Aggregates are consistency boundaries — the units that process commands and enforce business rules. In noDDDe, an aggregate is defined using the functional [Decider pattern](/docs/concepts/decider-pattern):
+Aggregates are consistency boundaries — the units that process commands and enforce business rules. In noDDDe, an aggregate is defined using the functional [Decider pattern](/docs/core-concepts/decider-pattern):
 
 ```ts
 const BankAccount = defineAggregate<BankAccountDef>({
@@ -127,11 +127,10 @@ noDDDe is for TypeScript developers building **event-driven** or **domain-rich**
 
 - Type-safe domain modeling without class hierarchies
 - Testable business logic without mock frameworks
-- Flexible persistence (event sourcing or state storage) with built-in adapters for [Drizzle, Prisma, and TypeORM](/docs/infrastructure/orm-adapters)
+- Flexible persistence (event sourcing or state storage) with built-in adapters for [Drizzle, Prisma, and TypeORM](/docs/running/orm-adapters)
 - A functional approach to DDD patterns
 
 ## Next Steps
 
-- [Installation](/docs/getting-started/installation) — Install `@noddde/core`
-- [Quick Start](/docs/getting-started/quick-start) — Build your first aggregate
-- [Concepts](/docs/concepts/messaging) — Understand the foundations
+- [Quick Start](/docs/getting-started/quick-start) — Install noDDDe and build your first aggregate
+- [Core Concepts](/docs/core-concepts/messages-and-types) — Understand the foundations

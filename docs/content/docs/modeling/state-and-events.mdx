@@ -1,0 +1,398 @@
+---
+title: State Design & Event Application
+description: Designing aggregate state for decision-making and writing pure apply handlers that evolve state in response to events.
+---
+
+State design and event application are two sides of the same coin. The shape of your aggregate state determines what decisions your command handlers can make, and the apply handlers are the mechanism that keeps that state in sync with the event stream. This page covers both topics together.
+
+## The Apply Handler
+
+Apply handlers are the functions that update aggregate state when an event occurs. They live in the `apply` map of an aggregate definition, with one entry per event type.
+
+The `ApplyHandler` type signature:
+
+```typescript
+type ApplyHandler<TEvent extends Event, TState> = (
+  event: TEvent["payload"],
+  state: TState,
+) => TState;
+```
+
+| Parameter | Description |
+|---|---|
+| `event` | The event's **payload** only. The `name` field is already used for routing to the correct handler. |
+| `state` | The current aggregate state before this event. |
+
+The return value is the new state after applying the event.
+
+Three things are deliberately absent from this signature:
+
+- **No infrastructure.** Apply handlers cannot access loggers, databases, clocks, or any external service.
+- **No `async`.** The return type is `TState`, not `Promise<TState>`.
+- **No side effects.** Apply handlers must be pure functions -- deterministic, with no mutations beyond returning the new state.
+
+These constraints exist because apply handlers run in two contexts: during command processing (applying freshly produced events) and during event replay (reconstructing state from stored events). If they had side effects, replaying events would re-trigger those side effects -- sending duplicate emails, double-writing to databases. Purity ensures that replay is safe and produces the same state every time.
+
+For a deeper discussion, see [Why Are Apply Handlers Pure?](/docs/design-decisions/why-pure-apply-handlers).
+
+## Designing Initial State
+
+Every aggregate declares an `initialState` -- the state a brand-new instance starts with before any events have been applied. When the framework loads an aggregate for the first time (or when there are no stored events), this is what the command handler receives as `state`.
+
+```typescript
+export const BankAccount = defineAggregate<BankAccountDef>({
+  initialState: {
+    balance: 0,
+    availableBalance: 0,
+    transactions: [],
+  },
+  // ...
+});
+```
+
+The type of `initialState` must match the `state` field in your `AggregateTypes` bundle exactly. TypeScript enforces this at compile time.
+
+Guidelines for a good initial state:
+
+- Use **zero values** for numeric fields (`0`, not `null`).
+- Use **empty arrays or maps** for collections (`[]`, `{}`).
+- Use **`null`** for optional reference-type fields that genuinely have no value yet.
+- Use **`as const`** for status fields when TypeScript needs help narrowing a literal type.
+
+```typescript
+initialState: {
+  status: "pending" as const,
+  highestBid: null as { bidderId: string; amount: number } | null,
+  item: "",
+  startingPrice: 0,
+  endsAt: null as Date | null,
+}
+```
+
+The `as const` assertion on `"pending"` ensures TypeScript narrows the type to the literal `"pending"` rather than widening it to `string`. This matters when your state has a union-typed status field like `"pending" | "open" | "closed"`.
+
+## State Immutability
+
+Apply handlers must return a **new state object**. Never mutate the existing state. The spread operator is the standard approach.
+
+### Flat Updates
+
+Override specific fields while preserving the rest:
+
+```typescript
+apply: {
+  TransactionAuthorized: (event, state) => ({
+    ...state,
+    availableBalance: state.availableBalance - event.amount,
+    transactions: [
+      ...state.transactions,
+      {
+        id: event.id,
+        timestamp: event.timestamp,
+        amount: event.amount,
+        merchant: event.merchant,
+        status: "pending" as const,
+      },
+    ],
+  }),
+}
+```
+
+This creates a new object with all existing state fields, but with `availableBalance` updated and a new entry appended to `transactions`. The original `state` object is untouched.
+
+### Nested Updates
+
+When updating a specific item inside a collection, use `map` to produce a new array and spread to produce a new item:
+
+```typescript
+apply: {
+  TransactionProcessed: (event, state) => ({
+    ...state,
+    balance: state.balance - event.amount,
+    transactions: state.transactions.map((transaction) =>
+      transaction.id === event.id
+        ? { ...transaction, status: "processed" as const }
+        : transaction,
+    ),
+  }),
+}
+```
+
+Here `map` creates a new array, and only the matching transaction is replaced with a new object via spread. All other transactions are returned as-is.
+
+### Array Appending
+
+Use spread to append to an array rather than `push`:
+
+```typescript
+transactions: [
+  ...state.transactions,
+  { ...event, status: "pending" as const },
+],
+```
+
+### Array Mapping
+
+Use `map` to transform a specific item rather than direct index assignment:
+
+```typescript
+transactions: state.transactions.map((t) =>
+  t.id === event.id ? { ...t, status: "processed" as const } : t,
+),
+```
+
+### What NOT to Do
+
+Never mutate state in place:
+
+```typescript
+// WRONG: mutates state directly
+TransactionAuthorized: (event, state) => {
+  state.availableBalance -= event.amount;
+  state.transactions.push({ ...event, status: "pending" });
+  return state;
+},
+```
+
+This modifies the existing state object. Even though it returns `state`, the original reference has been changed, which can cause subtle bugs during event replay and breaks the purity contract.
+
+## No-Op Apply Handlers
+
+Some events do not change the aggregate state. For example, a `TransactionDeclined` event records a decline but might not affect the balances or transaction list in your model. A `BidRejected` event in the auction domain records a rejection but leaves the highest bid and status unchanged.
+
+These handlers simply return the existing state:
+
+```typescript
+apply: {
+  BidRejected: (_event, state) => state,
+}
+```
+
+This is still required in the `apply` map -- the framework expects a handler for every event type. The event remains part of the event stream and can be projected or audited, even though the aggregate's internal state is unaffected.
+
+## State Evolution Walkthrough
+
+The most important thing to understand about apply handlers is how state accumulates over a sequence of events. Let's trace a bank account through its lifecycle.
+
+### Starting Point: Initial State
+
+```
+{ balance: 0, availableBalance: 0, transactions: [] }
+```
+
+### Event 1: BankAccountCreated
+
+```typescript
+BankAccountCreated: (_event, _state) => ({
+  balance: 0,
+  availableBalance: 0,
+  transactions: [],
+}),
+```
+
+This handler ignores both the event and prior state, returning a clean initial state. This is typical for creation events -- the aggregate starts fresh.
+
+**State after:**
+
+```
+{ balance: 0, availableBalance: 0, transactions: [] }
+```
+
+### Event 2: TransactionAuthorized (amount: 50)
+
+```typescript
+TransactionAuthorized: (event, state) => ({
+  ...state,
+  availableBalance: state.availableBalance - event.amount,
+  transactions: [
+    ...state.transactions,
+    {
+      id: event.id,
+      timestamp: event.timestamp,
+      amount: event.amount,
+      merchant: event.merchant,
+      status: "pending" as const,
+    },
+  ],
+}),
+```
+
+The available balance decreases by the authorized amount, reserving funds. The transaction is recorded as `"pending"`. The actual `balance` is unchanged -- the money has not settled yet.
+
+**State after:**
+
+```
+{
+  balance: 0,
+  availableBalance: -50,
+  transactions: [
+    { id: "tx-1", amount: 50, merchant: "Coffee Shop", status: "pending" }
+  ]
+}
+```
+
+### Event 3: TransactionAuthorized (amount: 30)
+
+The same handler runs again with a new event. Both transactions are now pending.
+
+**State after:**
+
+```
+{
+  balance: 0,
+  availableBalance: -80,
+  transactions: [
+    { id: "tx-1", amount: 50, merchant: "Coffee Shop", status: "pending" },
+    { id: "tx-2", amount: 30, merchant: "Bookstore", status: "pending" }
+  ]
+}
+```
+
+### Event 4: TransactionProcessed (id: "tx-1", amount: 50)
+
+```typescript
+TransactionProcessed: (event, state) => ({
+  ...state,
+  balance: state.balance - event.amount,
+  transactions: state.transactions.map((transaction) =>
+    transaction.id === event.id
+      ? { ...transaction, status: "processed" as const }
+      : transaction,
+  ),
+}),
+```
+
+The actual `balance` is now updated (the funds have settled), and the first transaction's status changes from `"pending"` to `"processed"`. The second transaction remains pending.
+
+**State after:**
+
+```
+{
+  balance: -50,
+  availableBalance: -80,
+  transactions: [
+    { id: "tx-1", amount: 50, merchant: "Coffee Shop", status: "processed" },
+    { id: "tx-2", amount: 30, merchant: "Bookstore", status: "pending" }
+  ]
+}
+```
+
+This is exactly the state that would be produced whether these four events are applied during command processing or replayed from storage. That guarantee is the foundation of event sourcing.
+
+## Derived vs Stored Fields
+
+A key design decision is whether a value should be **stored in state** or **derived elsewhere** (in a projection or query handler).
+
+The rule: **"Does a command handler need this field to make a decision?"**
+
+- **Yes** -- store it in state, update it in apply handlers.
+- **No** -- compute it in a [projection](/docs/read-model/projections).
+
+### Store: Fields Needed for Decisions
+
+Both `balance` and `availableBalance` are stored because they are needed for authorization:
+
+```typescript
+commands: {
+  AuthorizeTransaction: (command, state) => {
+    if (state.availableBalance < command.payload.amount) {
+      return { name: "TransactionDeclined", payload: { /* ... */ } };
+    }
+    // ...
+  },
+}
+```
+
+Even though `availableBalance` could theoretically be computed from the transaction list, storing it explicitly makes command handlers simpler and avoids recomputation on every command.
+
+### Derive: Fields Only for Display
+
+If a value is only needed for read models or queries, compute it in a projection rather than bloating aggregate state:
+
+```typescript
+// Don't store display-only data in aggregate state
+interface BankAccountState {
+  balance: number;
+  availableBalance: number;
+  transactions: Array<{ /* ... */ }>;
+  // Avoid: these are read-model concerns
+  // formattedBalance: string;
+  // transactionCount: number;
+  // lastTransactionDate: Date;
+}
+```
+
+Transaction count, formatted balances, and last transaction date are all values that projections can compute. They do not participate in any business rule, so they have no place in aggregate state.
+
+## Why the Aggregate ID Is Not in State
+
+The aggregate ID (`targetAggregateId`) is deliberately excluded from aggregate state. It is a **routing concern**, not a domain state concern. The ID identifies which instance of the aggregate a command targets, and the framework uses it to load the correct event stream and persist events under the correct key.
+
+The ID is always available in the command object:
+
+```typescript
+commands: {
+  CreateBankAccount: (command, _state) => ({
+    name: "BankAccountCreated",
+    payload: { id: command.targetAggregateId },
+  }),
+}
+```
+
+If your event payloads need the ID (for example, to identify the aggregate in read models), pass it from the command into the event payload. But do not store it as a field in the aggregate state object.
+
+This separation keeps state identity-free, simplifies serialization, and makes testing easier -- you can test apply handlers with any state snapshot without worrying about matching IDs.
+
+For the full rationale, see [Why Is the Aggregate ID Not in State?](/docs/design-decisions/why-id-not-in-state).
+
+## Common Patterns
+
+Quick reference for the most frequent apply handler shapes.
+
+### Appending to an Array
+
+```typescript
+TransactionAuthorized: (event, state) => ({
+  ...state,
+  transactions: [...state.transactions, { ...event, status: "pending" as const }],
+}),
+```
+
+### Updating an Item in an Array
+
+```typescript
+TransactionProcessed: (event, state) => ({
+  ...state,
+  transactions: state.transactions.map((t) =>
+    t.id === event.id ? { ...t, status: "processed" as const } : t,
+  ),
+}),
+```
+
+### Incrementing a Counter
+
+```typescript
+BidPlaced: (event, state) => ({
+  ...state,
+  bidCount: state.bidCount + 1,
+  highestBid: { bidderId: event.bidderId, amount: event.amount },
+}),
+```
+
+### Full State Replacement
+
+For creation events that set the entire state from the event payload:
+
+```typescript
+BankAccountCreated: (_event, _state) => ({
+  balance: 0,
+  availableBalance: 0,
+  transactions: [],
+}),
+```
+
+## Next Steps
+
+- [Command Handlers](/docs/modeling/command-handlers) -- Writing command handlers that enforce business rules and produce events.
+- [Routing & Dispatch](/docs/modeling/routing-and-dispatch) -- How commands reach the correct aggregate instance.
+- [Testing Aggregates](/docs/testing/testing-aggregates-and-projections) -- Strategies for testing aggregates in isolation.

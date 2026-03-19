@@ -1,0 +1,368 @@
+---
+title: Defining Aggregates
+description: How to define a complete aggregate in noddde — events, commands, state, the AggregateTypes bundle, and the defineAggregate identity function
+---
+
+## What is an Aggregate?
+
+An aggregate is a **consistency boundary** in your domain. It groups together the state and business rules that must always be consistent with each other. When you dispatch a command, a single aggregate instance validates the rules, makes a decision, and produces events that record what happened.
+
+noddde models aggregates using the [Decider pattern](/docs/core-concepts/decider-pattern): commands go in, events come out, and a pure function evolves state. There are no base classes and no decorators -- an aggregate is a plain typed object with three properties: `initialState`, `commands`, and `apply`.
+
+An aggregate definition is a **blueprint**, not a singleton. You define the behavior once, and the framework creates as many instances as needed at runtime, each identified by a unique `targetAggregateId`.
+
+The rest of this page walks through building a complete aggregate from scratch using the banking domain as a running example.
+
+## Step 1: Define Events
+
+Events represent facts that have already occurred. Define them as a payload map using `DefineEvents`:
+
+```typescript
+import { DefineEvents } from "@noddde/core";
+
+type BankAccountEvent = DefineEvents<{
+  BankAccountCreated: { id: string };
+  TransactionAuthorized: {
+    id: string;
+    timestamp: Date;
+    amount: number;
+    merchant: string;
+  };
+  TransactionDeclined: {
+    id: string;
+    timestamp: Date;
+    amount: number;
+    merchant: string;
+  };
+  TransactionProcessed: {
+    id: string;
+    timestamp: Date;
+    amount: number;
+    merchant: string;
+  };
+}>;
+```
+
+Each key becomes the event's `name`, and the value becomes its `payload` type. The resulting type is a discriminated union of all event shapes.
+
+**Naming convention:** events are always past tense -- `BankAccountCreated`, `TransactionAuthorized`, `BidPlaced`. They describe something that already happened.
+
+**Every event has a payload.** Unlike commands, there is no `void` payload concept for events. Even minimal events should carry the data needed to understand what occurred.
+
+For a deeper look at how `DefineEvents` works under the hood, see [Messages & Type System](/docs/core-concepts/messages-and-types).
+
+## Step 2: Define Commands
+
+Commands represent intent -- a request for something to happen. Define them with `DefineCommands`:
+
+```typescript
+import { DefineCommands } from "@noddde/core";
+
+type BankAccountCommand = DefineCommands<{
+  CreateBankAccount: void;
+  AuthorizeTransaction: { amount: number; merchant: string };
+}>;
+```
+
+Each key becomes the command's `name`, and the value becomes its `payload` type. Every command in the resulting union automatically includes a `targetAggregateId` field that the framework uses for routing.
+
+**Naming convention:** commands are always imperative -- `CreateBankAccount`, `AuthorizeTransaction`, `PlaceBid`. They express what the caller wants to happen.
+
+**Use `void` for commands that carry no data** beyond the target aggregate ID. Do not use `{}` or `undefined` -- `void` cleanly omits the `payload` field from the resulting type.
+
+For a deeper look at how `DefineCommands` works under the hood, see [Messages & Type System](/docs/core-concepts/messages-and-types).
+
+## Step 3: Define State
+
+The state interface describes what the aggregate tracks between commands. Design it as a plain TypeScript interface:
+
+```typescript
+interface BankAccountState {
+  balance: number;
+  availableBalance: number;
+  transactions: Array<{
+    id: string;
+    timestamp: Date;
+    amount: number;
+    merchant: string;
+    status: "pending" | "processed" | "declined";
+  }>;
+}
+```
+
+A few design tips:
+
+- **Use zero values for `initialState`.** Numbers start at `0`, arrays start empty, optional references start as `null`. This makes the initial state trivial to construct.
+- **Prefer flat structures.** Deeply nested state is harder to update immutably in apply handlers. Keep it as shallow as your domain allows.
+- **The aggregate ID is NOT part of the state.** It lives on the command as `targetAggregateId` and is managed by the framework. See [Why Is the Aggregate ID Not in State?](/docs/design-decisions/why-id-not-in-state) for the rationale.
+
+## Step 4: Bundle Types
+
+Bundle the state, events, commands, and infrastructure into a single `AggregateTypes` type. This is the single type parameter that `defineAggregate` uses for full type inference across all boundaries:
+
+```typescript
+import { Infrastructure } from "@noddde/core";
+
+type BankAccountDef = {
+  state: BankAccountState;
+  events: BankAccountEvent;
+  commands: BankAccountCommand;
+  infrastructure: Infrastructure;
+};
+```
+
+The `infrastructure` field specifies what services your command handlers can access. The base `Infrastructure` type is an empty object -- use it when your aggregate needs no external services. If your handlers need a logger, a clock, or any other service, define a custom interface instead (see [Using Infrastructure](#using-infrastructure) below).
+
+This bundle replaces what would otherwise be five or more positional generic parameters. For the reasoning behind this approach, see [Why AggregateTypes?](/docs/design-decisions/why-aggregate-types).
+
+## Step 5: defineAggregate
+
+`defineAggregate` is an identity function -- it takes your aggregate object and returns it unchanged. Its only purpose is to provide type inference so TypeScript can verify that your command handlers, apply handlers, and initial state are all consistent.
+
+```typescript
+import { defineAggregate } from "@noddde/core";
+
+export const BankAccount = defineAggregate<BankAccountDef>({
+  initialState: {
+    balance: 0,
+    availableBalance: 0,
+    transactions: [],
+  },
+
+  commands: {
+    CreateBankAccount: (command) => ({
+      name: "BankAccountCreated",
+      payload: { id: command.targetAggregateId },
+    }),
+
+    AuthorizeTransaction: (command, state) => {
+      const { amount, merchant } = command.payload;
+
+      if (state.availableBalance < amount) {
+        return {
+          name: "TransactionDeclined",
+          payload: {
+            id: command.targetAggregateId,
+            timestamp: new Date(),
+            amount,
+            merchant,
+          },
+        };
+      }
+
+      return {
+        name: "TransactionAuthorized",
+        payload: {
+          id: command.targetAggregateId,
+          timestamp: new Date(),
+          amount,
+          merchant,
+        },
+      };
+    },
+  },
+
+  apply: {
+    BankAccountCreated: (_event, _state) => ({
+      balance: 0,
+      availableBalance: 0,
+      transactions: [],
+    }),
+
+    TransactionAuthorized: (event, state) => ({
+      ...state,
+      availableBalance: state.availableBalance - event.amount,
+      transactions: [
+        ...state.transactions,
+        { ...event, status: "pending" as const },
+      ],
+    }),
+
+    TransactionDeclined: (event, state) => ({
+      ...state,
+      transactions: [
+        ...state.transactions,
+        { ...event, status: "declined" as const },
+      ],
+    }),
+
+    TransactionProcessed: (event, state) => ({
+      ...state,
+      balance: state.balance - event.amount,
+      transactions: state.transactions.map((t) =>
+        t.id === event.id
+          ? { ...t, status: "processed" as const }
+          : t,
+      ),
+    }),
+  },
+});
+```
+
+TypeScript enforces the following at compile time:
+
+- Every command name in the union has a matching handler in the `commands` map.
+- Every event name in the union has a matching handler in the `apply` map.
+- Command handlers can only return events from the aggregate's event union.
+- Apply handlers must return the exact state shape.
+- Infrastructure access in command handlers is correctly typed.
+
+Because `defineAggregate` is an identity function, it adds **zero runtime overhead**. It exists purely for the type checker.
+
+## Using Infrastructure
+
+When command handlers need external services -- a clock, a logger, a fraud-check client -- define a custom infrastructure type and include it in the types bundle.
+
+Here is the auction domain, which uses an injected `clock` to validate bid timing:
+
+```typescript
+import {
+  Infrastructure,
+  DefineEvents,
+  DefineCommands,
+  defineAggregate,
+} from "@noddde/core";
+
+interface AuctionInfrastructure extends Infrastructure {
+  clock: { now(): Date };
+}
+
+type AuctionEvent = DefineEvents<{
+  AuctionCreated: { item: string; startingPrice: number };
+  BidPlaced: { bidderId: string; amount: number; timestamp: Date };
+  BidRejected: { bidderId: string; amount: number; reason: string };
+  AuctionClosed: { winnerId: string | null };
+}>;
+
+type AuctionCommand = DefineCommands<{
+  CreateAuction: { item: string; startingPrice: number; endsAt: Date };
+  PlaceBid: { bidderId: string; amount: number };
+  CloseAuction: void;
+}>;
+
+interface AuctionState {
+  item: string;
+  startingPrice: number;
+  endsAt: Date | null;
+  status: "pending" | "open" | "closed";
+  highestBid: { bidderId: string; amount: number } | null;
+}
+
+type AuctionDef = {
+  state: AuctionState;
+  events: AuctionEvent;
+  commands: AuctionCommand;
+  infrastructure: AuctionInfrastructure;
+};
+
+export const Auction = defineAggregate<AuctionDef>({
+  initialState: {
+    item: "",
+    startingPrice: 0,
+    endsAt: null,
+    status: "pending",
+    highestBid: null,
+  },
+
+  commands: {
+    CreateAuction: (command) => ({
+      name: "AuctionCreated",
+      payload: command.payload,
+    }),
+
+    PlaceBid: (command, state, { clock }) => {
+      if (state.status !== "open") {
+        return {
+          name: "BidRejected",
+          payload: {
+            ...command.payload,
+            reason: "Auction is not open",
+          },
+        };
+      }
+
+      if (state.endsAt && clock.now() > state.endsAt) {
+        return {
+          name: "BidRejected",
+          payload: {
+            ...command.payload,
+            reason: "Auction has ended",
+          },
+        };
+      }
+
+      const minimum = state.highestBid?.amount ?? state.startingPrice;
+      if (command.payload.amount <= minimum) {
+        return {
+          name: "BidRejected",
+          payload: {
+            ...command.payload,
+            reason: `Bid must exceed ${minimum}`,
+          },
+        };
+      }
+
+      return {
+        name: "BidPlaced",
+        payload: {
+          ...command.payload,
+          timestamp: clock.now(),
+        },
+      };
+    },
+
+    CloseAuction: (_command, state) => ({
+      name: "AuctionClosed",
+      payload: { winnerId: state.highestBid?.bidderId ?? null },
+    }),
+  },
+
+  apply: {
+    AuctionCreated: (event) => ({
+      item: event.item,
+      startingPrice: event.startingPrice,
+      endsAt: null,
+      status: "open" as const,
+      highestBid: null,
+    }),
+
+    BidPlaced: (event, state) => ({
+      ...state,
+      highestBid: {
+        bidderId: event.bidderId,
+        amount: event.amount,
+      },
+    }),
+
+    BidRejected: (_event, state) => state,
+
+    AuctionClosed: (_event, state) => ({
+      ...state,
+      status: "closed" as const,
+    }),
+  },
+});
+```
+
+Notice that `{ clock }` is destructured from the third argument of the `PlaceBid` handler. The `AuctionInfrastructure` type ensures TypeScript knows exactly which services are available.
+
+Infrastructure is **never passed to apply handlers**. Apply handlers are pure reducers -- they receive only the event payload and the current state. This keeps state evolution deterministic and safe for event replay.
+
+## Commands vs Events at a Glance
+
+| Aspect | Command | Event |
+|---|---|---|
+| Tense | Imperative ("do this") | Past tense ("this happened") |
+| Payload | Optional (use `void` for no data) | Always present |
+| `targetAggregateId` | Present on aggregate commands | Not present |
+| Meaning | Intent -- may be accepted or rejected | Fact -- has already occurred |
+| Mutability | Can be retried or rejected | Immutable once persisted |
+| Defined with | `DefineCommands` | `DefineEvents` |
+
+A single command may produce different events depending on business logic. For example, `AuthorizeTransaction` produces either `TransactionAuthorized` or `TransactionDeclined` based on the available balance.
+
+## Next Steps
+
+- [Command Handlers](/docs/modeling/command-handlers) -- Patterns for command handler logic: async handlers, returning multiple events, validation strategies
+- [State and Events](/docs/modeling/state-and-events) -- Apply handler patterns, immutable state updates, and modeling rejection events
+- [Routing and Dispatch](/docs/modeling/routing-and-dispatch) -- How `targetAggregateId` routes commands to the right aggregate instance

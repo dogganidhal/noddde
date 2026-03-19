@@ -1,0 +1,349 @@
+---
+title: Testing Aggregates & Projections
+description: Using testAggregate, evolveAggregate, and testProjection for Given-When-Then testing of command handlers and read models.
+---
+
+Aggregates and projections share a similar testing shape: replay events, then assert on the result. For aggregates you assert on produced events and state; for projections you assert on the final view. The `@noddde/testing` package provides type-safe harnesses for both.
+
+## testAggregate
+
+The primary harness for testing command handlers. It replays given events through `apply` handlers to build state, executes the command handler, and returns the produced events and resulting state.
+
+```ts
+import { testAggregate } from "@noddde/testing";
+
+const result = await testAggregate(BankAccount)
+  .given(
+    { name: "AccountCreated", payload: { id: "acc-1" } },
+    { name: "DepositMade", payload: { amount: 1000 } },
+  )
+  .when({
+    name: "AuthorizeTransaction",
+    targetAggregateId: "acc-1",
+    payload: { amount: 500, merchant: "Amazon" },
+  })
+  .execute();
+
+expect(result.events).toEqual([
+  {
+    name: "TransactionAuthorized",
+    payload: expect.objectContaining({ amount: 500, merchant: "Amazon" }),
+  },
+]);
+expect(result.state.availableBalance).toBe(500);
+```
+
+### Builder API
+
+| Method | Purpose |
+|--------|---------|
+| `.given(...events)` | Prior events to replay through `apply` handlers. Can be called multiple times; events accumulate. |
+| `.when(command)` | The command to execute. Required before `.execute()`. |
+| `.withInfrastructure(infra)` | Custom infrastructure for the handler. Defaults to `{}`. |
+| `.execute()` | Runs the test and returns the result. Always async. |
+
+### Result Shape
+
+```ts
+type AggregateTestResult<TState, TEvents> = {
+  events: TEvents[];   // Events produced by the command handler
+  state: TState;       // State after applying produced events
+  error?: Error;       // Captured error (if handler threw)
+};
+```
+
+The harness **never throws** -- errors are always captured in `result.error`.
+
+## Testing Without Prior Events
+
+When no `.given()` is called, the command runs against `aggregate.initialState`:
+
+```ts
+const result = await testAggregate(BankAccount)
+  .when({
+    name: "CreateBankAccount",
+    targetAggregateId: "acc-1",
+  })
+  .execute();
+
+expect(result.events[0].name).toBe("BankAccountCreated");
+```
+
+## Testing Rejection Cases
+
+When a command handler throws (e.g., validation failure), the error is captured:
+
+```ts
+const result = await testAggregate(BankAccount)
+  .given(
+    { name: "AccountCreated", payload: { id: "acc-1" } },
+  )
+  .when({
+    name: "AuthorizeTransaction",
+    targetAggregateId: "acc-1",
+    payload: { amount: 999999 },
+  })
+  .execute();
+
+expect(result.error).toBeDefined();
+expect(result.error!.message).toContain("insufficient");
+expect(result.events).toEqual([]);
+```
+
+## Testing with Infrastructure
+
+Pass infrastructure via `.withInfrastructure()`. This is how you inject clocks, loggers, or any domain-specific dependency:
+
+```ts
+const result = await testAggregate(BankAccount)
+  .given(
+    { name: "AccountCreated", payload: { id: "acc-1" } },
+  )
+  .when({
+    name: "AuthorizeTransaction",
+    targetAggregateId: "acc-1",
+    payload: { amount: 100, merchant: "Store" },
+  })
+  .withInfrastructure({
+    clock: { now: () => new Date("2024-05-15T10:00:00Z") },
+    logger: { info: vi.fn(), error: vi.fn() },
+  })
+  .execute();
+```
+
+For infrastructure with multiple members, create a reusable mock factory to keep tests concise:
+
+```ts
+function createMockBankingInfrastructure() {
+  return {
+    logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+    bankAccountViewRepository: {
+      getById: vi.fn(),
+      insert: vi.fn(),
+      update: vi.fn(),
+    },
+  };
+}
+
+const result = await testAggregate(BankAccount)
+  .when(createAccountCommand)
+  .withInfrastructure(createMockBankingInfrastructure())
+  .execute();
+```
+
+## Testing Multiple Events from One Command
+
+When a command handler returns an array of events, all are captured and applied:
+
+```ts
+const result = await testAggregate(BankAccount)
+  .given(
+    { name: "AccountCreated", payload: { id: "acc-1" } },
+    { name: "DepositMade", payload: { amount: 1000 } },
+  )
+  .when({
+    name: "ProcessBatchTransactions",
+    targetAggregateId: "acc-1",
+    payload: { transactions: [{ amount: 100 }, { amount: 200 }, { amount: 300 }] },
+  })
+  .execute();
+
+expect(result.events).toHaveLength(3);
+```
+
+## evolveAggregate
+
+A standalone pure function for replaying events through apply handlers. Useful when you need to reconstruct state without executing a command:
+
+```ts
+import { evolveAggregate } from "@noddde/testing";
+
+const state = evolveAggregate(BankAccount, [
+  { name: "BankAccountCreated", payload: { id: "acc-1" } },
+  { name: "TransactionAuthorized", payload: { id: "t1", amount: 300, merchant: "A", timestamp: now } },
+  { name: "TransactionProcessed", payload: { id: "t1", amount: 300, merchant: "A", timestamp: now } },
+]);
+
+expect(state.balance).toBe(300);
+```
+
+You can also pass a custom starting state:
+
+```ts
+const state = evolveAggregate(
+  BankAccount,
+  [{ name: "DepositMade", payload: { amount: 50 } }],
+  { balance: 100, availableBalance: 100, transactions: [] },
+);
+
+expect(state.balance).toBe(150);
+```
+
+## Direct Aggregate Handler Testing
+
+You can always bypass the harness and call handlers directly:
+
+```ts
+// Command handler
+const events = BankAccount.commands.AuthorizeTransaction(
+  command, state, infrastructure,
+);
+
+// Apply handler (pure, sync)
+const newState = BankAccount.apply.TransactionAuthorized(payload, state);
+```
+
+The harness is recommended for most tests because it manages state reconstruction from events and provides consistent error handling, but direct calls are useful for focused unit tests of individual handlers.
+
+---
+
+## testProjection
+
+Projections build read models from event streams. The `testProjection` harness replays events through the projection's reducers and returns the final view.
+
+```ts
+import { testProjection } from "@noddde/testing";
+
+const result = await testProjection(BankAccountProjection)
+  .given(
+    { name: "BankAccountCreated", payload: { id: "acc-1" } },
+    { name: "TransactionProcessed", payload: { id: "t1", amount: 500, merchant: "Salary", timestamp: now } },
+    { name: "TransactionProcessed", payload: { id: "t2", amount: -50, merchant: "Coffee", timestamp: now } },
+  )
+  .execute();
+
+expect(result.view.balance).toBe(450);
+expect(result.view.transactions).toHaveLength(2);
+```
+
+### Builder API
+
+| Method | Purpose |
+|--------|---------|
+| `.initialView(view)` | Starting view before events. If omitted, reducers receive `undefined` (matching real first-event behavior). |
+| `.given(...events)` | Events to replay through reducers. Can be called multiple times; events accumulate in order. |
+| `.execute()` | Runs the test and returns the result. Always async. |
+
+### Result Shape
+
+```ts
+type ProjectionTestResult<TView> = {
+  view: TView;      // Final view after all events
+  error?: Error;     // Captured error (if a reducer threw)
+};
+```
+
+## Initial View
+
+Control the starting state of the projection. This is useful when testing incremental updates rather than building from scratch:
+
+```ts
+const result = await testProjection(BankAccountProjection)
+  .initialView({
+    id: "acc-1",
+    balance: 1000,
+    transactions: [/* existing transactions */],
+  })
+  .given(
+    { name: "TransactionProcessed", payload: { id: "t3", amount: -200, merchant: "Store", timestamp: now } },
+  )
+  .execute();
+
+expect(result.view.balance).toBe(800);
+```
+
+When `.initialView()` is not called, the first reducer invocation receives `undefined` as the view. This matches real projection behavior when the first event arrives. Design your reducers to handle this:
+
+```ts
+reducers: {
+  AccountCreated: (event, view) => ({
+    id: event.payload.id,
+    balance: 0,              // Initialize from scratch
+    transactions: [],
+  }),
+  DepositMade: (event, view) => ({
+    ...view,                 // Spread existing view
+    balance: (view?.balance ?? 0) + event.payload.amount,
+  }),
+},
+```
+
+## Testing Full Event Streams
+
+Build a complete view from scratch by providing all events in order:
+
+```ts
+const result = await testProjection(BankAccountProjection)
+  .given(
+    { name: "BankAccountCreated", payload: { id: "acc-1" } },
+    { name: "DepositMade", payload: { amount: 1000 } },
+    { name: "TransactionAuthorized", payload: { id: "t1", amount: 200, merchant: "Store", timestamp: now } },
+    { name: "TransactionProcessed", payload: { id: "t1", amount: 200, merchant: "Store", timestamp: now } },
+  )
+  .execute();
+
+expect(result.view.balance).toBe(800);
+expect(result.view.transactions).toHaveLength(1);
+```
+
+## Reducers Receive the Full Event
+
+Projection reducers receive the **full event object** (`{ name, payload }`), not just the payload. The event type is narrowed by name:
+
+```ts
+reducers: {
+  AccountCreated: (event, view) => {
+    // event is { name: "AccountCreated", payload: { id: string } }
+    return { ...view, id: event.payload.id };
+  },
+},
+```
+
+This is consistent with the runtime behavior in `@noddde/engine` and different from aggregate apply handlers, which receive only the payload.
+
+## Testing Async Reducers
+
+Reducers can be async. The harness awaits each one sequentially:
+
+```ts
+const result = await testProjection(AsyncProjection)
+  .given(
+    { name: "DataFetched", payload: { url: "https://example.com" } },
+  )
+  .execute();
+
+expect(result.view.fetched).toBe(true);
+```
+
+## Projection Error Handling
+
+If a reducer throws, the error is captured in the result:
+
+```ts
+const result = await testProjection(StrictProjection)
+  .given({ name: "InvalidEvent", payload: { bad: true } })
+  .execute();
+
+expect(result.error).toBeDefined();
+expect(result.error!.message).toContain("invalid");
+```
+
+## Direct Reducer Testing
+
+You can always call reducers directly for focused tests:
+
+```ts
+const newView = BankAccountProjection.reducers.TransactionProcessed(
+  { name: "TransactionProcessed", payload: { id: "t1", amount: 100, merchant: "Store", timestamp: now } },
+  { id: "acc-1", balance: 0, transactions: [] },
+);
+
+expect(newView.balance).toBe(100);
+```
+
+## Next Steps
+
+- [Testing Sagas](/docs/testing/testing-sagas) -- `testSaga` for workflow testing
+- [Testing Domains](/docs/testing/testing-domains) -- `testDomain` for slice tests with aggregates and projections together
+- [Defining Aggregates](/docs/modeling/defining-aggregates) -- Aggregate definition reference
+- [Defining Projections](/docs/read-model/defining-projections) -- Projection definition reference

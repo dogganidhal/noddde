@@ -93,7 +93,7 @@ expect(result.state.status).toBe("fulfilled");
 
 ## Automatic CQRS Infrastructure
 
-Saga handlers receive `TInfrastructure & CQRSInfrastructure` — they have access to `commandBus`, `eventBus`, and `queryBus`. The harness automatically provides no-op implementations so you do not need to wire mock buses for most tests.
+Saga handlers receive `TInfrastructure & CQRSInfrastructure` -- they have access to `commandBus`, `eventBus`, and `queryBus`. The harness automatically provides no-op implementations so you do not need to wire mock buses for most tests.
 
 Most saga handlers return commands in the reaction rather than dispatching through the bus directly. The no-op buses satisfy the type contract without affecting test behavior.
 
@@ -161,8 +161,67 @@ const sagaId = OrderFulfillmentSaga.associations.OrderPlaced({
 expect(sagaId).toBe("o-1");
 ```
 
+Each bounded context may name the correlation field differently (`orderId`, `referenceId`, `customerReference`), so verify that each association resolves to the same saga ID:
+
+```ts
+describe("associations", () => {
+  it("should extract orderId from OrderPlaced", () => {
+    const event = {
+      name: "OrderPlaced" as const,
+      payload: { orderId: "order-1", customerId: "c-1", items: [], total: 0, placedAt: new Date() },
+    };
+    expect(OrderFulfillmentSaga.associations.OrderPlaced(event)).toBe("order-1");
+  });
+
+  it("should extract referenceId from PaymentCompleted", () => {
+    const event = {
+      name: "PaymentCompleted" as const,
+      payload: { paymentId: "pay-1", referenceId: "order-1", amount: 100, completedAt: new Date() },
+    };
+    expect(OrderFulfillmentSaga.associations.PaymentCompleted(event)).toBe("order-1");
+  });
+});
+```
+
+## Testing Full Workflows
+
+Replay a sequence of events through the saga to verify the complete lifecycle. You can either use the harness for each step or call handlers directly:
+
+```ts
+it("should complete the full happy path", async () => {
+  let state = OrderFulfillmentSaga.initialState;
+  let commands: any;
+
+  // Step 1: Order placed
+  ({ state, commands } = OrderFulfillmentSaga.handlers.OrderPlaced(
+    { name: "OrderPlaced", payload: { orderId: "o-1", customerId: "c-1", items: [], total: 100, placedAt: new Date() } },
+    state,
+    mockInfra,
+  ));
+  expect(state.status).toBe("awaiting_payment");
+  expect(commands.name).toBe("RequestPayment");
+
+  // Step 2: Payment completed
+  ({ state, commands } = OrderFulfillmentSaga.handlers.PaymentCompleted(
+    { name: "PaymentCompleted", payload: { paymentId: "p-1", referenceId: "o-1", amount: 100, completedAt: new Date() } },
+    state,
+    mockInfra,
+  ));
+  expect(state.status).toBe("awaiting_shipment");
+
+  // Step 3: Shipment dispatched
+  ({ state, commands } = OrderFulfillmentSaga.handlers.ShipmentDispatched(
+    { name: "ShipmentDispatched", payload: { shipmentId: "s-1", customerReference: "o-1", trackingNumber: "TRK-123", dispatchedAt: new Date() } },
+    state,
+    mockInfra,
+  ));
+  expect(state.status).toBe("shipped");
+  expect(state.trackingNumber).toBe("TRK-123");
+});
+```
+
 ## Next Steps
 
-- [Testing Aggregates](/docs/testing/testing-aggregates) — `testAggregate` for command handler testing
-- [Testing Domains](/docs/testing/testing-domains) — `testDomain` for full saga orchestration tests
-- [Defining Sagas](/docs/sagas/defining-sagas) — Saga definition reference
+- [Testing Aggregates and Projections](/docs/testing/testing-aggregates-and-projections) -- `testAggregate` for command handler testing
+- [Testing Domains](/docs/testing/testing-domains) -- `testDomain` for full saga orchestration tests
+- [Defining Sagas](/docs/process-managers/defining-sagas) -- Saga definition reference

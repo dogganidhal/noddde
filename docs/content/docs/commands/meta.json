@@ -1,4 +1,0 @@
-{
-  "title": "Commands",
-  "pages": ["defining-commands", "handling-commands", "standalone-commands", "dispatching", "infrastructure"]
-}

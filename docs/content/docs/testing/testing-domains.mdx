@@ -49,11 +49,11 @@ type TestDomainConfig = {
 
 Only specify what you are testing. Everything else is wired automatically:
 
-- **Command bus** — `InMemoryCommandBus` with spy
-- **Event bus** — `EventEmitterEventBus` with spy
-- **Query bus** — `InMemoryQueryBus`
-- **Aggregate persistence** — `InMemoryEventSourcedAggregatePersistence`
-- **Saga persistence** — `InMemorySagaPersistence` (only when sagas are configured)
+- **Command bus** -- `InMemoryCommandBus` with spy
+- **Event bus** -- `EventEmitterEventBus` with spy
+- **Query bus** -- `InMemoryQueryBus`
+- **Aggregate persistence** -- `InMemoryEventSourcedAggregatePersistence`
+- **Saga persistence** -- `InMemorySagaPersistence` (only when sagas are configured)
 
 ### Result Shape
 
@@ -75,30 +75,29 @@ type DomainSpy = {
 
 ```ts
 const { domain, spy } = await testDomain({
-  aggregates: { Counter },
+  aggregates: { BankAccount },
 });
 
 await domain.dispatchCommand({
-  name: "Increment",
-  targetAggregateId: "c-1",
-  payload: { amount: 5 },
+  name: "CreateBankAccount",
+  targetAggregateId: "acc-1",
 });
 
 await domain.dispatchCommand({
-  name: "Increment",
-  targetAggregateId: "c-1",
-  payload: { amount: 3 },
+  name: "DepositMade",
+  targetAggregateId: "acc-1",
+  payload: { amount: 500 },
 });
 
 expect(spy.publishedEvents).toEqual([
-  { name: "Incremented", payload: { amount: 5 } },
-  { name: "Incremented", payload: { amount: 3 } },
+  { name: "BankAccountCreated", payload: expect.any(Object) },
+  { name: "DepositMade", payload: { amount: 500 } },
 ]);
 ```
 
 ## Spy: Dispatched Commands
 
-`spy.dispatchedCommands` records commands dispatched through the command bus. This is most useful for verifying saga behavior — sagas dispatch commands as reactions to events:
+`spy.dispatchedCommands` records commands dispatched through the command bus. This is most useful for verifying saga behavior -- sagas dispatch commands as reactions to events:
 
 ```ts
 const { domain, spy } = await testDomain({
@@ -127,18 +126,23 @@ After dispatching commands, check the projection view directly:
 
 ```ts
 const { domain } = await testDomain({
-  aggregates: { Counter },
-  projections: { CounterView },
+  aggregates: { BankAccount },
+  projections: { BankAccountView },
 });
 
 await domain.dispatchCommand({
-  name: "Increment",
-  targetAggregateId: "c-1",
-  payload: { amount: 10 },
+  name: "CreateBankAccount",
+  targetAggregateId: "acc-1",
 });
 
-const view = domain.getProjectionView<{ total: number }>("CounterView");
-expect(view?.total).toBe(10);
+await domain.dispatchCommand({
+  name: "DepositMade",
+  targetAggregateId: "acc-1",
+  payload: { amount: 1000 },
+});
+
+const view = domain.getProjectionView<{ balance: number }>("BankAccountView");
+expect(view?.balance).toBe(1000);
 ```
 
 ## Custom Infrastructure
@@ -166,7 +170,7 @@ expect(mockLogger.info).toHaveBeenCalled();
 
 ## Full Slice Test Example
 
-Testing the complete order fulfillment flow — aggregate, projection, and saga together:
+Testing the complete order fulfillment flow -- aggregate, projection, and saga together:
 
 ```ts
 const { domain, spy } = await testDomain({
@@ -211,7 +215,6 @@ expect(summary?.status).toBe("confirmed");
 
 ## Next Steps
 
-- [Testing Aggregates](/docs/testing/testing-aggregates) — Unit-level aggregate testing
-- [Testing Sagas](/docs/testing/testing-sagas) — Unit-level saga testing
-- [Testing Infrastructure](/docs/testing/testing-infrastructure) — Mocking patterns and Clock
-- [Domain Configuration](/docs/domain-configuration/overview) — Full `configureDomain` reference
+- [Testing Aggregates and Projections](/docs/testing/testing-aggregates-and-projections) -- Unit-level aggregate and projection testing
+- [Testing Sagas](/docs/testing/testing-sagas) -- Unit-level saga testing
+- [Domain Configuration](/docs/running/domain-configuration) -- Full `configureDomain` reference

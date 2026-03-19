@@ -1,0 +1,272 @@
+---
+title: Infrastructure
+description: How noddde uses injectable infrastructure to keep domain logic pure, and how to configure providers, buses, and custom services.
+---
+
+Infrastructure in noddde refers to everything outside your domain logic -- databases, loggers, HTTP clients, clocks, view repositories, and any external service your handlers need. The framework enforces a strict boundary: domain logic depends on interfaces, and concrete implementations are injected at configuration time.
+
+## The Core Principle
+
+A command handler that decides whether a transaction is authorized should not know whether it is logging to the console or to CloudWatch. It should not know whether its state came from PostgreSQL or an in-memory store.
+
+noddde enforces this by injecting infrastructure as a function parameter, never as a direct import:
+
+```ts
+commands: {
+  AuthorizeTransaction: (command, state, { logger }) => {
+    logger.info(`Processing transaction for ${command.payload.merchant}`);
+    // Business logic here -- no knowledge of concrete logger
+  },
+},
+```
+
+The handler depends on the `Logger` interface, not a concrete `ConsoleLogger`. This separation makes the entire framework testable without mocks for infrastructure internals.
+
+## The Infrastructure Type
+
+The base `Infrastructure` type is deliberately empty:
+
+```ts
+type Infrastructure = {};
+```
+
+You extend it with whatever your domain needs:
+
+```ts
+interface BankingInfrastructure {
+  logger: Logger;
+  bankAccountViewRepository: BankAccountViewRepository;
+  transactionViewRepository: TransactionViewRepository;
+}
+```
+
+This type becomes the `infrastructure` member of your [AggregateTypes](/docs/modeling/aggregates) bundle, flowing through the type system to ensure handlers receive the correct infrastructure at compile time.
+
+### Defining Interfaces with Swappable Implementations
+
+Each member of your infrastructure type should be an interface with concrete implementations:
+
+```ts
+interface Logger {
+  info(message: string): void;
+  error(message: string): void;
+}
+
+// Production
+class ConsoleLogger implements Logger {
+  info(message: string) { console.log(message); }
+  error(message: string) { console.error(message); }
+}
+
+// Test
+class SilentLogger implements Logger {
+  info(_message: string) {}
+  error(_message: string) {}
+}
+```
+
+This pattern -- interface plus swappable implementations -- is what makes noddde handlers testable without mocking frameworks.
+
+## Where Infrastructure Is Injected
+
+Infrastructure appears as a parameter in three handler types:
+
+| Handler Type | Parameter Position | Receives |
+| --- | --- | --- |
+| Aggregate command handlers | Third parameter | `TInfrastructure` |
+| Projection event handlers | Second parameter | `TInfrastructure` |
+| Query handlers | Second parameter | `TInfrastructure` |
+| Standalone command handlers | Second parameter | `TInfrastructure & CQRSInfrastructure` |
+| Saga handlers | Third parameter | `TInfrastructure & CQRSInfrastructure` |
+
+[Apply handlers](/docs/core-concepts/cqrs-and-event-sourcing) deliberately do **not** receive infrastructure. They are pure, synchronous functions for deterministic event replay -- no side effects allowed.
+
+## CQRSInfrastructure
+
+In addition to your custom infrastructure, noddde provides a built-in `CQRSInfrastructure` type:
+
+```ts
+interface CQRSInfrastructure {
+  commandBus: CommandBus;
+  eventBus: EventBus;
+  queryBus: QueryBus;
+}
+```
+
+These three buses are the communication backbone of the CQRS architecture:
+
+- **`CommandBus`** -- Routes commands to aggregates and standalone command handlers
+- **`EventBus`** -- Publishes events to projections, sagas, and other subscribers
+- **`QueryBus`** -- Routes queries to query handlers with type-safe return values
+
+Standalone command handlers and saga handlers receive the merged type `TInfrastructure & CQRSInfrastructure`, giving them access to both your custom services and the CQRS buses. This is what allows them to orchestrate across aggregates.
+
+## The Infrastructure Providers
+
+The `infrastructure` section of the [domain configuration](/docs/running/domain-configuration) provides four factory functions that create runtime dependencies.
+
+### provideInfrastructure
+
+Provides your custom domain infrastructure -- the services, repositories, and tools your handlers need:
+
+```ts
+provideInfrastructure: () => ({
+  logger: new ConsoleLogger(),
+  bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
+  transactionViewRepository: new InMemoryTransactionViewRepository(),
+}),
+```
+
+The generic parameter `<BankingInfrastructure>` on `configureDomain` ensures the factory return type matches your infrastructure definition. TypeScript reports an error if you forget a member or return the wrong type.
+
+### cqrsInfrastructure
+
+Provides the three CQRS buses. It receives the custom infrastructure as a parameter, allowing buses to be configured based on your infrastructure:
+
+```ts
+cqrsInfrastructure: (customInfra) => ({
+  commandBus: new InMemoryCommandBus(),
+  eventBus: new EventEmitterEventBus(),
+  queryBus: new InMemoryQueryBus(),
+}),
+```
+
+### aggregatePersistence
+
+Provides the persistence strategy for aggregate state. Returns either an `EventSourcedAggregatePersistence` or a `StateStoredAggregatePersistence`. See [Persistence](/docs/running/persistence) for details.
+
+```ts
+aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
+```
+
+### unitOfWorkFactory
+
+Provides the factory for creating `UnitOfWork` instances used for atomic command dispatch. See [Unit of Work](/docs/running/unit-of-work) for details.
+
+```ts
+unitOfWorkFactory: () => () => new PostgresUnitOfWork(pool),
+```
+
+## Why Factory Functions
+
+All providers are factory functions (not raw values). This is intentional:
+
+- **Lazy initialization** -- Resources are created when needed, not at import time
+- **Async setup** -- Database connections, service discovery, config loading
+- **Clean isolation** -- Each test can create fresh infrastructure
+
+```ts
+infrastructure: {
+  provideInfrastructure: async () => {
+    const dbConnection = await connectToDatabase();
+    return {
+      logger: new ConsoleLogger(),
+      bankAccountRepo: new PostgresBankAccountRepository(dbConnection),
+    };
+  },
+  cqrsInfrastructure: async (infra) => ({
+    commandBus: await createRabbitMQCommandBus(),
+    eventBus: await createKafkaEventBus(),
+    queryBus: new InMemoryQueryBus(),
+  }),
+},
+```
+
+## Provider Execution Order
+
+When `configureDomain` is called:
+
+1. `provideInfrastructure()` is called first to create custom infrastructure
+2. `cqrsInfrastructure(customInfra)` is called with the custom infrastructure
+3. `aggregatePersistence()` is called to set up persistence
+4. `unitOfWorkFactory()` is called to set up the unit of work factory
+5. The `Domain` instance is created with all infrastructure merged
+
+The resulting `domain.infrastructure` property is `TInfrastructure & CQRSInfrastructure` -- your custom infrastructure merged with the CQRS buses.
+
+## Custom Bus Implementations
+
+The built-in buses (`InMemoryCommandBus`, `EventEmitterEventBus`, `InMemoryQueryBus`) are suitable for single-process applications. For production, you can implement custom buses backed by message brokers.
+
+### Logging Decorator Pattern
+
+A common pattern is to wrap a bus with logging:
+
+```ts
+class LoggingCommandBus implements CommandBus {
+  constructor(
+    private readonly inner: CommandBus,
+    private readonly logger: Logger,
+  ) {}
+
+  async dispatch(command: Command): Promise<void> {
+    this.logger.info(`Dispatching command: ${command.name}`);
+    await this.inner.dispatch(command);
+    this.logger.info(`Command dispatched: ${command.name}`);
+  }
+}
+
+// In the provider:
+cqrsInfrastructure: (infra) => ({
+  commandBus: new LoggingCommandBus(new InMemoryCommandBus(), infra.logger),
+  eventBus: new EventEmitterEventBus(),
+  queryBus: new InMemoryQueryBus(),
+}),
+```
+
+Notice how `cqrsInfrastructure` receives the custom infrastructure as a parameter. This allows the logging bus to use the same logger that command handlers use.
+
+## Testing with Different Infrastructure
+
+The factory pattern makes it straightforward to swap infrastructure for testing:
+
+```ts
+// Production
+const prodDomain = await configureDomain<BankingInfrastructure>({
+  writeModel: { aggregates: { BankAccount } },
+  readModel: { projections: { BankAccount: BankAccountProjection } },
+  infrastructure: {
+    provideInfrastructure: () => createProductionInfrastructure(),
+    cqrsInfrastructure: () => createProductionBuses(),
+    aggregatePersistence: () => new PostgresEventStore(),
+  },
+});
+
+// Testing
+const testDomain = await configureDomain<BankingInfrastructure>({
+  writeModel: { aggregates: { BankAccount } },
+  readModel: { projections: { BankAccount: BankAccountProjection } },
+  infrastructure: {
+    provideInfrastructure: () => ({
+      logger: new SilentLogger(),
+      bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
+      transactionViewRepository: new InMemoryTransactionViewRepository(),
+    }),
+    cqrsInfrastructure: () => ({
+      commandBus: new InMemoryCommandBus(),
+      eventBus: new EventEmitterEventBus(),
+      queryBus: new InMemoryQueryBus(),
+    }),
+    aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
+  },
+});
+```
+
+Same aggregates and projections, different infrastructure. The domain logic does not change -- only the infrastructure factories differ between environments.
+
+## Accessing Buses at Runtime
+
+After configuration, buses are available on `domain.infrastructure`:
+
+```ts
+const domain = await configureDomain<BankingInfrastructure>({ /* ... */ });
+
+const { commandBus, eventBus, queryBus } = domain.infrastructure;
+```
+
+## Next Steps
+
+- [Domain Configuration](/docs/running/domain-configuration) -- The full configuration structure
+- [Persistence](/docs/running/persistence) -- Event-sourced vs. state-stored strategies
+- [ORM Adapters](/docs/running/orm-adapters) -- Production persistence using Drizzle, Prisma, or TypeORM
+- [Testing](/docs/testing/overview) -- Using in-memory implementations for testing

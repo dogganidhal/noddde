@@ -1,0 +1,321 @@
+---
+title: Projections
+description: Building read-optimized views from event streams using reducer maps, query handlers, and defineProjection.
+---
+
+Projections are the read side of your domain. They consume events produced by aggregates and transform them into purpose-specific data structures called **views** (or **read models**) that are optimized for querying. For background on why the read and write sides are separated, see [CQRS and Event Sourcing](/docs/core-concepts/cqrs-and-event-sourcing).
+
+## Why Projections?
+
+An aggregate's state is structured to enforce business rules -- not to serve queries efficiently. A bank account aggregate tracks `balance`, `availableBalance`, and a `transactions` array because those are needed for authorization decisions. But a dashboard showing accounts sorted by balance, a search across transactions by merchant, or a spending analytics view all need different data structures.
+
+Projections solve this by building query-specific views from the event stream. Adding a new read model means writing a new projection. The write model is never touched.
+
+## The Event Flow
+
+When a command is dispatched, the following sequence connects the write side to projections:
+
+1. The aggregate's command handler processes the command and returns events
+2. Events are persisted (via `EventSourcedAggregatePersistence` or equivalent)
+3. Each event is published to the `EventBus`
+4. Registered projections receive the events and update their views via reducers
+5. Queries read from the projection views via query handlers
+
+```
+Command --> Aggregate --> Events --> EventBus --> Projection Reducers --> View
+                                                                         |
+                                                            Query --> QueryHandler
+```
+
+## The ProjectionTypes Bundle
+
+Every projection is parameterized by a `ProjectionTypes` bundle -- a single named type that captures four dimensions:
+
+```ts
+type MyProjectionDef = {
+  events: MyEvent;           // The event union this projection handles
+  queries: MyQuery;          // The query union this projection answers
+  view: MyView;              // The view model this projection builds
+  infrastructure: MyInfra;   // Dependencies available to query handlers
+};
+```
+
+This follows the same pattern as `AggregateTypes` in [defining aggregates](/docs/modeling/defining-aggregates) -- instead of threading positional generics, you declare a single named type.
+
+## Defining a Projection
+
+Use `defineProjection` to create a projection with full type inference:
+
+```ts
+import { defineProjection, DefineQueries } from "@noddde/core";
+
+// View model -- read-optimized, display-focused
+type BankAccountView = {
+  id: string;
+  balance: number;
+  transactions: {
+    id: string;
+    timestamp: Date;
+    amount: number;
+    status: "processed" | "declined" | "authorized";
+  }[];
+};
+
+// Queries this projection serves
+type BankAccountQuery = DefineQueries<{
+  GetBankAccountById: { payload: { id: string }; result: BankAccountView | null };
+}>;
+
+// The ProjectionTypes bundle
+type BankAccountProjectionDef = {
+  events: BankAccountEvent;
+  queries: BankAccountQuery;
+  view: BankAccountView;
+  infrastructure: BankingInfrastructure;
+};
+
+export const BankAccountProjection = defineProjection<BankAccountProjectionDef>({
+  reducers: {
+    BankAccountCreated: (event) => ({
+      id: event.payload.id,
+      balance: 0,
+      transactions: [],
+    }),
+
+    TransactionProcessed: (event, view) => ({
+      ...view,
+      balance: view.balance + event.payload.amount,
+      transactions: [
+        ...view.transactions,
+        {
+          id: event.payload.id,
+          timestamp: event.payload.timestamp,
+          amount: event.payload.amount,
+          status: "processed" as const,
+        },
+      ],
+    }),
+
+    TransactionDeclined: (event, view) => ({
+      ...view,
+      transactions: [
+        ...view.transactions,
+        {
+          id: event.payload.id,
+          timestamp: event.payload.timestamp,
+          amount: event.payload.amount,
+          status: "declined" as const,
+        },
+      ],
+    }),
+  },
+
+  queryHandlers: {
+    GetBankAccountById: async (query, { bankAccountViewRepository }) =>
+      bankAccountViewRepository.getById(query.payload.id),
+  },
+});
+```
+
+`defineProjection` is an identity function -- it returns the same object you pass in, but with full type inference applied. The framework uses the `ProjectionTypes` bundle to narrow event types inside each reducer and validate query handler return types.
+
+## Reducers
+
+The `reducers` map contains one handler per event name. Each reducer receives the **full event** (not just the payload) and the current view, then returns the updated view.
+
+```ts
+reducers: {
+  // `event` is narrowed to the specific event variant, not the full union
+  BankAccountCreated: (event, view) => ({
+    ...view,
+    id: event.payload.id,
+  }),
+}
+```
+
+Key properties of reducers:
+
+- **Automatic type narrowing** -- Inside each handler, `event` is narrowed to the specific event variant (e.g., `Extract<BankAccountEvent, { name: "BankAccountCreated" }>`). No switch statements or type guards needed.
+- **Exhaustiveness checking** -- TypeScript ensures you handle every event in the union. Missing an event name is a compile error.
+- **Can be async** -- Reducers may return `Promise<View>` when they need to perform asynchronous work.
+- **Receive full events** -- Unlike aggregate apply handlers that receive just the payload, projection reducers receive the complete event object (with `name` and `payload`).
+
+### Why a Map Instead of a Single Reducer?
+
+A map of per-event functions has two advantages over a single `(view, event) => view` function:
+
+1. **Automatic type narrowing** -- Each handler gets the specific event type, not the union.
+2. **Exhaustiveness** -- TypeScript catches missing event handlers at compile time.
+
+### Similarity to Apply Handlers
+
+The reducer pattern mirrors the apply handler pattern used in aggregates. Both are maps of functions that transform state based on events. The difference is purpose:
+
+- **Apply handlers** rebuild the aggregate's internal state for command processing
+- **Projection reducers** build a query-optimized view for the read model
+
+## Query Handlers
+
+The `queryHandlers` map contains handlers for serving queries from the projection's view. Each handler receives the query and the infrastructure:
+
+```ts
+queryHandlers: {
+  GetBankAccountById: async (query, { bankAccountViewRepository }) =>
+    bankAccountViewRepository.getById(query.payload.id),
+}
+```
+
+Query handlers access data through infrastructure -- typically view repositories that encapsulate the underlying storage. The handler's return type is validated against the `result` type declared in the `DefineQueries` map.
+
+Query handlers are optional. A projection may handle events (updating a view) without directly serving queries.
+
+## Type Inference Helpers
+
+noddde provides `Infer*` helpers to extract individual types from a projection definition:
+
+```ts
+import type {
+  InferProjectionView,
+  InferProjectionEvents,
+  InferProjectionQueries,
+  InferProjectionInfrastructure,
+} from "@noddde/core";
+
+type View    = InferProjectionView<typeof BankAccountProjection>;           // BankAccountView
+type Events  = InferProjectionEvents<typeof BankAccountProjection>;         // BankAccountEvent
+type Queries = InferProjectionQueries<typeof BankAccountProjection>;        // BankAccountQuery
+type Infra   = InferProjectionInfrastructure<typeof BankAccountProjection>; // BankingInfrastructure
+```
+
+These are useful when other modules need to reference projection types without importing the underlying type aliases directly.
+
+## Multiple Projections from the Same Events
+
+A single stream of events can feed multiple projections, each optimized for a different query pattern:
+
+```ts
+// Projection 1: Account balance view
+const AccountBalanceProjection = defineProjection<BalanceDef>({
+  reducers: {
+    TransactionProcessed: (event, view) => ({
+      ...view,
+      balance: view.balance + event.payload.amount,
+    }),
+    // ...
+  },
+  queryHandlers: { /* ... */ },
+});
+
+// Projection 2: Transaction history view
+const TransactionHistoryProjection = defineProjection<HistoryDef>({
+  reducers: {
+    TransactionProcessed: (event, view) => ({
+      ...view,
+      transactions: [...view.transactions, {
+        id: event.payload.id,
+        amount: event.payload.amount,
+        merchant: event.payload.merchant,
+      }],
+    }),
+    // ...
+  },
+  queryHandlers: { /* ... */ },
+});
+```
+
+Both projections consume the same `TransactionProcessed` event but build entirely different views.
+
+### Cross-Aggregate Projections
+
+A projection is not limited to events from a single aggregate. A single projection can consume events from multiple aggregate types by using a union in the `events` field:
+
+```ts
+type CrossDomainProjectionDef = {
+  events: BankAccountEvent | AuditEvent;
+  queries: ActivityQuery;
+  view: ActivityFeedView;
+  infrastructure: AppInfrastructure;
+};
+```
+
+This is useful for building views that span multiple domain concepts, such as an activity feed combining events from several aggregates.
+
+## Registering Projections
+
+Projections are registered in the `readModel.projections` map of the domain configuration:
+
+```ts
+import { configureDomain } from "@noddde/engine";
+
+const domain = await configureDomain<BankingInfrastructure>({
+  writeModel: {
+    aggregates: { BankAccount },
+  },
+  readModel: {
+    projections: {
+      AccountBalance: AccountBalanceProjection,
+      TransactionHistory: TransactionHistoryProjection,
+    },
+  },
+  infrastructure: { /* ... */ },
+});
+```
+
+The key in the projections map (e.g., `"AccountBalance"`) is the projection's name. It does not need to match the aggregate name.
+
+## Event Delivery Guarantees
+
+The `EventBus` implementation determines delivery guarantees:
+
+- **`EventEmitterEventBus`** (built-in) -- In-process, sequentially awaited delivery. Events are delivered immediately after persistence. If a handler throws, the error propagates. Suitable for single-process applications and testing.
+- **Custom implementations** -- You can implement asynchronous delivery, at-least-once guarantees, or distributed event buses by providing your own `EventBus` implementation.
+
+## Testing Reducers
+
+Because reducers are pure functions, testing them is straightforward -- call the function with inputs and assert the output:
+
+```ts
+import { describe, it, expect } from "vitest";
+import { BankAccountProjection } from "./projection";
+
+describe("BankAccountProjection", () => {
+  const emptyView = { id: "", balance: 0, transactions: [] };
+
+  it("initializes the view on BankAccountCreated", () => {
+    const result = BankAccountProjection.reducers.BankAccountCreated(
+      { name: "BankAccountCreated", payload: { id: "acc-123" } },
+      emptyView,
+    );
+
+    expect(result.id).toBe("acc-123");
+    expect(result.balance).toBe(0);
+  });
+
+  it("adds to balance on TransactionProcessed", () => {
+    const view = { id: "acc-123", balance: 100, transactions: [] };
+
+    const result = BankAccountProjection.reducers.TransactionProcessed(
+      {
+        name: "TransactionProcessed",
+        payload: {
+          id: "txn-1",
+          timestamp: new Date(),
+          amount: 50,
+          merchant: "Store",
+        },
+      },
+      view,
+    );
+
+    expect(result.balance).toBe(150);
+    expect(result.transactions).toHaveLength(1);
+  });
+});
+```
+
+No mocks needed. No infrastructure setup. Just inputs and outputs.
+
+## Next Steps
+
+- [Queries](/docs/read-model/queries) -- Defining and dispatching type-safe queries
+- [Testing Aggregates and Projections](/docs/testing/testing-aggregates-and-projections) -- Testing strategies for both sides of the domain

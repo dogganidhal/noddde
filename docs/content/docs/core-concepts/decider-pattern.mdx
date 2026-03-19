@@ -1,0 +1,367 @@
+---
+title: The Decider Pattern
+description: How noddde uses the functional Decider pattern instead of OOP aggregates — pure functions, no base classes, no decorators
+---
+
+## What is the Decider Pattern?
+
+The Decider pattern is a functional approach to modeling domain behavior as a state machine with three components:
+
+1. **`decide(command, state) -> events`** — Given a command and the current state, decide which events should occur. This is where business rules and validation live.
+
+2. **`evolve(event, state) -> state`** — Given an event and the current state, produce the next state. This is a pure function with no side effects.
+
+3. **`initialState`** — The starting state for a new instance of the decider.
+
+That is the entire pattern. There are no base classes to extend, no lifecycle hooks to override, no decorators to apply, and no framework-specific interfaces to implement. A Decider is just data and functions.
+
+```
+                    +---------+
+         command -->| decide  |--> event(s)
+                    |         |
+         state  -->|         |
+                    +---------+
+                         |
+                         | event(s)
+                         v
+                    +---------+
+         event  -->| evolve  |--> new state
+                    |         |
+         state  -->|         |
+                    +---------+
+```
+
+The flow works as follows: a command arrives, and `decide` examines the current state to determine whether the command should be accepted. If accepted, it returns one or more events describing what happened. Each event is then fed through `evolve` to produce the next state. The cycle repeats for the next command.
+
+### A Minimal Example
+
+Here is a Decider for a simple counter, expressed as plain TypeScript:
+
+```typescript
+// The state
+type CounterState = { value: number };
+
+// The commands
+type Increment = { name: "Increment" };
+type Decrement = { name: "Decrement" };
+type CounterCommand = Increment | Decrement;
+
+// The events
+type Incremented = { name: "Incremented"; payload: { newValue: number } };
+type Decremented = { name: "Decremented"; payload: { newValue: number } };
+type CounterEvent = Incremented | Decremented;
+
+// The Decider
+const initialState: CounterState = { value: 0 };
+
+function decide(command: CounterCommand, state: CounterState): CounterEvent {
+  switch (command.name) {
+    case "Increment":
+      return { name: "Incremented", payload: { newValue: state.value + 1 } };
+    case "Decrement":
+      return { name: "Decremented", payload: { newValue: state.value - 1 } };
+  }
+}
+
+function evolve(event: CounterEvent, state: CounterState): CounterState {
+  switch (event.name) {
+    case "Incremented":
+      return { value: event.payload.newValue };
+    case "Decremented":
+      return { value: event.payload.newValue };
+  }
+}
+```
+
+Notice what is absent: there is no class, no `this`, no mutation, no framework dependency. The Decider is pure data structures and pure functions. You can test `decide` and `evolve` independently with simple unit tests — no mocks, no setup, no teardown.
+
+## Decider vs. OOP Aggregates
+
+Most DDD frameworks model aggregates as classes with methods that mutate internal state. noddde takes a fundamentally different approach. Here is a side-by-side comparison using a bank account domain.
+
+### The OOP Approach
+
+In a traditional OOP framework, you might write something like this:
+
+```typescript
+// Typical OOP aggregate (NOT noddde)
+class BankAccountAggregate extends AggregateRoot {
+  private balance: number = 0;
+  private status: "active" | "closed" = "active";
+
+  public authorizeTransaction(amount: number, merchant: string): void {
+    if (this.status !== "active") {
+      throw new Error("Account is not active");
+    }
+    if (amount > this.balance) {
+      this.apply(new TransactionDeclined({ reason: "Insufficient funds" }));
+      return;
+    }
+    this.apply(new TransactionAuthorized({ amount, merchant }));
+  }
+
+  protected onTransactionAuthorized(event: TransactionAuthorized): void {
+    this.balance -= event.amount;
+  }
+
+  protected onTransactionDeclined(event: TransactionDeclined): void {
+    // state unchanged
+  }
+}
+```
+
+This approach has several characteristics:
+
+- **Mutable state** — The `balance` and `status` fields are mutated in place via `this`.
+- **Base class coupling** — The aggregate must extend `AggregateRoot`, coupling it to the framework.
+- **Hidden state** — The state shape is implicit in the private fields. There is no single, inspectable state object.
+- **Mixed concerns** — The `authorizeTransaction` method both validates the command and applies events through `this.apply()`.
+- **Decorator/convention reliance** — Many OOP frameworks use decorators like `@CommandHandler` or naming conventions like `onTransactionAuthorized` to wire handlers.
+
+### The Decider Approach (noddde)
+
+Here is the same domain expressed as a noddde Decider:
+
+```typescript
+import { defineAggregate, DefineCommands, DefineEvents } from "@noddde/core";
+
+type BankingCommand = DefineCommands<{
+  CreateBankAccount: void;
+  AuthorizeTransaction: { amount: number; merchant: string };
+}>;
+
+type BankingEvent = DefineEvents<{
+  BankAccountCreated: { id: string };
+  TransactionAuthorized: { id: string; amount: number; merchant: string };
+  TransactionDeclined: { reason: string };
+}>;
+
+type BankAccountState = {
+  balance: number;
+  status: "active" | "closed";
+};
+
+type BankAccountTypes = {
+  state: BankAccountState;
+  commands: BankingCommand;
+  events: BankingEvent;
+  infrastructure: {};
+};
+
+const BankAccount = defineAggregate<BankAccountTypes>({
+  initialState: { balance: 0, status: "active" },
+
+  commands: {
+    CreateBankAccount: (command) => ({
+      name: "BankAccountCreated",
+      payload: { id: command.targetAggregateId },
+    }),
+
+    AuthorizeTransaction: (command, state) => {
+      if (state.status !== "active") {
+        return { name: "TransactionDeclined", payload: { reason: "Account not active" } };
+      }
+      if (command.payload.amount > state.balance) {
+        return { name: "TransactionDeclined", payload: { reason: "Insufficient funds" } };
+      }
+      return {
+        name: "TransactionAuthorized",
+        payload: {
+          id: command.targetAggregateId,
+          amount: command.payload.amount,
+          merchant: command.payload.merchant,
+        },
+      };
+    },
+  },
+
+  apply: {
+    BankAccountCreated: (_event, _state) => ({
+      balance: 0,
+      status: "active" as const,
+    }),
+
+    TransactionAuthorized: (event, state) => ({
+      ...state,
+      balance: state.balance - event.amount,
+    }),
+
+    TransactionDeclined: (_event, state) => state,
+  },
+});
+```
+
+The differences are significant:
+
+| Aspect | OOP Aggregate | noddde Decider |
+|--------|---------------|----------------|
+| State | Mutable private fields | Immutable state object |
+| Base class | Required (`extends AggregateRoot`) | None |
+| `this` keyword | Used throughout | Never used |
+| Decorators | Often required | None |
+| State shape | Implicit in fields | Explicit type (`BankAccountState`) |
+| Command handling | Methods on the class | Functions in a `commands` map |
+| Event application | Protected methods on the class | Functions in an `apply` map |
+| Testing | Requires instantiation, mocks | Call pure functions directly |
+
+## Benefits of the Decider Pattern
+
+### Testability
+
+Because `decide` and `evolve` are pure functions, testing them requires no setup:
+
+```typescript
+import { describe, it, expect } from "vitest";
+
+describe("AuthorizeTransaction", () => {
+  const activeState: BankAccountState = { balance: 1000, status: "active" };
+  const handler = BankAccount.commands.AuthorizeTransaction;
+
+  it("authorizes when balance is sufficient", () => {
+    const command = {
+      name: "AuthorizeTransaction" as const,
+      targetAggregateId: "acc-1",
+      payload: { amount: 500, merchant: "Store" },
+    };
+    const event = handler(command, activeState, {});
+    expect(event).toEqual({
+      name: "TransactionAuthorized",
+      payload: { id: "acc-1", amount: 500, merchant: "Store" },
+    });
+  });
+
+  it("declines when balance is insufficient", () => {
+    const command = {
+      name: "AuthorizeTransaction" as const,
+      targetAggregateId: "acc-1",
+      payload: { amount: 2000, merchant: "Store" },
+    };
+    const event = handler(command, activeState, {});
+    expect(event).toEqual({
+      name: "TransactionDeclined",
+      payload: { reason: "Insufficient funds" },
+    });
+  });
+});
+```
+
+No aggregate instantiation, no event store setup, no mock buses. Just function in, value out.
+
+### Composability
+
+Deciders are plain objects. You can combine them, transform them, or wrap them without inheritance hierarchies. For example, you could write a function that adds logging to any aggregate:
+
+```typescript
+function withLogging<T extends AggregateTypes>(
+  aggregate: Aggregate<T>,
+): Aggregate<T> {
+  return {
+    ...aggregate,
+    commands: Object.fromEntries(
+      Object.entries(aggregate.commands).map(([name, handler]) => [
+        name,
+        (command: any, state: any, infra: any) => {
+          console.log(`Handling command: ${name}`);
+          return (handler as Function)(command, state, infra);
+        },
+      ]),
+    ) as any,
+  };
+}
+```
+
+### No Hidden State
+
+The entire state of a Decider is captured in a single, inspectable value. You can serialize it, compare it, log it, or snapshot it. There is no hidden state trapped in private fields or closures.
+
+### No Framework Coupling
+
+A noddde aggregate is a plain TypeScript object with a specific shape. It does not extend a base class, implement a framework interface, or use decorators. If you ever want to migrate to a different framework, your domain logic — the `commands` and `apply` functions — are portable.
+
+## The Decider in noddde
+
+noddde's `defineAggregate` function maps directly to the three components of a Decider:
+
+| Decider Concept | noddde Equivalent | Purpose |
+|-----------------|-------------------|---------|
+| `initialState` | `initialState` | Starting state for new aggregate instances |
+| `decide` | `commands` map | Command handlers that return events |
+| `evolve` | `apply` map | Apply handlers that evolve state from events |
+
+The `defineAggregate` function takes a configuration object and returns it with full type inference. It does not add behavior or register anything — it is an identity function that exists solely to provide type checking:
+
+```typescript
+export function defineAggregate<T extends AggregateTypes>(
+  config: Aggregate<T>,
+): Aggregate<T> {
+  return config;
+}
+```
+
+This means the framework has zero runtime overhead in the aggregate definition. All the work happens at the type level.
+
+### The `AggregateTypes` Bundle
+
+Rather than passing five positional generic parameters, noddde uses a single types bundle that names each type in the aggregate's type universe:
+
+```typescript
+type BankAccountTypes = {
+  state: BankAccountState;       // The aggregate's state shape
+  commands: BankingCommand;      // The discriminated union of commands
+  events: BankingEvent;          // The discriminated union of events
+  infrastructure: {};            // External dependencies (if any)
+};
+```
+
+This bundle is passed as a single generic parameter to `defineAggregate<BankAccountTypes>(...)`. The framework then uses it to generate correctly typed handler maps — each command handler receives the narrowed command type and state, and each apply handler receives the narrowed event payload and state.
+
+### Infrastructure Injection
+
+The Decider pattern in its pure form has no concept of side effects. But real-world domain logic sometimes needs external information — the current time, a random ID generator, or a third-party service check. noddde handles this through the `infrastructure` field in the types bundle:
+
+```typescript
+type Clock = { now(): Date };
+
+type AuctionTypes = {
+  state: AuctionState;
+  commands: AuctionCommand;
+  events: AuctionEvent;
+  infrastructure: { clock: Clock };
+};
+
+const Auction = defineAggregate<AuctionTypes>({
+  initialState: { /* ... */ },
+
+  commands: {
+    PlaceBid: (command, state, { clock }) => {
+      const now = clock.now();
+      if (now > state.endTime) {
+        return { name: "BidRejected", payload: { reason: "Auction has ended" } };
+      }
+      // ... rest of bid logic
+    },
+  },
+
+  apply: {
+    // ... apply handlers (no infrastructure — always pure)
+  },
+});
+```
+
+Infrastructure is passed to command handlers but never to apply handlers. This is by design: apply handlers must be pure because they are used to replay events during state reconstruction. If apply handlers depended on infrastructure, replaying the same events could produce different states depending on external conditions, which would break the event sourcing guarantee.
+
+## Summary
+
+The Decider pattern gives you a simple, functional model for domain behavior:
+
+- **`decide`** (command handlers) contains your business rules and validation
+- **`evolve`** (apply handlers) contains your state transitions
+- **`initialState`** defines where new instances start
+
+noddde implements this pattern with `defineAggregate`, adding type-safe handler maps and infrastructure injection while preserving the pattern's core properties: no base classes, no decorators, no mutation, and full testability.
+
+## Next Steps
+
+- Define your own aggregates in the [Modeling Your Domain guide](/docs/modeling/defining-aggregates)
+- Understand why noddde chose this pattern in [Why the Decider Pattern](/docs/design-decisions/why-decider)
+- Learn how infrastructure injection works in the [Running Your Domain guide](/docs/running/infrastructure)

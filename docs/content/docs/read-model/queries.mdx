@@ -1,0 +1,352 @@
+---
+title: Queries
+description: Defining type-safe queries with DefineQueries, implementing query handlers, and dispatching through the QueryBus.
+---
+
+Queries are read-only requests for data. They never modify state. In a CQRS architecture, queries are the counterpart to commands on the write side -- commands express intent to change, queries express a request to read. For background on the command/query separation, see [CQRS and Event Sourcing](/docs/core-concepts/cqrs-and-event-sourcing).
+
+## The Query Interface
+
+A query is defined by extending `Query<TResult>`:
+
+```ts
+import { Query } from "@noddde/core";
+
+interface GetBankAccountByIdQuery extends Query<BankAccountView> {
+  name: "GetBankAccountById";
+  payload: { id: string };
+}
+```
+
+The `Query` interface has two type parameters:
+
+```ts
+interface Query<TResult, TQueryNames extends string | symbol = string> {
+  name: TQueryNames;
+  payload?: any;
+}
+```
+
+| Parameter | Purpose |
+|---|---|
+| `TResult` | The return type of this query. This is a **phantom type** -- it does not appear as a field on the object but links the query to its expected result at the type level. |
+| `TQueryNames` | Optional constraint on the `name` field. Defaults to `string`. |
+
+## Defining Query Types with DefineQueries
+
+The recommended way to define queries is the `DefineQueries` utility type. It creates a discriminated union from a definition map, consistent with how events and commands are defined (see [Defining Aggregates](/docs/modeling/defining-aggregates)):
+
+```ts
+import { DefineQueries } from "@noddde/core";
+
+type BankAccountQuery = DefineQueries<{
+  GetBankAccountById: { payload: { id: string }; result: BankAccountView };
+  ListBankAccountTransactions: {
+    payload: { accountId: string; limit?: number; offset?: number };
+    result: TransactionView[];
+  };
+  GetAccountSummary: { payload: { accountId: string }; result: AccountSummary };
+  GetSystemStats: { result: SystemStats };
+}>;
+```
+
+Each key becomes a query `name`. Each value specifies:
+
+- **`result`** (required) -- The return type of the query. Encoded as a phantom type.
+- **`payload`** (optional) -- The data carried by the query. Omit for queries with no parameters.
+
+### Queries Without Payload
+
+Omit the `payload` field for parameterless queries:
+
+```ts
+type StatsQuery = DefineQueries<{
+  GetSystemStats: { result: SystemStats };
+}>;
+
+// Dispatched as: { name: "GetSystemStats" }
+```
+
+## The QueryResult Extractor
+
+`QueryResult<TQuery>` extracts the result type from a query definition:
+
+```ts
+import { QueryResult } from "@noddde/core";
+
+type Result = QueryResult<GetBankAccountByIdQuery>;
+// BankAccountView
+```
+
+Use `QueryResult` when you need the result type without importing the view type directly. If the query's result type changes, all consumers update automatically:
+
+```ts
+async function handleGetAccount(
+  req: Request,
+): Promise<QueryResult<GetBankAccountByIdQuery>> {
+  return domain.dispatchQuery<GetBankAccountByIdQuery>({
+    name: "GetBankAccountById",
+    payload: { id: req.params.id },
+  });
+}
+```
+
+## Query Naming Conventions
+
+| Pattern | Example | Use Case |
+|---|---|---|
+| `Get[Entity]By[Field]` | `GetBankAccountById` | Single entity lookup |
+| `List[Entities]` | `ListBankAccountTransactions` | Collection queries |
+| `Get[Entity][Aspect]` | `GetAccountSummary` | Derived or computed views |
+| `Search[Entities]` | `SearchTransactions` | Filtered searches |
+| `Count[Entities]` | `CountPendingTransactions` | Aggregate count queries |
+
+## The QueryHandler Type
+
+A `QueryHandler` receives a query payload and infrastructure, then returns the result:
+
+```ts
+type QueryHandler<
+  TInfrastructure extends Infrastructure,
+  TQuery extends Query<any>,
+> = (
+  query: TQuery["payload"],
+  infrastructure: TInfrastructure,
+) => QueryResult<TQuery> | Promise<QueryResult<TQuery>>;
+```
+
+| Parameter | Type | Description |
+|---|---|---|
+| `query` | `TQuery["payload"]` | The query payload -- the filtering and lookup parameters. This is the `payload` field, not the entire query object. |
+| `infrastructure` | `TInfrastructure` | Infrastructure services (repositories, caches, external clients). |
+| **Return** | `QueryResult<TQuery>` | The result type inferred from the query definition. Can be sync or async. |
+
+### Basic Handler
+
+```ts
+const getBankAccountByIdHandler: QueryHandler<
+  BankingInfrastructure,
+  GetBankAccountByIdQuery
+> = async (query, { bankAccountViewRepository }) => {
+  return bankAccountViewRepository.getById(query.id);
+};
+```
+
+The handler receives `query` as the payload (`{ id: string }` in this case), destructures the repository from infrastructure, and returns the result.
+
+### Handler with Filtering and Pagination
+
+```ts
+const listTransactionsHandler: QueryHandler<
+  BankingInfrastructure,
+  ListBankAccountTransactionsQuery
+> = async (query, { transactionViewRepository }) => {
+  return transactionViewRepository.list({
+    accountId: query.accountId,
+    status: query.status,
+    limit: query.limit ?? 50,
+    offset: query.offset ?? 0,
+  });
+};
+```
+
+Default values for optional parameters are typically applied inside the handler.
+
+### Synchronous Handlers
+
+Query handlers do not have to be async. If the data source is in-memory, return the result directly:
+
+```ts
+const getSystemStatsHandler: QueryHandler<
+  AppInfrastructure,
+  GetSystemStatsQuery
+> = (query, { statsCache }) => {
+  return statsCache.getStats();
+};
+```
+
+## Projection-Backed vs Standalone Handlers
+
+### Projection-Backed
+
+Most query handlers read from views built by [projections](/docs/read-model/projections). The projection keeps the read model up to date from the event stream, and the query handler serves it:
+
+```
+Events --> Projection --> View Store --> Query Handler --> Result
+```
+
+These handlers are defined inside `defineProjection` as part of the `queryHandlers` map.
+
+### Standalone Query Handlers
+
+Some queries do not need a prebuilt read model. They compute results on-the-fly from raw data or external services:
+
+```ts
+const calculateInterestHandler: QueryHandler<
+  BankingInfrastructure,
+  CalculateInterestQuery
+> = async (query, { bankAccountViewRepository }) => {
+  const account = await bankAccountViewRepository.getById(query.accountId);
+
+  const interest = (account.balance * query.rate * query.days) / 365;
+
+  return {
+    accountId: query.accountId,
+    currentBalance: account.balance,
+    projectedInterest: Math.round(interest * 100) / 100,
+    projectedBalance: Math.round((account.balance + interest) * 100) / 100,
+    days: query.days,
+    rate: query.rate,
+  };
+};
+```
+
+Standalone handlers are useful for computed or derived data that does not justify a persistent read model, queries that combine data from multiple sources at read time, and queries against external services.
+
+Standalone handlers are registered separately in the domain configuration under `readModel.standaloneQueryHandlers`:
+
+```ts
+const domain = await configureDomain({
+  writeModel: { aggregates: { BankAccount } },
+  readModel: {
+    projections: { /* ... */ },
+    standaloneQueryHandlers: {
+      CalculateInterest: calculateInterestHandler,
+    },
+  },
+  infrastructure: { /* ... */ },
+});
+```
+
+## The QueryBus Interface
+
+The `QueryBus` is the dispatch mechanism for queries. It provides a single `dispatch` method that routes a query to its registered handler and returns the typed result:
+
+```ts
+interface QueryBus {
+  dispatch<TQuery extends Query<any>>(
+    query: TQuery,
+  ): Promise<QueryResult<TQuery>>;
+}
+```
+
+### Typed Dispatch
+
+The return type is automatically derived from the query type argument:
+
+```ts
+async function example(queryBus: QueryBus) {
+  // result is typed as BankAccountView
+  const account = await queryBus.dispatch<GetBankAccountByIdQuery>({
+    name: "GetBankAccountById",
+    payload: { id: "acct-001" },
+  });
+
+  // result is typed as TransactionView[]
+  const transactions = await queryBus.dispatch<ListBankAccountTransactionsQuery>({
+    name: "ListBankAccountTransactions",
+    payload: { accountId: "acct-001", limit: 20, offset: 0 },
+  });
+}
+```
+
+The explicit type argument on `dispatch<GetBankAccountByIdQuery>(...)` serves two purposes: it infers the return type, and it validates the query object shape.
+
+### InMemoryQueryBus
+
+noddde ships with `InMemoryQueryBus`, an in-process implementation:
+
+```ts
+import { InMemoryQueryBus } from "@noddde/engine";
+
+const queryBus = new InMemoryQueryBus();
+```
+
+`InMemoryQueryBus` maintains a handler registry keyed by query name. It throws if no handler is registered for a dispatched query or if a duplicate handler is registered for the same name. During domain initialization, the framework automatically registers both projection query handlers and standalone query handlers on the bus.
+
+### Dispatching from Application Code
+
+The `Domain` class provides `dispatchQuery`, giving you a symmetric API alongside `dispatchCommand`:
+
+```ts
+// In an HTTP handler, GraphQL resolver, or service layer
+const account = await domain.dispatchQuery<GetBankAccountByIdQuery>({
+  name: "GetBankAccountById",
+  payload: { id: accountId },
+});
+```
+
+### Dispatching from an Express Route
+
+```ts
+app.get("/accounts/:id", async (req, res) => {
+  try {
+    const account = await domain.dispatchQuery<GetBankAccountByIdQuery>({
+      name: "GetBankAccountById",
+      payload: { id: req.params.id },
+    });
+    res.json(account);
+  } catch (error) {
+    res.status(404).json({ error: "Account not found" });
+  }
+});
+```
+
+## Custom QueryBus Implementations
+
+For production, you may need a query bus with caching, middleware, or distributed routing. A custom implementation must satisfy the `QueryBus` interface:
+
+```ts
+class ProductionQueryBus<
+  TInfrastructure extends Infrastructure,
+> implements QueryBus {
+  private handlers = new Map<string, QueryHandler<any, any>>();
+
+  constructor(private infrastructure: TInfrastructure) {}
+
+  register<TQuery extends Query<any>>(
+    name: string,
+    handler: QueryHandler<TInfrastructure, TQuery>,
+  ): void {
+    this.handlers.set(name, handler);
+  }
+
+  async dispatch<TQuery extends Query<any>>(
+    query: TQuery,
+  ): Promise<QueryResult<TQuery>> {
+    const handler = this.handlers.get(query.name as string);
+    if (!handler) {
+      throw new Error(`No handler registered for query: ${String(query.name)}`);
+    }
+    return handler(query.payload, this.infrastructure);
+  }
+}
+```
+
+When building a production query bus, consider error handling for unregistered query names and handler failures, logging for observability, middleware for cross-cutting concerns like caching or authorization, and async initialization for handlers that need database connections or cache warming.
+
+## Error Handling
+
+Query handlers can throw errors for invalid queries or missing data. The error propagates through the query bus to the caller:
+
+```ts
+const getBankAccountByIdHandler: QueryHandler<
+  BankingInfrastructure,
+  GetBankAccountByIdQuery
+> = async (query, { bankAccountViewRepository }) => {
+  const account = await bankAccountViewRepository.getById(query.id);
+
+  if (!account) {
+    throw new Error(`Bank account not found: ${query.id}`);
+  }
+
+  return account;
+};
+```
+
+How you handle the error at the call site depends on your application layer (HTTP status codes, GraphQL errors, etc.).
+
+## Next Steps
+
+- [Domain Configuration](/docs/running/domain-configuration) -- Wiring projections, query handlers, and the query bus into the domain
+- [Testing Domains](/docs/testing/testing-domains) -- End-to-end testing strategies for the full read/write pipeline

@@ -84,7 +84,7 @@ The Decider pattern maps naturally to Given-When-Then:
 | Concept | Given | When | Then |
 |---------|-------|------|------|
 | **Aggregate** | Prior events (replayed through apply) | Command | Produced events + new state |
-| **Projection** | Prior events (reduced through reducers) | — | Final view |
+| **Projection** | Prior events (reduced through reducers) | -- | Final view |
 | **Saga** | Prior saga state | Incoming event | New state + dispatched commands |
 
 For aggregates, "Given" means "these events already happened." The harness replays them through the aggregate's `apply` handlers to reconstruct the pre-command state, then executes the command handler.
@@ -126,12 +126,33 @@ const newState = BankAccount.apply.TransactionAuthorized(payload, state);
 const newView = BankProjection.reducers.TransactionAuthorized(event, view);
 ```
 
-The harnesses add value by managing state reconstruction from events, normalizing results, and capturing errors — but they are optional.
+The harnesses add value by managing state reconstruction from events, normalizing results, and capturing errors -- but they are optional.
+
+## Infrastructure Stubs for Testing
+
+Infrastructure injection is what makes noddde handlers testable. Because infrastructure is passed as function parameters (not via DI containers), you can substitute test implementations trivially.
+
+The most common pattern is the **Clock**: inject a `Clock` interface instead of calling `new Date()` directly, then use a `FixedClock` in tests for deterministic behavior. This pattern generalizes to any non-deterministic dependency -- random ID generators, external APIs, or file storage.
+
+For infrastructure with multiple members, create a reusable mock factory:
+
+```ts
+function createMockBankingInfrastructure() {
+  return {
+    logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+    bankAccountViewRepository: {
+      getById: vi.fn(),
+      insert: vi.fn(),
+      update: vi.fn(),
+    },
+  };
+}
+```
+
+Then pass it via `.withInfrastructure()` in unit harnesses or the `infrastructure` field in `testDomain`.
 
 ## Next Steps
 
-- [Testing Aggregates](/docs/testing/testing-aggregates) — `testAggregate` and `evolveAggregate` in depth
-- [Testing Projections](/docs/testing/testing-projections) — `testProjection` patterns
-- [Testing Sagas](/docs/testing/testing-sagas) — `testSaga` for workflow testing
-- [Testing Domains](/docs/testing/testing-domains) — `testDomain` for slice and integration tests
-- [Testing Infrastructure](/docs/testing/testing-infrastructure) — Mocking infrastructure, Clock pattern
+- [Testing Aggregates and Projections](/docs/testing/testing-aggregates-and-projections) -- `testAggregate`, `evolveAggregate`, and `testProjection` in depth
+- [Testing Sagas](/docs/testing/testing-sagas) -- `testSaga` for workflow testing
+- [Testing Domains](/docs/testing/testing-domains) -- `testDomain` for slice and integration tests

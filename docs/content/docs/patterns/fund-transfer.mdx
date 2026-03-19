@@ -3,7 +3,7 @@ title: "Example: Fund Transfer"
 description: Atomic multi-command operations using domain.withUnitOfWork() to transfer funds between two accounts.
 ---
 
-This example walks through the fund transfer sample included with noddde. It demonstrates the [Unit of Work](/docs/domain-configuration/unit-of-work) pattern for grouping multiple commands into a single atomic boundary — both succeed or neither takes effect.
+This example walks through the fund transfer sample included with noddde. It demonstrates the [Unit of Work](/docs/running/unit-of-work) pattern for grouping multiple commands into a single atomic boundary — both succeed or neither takes effect.
 
 ## Domain Overview
 
@@ -140,7 +140,7 @@ The `Withdraw` command handler throws because of insufficient funds. The unit of
 5. The domain then publishes all events to the event bus in order
 6. If the callback throws at any point, `rollback()` is called — all operations and events are discarded
 
-With a database-backed [ORM adapter](/docs/infrastructure/orm-adapters), the `commit()` wraps operations in a real database transaction (`BEGIN`/`COMMIT`/`ROLLBACK`), giving you true ACID guarantees.
+With a database-backed [ORM adapter](/docs/running/orm-adapters), the `commit()` wraps operations in a real database transaction (`BEGIN`/`COMMIT`/`ROLLBACK`), giving you true ACID guarantees.
 
 ## Key Patterns Demonstrated
 
@@ -159,6 +159,6 @@ yarn run
 
 ## Next Steps
 
-- [Unit of Work](/docs/domain-configuration/unit-of-work) — Full reference for `withUnitOfWork()` and the `UnitOfWork` interface
-- [ORM Adapters](/docs/infrastructure/orm-adapters) — Database-backed persistence with real transactions
+- [Unit of Work](/docs/running/unit-of-work) — Full reference for `withUnitOfWork()` and the `UnitOfWork` interface
+- [ORM Adapters](/docs/running/orm-adapters) — Database-backed persistence with real transactions
 - [Example: Order Fulfillment](/docs/patterns/order-fulfillment) — Multi-aggregate orchestration using sagas

@@ -1,9 +1,30 @@
 ---
 title: Quick Start
-description: Build your first noddde application — a bank account aggregate
+description: Install noddde and build your first aggregate — a bank account with commands, events, and domain configuration
 ---
 
-This guide walks you through building a bank account system step by step. By the end, you will have a working aggregate with commands, events, state, and a domain configuration.
+## Installation
+
+```bash
+npm install @noddde/core @noddde/engine
+```
+
+`@noddde/core` provides the type definitions, identity functions, and interfaces for defining your domain. `@noddde/engine` provides the runtime — `configureDomain`, in-memory buses, and persistence.
+
+**Requirements**: Node.js >= 18, TypeScript >= 5.3 with strict mode enabled:
+
+```json
+{
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16"
+  }
+}
+```
+
+For production persistence with a real database, see [ORM Adapters](/docs/running/orm-adapters).
 
 ## What We Will Build
 
@@ -36,7 +57,7 @@ export type BankAccountEvent = DefineEvents<{
 }>;
 ```
 
-Each key becomes the event's `name` discriminant. The value becomes the `payload` type. `DefineEvents` builds a discriminated union from this map. Learn more in [Defining Events](/docs/events/defining-events).
+Each key becomes the event's `name` discriminant. The value becomes the `payload` type. `DefineEvents` builds a discriminated union from this map.
 
 ## Step 2: Define Commands
 
@@ -51,7 +72,7 @@ export type BankAccountCommand = DefineCommands<{
 }>;
 ```
 
-`void` means `CreateBankAccount` has no payload — just a name and a `targetAggregateId`. Learn more in [Defining Commands](/docs/commands/defining-commands).
+`void` means `CreateBankAccount` has no payload — just a name and a `targetAggregateId`.
 
 ## Step 3: Define State
 
@@ -86,7 +107,7 @@ type BankAccountDef = {
 };
 ```
 
-This single type replaces five positional generic parameters. Learn more in [AggregateTypes Bundle](/docs/design-decisions/why-aggregate-types).
+This single type replaces five positional generic parameters. Learn more in [Why AggregateTypes Bundle](/docs/design-decisions/why-aggregate-types).
 
 ## Step 5: Define the Aggregate
 
@@ -232,9 +253,7 @@ The full flow for each `dispatchCommand` call:
 
 ## Next Steps
 
-- [Concepts](/docs/concepts/messaging) — Understand the foundational patterns
-- [Aggregates](/docs/aggregates/defining-aggregates) — Deep dive into aggregate definitions
-- [Commands](/docs/commands/defining-commands) — The full command system
-- [Events](/docs/events/defining-events) — Events and apply handlers
-- [Projections](/docs/projections/overview) — Building read models
-- [Domain Configuration](/docs/domain-configuration/overview) — Complete wiring reference
+- [Core Concepts](/docs/core-concepts/messages-and-types) — Understand the foundational patterns
+- [Modeling Your Domain](/docs/modeling/defining-aggregates) — Deep dive into aggregate definitions
+- [Projections](/docs/read-model/projections) — Building read models
+- [Running Your Domain](/docs/running/domain-configuration) — Complete wiring reference

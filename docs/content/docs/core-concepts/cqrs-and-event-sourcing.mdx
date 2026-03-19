@@ -1,0 +1,380 @@
+---
+title: CQRS & Event Sourcing
+description: How noddde separates write and read models using CQRS and uses events as the source of truth through event sourcing
+---
+
+## CQRS: Separating Reads from Writes
+
+**Command Query Responsibility Segregation** (CQRS) splits your application into two distinct models: one optimized for writing data and one optimized for reading it. Instead of forcing a single schema to serve both consistent writes and efficient reads, each side gets a data structure that fits its purpose.
+
+noddde organizes a domain into three sides:
+
+```
+                 Write Side                           Read Side
+           =====================               =====================
+
+   Command --> [ Aggregate ] --> Event(s) --> [ Projection ] <-- Query
+                   |                  |             |
+                   v                  |             v
+            Event Store /             |      Read Database /
+            State Store               |      View Tables
+                                      |
+                                Process Side
+                           =====================
+                                      |
+                               [ Saga ] --> Command(s)
+                                  |
+                                  v
+                           Saga State Store
+```
+
+- **Write Side** -- Aggregates receive commands, enforce business rules, and emit events.
+- **Process Side** -- Sagas react to events and dispatch commands across aggregates.
+- **Read Side** -- Projections consume events, build query-optimized views, and serve queries.
+
+## The Write Model
+
+The write model is where domain logic lives. Its primary building blocks are **aggregates** -- Decider-based state machines that receive commands, validate them against the current state, and produce events. For commands that do not target an aggregate (sending a notification, calling an external API), noddde provides **standalone command handlers**.
+
+In the domain configuration, the write model is declared under the `writeModel` key:
+
+```typescript
+import { configureDomain } from "@noddde/engine";
+
+const domain = await configureDomain({
+  writeModel: {
+    aggregates: {
+      BankAccount,
+    },
+    standaloneCommandHandlers: {
+      SendNotification: async (command, infrastructure) => {
+        await infrastructure.notificationService.send(command.payload);
+      },
+    },
+  },
+  // ...
+});
+```
+
+For a complete treatment of how to define aggregates, commands, and apply handlers, see [Modeling Your Domain](/docs/modeling/defining-aggregates).
+
+## The Read Model
+
+The read model consumes events and builds **projections** -- query-optimized data structures that answer specific questions about the domain. Each projection has two sides:
+
+- **Reducers** -- React to events and update a view.
+- **Query handlers** -- Serve queries by reading from that view.
+
+For queries that do not belong to any projection, noddde provides **standalone query handlers**.
+
+```typescript
+const domain = await configureDomain({
+  // ...
+  readModel: {
+    projections: {
+      AccountBalance: AccountBalanceProjection,
+      TransactionHistory: TransactionHistoryProjection,
+    },
+    standaloneQueryHandlers: {
+      GetSystemStats: async (_query, infrastructure) => {
+        return infrastructure.statsService.getStats();
+      },
+    },
+  },
+});
+```
+
+For details on defining projections, reducers, and query handlers, see [Projections](/docs/read-model/projections).
+
+## The Process Model
+
+The process model sits between write and read. It contains **sagas** -- stateful, event-driven process managers that coordinate workflows across multiple aggregates by reacting to events and dispatching commands.
+
+A saga is the structural inverse of an aggregate:
+
+- **Aggregate**: command in, events out (decisions)
+- **Saga**: event in, commands out (coordination)
+
+Sagas are declared under the `processModel` key in the domain configuration and live in their own top-level section because they are neither pure write-model (they subscribe to events) nor pure read-model (they dispatch commands).
+
+For a detailed guide on defining sagas, associations, and handlers, see [Sagas](/docs/process-managers/sagas).
+
+## The Buses
+
+Communication between the write model, read model, and the outside world flows through three buses. Together they form the `CQRSInfrastructure`:
+
+```typescript
+interface CQRSInfrastructure {
+  commandBus: CommandBus;
+  eventBus: EventBus;
+  queryBus: QueryBus;
+}
+```
+
+**CommandBus** routes commands to the correct handler -- either an aggregate's command handler or a standalone command handler, based on the command's `name`.
+
+```typescript
+interface CommandBus {
+  dispatch(command: Command): Promise<void>;
+}
+```
+
+**EventBus** distributes events to all interested subscribers. After an aggregate produces events, the framework dispatches each one through the event bus. Every projection with a matching reducer and every saga with a matching association receives it.
+
+```typescript
+interface EventBus {
+  dispatch<TEvent extends Event>(event: TEvent): Promise<void>;
+}
+```
+
+**QueryBus** routes queries to the appropriate handler and returns the result. It connects the outside world to the read model.
+
+```typescript
+interface QueryBus {
+  dispatch<TQuery extends Query<any>>(query: TQuery): Promise<QueryResult<TQuery>>;
+}
+```
+
+noddde ships with in-memory implementations of all three buses for development and testing:
+
+```typescript
+import {
+  InMemoryCommandBus,
+  EventEmitterEventBus,
+  InMemoryQueryBus,
+} from "@noddde/engine";
+```
+
+In production, you would replace these with implementations backed by a message broker (RabbitMQ, Kafka, etc.) or a distributed event store.
+
+## Why Separate Models?
+
+Separating write and read unlocks several architectural advantages:
+
+- **Independent optimization** -- The write model can use a structure optimized for consistency (an event stream, a normalized schema), while the read model uses structures optimized for query performance (denormalized views, materialized aggregations, search indexes).
+
+- **Independent scaling** -- Read traffic typically far exceeds write traffic. With CQRS you can scale the read side independently -- more replicas, aggressive caching, distributed projections -- without affecting the write side.
+
+- **Multiple read models** -- A single stream of events can feed many projections, each optimized for a different query pattern. The same `TransactionAuthorized` event might update an `AccountBalance` view, append to a `TransactionHistory`, feed a `FraudDetection` model, and populate an `AnalyticsDashboard`. Adding a new read model requires only writing a new projection.
+
+- **Temporal flexibility** -- Because events are immutable facts, you can add a new projection at any time and replay the entire event history to populate it. You can answer questions about your data that you did not anticipate when you first designed the system.
+
+## Event Sourcing
+
+In most applications, the database stores the **current state** of each entity. When you update a bank account balance, the old value is overwritten. The history of how you arrived at that value is lost.
+
+**Event sourcing** takes a different approach: instead of storing the current state, you store the **sequence of events** that produced it. The current state is derived by replaying all events from the beginning through pure functions.
+
+```
+Traditional (state-stored):
+  Account #123  ->  { balance: 750, status: "active" }
+
+Event-sourced:
+  Account #123  ->  [
+    { name: "BankAccountCreated", payload: { id: "123" } },
+    { name: "FundsDeposited",     payload: { amount: 1000 } },
+    { name: "TransactionAuthorized", payload: { amount: 200, merchant: "Store A" } },
+    { name: "TransactionAuthorized", payload: { amount: 50,  merchant: "Store B" } },
+  ]
+
+  Current state = replay all events -> { balance: 750, status: "active" }
+```
+
+The event stream is an append-only log. Events are never modified or deleted. Each event represents an immutable fact -- something that happened in the past.
+
+## Event Sourcing in noddde
+
+noddde supports event sourcing through the `EventSourcedAggregatePersistence` interface:
+
+```typescript
+interface EventSourcedAggregatePersistence {
+  save(aggregateName: string, aggregateId: string, events: Event[]): Promise<void>;
+  load(aggregateName: string, aggregateId: string): Promise<Event[]>;
+}
+```
+
+When a command arrives for an aggregate instance, the framework follows this sequence:
+
+1. **Load events** -- Retrieve the full event history for the aggregate instance.
+2. **Replay** -- Start with `initialState` and fold each event through the matching apply handler to reconstruct the current state.
+3. **Handle command** -- Pass the reconstructed state, the command, and infrastructure to the command handler.
+4. **Save new events** -- Append the events produced by the command handler.
+5. **Apply new events** -- Fold the new events into the state for any subsequent commands in the same session.
+
+The conceptual replay logic looks like this:
+
+```typescript
+function replayState<T extends AggregateTypes>(
+  aggregate: Aggregate<T>,
+  events: Event[],
+): T["state"] {
+  return events.reduce((state, event) => {
+    const handler = aggregate.apply[event.name];
+    return handler(event.payload, state);
+  }, aggregate.initialState);
+}
+```
+
+This is why the apply handlers in a noddde aggregate are so important. They are not just updating state after a command -- they are the **canonical definition** of how state is derived from events. Every time an aggregate instance is loaded, the apply handlers run over the entire event history.
+
+## The State-Stored Alternative
+
+Not every aggregate needs event sourcing. noddde also supports **state-stored persistence**, where the framework saves and loads the final state directly:
+
+```typescript
+interface StateStoredAggregatePersistence {
+  save(aggregateName: string, aggregateId: string, state: any): Promise<void>;
+  load(aggregateName: string, aggregateId: string): Promise<any>;
+}
+```
+
+With state-stored persistence, events are still produced by command handlers and still flow through the event bus to projections. The difference is that events are not persisted in an event store -- only the resulting state is saved.
+
+The key design choice: **the aggregate definition does not change** between event-sourced and state-stored persistence. The same `defineAggregate` with the same `commands` and `apply` handlers works with either strategy. The persistence strategy is a deployment decision, not a domain modeling decision.
+
+```typescript
+// This aggregate works identically with either persistence strategy
+const BankAccount = defineAggregate<BankAccountTypes>({
+  initialState: { balance: 0, status: "active" },
+  commands: { /* ... */ },
+  apply: { /* ... */ },
+});
+```
+
+You could start with state-stored persistence for simplicity and switch to event sourcing later without changing a single line of domain code.
+
+## When to Use Which
+
+**Choose event sourcing when:**
+
+- An audit trail is required (financial systems, healthcare, compliance)
+- Temporal queries matter ("What was the balance on March 1st?")
+- Your architecture is event-driven and events must be durably stored
+- Debugging and forensics benefit from a complete event history
+- You need schema evolution via upcasters or versioned apply handlers
+
+**Choose state-stored persistence when:**
+
+- Simplicity is the priority (CRUD entities, configuration, non-critical objects)
+- Replaying a long event history on every command would be too expensive
+- There is no regulatory or business need for full change history
+- You are prototyping and want to iterate quickly
+
+Different aggregates in the same domain can use different persistence strategies. A `BankAccount` might use event sourcing for its audit trail while a `UserPreferences` uses state-stored persistence for simplicity.
+
+## The Replay Guarantee
+
+Event sourcing works only if replaying the same events always produces the same state. This imposes a strict requirement: **apply handlers must be pure functions**.
+
+A pure function depends only on its inputs, produces no side effects, and returns the same output for the same inputs every time.
+
+Apply handlers must **not** use non-deterministic values:
+
+```typescript
+// BAD: Uses current time (different on each replay)
+TransactionAuthorized: (event, state) => ({
+  ...state,
+  balance: state.balance - event.amount,
+  lastUpdated: new Date(),
+})
+
+// BAD: Uses random values
+AccountCreated: (event, state) => ({
+  ...state,
+  internalId: crypto.randomUUID(),
+})
+```
+
+Apply handlers **should** derive all values from the event payload and current state:
+
+```typescript
+// GOOD: Pure computation from event payload and state
+TransactionAuthorized: (event, state) => ({
+  ...state,
+  balance: state.balance - event.amount,
+})
+
+// GOOD: Timestamps come from the event, not from the clock
+TransactionProcessed: (event, state) => ({
+  ...state,
+  lastTransactionAt: event.processedAt,
+})
+```
+
+If you need a timestamp or a generated ID, compute it in the **command handler** (which has access to infrastructure) and include it in the event payload. The apply handler then reads it from the event, ensuring deterministic replay.
+
+This is why noddde passes infrastructure to command handlers but **never** to apply handlers. The type system enforces this boundary:
+
+```typescript
+type ApplyHandler<TEvent extends Event, TState> = (
+  event: TEvent["payload"],
+  state: TState,
+) => TState;
+```
+
+There is no infrastructure parameter. If you try to access infrastructure in an apply handler, the compiler will prevent it.
+
+## Event Sourcing + CQRS Together
+
+Event sourcing and CQRS are independent patterns, but they complement each other naturally:
+
+- **Event sourcing** provides a durable event stream on the write side.
+- **CQRS** provides the separation that lets the read side consume that stream and build query-optimized views.
+
+Without CQRS, event sourcing would require replaying events every time you want to read data -- slow for complex queries. With CQRS, projections pre-compute the views you need, and queries are served from those pre-computed views.
+
+Without event sourcing, CQRS would need a separate mechanism to propagate changes from write to read. With event sourcing, events are the natural propagation mechanism -- they are already produced by command handlers and can be directly consumed by projections.
+
+```
+  Command -> Aggregate -> Events -> Event Store (write side, event sourcing)
+                                 |
+                                 +-> EventBus -> Projection -> Read DB (read side, CQRS)
+                                                                   |
+                                                          Query -> QueryBus -> Response
+```
+
+## The CQRS Data Flow
+
+Here is the complete flow of a command through a noddde application:
+
+```
+1. Client sends a command
+   { name: "AuthorizeTransaction", targetAggregateId: "acc-1",
+     payload: { amount: 50, merchant: "Store" } }
+
+2. CommandBus routes to BankAccount aggregate
+
+3. Framework loads current state for "acc-1"
+   { balance: 1000, status: "active" }
+
+4. Command handler runs
+   AuthorizeTransaction(command, state, infrastructure) -> event
+
+5. Event returned
+   { name: "TransactionAuthorized",
+     payload: { id: "acc-1", amount: 50, merchant: "Store" } }
+
+6. Apply handler updates state
+   TransactionAuthorized(event.payload, state) -> { balance: 950, status: "active" }
+
+7. Event persisted to event store
+
+8. EventBus dispatches event to projections and sagas
+   - AccountBalanceView updates balance for "acc-1"
+   - TransactionHistory appends new entry
+   - FraudDetection checks for anomalies
+
+9. Client can query the read model
+   QueryBus.dispatch({ name: "GetAccountBalance",
+     payload: { accountId: "acc-1" } })
+   -> { balance: 950 }
+```
+
+Steps 1-7 are the **write path** (synchronous, consistent). Step 8 fans out to the **read path** (projections) and the **process path** (sagas). Step 9 is the **query path**.
+
+## Next Steps
+
+- [Defining Aggregates](/docs/modeling/defining-aggregates) -- Model your write side with the Decider pattern
+- [Projections](/docs/read-model/projections) -- Build query-optimized views from events
+- [Sagas](/docs/process-managers/sagas) -- Coordinate workflows across aggregates
+- [Domain Configuration](/docs/running/domain-configuration) -- Wire everything together and run your domain

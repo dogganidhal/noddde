@@ -1,0 +1,364 @@
+---
+title: Command Routing & Dispatch
+description: How commands flow from dispatch through routing, aggregate state loading, command handling, event persistence, and event publication.
+---
+
+When you call `domain.dispatchCommand()`, the framework executes a deterministic sequence of steps that takes a command from the caller's intent all the way through to persisted events and updated projections. This page covers that entire flow.
+
+## domain.dispatchCommand()
+
+The entry point for all command processing is `domain.dispatchCommand()`. You pass a command object with a `name`, a `targetAggregateId`, and optionally a `payload`:
+
+```typescript
+import { configureDomain } from "@noddde/engine";
+
+const domain = await configureDomain<BankingInfrastructure>({
+  // ... configuration
+});
+
+const bankAccountId = randomUUID();
+
+// A command with no payload (void)
+await domain.dispatchCommand({
+  name: "CreateBankAccount",
+  targetAggregateId: bankAccountId,
+});
+
+// A command with a payload
+await domain.dispatchCommand({
+  name: "AuthorizeTransaction",
+  targetAggregateId: bankAccountId,
+  payload: {
+    amount: 100,
+    merchant: "Electronics Store",
+  },
+});
+```
+
+The method is generic and accepts any `AggregateCommand` registered in your domain. TypeScript validates the command shape at compile time when your commands are defined with `DefineCommands`.
+
+## The Dispatch Lifecycle
+
+Every `dispatchCommand` call runs the same seven-step sequence. Understanding this flow helps you reason about consistency, ordering, and where your code fits in.
+
+```
+dispatchCommand({ name, targetAggregateId, payload })
+  |
+  |  1. Command received
+  v
+Route by command.name
+  |  2. Find aggregate type whose commands map contains this name
+  |     Use targetAggregateId to identify the specific instance
+  v
+Load state
+  |  3. Event-sourced: replay all past events through apply handlers
+  |     State-stored: load the latest snapshot
+  |     New instance: use initialState from the aggregate definition
+  v
+Execute handler
+  |  4. commands[name](command, currentState, infrastructure) --> events
+  v
+Apply events
+  |  5. For each returned event: newState = apply[event.name](event.payload, state)
+  v
+Persist
+  |  6. Event-sourced: append new events to the event stream
+  |     State-stored: save the final state as a snapshot
+  v
+Publish
+     7. Each event is dispatched to the EventBus
+        --> projection reducers update read models
+        --> saga handlers react and may dispatch further commands
+```
+
+### Step 1: Command Received
+
+`domain.dispatchCommand(command)` receives the command object. The `name` field identifies which aggregate type should process it. The `targetAggregateId` field identifies which instance of that aggregate.
+
+### Step 2: Route to Aggregate
+
+The framework scans the `commands` map of each aggregate in the `writeModel.aggregates` configuration to find one with a handler matching the command's `name`.
+
+- If a match is found, the command enters the aggregate lifecycle (steps 3-7).
+- If no aggregate handles it, the command falls through to the `CommandBus`, which routes it to any registered standalone command handlers.
+
+The `targetAggregateId` tells the framework which instance to load. Two commands with the same `name` but different `targetAggregateId` values operate on completely independent instances with separate event streams and separate state.
+
+### Step 3: Load Current State
+
+For event-sourced persistence, all past events for this aggregate instance are loaded and replayed through the `apply` handlers to rebuild current state:
+
+```
+state = initialState
+for each stored event:
+  state = apply[event.name](event.payload, state)
+```
+
+For state-stored persistence, the latest state snapshot is loaded directly.
+
+If no prior state exists (the aggregate instance is new), the `initialState` from the aggregate definition is used.
+
+### Step 4: Execute Command Handler
+
+The matching handler is called with three arguments:
+
+```typescript
+handler(command, currentState, infrastructure);
+```
+
+The handler inspects the command and the current state, enforces business invariants, and returns one or more events representing what happened. See [Command Handlers](/docs/modeling/command-handlers) for patterns on writing handler logic.
+
+### Step 5: Apply Returned Events
+
+Each returned event is passed through the corresponding `apply` handler to produce a new state:
+
+```typescript
+newState = apply[event.name](event.payload, currentState);
+```
+
+If the command handler returns multiple events, they are applied sequentially. Each produces a new state that feeds into the next. See [State & Event Application](/docs/modeling/state-and-events) for apply handler patterns.
+
+### Step 6: Persist
+
+For event-sourced persistence, the new events are appended to the aggregate's event stream in the event store.
+
+For state-stored persistence, the final state (after all events are applied) is saved as a snapshot, overwriting the previous one.
+
+### Step 7: Publish Events
+
+After successful persistence, each event is dispatched to the `EventBus`. This triggers registered projection reducers (which update read model views) and saga handlers (which may dispatch further commands or trigger side effects).
+
+Events are published **after** persistence, so handlers can assume the event is durably stored.
+
+## Command Routing
+
+Routing answers two questions: **which aggregate type** handles a given command, and **which instance** of that type is the target.
+
+### Aggregate Type: Derived from command.name
+
+The framework matches the command's `name` against the `commands` map of each registered aggregate. The aggregate whose map contains a handler for that name receives the command. This means command names must be globally unique across all aggregate types in a domain.
+
+```typescript
+// BankAccount handles: CreateBankAccount, AuthorizeTransaction
+// Auction handles: CreateAuction, PlaceBid, CloseAuction
+
+const domain = await configureDomain({
+  writeModel: {
+    aggregates: {
+      BankAccount,  // aggregate name: "BankAccount"
+      Auction,      // aggregate name: "Auction"
+    },
+  },
+  // ...
+});
+
+// Routed to BankAccount
+await domain.dispatchCommand({
+  name: "AuthorizeTransaction",
+  targetAggregateId: "acct-001",
+  payload: { amount: 50, merchant: "Coffee Shop" },
+});
+
+// Routed to Auction
+await domain.dispatchCommand({
+  name: "PlaceBid",
+  targetAggregateId: "auction-42",
+  payload: { bidderId: "user-7", amount: 1500 },
+});
+```
+
+### Aggregate Instance: Derived from targetAggregateId
+
+The `targetAggregateId` identifies which instance to load. Each aggregate type has its own ID space -- `"acct-001"` and `"auction-42"` are completely independent with separate event streams and state.
+
+When you define commands with `DefineCommands`, the `targetAggregateId` field is automatically included on every command in the resulting union:
+
+```typescript
+type BankAccountCommand = DefineCommands<{
+  CreateBankAccount: void;
+  AuthorizeTransaction: { amount: number; merchant: string };
+}>;
+// Produces:
+// | { name: "CreateBankAccount"; targetAggregateId: string }
+// | { name: "AuthorizeTransaction"; targetAggregateId: string;
+//     payload: { amount: number; merchant: string } }
+```
+
+The `targetAggregateId` is the caller's responsibility. The framework does not generate IDs -- you choose the ID strategy (UUIDs, sequential IDs, natural keys) based on your domain requirements.
+
+### Aggregate Name from the writeModel Key
+
+The key you use in `writeModel.aggregates` becomes the aggregate's internal name:
+
+```typescript
+writeModel: {
+  aggregates: {
+    BankAccount,        // name: "BankAccount"
+    Account: BankAccount, // name: "Account" (overrides the variable name)
+  },
+}
+```
+
+This name is used for persistence namespacing (events stored under `BankAccount:acct-001`), command routing, and diagnostics.
+
+### Command Name Uniqueness
+
+If two aggregate types define a handler for the same command name, the framework cannot determine which should handle it. This is a configuration error. Keep command names globally unique, typically by prefixing with the aggregate context:
+
+```typescript
+// Good: unique names
+type BankAccountCommand = DefineCommands<{
+  CreateBankAccount: void;
+  AuthorizeTransaction: { amount: number; merchant: string };
+}>;
+
+type AuctionCommand = DefineCommands<{
+  CreateAuction: { item: string; startingPrice: number };
+  PlaceBid: { bidderId: string; amount: number };
+}>;
+
+// Problematic: "Create" is ambiguous across aggregates
+// type BankAccountCommand = DefineCommands<{ Create: void }>;
+// type AuctionCommand = DefineCommands<{ Create: { item: string } }>;
+```
+
+## Custom ID Types
+
+By default, `targetAggregateId` is typed as `string`. For stricter type safety, you can use branded types via the second type parameter of `DefineCommands`:
+
+```typescript
+type BankAccountId = string & { __brand: "BankAccountId" };
+
+type BankAccountCommand = DefineCommands<
+  {
+    CreateBankAccount: void;
+    AuthorizeTransaction: { amount: number; merchant: string };
+  },
+  BankAccountId
+>;
+
+// Now targetAggregateId must be a BankAccountId, not a plain string
+```
+
+With a branded type, TypeScript rejects raw strings where a `BankAccountId` is expected. Create a helper function to construct IDs:
+
+```typescript
+function bankAccountId(id: string): BankAccountId {
+  return id as BankAccountId;
+}
+
+await domain.dispatchCommand({
+  name: "CreateBankAccount",
+  targetAggregateId: bankAccountId("acct-001"),
+});
+
+// Type error: string is not assignable to BankAccountId
+// await domain.dispatchCommand({
+//   name: "CreateBankAccount",
+//   targetAggregateId: "acct-001",
+// });
+```
+
+This prevents accidentally passing an auction ID to a bank account command, catching cross-aggregate ID mix-ups at compile time.
+
+## The CommandBus
+
+The `CommandBus` is the transport interface for commands:
+
+```typescript
+interface CommandBus {
+  dispatch(command: Command): Promise<void>;
+}
+```
+
+It is part of `CQRSInfrastructure`, which is provided during domain configuration:
+
+```typescript
+interface CQRSInfrastructure {
+  commandBus: CommandBus;
+  eventBus: EventBus;
+  queryBus: QueryBus;
+}
+```
+
+In most cases, you interact with commands through `domain.dispatchCommand()` rather than the command bus directly. The command bus becomes relevant when standalone command handlers need to dispatch commands to aggregates, or when sagas need to issue commands in response to events.
+
+### InMemoryCommandBus
+
+noddde ships with `InMemoryCommandBus`, a minimal in-process implementation suitable for development and testing:
+
+```typescript
+import {
+  InMemoryCommandBus,
+  EventEmitterEventBus,
+  InMemoryQueryBus,
+} from "@noddde/engine";
+
+cqrsInfrastructure: () => ({
+  commandBus: new InMemoryCommandBus(),
+  eventBus: new EventEmitterEventBus(),
+  queryBus: new InMemoryQueryBus(),
+}),
+```
+
+### Custom Implementations
+
+For production systems, you may need a command bus that adds logging, retry logic, or publishes commands to a message broker. The `CommandBus` interface has a single method, making custom implementations straightforward. Common patterns include logging decorators, retry wrappers, and message-queue-backed buses. See [Infrastructure](/docs/running/infrastructure) for details on building custom bus implementations.
+
+## The EventBus
+
+The `EventBus` is the transport mechanism that delivers events from aggregates to projections and sagas after persistence:
+
+```typescript
+interface EventBus {
+  dispatch<TEvent extends Event>(event: TEvent): Promise<void>;
+}
+```
+
+Like the `CommandBus`, it is part of `CQRSInfrastructure`.
+
+### EventEmitterEventBus
+
+The built-in `EventEmitterEventBus` is an in-process implementation that tracks handlers internally and awaits them sequentially during dispatch:
+
+```typescript
+import { EventEmitterEventBus } from "@noddde/engine";
+
+cqrsInfrastructure: () => ({
+  commandBus: new InMemoryCommandBus(),
+  eventBus: new EventEmitterEventBus(),
+  queryBus: new InMemoryQueryBus(),
+}),
+```
+
+During `configureDomain`, the framework reads the `reducers` map from each projection and the `handlers` map from each saga, then registers them with the event bus via `on(eventName, handler)`. You do not subscribe manually.
+
+| Property | Behavior |
+|---|---|
+| Delivery | In-process, sequentially awaited |
+| Ordering | Handlers run in registration order |
+| Durability | None -- events are lost if the process crashes mid-delivery |
+| Scalability | Single process only |
+
+`EventEmitterEventBus` is well-suited for development, testing, and single-process applications.
+
+### Custom Implementations
+
+For production deployments requiring durability, distribution, or at-least-once delivery, you can implement the `EventBus` interface with a message broker backend (Kafka, RabbitMQ, NATS) or build composite buses that fan out to multiple destinations. See [Infrastructure](/docs/running/infrastructure) for custom event bus patterns.
+
+## Error Behavior
+
+The seven-step lifecycle has clear failure semantics at each stage:
+
+**Command handler throws.** No events are produced, no state changes are persisted, and the error propagates to the caller as a rejected promise. The aggregate state remains exactly as it was before the command.
+
+**Persistence fails.** The handler returned events, but the storage layer rejected them (network error, constraint violation, etc.). The error propagates to the caller. No events are published to the event bus. The aggregate state remains unchanged.
+
+**Event bus fails.** The events have already been persisted. If the event bus throws during publication (a projection reducer throws, the broker is unreachable), the events are durably stored but downstream consumers may not have received them. This is the nature of at-least-once delivery -- projections may need to handle redelivery or catch-up.
+
+In practice, this means that the write side (command handling and persistence) is atomic. The read side (event publication and projection updates) is eventually consistent, and failures there do not roll back the write.
+
+## Next Steps
+
+- [Infrastructure](/docs/running/infrastructure) -- Custom `CommandBus` and `EventBus` implementations, logging decorators, and message broker adapters
+- [Testing Domains](/docs/testing/testing-domains) -- Integration-level tests that exercise the full dispatch lifecycle

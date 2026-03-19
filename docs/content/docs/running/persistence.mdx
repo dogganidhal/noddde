@@ -1,0 +1,222 @@
+---
+title: Persistence
+description: Choosing between event-sourced and state-stored persistence strategies, configuring built-in implementations, and implementing custom persistence.
+---
+
+noddde supports two persistence strategies for aggregates: **event sourcing** (store events, replay to rebuild state) and **state storage** (store final state directly). Both use the same aggregate definition -- the persistence strategy is a deployment concern, not a modeling concern.
+
+For the conceptual foundation of event sourcing and CQRS, see [CQRS and Event Sourcing](/docs/core-concepts/cqrs-and-event-sourcing).
+
+## Two Persistence Strategies
+
+### Event-Sourced Persistence
+
+With event sourcing, events are the source of truth. State is ephemeral -- derived on every load by replaying the complete event history through the aggregate's apply handlers.
+
+```ts
+interface EventSourcedAggregatePersistence {
+  save(
+    aggregateName: string,
+    aggregateId: string,
+    events: Event[],
+  ): Promise<void>;
+  load(aggregateName: string, aggregateId: string): Promise<Event[]>;
+}
+```
+
+- **`save`** appends new events to the aggregate's event stream
+- **`load`** returns all events for an aggregate instance, in order
+
+Each aggregate instance has its own event stream, identified by the combination of `aggregateName` and `aggregateId`. Streams are independent -- loading events for one instance does not include events from another.
+
+### State-Stored Persistence
+
+With state storage, the current state is saved directly. No event replay is needed -- the loaded state is used as-is.
+
+```ts
+interface StateStoredAggregatePersistence {
+  save(aggregateName: string, aggregateId: string, state: any): Promise<void>;
+  load(aggregateName: string, aggregateId: string): Promise<any>;
+}
+```
+
+- **`save`** overwrites the current state snapshot
+- **`load`** returns the last saved state (or `null` for new aggregates)
+
+### Saga Persistence
+
+Sagas are always state-stored. The `SagaPersistence` interface mirrors the state-stored aggregate interface:
+
+```ts
+interface SagaPersistence {
+  save(sagaName: string, sagaId: string, state: any): Promise<void>;
+  load(sagaName: string, sagaId: string): Promise<any>;
+}
+```
+
+Required when using sagas (`processModel`) in your [domain configuration](/docs/running/domain-configuration).
+
+## Configuring Persistence
+
+Provide a persistence implementation via the `aggregatePersistence` factory in the infrastructure section:
+
+```ts
+import {
+  configureDomain,
+  InMemoryEventSourcedAggregatePersistence,
+  InMemorySagaPersistence,
+} from "@noddde/engine";
+
+const domain = await configureDomain<BankingInfrastructure>({
+  writeModel: { aggregates: { BankAccount } },
+  readModel: { projections: { BankAccount: BankAccountProjection } },
+  infrastructure: {
+    aggregatePersistence: () =>
+      new InMemoryEventSourcedAggregatePersistence(),
+    sagaPersistence: () =>
+      new InMemorySagaPersistence(),
+    // ...other providers
+  },
+});
+```
+
+The `aggregatePersistence` factory returns either an `EventSourcedAggregatePersistence` or a `StateStoredAggregatePersistence`. The framework uses it to load and save state for all aggregates in the domain.
+
+## Built-in In-Memory Implementations
+
+The `@noddde/engine` package includes in-memory implementations that require no external dependencies. These are suitable for development, testing, and prototyping. Data is lost when the process exits.
+
+### InMemoryEventSourcedAggregatePersistence
+
+```ts
+import { InMemoryEventSourcedAggregatePersistence } from "@noddde/engine";
+
+const persistence = new InMemoryEventSourcedAggregatePersistence();
+```
+
+Stores event streams in memory, keyed by `(aggregateName, aggregateId)`.
+
+### InMemoryStateStoredAggregatePersistence
+
+```ts
+import { InMemoryStateStoredAggregatePersistence } from "@noddde/engine";
+
+const persistence = new InMemoryStateStoredAggregatePersistence();
+```
+
+Stores aggregate state snapshots in memory, keyed by `(aggregateName, aggregateId)`.
+
+### InMemorySagaPersistence
+
+```ts
+import { InMemorySagaPersistence } from "@noddde/engine";
+
+const persistence = new InMemorySagaPersistence();
+```
+
+Stores saga instance state in memory, keyed by `(sagaName, sagaId)`.
+
+## Same Aggregate, Different Strategy
+
+The same aggregate definition works with either persistence strategy. The `defineAggregate` function does not know or care about persistence -- it defines `initialState`, `commands`, and `apply` regardless.
+
+This means you can:
+
+- Start with state storage for simplicity, then migrate to event sourcing without changing your aggregate
+- Use event sourcing in production and state storage in tests
+- Switch strategies by changing only the `aggregatePersistence` factory
+
+The strategy is a configuration choice, not a modeling choice.
+
+## Decision Matrix
+
+| Factor             | Event Sourcing    | State Storage          |
+| ------------------ | ----------------- | ---------------------- |
+| Audit trail        | Full history      | Current state only     |
+| Storage growth     | Grows with events | Constant per aggregate |
+| Load performance   | Slower (replay)   | Faster (direct read)   |
+| Projection rebuild | Possible          | Not possible           |
+| Temporal queries   | Supported         | Not supported          |
+| Complexity         | Higher            | Lower                  |
+| Debugging          | Excellent         | Standard               |
+
+### When to Choose Event Sourcing
+
+- You need a complete audit trail of every change
+- Temporal queries are important ("what was the balance at 3pm on Tuesday?")
+- Multiple projections consume the same events to build different read models
+- You want to replay events to rebuild projections or fix bugs
+- Your domain has complex business rules where understanding how the state changed matters
+
+### When to Choose State Storage
+
+- No audit trail is needed -- you only care about current state
+- The domain is simple enough that a direct state snapshot is sufficient
+- Performance is critical -- loading state is O(1) instead of O(n) where n is event count
+- Storage efficiency matters -- one record per aggregate instead of growing event streams
+
+## Implementing Custom Persistence
+
+The persistence interfaces are deliberately minimal -- `save` and `load` are the only two operations. This makes it straightforward to implement for any storage backend:
+
+```ts
+import { Event, EventSourcedAggregatePersistence } from "@noddde/core";
+
+class PostgresEventStore implements EventSourcedAggregatePersistence {
+  constructor(private readonly pool: Pool) {}
+
+  async load(aggregateName: string, aggregateId: string): Promise<Event[]> {
+    const result = await this.pool.query(
+      `SELECT name, payload FROM events
+       WHERE aggregate_name = $1 AND aggregate_id = $2
+       ORDER BY sequence_number ASC`,
+      [aggregateName, aggregateId],
+    );
+    return result.rows.map((row) => ({
+      name: row.name,
+      payload: row.payload,
+    }));
+  }
+
+  async save(
+    aggregateName: string,
+    aggregateId: string,
+    events: Event[],
+  ): Promise<void> {
+    for (const event of events) {
+      await this.pool.query(
+        `INSERT INTO events (aggregate_name, aggregate_id, name, payload)
+         VALUES ($1, $2, $3, $4)`,
+        [aggregateName, aggregateId, event.name, event.payload],
+      );
+    }
+  }
+}
+```
+
+Key implementation considerations:
+
+- **Ordering** -- Events must be loaded in the order they were saved. Use a sequence number or timestamp column.
+- **Atomicity** -- All events from a single command must be saved atomically (within one transaction).
+- **Serialization** -- Event payloads must round-trip correctly. JSON is the common choice, but be careful with types like `Date` that do not survive `JSON.parse`.
+
+For production-ready persistence with transaction support, consider the [ORM Adapters](/docs/running/orm-adapters) packages instead of writing custom implementations.
+
+## Moving to Production
+
+noddde provides three ORM adapter packages that cover persistence and [unit of work](/docs/running/unit-of-work) out of the box:
+
+| In-Memory                                  | Production Alternative                                    |
+| ------------------------------------------ | --------------------------------------------------------- |
+| `InMemoryEventSourcedAggregatePersistence` | `@noddde/drizzle`, `@noddde/prisma`, or `@noddde/typeorm` |
+| `InMemoryStateStoredAggregatePersistence`  | `@noddde/drizzle`, `@noddde/prisma`, or `@noddde/typeorm` |
+| `InMemorySagaPersistence`                  | `@noddde/drizzle`, `@noddde/prisma`, or `@noddde/typeorm` |
+
+Each adapter provides a single factory function that creates all persistence implementations wired to share a database transaction context. Your aggregate and projection code remains unchanged -- only the infrastructure factories in `configureDomain` need to be updated.
+
+## Next Steps
+
+- [ORM Adapters](/docs/running/orm-adapters) -- Production persistence using Drizzle, Prisma, or TypeORM
+- [Unit of Work](/docs/running/unit-of-work) -- Atomic persistence and deferred event publishing
+- [Infrastructure](/docs/running/infrastructure) -- The full infrastructure provider system
+- [CQRS and Event Sourcing](/docs/core-concepts/cqrs-and-event-sourcing) -- Conceptual foundation
