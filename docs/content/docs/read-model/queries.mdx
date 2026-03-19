@@ -27,10 +27,10 @@ interface Query<TResult, TQueryNames extends string | symbol = string> {
 }
 ```
 
-| Parameter | Purpose |
-|---|---|
-| `TResult` | The return type of this query. This is a **phantom type** -- it does not appear as a field on the object but links the query to its expected result at the type level. |
-| `TQueryNames` | Optional constraint on the `name` field. Defaults to `string`. |
+| Parameter     | Purpose                                                                                                                                                                |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TResult`     | The return type of this query. This is a **phantom type** -- it does not appear as a field on the object but links the query to its expected result at the type level. |
+| `TQueryNames` | Optional constraint on the `name` field. Defaults to `string`.                                                                                                         |
 
 ## Defining Query Types with DefineQueries
 
@@ -93,13 +93,13 @@ async function handleGetAccount(
 
 ## Query Naming Conventions
 
-| Pattern | Example | Use Case |
-|---|---|---|
-| `Get[Entity]By[Field]` | `GetBankAccountById` | Single entity lookup |
-| `List[Entities]` | `ListBankAccountTransactions` | Collection queries |
-| `Get[Entity][Aspect]` | `GetAccountSummary` | Derived or computed views |
-| `Search[Entities]` | `SearchTransactions` | Filtered searches |
-| `Count[Entities]` | `CountPendingTransactions` | Aggregate count queries |
+| Pattern                | Example                       | Use Case                  |
+| ---------------------- | ----------------------------- | ------------------------- |
+| `Get[Entity]By[Field]` | `GetBankAccountById`          | Single entity lookup      |
+| `List[Entities]`       | `ListBankAccountTransactions` | Collection queries        |
+| `Get[Entity][Aspect]`  | `GetAccountSummary`           | Derived or computed views |
+| `Search[Entities]`     | `SearchTransactions`          | Filtered searches         |
+| `Count[Entities]`      | `CountPendingTransactions`    | Aggregate count queries   |
 
 ## The QueryHandler Type
 
@@ -115,11 +115,11 @@ type QueryHandler<
 ) => QueryResult<TQuery> | Promise<QueryResult<TQuery>>;
 ```
 
-| Parameter | Type | Description |
-|---|---|---|
-| `query` | `TQuery["payload"]` | The query payload -- the filtering and lookup parameters. This is the `payload` field, not the entire query object. |
-| `infrastructure` | `TInfrastructure` | Infrastructure services (repositories, caches, external clients). |
-| **Return** | `QueryResult<TQuery>` | The result type inferred from the query definition. Can be sync or async. |
+| Parameter        | Type                  | Description                                                                                                         |
+| ---------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `query`          | `TQuery["payload"]`   | The query payload -- the filtering and lookup parameters. This is the `payload` field, not the entire query object. |
+| `infrastructure` | `TInfrastructure`     | Infrastructure services (repositories, caches, external clients).                                                   |
+| **Return**       | `QueryResult<TQuery>` | The result type inferred from the query definition. Can be sync or async.                                           |
 
 ### Basic Handler
 
@@ -209,12 +209,16 @@ Standalone handlers are registered separately in the domain configuration under 
 const domain = await configureDomain({
   writeModel: { aggregates: { BankAccount } },
   readModel: {
-    projections: { /* ... */ },
+    projections: {
+      /* ... */
+    },
     standaloneQueryHandlers: {
       CalculateInterest: calculateInterestHandler,
     },
   },
-  infrastructure: { /* ... */ },
+  infrastructure: {
+    /* ... */
+  },
 });
 ```
 
@@ -243,10 +247,11 @@ async function example(queryBus: QueryBus) {
   });
 
   // result is typed as TransactionView[]
-  const transactions = await queryBus.dispatch<ListBankAccountTransactionsQuery>({
-    name: "ListBankAccountTransactions",
-    payload: { accountId: "acct-001", limit: 20, offset: 0 },
-  });
+  const transactions =
+    await queryBus.dispatch<ListBankAccountTransactionsQuery>({
+      name: "ListBankAccountTransactions",
+      payload: { accountId: "acct-001", limit: 20, offset: 0 },
+    });
 }
 ```
 
@@ -297,9 +302,9 @@ app.get("/accounts/:id", async (req, res) => {
 For production, you may need a query bus with caching, middleware, or distributed routing. A custom implementation must satisfy the `QueryBus` interface:
 
 ```ts
-class ProductionQueryBus<
-  TInfrastructure extends Infrastructure,
-> implements QueryBus {
+class ProductionQueryBus<TInfrastructure extends Infrastructure>
+  implements QueryBus
+{
   private handlers = new Map<string, QueryHandler<any, any>>();
 
   constructor(private infrastructure: TInfrastructure) {}

@@ -12,11 +12,11 @@ Every aggregate command handler has this shape:
   TEvents | TEvents[] | Promise<TEvents | TEvents[]>;
 ```
 
-| Parameter | Description |
-|---|---|
-| `command` | The incoming command, narrowed to the specific command type for this handler |
-| `state` | The current state of the aggregate instance (rebuilt from past events or loaded from storage) |
-| `infrastructure` | Your domain infrastructure (loggers, clocks, external services) |
+| Parameter        | Description                                                                                   |
+| ---------------- | --------------------------------------------------------------------------------------------- |
+| `command`        | The incoming command, narrowed to the specific command type for this handler                  |
+| `state`          | The current state of the aggregate instance (rebuilt from past events or loaded from storage) |
+| `infrastructure` | Your domain infrastructure (loggers, clocks, external services)                               |
 
 The return value is always one or more events describing what happened. The framework narrows the `command` parameter per handler -- when you write the handler for `AuthorizeTransaction`, the `command` type is narrowed to `{ name: "AuthorizeTransaction"; payload: { amount: number; merchant: string }; targetAggregateId: string }`. You never need to check the command name or cast anything.
 

@@ -32,21 +32,21 @@ expect(result.commands).toEqual([
 
 ### Builder API
 
-| Method | Purpose |
-|--------|---------|
-| `.givenState(state)` | Saga state before the event. Defaults to `saga.initialState` if not called. |
-| `.when(event)` | The event to process through the saga handler. Required before `.execute()`. |
-| `.withInfrastructure(infra)` | Custom infrastructure. Defaults to `{}`. |
-| `.withCQRSInfrastructure(cqrs)` | Override the default no-op CQRS buses. |
-| `.execute()` | Runs the test and returns the result. Always async. |
+| Method                          | Purpose                                                                      |
+| ------------------------------- | ---------------------------------------------------------------------------- |
+| `.givenState(state)`            | Saga state before the event. Defaults to `saga.initialState` if not called.  |
+| `.when(event)`                  | The event to process through the saga handler. Required before `.execute()`. |
+| `.withInfrastructure(infra)`    | Custom infrastructure. Defaults to `{}`.                                     |
+| `.withCQRSInfrastructure(cqrs)` | Override the default no-op CQRS buses.                                       |
+| `.execute()`                    | Runs the test and returns the result. Always async.                          |
 
 ### Result Shape
 
 ```ts
 type SagaTestResult<TState, TCommands> = {
-  state: TState;           // New saga state
-  commands: TCommands[];   // Commands to dispatch (always an array, empty if none)
-  error?: Error;           // Captured error (if handler threw)
+  state: TState; // New saga state
+  commands: TCommands[]; // Commands to dispatch (always an array, empty if none)
+  error?: Error; // Captured error (if handler threw)
 };
 ```
 
@@ -168,17 +168,32 @@ describe("associations", () => {
   it("should extract orderId from OrderPlaced", () => {
     const event = {
       name: "OrderPlaced" as const,
-      payload: { orderId: "order-1", customerId: "c-1", items: [], total: 0, placedAt: new Date() },
+      payload: {
+        orderId: "order-1",
+        customerId: "c-1",
+        items: [],
+        total: 0,
+        placedAt: new Date(),
+      },
     };
-    expect(OrderFulfillmentSaga.associations.OrderPlaced(event)).toBe("order-1");
+    expect(OrderFulfillmentSaga.associations.OrderPlaced(event)).toBe(
+      "order-1",
+    );
   });
 
   it("should extract referenceId from PaymentCompleted", () => {
     const event = {
       name: "PaymentCompleted" as const,
-      payload: { paymentId: "pay-1", referenceId: "order-1", amount: 100, completedAt: new Date() },
+      payload: {
+        paymentId: "pay-1",
+        referenceId: "order-1",
+        amount: 100,
+        completedAt: new Date(),
+      },
     };
-    expect(OrderFulfillmentSaga.associations.PaymentCompleted(event)).toBe("order-1");
+    expect(OrderFulfillmentSaga.associations.PaymentCompleted(event)).toBe(
+      "order-1",
+    );
   });
 });
 ```
@@ -194,7 +209,16 @@ it("should complete the full happy path", async () => {
 
   // Step 1: Order placed
   ({ state, commands } = OrderFulfillmentSaga.handlers.OrderPlaced(
-    { name: "OrderPlaced", payload: { orderId: "o-1", customerId: "c-1", items: [], total: 100, placedAt: new Date() } },
+    {
+      name: "OrderPlaced",
+      payload: {
+        orderId: "o-1",
+        customerId: "c-1",
+        items: [],
+        total: 100,
+        placedAt: new Date(),
+      },
+    },
     state,
     mockInfra,
   ));
@@ -203,7 +227,15 @@ it("should complete the full happy path", async () => {
 
   // Step 2: Payment completed
   ({ state, commands } = OrderFulfillmentSaga.handlers.PaymentCompleted(
-    { name: "PaymentCompleted", payload: { paymentId: "p-1", referenceId: "o-1", amount: 100, completedAt: new Date() } },
+    {
+      name: "PaymentCompleted",
+      payload: {
+        paymentId: "p-1",
+        referenceId: "o-1",
+        amount: 100,
+        completedAt: new Date(),
+      },
+    },
     state,
     mockInfra,
   ));
@@ -211,7 +243,15 @@ it("should complete the full happy path", async () => {
 
   // Step 3: Shipment dispatched
   ({ state, commands } = OrderFulfillmentSaga.handlers.ShipmentDispatched(
-    { name: "ShipmentDispatched", payload: { shipmentId: "s-1", customerReference: "o-1", trackingNumber: "TRK-123", dispatchedAt: new Date() } },
+    {
+      name: "ShipmentDispatched",
+      payload: {
+        shipmentId: "s-1",
+        customerReference: "o-1",
+        trackingNumber: "TRK-123",
+        dispatchedAt: new Date(),
+      },
+    },
     state,
     mockInfra,
   ));

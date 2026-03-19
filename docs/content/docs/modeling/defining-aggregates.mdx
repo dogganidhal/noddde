@@ -190,9 +190,7 @@ export const BankAccount = defineAggregate<BankAccountDef>({
       ...state,
       balance: state.balance - event.amount,
       transactions: state.transactions.map((t) =>
-        t.id === event.id
-          ? { ...t, status: "processed" as const }
-          : t,
+        t.id === event.id ? { ...t, status: "processed" as const } : t,
       ),
     }),
   },
@@ -350,14 +348,14 @@ Infrastructure is **never passed to apply handlers**. Apply handlers are pure re
 
 ## Commands vs Events at a Glance
 
-| Aspect | Command | Event |
-|---|---|---|
-| Tense | Imperative ("do this") | Past tense ("this happened") |
-| Payload | Optional (use `void` for no data) | Always present |
-| `targetAggregateId` | Present on aggregate commands | Not present |
-| Meaning | Intent -- may be accepted or rejected | Fact -- has already occurred |
-| Mutability | Can be retried or rejected | Immutable once persisted |
-| Defined with | `DefineCommands` | `DefineEvents` |
+| Aspect              | Command                               | Event                        |
+| ------------------- | ------------------------------------- | ---------------------------- |
+| Tense               | Imperative ("do this")                | Past tense ("this happened") |
+| Payload             | Optional (use `void` for no data)     | Always present               |
+| `targetAggregateId` | Present on aggregate commands         | Not present                  |
+| Meaning             | Intent -- may be accepted or rejected | Fact -- has already occurred |
+| Mutability          | Can be retried or rejected            | Immutable once persisted     |
+| Defined with        | `DefineCommands`                      | `DefineEvents`               |
 
 A single command may produce different events depending on business logic. For example, `AuthorizeTransaction` produces either `TransactionAuthorized` or `TransactionDeclined` based on the available balance.
 

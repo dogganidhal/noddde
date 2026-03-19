@@ -1,4 +1,10 @@
 {
   "title": "Running Your Domain",
-  "pages": ["domain-configuration", "infrastructure", "persistence", "orm-adapters", "unit-of-work"]
+  "pages": [
+    "domain-configuration",
+    "infrastructure",
+    "persistence",
+    "orm-adapters",
+    "unit-of-work"
+  ]
 }

@@ -142,22 +142,30 @@ import type { UnitOfWork, UnitOfWorkFactory, Event } from "@noddde/core";
 describe("UnitOfWork Interface", () => {
   it("should have enlist accepting an async thunk", () => {
     expectTypeOf<UnitOfWork["enlist"]>().toBeFunction();
-    expectTypeOf<UnitOfWork["enlist"]>().parameter(0).toMatchTypeOf<() => Promise<void>>();
+    expectTypeOf<UnitOfWork["enlist"]>()
+      .parameter(0)
+      .toMatchTypeOf<() => Promise<void>>();
   });
 
   it("should have deferPublish accepting spread events", () => {
     expectTypeOf<UnitOfWork["deferPublish"]>().toBeFunction();
-    expectTypeOf<UnitOfWork["deferPublish"]>().parameters.toMatchTypeOf<Event[]>();
+    expectTypeOf<UnitOfWork["deferPublish"]>().parameters.toMatchTypeOf<
+      Event[]
+    >();
   });
 
   it("should have commit returning Promise of Event array", () => {
     expectTypeOf<UnitOfWork["commit"]>().toBeFunction();
-    expectTypeOf<UnitOfWork["commit"]>().returns.toMatchTypeOf<Promise<Event[]>>();
+    expectTypeOf<UnitOfWork["commit"]>().returns.toMatchTypeOf<
+      Promise<Event[]>
+    >();
   });
 
   it("should have rollback returning Promise of void", () => {
     expectTypeOf<UnitOfWork["rollback"]>().toBeFunction();
-    expectTypeOf<UnitOfWork["rollback"]>().returns.toMatchTypeOf<Promise<void>>();
+    expectTypeOf<UnitOfWork["rollback"]>().returns.toMatchTypeOf<
+      Promise<void>
+    >();
   });
 });
 ```

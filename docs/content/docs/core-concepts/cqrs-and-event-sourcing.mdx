@@ -131,7 +131,9 @@ interface EventBus {
 
 ```typescript
 interface QueryBus {
-  dispatch<TQuery extends Query<any>>(query: TQuery): Promise<QueryResult<TQuery>>;
+  dispatch<TQuery extends Query<any>>(
+    query: TQuery,
+  ): Promise<QueryResult<TQuery>>;
 }
 ```
 
@@ -188,7 +190,11 @@ noddde supports event sourcing through the `EventSourcedAggregatePersistence` in
 
 ```typescript
 interface EventSourcedAggregatePersistence {
-  save(aggregateName: string, aggregateId: string, events: Event[]): Promise<void>;
+  save(
+    aggregateName: string,
+    aggregateId: string,
+    events: Event[],
+  ): Promise<void>;
   load(aggregateName: string, aggregateId: string): Promise<Event[]>;
 }
 ```
@@ -236,8 +242,12 @@ The key design choice: **the aggregate definition does not change** between even
 // This aggregate works identically with either persistence strategy
 const BankAccount = defineAggregate<BankAccountTypes>({
   initialState: { balance: 0, status: "active" },
-  commands: { /* ... */ },
-  apply: { /* ... */ },
+  commands: {
+    /* ... */
+  },
+  apply: {
+    /* ... */
+  },
 });
 ```
 
@@ -276,13 +286,13 @@ TransactionAuthorized: (event, state) => ({
   ...state,
   balance: state.balance - event.amount,
   lastUpdated: new Date(),
-})
+});
 
 // BAD: Uses random values
 AccountCreated: (event, state) => ({
   ...state,
   internalId: crypto.randomUUID(),
-})
+});
 ```
 
 Apply handlers **should** derive all values from the event payload and current state:
@@ -292,13 +302,13 @@ Apply handlers **should** derive all values from the event payload and current s
 TransactionAuthorized: (event, state) => ({
   ...state,
   balance: state.balance - event.amount,
-})
+});
 
 // GOOD: Timestamps come from the event, not from the clock
 TransactionProcessed: (event, state) => ({
   ...state,
   lastTransactionAt: event.processedAt,
-})
+});
 ```
 
 If you need a timestamp or a generated ID, compute it in the **command handler** (which has access to infrastructure) and include it in the event payload. The apply handler then reads it from the event, ensuring deterministic replay.

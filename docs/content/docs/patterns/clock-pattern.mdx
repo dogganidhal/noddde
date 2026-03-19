@@ -154,12 +154,12 @@ const domain = await configureDomain<AuctionInfrastructure>({
 
 The Clock pattern is not specific to time. It applies to **any non-deterministic dependency**:
 
-| Dependency | Interface | Production | Test |
-|---|---|---|---|
-| Current time | `Clock` | `SystemClock` | `FixedClock` |
-| Random IDs | `IdGenerator` | `UUIDGenerator` | `SequentialIdGenerator` |
-| External APIs | `PaymentGateway` | `StripeGateway` | `StubPaymentGateway` |
-| Random numbers | `RandomSource` | `CryptoRandom` | `FixedRandom` |
+| Dependency     | Interface        | Production      | Test                    |
+| -------------- | ---------------- | --------------- | ----------------------- |
+| Current time   | `Clock`          | `SystemClock`   | `FixedClock`            |
+| Random IDs     | `IdGenerator`    | `UUIDGenerator` | `SequentialIdGenerator` |
+| External APIs  | `PaymentGateway` | `StripeGateway` | `StubPaymentGateway`    |
+| Random numbers | `RandomSource`   | `CryptoRandom`  | `FixedRandom`           |
 
 The recipe is always the same:
 

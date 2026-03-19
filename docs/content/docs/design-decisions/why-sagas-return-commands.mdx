@@ -38,7 +38,11 @@ This consistency makes the framework predictable: **handlers declare outputs, th
 With declarative returns, testing is trivial:
 
 ```ts
-const reaction = OrderFulfillmentSaga.handlers.PaymentCompleted(event, state, mockInfra);
+const reaction = OrderFulfillmentSaga.handlers.PaymentCompleted(
+  event,
+  state,
+  mockInfra,
+);
 expect(reaction.commands).toMatchObject([
   { name: "ConfirmOrder" },
   { name: "ArrangeShipment" },

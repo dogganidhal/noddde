@@ -159,10 +159,16 @@ const BankAccount = defineAggregate<BankAccountTypes>({
 
     AuthorizeTransaction: (command, state) => {
       if (state.status !== "active") {
-        return { name: "TransactionDeclined", payload: { reason: "Account not active" } };
+        return {
+          name: "TransactionDeclined",
+          payload: { reason: "Account not active" },
+        };
       }
       if (command.payload.amount > state.balance) {
-        return { name: "TransactionDeclined", payload: { reason: "Insufficient funds" } };
+        return {
+          name: "TransactionDeclined",
+          payload: { reason: "Insufficient funds" },
+        };
       }
       return {
         name: "TransactionAuthorized",
@@ -193,16 +199,16 @@ const BankAccount = defineAggregate<BankAccountTypes>({
 
 The differences are significant:
 
-| Aspect | OOP Aggregate | noddde Decider |
-|--------|---------------|----------------|
-| State | Mutable private fields | Immutable state object |
-| Base class | Required (`extends AggregateRoot`) | None |
-| `this` keyword | Used throughout | Never used |
-| Decorators | Often required | None |
-| State shape | Implicit in fields | Explicit type (`BankAccountState`) |
-| Command handling | Methods on the class | Functions in a `commands` map |
-| Event application | Protected methods on the class | Functions in an `apply` map |
-| Testing | Requires instantiation, mocks | Call pure functions directly |
+| Aspect            | OOP Aggregate                      | noddde Decider                     |
+| ----------------- | ---------------------------------- | ---------------------------------- |
+| State             | Mutable private fields             | Immutable state object             |
+| Base class        | Required (`extends AggregateRoot`) | None                               |
+| `this` keyword    | Used throughout                    | Never used                         |
+| Decorators        | Often required                     | None                               |
+| State shape       | Implicit in fields                 | Explicit type (`BankAccountState`) |
+| Command handling  | Methods on the class               | Functions in a `commands` map      |
+| Event application | Protected methods on the class     | Functions in an `apply` map        |
+| Testing           | Requires instantiation, mocks      | Call pure functions directly       |
 
 ## Benefits of the Decider Pattern
 
@@ -282,11 +288,11 @@ A noddde aggregate is a plain TypeScript object with a specific shape. It does n
 
 noddde's `defineAggregate` function maps directly to the three components of a Decider:
 
-| Decider Concept | noddde Equivalent | Purpose |
-|-----------------|-------------------|---------|
-| `initialState` | `initialState` | Starting state for new aggregate instances |
-| `decide` | `commands` map | Command handlers that return events |
-| `evolve` | `apply` map | Apply handlers that evolve state from events |
+| Decider Concept | noddde Equivalent | Purpose                                      |
+| --------------- | ----------------- | -------------------------------------------- |
+| `initialState`  | `initialState`    | Starting state for new aggregate instances   |
+| `decide`        | `commands` map    | Command handlers that return events          |
+| `evolve`        | `apply` map       | Apply handlers that evolve state from events |
 
 The `defineAggregate` function takes a configuration object and returns it with full type inference. It does not add behavior or register anything — it is an identity function that exists solely to provide type checking:
 
@@ -306,10 +312,10 @@ Rather than passing five positional generic parameters, noddde uses a single typ
 
 ```typescript
 type BankAccountTypes = {
-  state: BankAccountState;       // The aggregate's state shape
-  commands: BankingCommand;      // The discriminated union of commands
-  events: BankingEvent;          // The discriminated union of events
-  infrastructure: {};            // External dependencies (if any)
+  state: BankAccountState; // The aggregate's state shape
+  commands: BankingCommand; // The discriminated union of commands
+  events: BankingEvent; // The discriminated union of events
+  infrastructure: {}; // External dependencies (if any)
 };
 ```
 
@@ -330,13 +336,18 @@ type AuctionTypes = {
 };
 
 const Auction = defineAggregate<AuctionTypes>({
-  initialState: { /* ... */ },
+  initialState: {
+    /* ... */
+  },
 
   commands: {
     PlaceBid: (command, state, { clock }) => {
       const now = clock.now();
       if (now > state.endTime) {
-        return { name: "BidRejected", payload: { reason: "Auction has ended" } };
+        return {
+          name: "BidRejected",
+          payload: { reason: "Auction has ended" },
+        };
       }
       // ... rest of bid logic
     },

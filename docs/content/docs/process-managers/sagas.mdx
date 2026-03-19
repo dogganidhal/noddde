@@ -21,13 +21,13 @@ A saga is the structural inverse of an aggregate: an aggregate receives commands
 
 ### Aggregate vs Saga
 
-| | Aggregate | Saga |
-|---|---|---|
-| **Triggered by** | Commands | Events |
-| **Produces** | Events | Commands |
-| **State** | Domain truth | Workflow progress |
-| **Persistence** | Event-sourced or state-stored | State-stored |
-| **Purity** | Command handlers may use infra | Event handlers may use infra |
+|                  | Aggregate                      | Saga                         |
+| ---------------- | ------------------------------ | ---------------------------- |
+| **Triggered by** | Commands                       | Events                       |
+| **Produces**     | Events                         | Commands                     |
+| **State**        | Domain truth                   | Workflow progress            |
+| **Persistence**  | Event-sourced or state-stored  | State-stored                 |
+| **Purity**       | Command handlers may use infra | Event handlers may use infra |
 
 ## When to Use a Saga
 
@@ -59,12 +59,12 @@ type OrderFulfillmentSagaDef = {
 };
 ```
 
-| Member | Description |
-|---|---|
-| `state` | The saga's internal state tracking workflow progress |
-| `events` | Union of all event types the saga reacts to (from any aggregate) |
-| `commands` | Union of all command types the saga may dispatch |
-| `infrastructure` | External dependencies available to handlers |
+| Member           | Description                                                      |
+| ---------------- | ---------------------------------------------------------------- |
+| `state`          | The saga's internal state tracking workflow progress             |
+| `events`         | Union of all event types the saga reacts to (from any aggregate) |
+| `commands`       | Union of all command types the saga may dispatch                 |
+| `infrastructure` | External dependencies available to handlers                      |
 
 Note that `events` and `commands` can span multiple aggregates -- this is the whole point of a saga.
 
@@ -407,8 +407,12 @@ const domain = await configureDomain<EcommerceInfrastructure>({
   infrastructure: {
     aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
     sagaPersistence: () => new InMemorySagaPersistence(),
-    provideInfrastructure: () => ({ /* ... */ }),
-    cqrsInfrastructure: () => ({ /* ... */ }),
+    provideInfrastructure: () => ({
+      /* ... */
+    }),
+    cqrsInfrastructure: () => ({
+      /* ... */
+    }),
   },
 });
 ```
@@ -439,16 +443,16 @@ type Id = InferSagaId<typeof OrderFulfillmentSaga>; // string
 
 noddde also supports [standalone command handlers](/docs/process-managers/standalone-commands) for cross-aggregate coordination. Here is when to use which:
 
-| | Standalone Command Handler | Saga |
-|---|---|---|
-| **Triggered by** | A command (imperative) | Domain events (reactive) |
-| **Stateful** | No | Yes (persisted state) |
-| **Output** | Side effects via infrastructure | Declarative command returns |
-| **Lifecycle** | Single request-response | Multi-step over time |
-| **Testability** | Requires mocking buses | Assert on returned data |
-| **Compensation** | Manual try/catch | Built-in via event reactions |
-| **Error handling** | Manual try/catch | Compensation via state machine |
-| **Use case** | Simple one-shot orchestration, integrations | Multi-step workflows, long-running processes |
+|                    | Standalone Command Handler                  | Saga                                         |
+| ------------------ | ------------------------------------------- | -------------------------------------------- |
+| **Triggered by**   | A command (imperative)                      | Domain events (reactive)                     |
+| **Stateful**       | No                                          | Yes (persisted state)                        |
+| **Output**         | Side effects via infrastructure             | Declarative command returns                  |
+| **Lifecycle**      | Single request-response                     | Multi-step over time                         |
+| **Testability**    | Requires mocking buses                      | Assert on returned data                      |
+| **Compensation**   | Manual try/catch                            | Built-in via event reactions                 |
+| **Error handling** | Manual try/catch                            | Compensation via state machine               |
+| **Use case**       | Simple one-shot orchestration, integrations | Multi-step workflows, long-running processes |
 
 Use a standalone command handler for stateless, simple coordination: sending notifications, syncing with external systems, or dispatching a few commands in sequence.
 

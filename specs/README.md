@@ -99,6 +99,7 @@ specs/
 ```
 
 To find the spec for any source file:
+
 - `packages/core/src/<path>.ts` → `specs/core/<path>.spec.md`
 - `packages/engine/src/<path>.ts` → `specs/engine/<path>.spec.md`
 
@@ -201,11 +202,11 @@ Before a spec reaches `ready`:
 
 The `## Test Scenarios` section maps directly to vitest test files:
 
-| Spec path                            | Test file path                                             |
-| ------------------------------------ | ---------------------------------------------------------- |
-| `specs/core/<path>/<name>.spec.md`   | `packages/core/src/__tests__/<path>/<name>.test.ts`        |
+| Spec path                            | Test file path                                               |
+| ------------------------------------ | ------------------------------------------------------------ |
+| `specs/core/<path>/<name>.spec.md`   | `packages/core/src/__tests__/<path>/<name>.test.ts`          |
 | `specs/engine/<path>/<name>.spec.md` | `packages/engine/src/__tests__/engine/<path>/<name>.test.ts` |
-| `specs/integration/<name>.spec.md`   | `packages/engine/src/__tests__/integration/<name>.test.ts` |
+| `specs/integration/<name>.spec.md`   | `packages/engine/src/__tests__/integration/<name>.test.ts`   |
 
 - Each `### Heading` becomes one `it("heading", ...)` block
 - TypeScript code fences in each subsection are the test body

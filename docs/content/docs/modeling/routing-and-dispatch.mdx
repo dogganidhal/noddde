@@ -145,8 +145,8 @@ The framework matches the command's `name` against the `commands` map of each re
 const domain = await configureDomain({
   writeModel: {
     aggregates: {
-      BankAccount,  // aggregate name: "BankAccount"
-      Auction,      // aggregate name: "Auction"
+      BankAccount, // aggregate name: "BankAccount"
+      Auction, // aggregate name: "Auction"
     },
   },
   // ...
@@ -333,12 +333,12 @@ cqrsInfrastructure: () => ({
 
 During `configureDomain`, the framework reads the `reducers` map from each projection and the `handlers` map from each saga, then registers them with the event bus via `on(eventName, handler)`. You do not subscribe manually.
 
-| Property | Behavior |
-|---|---|
-| Delivery | In-process, sequentially awaited |
-| Ordering | Handlers run in registration order |
-| Durability | None -- events are lost if the process crashes mid-delivery |
-| Scalability | Single process only |
+| Property    | Behavior                                                    |
+| ----------- | ----------------------------------------------------------- |
+| Delivery    | In-process, sequentially awaited                            |
+| Ordering    | Handlers run in registration order                          |
+| Durability  | None -- events are lost if the process crashes mid-delivery |
+| Scalability | Single process only                                         |
 
 `EventEmitterEventBus` is well-suited for development, testing, and single-process applications.
 

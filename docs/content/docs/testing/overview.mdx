@@ -42,12 +42,12 @@ expect(result.state.availableBalance).toBe(300);
 
 Available unit harnesses:
 
-| Harness | Tests | Pattern |
-|---------|-------|---------|
-| `testAggregate` | Command handlers + apply | Given events, When command, Then events + state |
-| `testProjection` | Projection reducers | Given events, Then view |
-| `testSaga` | Saga event handlers | Given state, When event, Then state + commands |
-| `evolveAggregate` | Apply handlers only | Replay events to reconstruct state |
+| Harness           | Tests                    | Pattern                                         |
+| ----------------- | ------------------------ | ----------------------------------------------- |
+| `testAggregate`   | Command handlers + apply | Given events, When command, Then events + state |
+| `testProjection`  | Projection reducers      | Given events, Then view                         |
+| `testSaga`        | Saga event handlers      | Given state, When event, Then state + commands  |
+| `evolveAggregate` | Apply handlers only      | Replay events to reconstruct state              |
 
 ### Level 2: Slice Tests (Pre-Wired Domain)
 
@@ -81,11 +81,11 @@ Use `configureDomain` from `@noddde/engine` directly when you need full control 
 
 The Decider pattern maps naturally to Given-When-Then:
 
-| Concept | Given | When | Then |
-|---------|-------|------|------|
-| **Aggregate** | Prior events (replayed through apply) | Command | Produced events + new state |
-| **Projection** | Prior events (reduced through reducers) | -- | Final view |
-| **Saga** | Prior saga state | Incoming event | New state + dispatched commands |
+| Concept        | Given                                   | When           | Then                            |
+| -------------- | --------------------------------------- | -------------- | ------------------------------- |
+| **Aggregate**  | Prior events (replayed through apply)   | Command        | Produced events + new state     |
+| **Projection** | Prior events (reduced through reducers) | --             | Final view                      |
+| **Saga**       | Prior saga state                        | Incoming event | New state + dispatched commands |
 
 For aggregates, "Given" means "these events already happened." The harness replays them through the aggregate's `apply` handlers to reconstruct the pre-command state, then executes the command handler.
 
@@ -116,7 +116,9 @@ You can always call handlers directly without any harness. The aggregate, projec
 ```ts
 // Call a command handler directly
 const events = BankAccount.commands.AuthorizeTransaction(
-  command, state, infrastructure,
+  command,
+  state,
+  infrastructure,
 );
 
 // Call an apply handler directly

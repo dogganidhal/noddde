@@ -33,6 +33,7 @@ class BankAccount extends AggregateRoot {
 ```
 
 This approach has several problems:
+
 - Requires a base class (`AggregateRoot`) — couples your domain to the framework
 - Uses `this.apply()` to dispatch events — mixes decision-making with side effects
 - Mutates internal state — harder to reason about
@@ -53,15 +54,20 @@ The Decider pattern treats an aggregate as three pure components:
 const BankAccount = defineAggregate<BankAccountDef>({
   initialState: { balance: 0, transactions: [] },
   commands: {
-    AuthorizeTransaction: (command, state, infra) => { /* return events */ },
+    AuthorizeTransaction: (command, state, infra) => {
+      /* return events */
+    },
   },
   apply: {
-    TransactionAuthorized: (event, state) => { /* return new state */ },
+    TransactionAuthorized: (event, state) => {
+      /* return new state */
+    },
   },
 });
 ```
 
 Benefits:
+
 - **No base class** — Your domain types are plain TypeScript
 - **No decorators** — Works with any TypeScript version and build tool
 - **No `this`** — Handlers are functions, not methods; no binding issues

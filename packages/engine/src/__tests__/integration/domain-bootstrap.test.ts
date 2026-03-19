@@ -6,11 +6,7 @@ import type {
   DefineQueries,
   Infrastructure,
 } from "@noddde/core";
-import {
-  defineAggregate,
-  defineProjection,
-  defineSaga,
-} from "@noddde/core";
+import { defineAggregate, defineProjection, defineSaga } from "@noddde/core";
 import {
   configureDomain,
   InMemoryEventSourcedAggregatePersistence,

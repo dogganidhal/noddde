@@ -41,9 +41,9 @@ type StandaloneCommandHandler<
 ) => void | Promise<void>;
 ```
 
-| Parameter | Description |
-|---|---|
-| `command` | The incoming standalone command |
+| Parameter        | Description                                                                                  |
+| ---------------- | -------------------------------------------------------------------------------------------- |
+| `command`        | The incoming standalone command                                                              |
 | `infrastructure` | Your domain infrastructure merged with `CQRSInfrastructure` (commandBus, eventBus, queryBus) |
 
 Key differences from aggregate command handlers:
@@ -120,7 +120,11 @@ standaloneCommandHandlers: {
 ```
 
 <Callout type="info">
-For **stateful** multi-step workflows that need to track progress, handle failures, and coordinate compensation across aggregates, consider using [Sagas](/docs/process-managers/sagas) instead. Sagas are event-driven, persist their state, and return commands declaratively -- making them testable without mocking buses.
+  For **stateful** multi-step workflows that need to track progress, handle
+  failures, and coordinate compensation across aggregates, consider using
+  [Sagas](/docs/process-managers/sagas) instead. Sagas are event-driven, persist
+  their state, and return commands declaratively -- making them testable without
+  mocking buses.
 </Callout>
 
 ### Integration Commands
@@ -171,13 +175,13 @@ standaloneCommandHandlers: {
 
 ## Standalone vs Aggregate Commands
 
-| Aspect | Aggregate Command | Standalone Command |
-|---|---|---|
-| Has `targetAggregateId` | Yes | No |
-| Handler receives state | Yes | No |
-| Handler returns events | Yes (one or more) | No (returns void) |
-| Has access to CQRSInfrastructure | No (only domain infrastructure) | Yes (commandBus, eventBus, queryBus) |
-| Purpose | Domain logic within a single aggregate | Cross-aggregate orchestration |
+| Aspect                           | Aggregate Command                      | Standalone Command                   |
+| -------------------------------- | -------------------------------------- | ------------------------------------ |
+| Has `targetAggregateId`          | Yes                                    | No                                   |
+| Handler receives state           | Yes                                    | No                                   |
+| Handler returns events           | Yes (one or more)                      | No (returns void)                    |
+| Has access to CQRSInfrastructure | No (only domain infrastructure)        | Yes (commandBus, eventBus, queryBus) |
+| Purpose                          | Domain logic within a single aggregate | Cross-aggregate orchestration        |
 
 ## Guidelines
 

@@ -1,4 +1,10 @@
 {
   "title": "Modeling Your Domain",
-  "pages": ["defining-aggregates", "command-handlers", "state-and-events", "routing-and-dispatch", "type-inference"]
+  "pages": [
+    "defining-aggregates",
+    "command-handlers",
+    "state-and-events",
+    "routing-and-dispatch",
+    "type-inference"
+  ]
 }

@@ -178,7 +178,12 @@ type BrandedId = string & { __brand: "AuctionId" };
 type AuctionDef = {
   state: AuctionState;
   events: AuctionEvent;
-  commands: DefineCommands<{ /* ... */ }, BrandedId>;
+  commands: DefineCommands<
+    {
+      /* ... */
+    },
+    BrandedId
+  >;
   infrastructure: {};
 };
 
@@ -241,13 +246,13 @@ function createTestInfrastructure(): AuctionInfra {
 
 ## Quick Reference
 
-| Helper | Input | Extracts |
-|---|---|---|
-| `InferAggregateState<typeof Agg>` | `Aggregate` instance | The state type |
-| `InferAggregateEvents<typeof Agg>` | `Aggregate` instance | The event union type |
-| `InferAggregateCommands<typeof Agg>` | `Aggregate` instance | The command union type |
-| `InferAggregateID<Def>` | `AggregateTypes` bundle | The `targetAggregateId` type |
-| `InferAggregateInfrastructure<typeof Agg>` | `Aggregate` instance | The infrastructure type |
+| Helper                                     | Input                   | Extracts                     |
+| ------------------------------------------ | ----------------------- | ---------------------------- |
+| `InferAggregateState<typeof Agg>`          | `Aggregate` instance    | The state type               |
+| `InferAggregateEvents<typeof Agg>`         | `Aggregate` instance    | The event union type         |
+| `InferAggregateCommands<typeof Agg>`       | `Aggregate` instance    | The command union type       |
+| `InferAggregateID<Def>`                    | `AggregateTypes` bundle | The `targetAggregateId` type |
+| `InferAggregateInfrastructure<typeof Agg>` | `Aggregate` instance    | The infrastructure type      |
 
 The first four helpers work with `typeof YourAggregate` (the value returned by `defineAggregate`). `InferAggregateID` works with the `AggregateTypes` type alias you pass as the generic parameter to `defineAggregate`.
 

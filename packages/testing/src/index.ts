@@ -9,10 +9,7 @@ export { testProjection } from "./projection-harness";
 export type { ProjectionTestBuilder } from "./projection-harness";
 
 export { testSaga } from "./saga-harness";
-export type {
-  SagaTestBuilder,
-  SagaTestBuilderWithEvent,
-} from "./saga-harness";
+export type { SagaTestBuilder, SagaTestBuilderWithEvent } from "./saga-harness";
 
 // Level 2: Domain harness
 export { testDomain } from "./domain-harness";

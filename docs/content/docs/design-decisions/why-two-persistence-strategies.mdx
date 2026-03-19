@@ -51,6 +51,7 @@ infrastructure: {
 ```
 
 Benefits:
+
 - **Start simple** — Use state storage initially, migrate to event sourcing when you need it
 - **Per-environment** — Use event sourcing in production, state storage in tests for speed
 - **Same aggregate** — No code changes needed when switching strategies
@@ -64,12 +65,12 @@ Benefits:
 
 ## When to Use Each
 
-| Use Event Sourcing When... | Use State Storage When... |
-|---|---|
-| You need an audit trail | You only need current state |
-| You want temporal queries | You have simple CRUD operations |
-| You plan to rebuild projections | Storage growth is a concern |
-| Events drive other systems | Simplicity is the priority |
+| Use Event Sourcing When...      | Use State Storage When...           |
+| ------------------------------- | ----------------------------------- |
+| You need an audit trail         | You only need current state         |
+| You want temporal queries       | You have simple CRUD operations     |
+| You plan to rebuild projections | Storage growth is a concern         |
+| Events drive other systems      | Simplicity is the priority          |
 | You need debugging capabilities | Performance is critical (O(1) load) |
 
 ## Example

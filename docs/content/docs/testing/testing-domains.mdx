@@ -40,10 +40,10 @@ expect(view?.balance).toBe(-100);
 
 ```ts
 type TestDomainConfig = {
-  aggregates?: Record<string, Aggregate>;    // Aggregate definitions
-  projections?: Record<string, Projection>;  // Projection definitions
-  sagas?: Record<string, Saga>;              // Saga definitions (optional)
-  infrastructure?: Infrastructure;            // Custom infrastructure (optional)
+  aggregates?: Record<string, Aggregate>; // Aggregate definitions
+  projections?: Record<string, Projection>; // Projection definitions
+  sagas?: Record<string, Saga>; // Saga definitions (optional)
+  infrastructure?: Infrastructure; // Custom infrastructure (optional)
 };
 ```
 
@@ -59,13 +59,13 @@ Only specify what you are testing. Everything else is wired automatically:
 
 ```ts
 type TestDomainResult = {
-  domain: Domain;     // The fully initialized domain
-  spy: DomainSpy;     // Spy accessors
+  domain: Domain; // The fully initialized domain
+  spy: DomainSpy; // Spy accessors
 };
 
 type DomainSpy = {
-  publishedEvents: Event[];        // All events dispatched via the event bus
-  dispatchedCommands: Command[];   // All commands dispatched via the command bus
+  publishedEvents: Event[]; // All events dispatched via the event bus
+  dispatchedCommands: Command[]; // All commands dispatched via the command bus
 };
 ```
 
@@ -183,7 +183,11 @@ const { domain, spy } = await testDomain({
 await domain.dispatchCommand({
   name: "PlaceOrder",
   targetAggregateId: "o-1",
-  payload: { customerId: "c-1", items: [{ sku: "WIDGET", qty: 2 }], total: 49.99 },
+  payload: {
+    customerId: "c-1",
+    items: [{ sku: "WIDGET", qty: 2 }],
+    total: 49.99,
+  },
 });
 
 // Saga should have dispatched a payment command
@@ -205,13 +209,13 @@ expect(summary?.status).toBe("confirmed");
 
 ## When to Use testDomain vs. configureDomain
 
-| Scenario | Use |
-|----------|-----|
-| Testing handler logic in isolation | `testAggregate`, `testProjection`, `testSaga` |
-| Testing multiple components together | `testDomain` |
-| Custom persistence strategies | `configureDomain` from `@noddde/engine` |
-| Custom bus implementations | `configureDomain` from `@noddde/engine` |
-| Production-like environment tests | `configureDomain` from `@noddde/engine` |
+| Scenario                             | Use                                           |
+| ------------------------------------ | --------------------------------------------- |
+| Testing handler logic in isolation   | `testAggregate`, `testProjection`, `testSaga` |
+| Testing multiple components together | `testDomain`                                  |
+| Custom persistence strategies        | `configureDomain` from `@noddde/engine`       |
+| Custom bus implementations           | `configureDomain` from `@noddde/engine`       |
+| Production-like environment tests    | `configureDomain` from `@noddde/engine`       |
 
 ## Next Steps
 

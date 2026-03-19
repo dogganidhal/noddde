@@ -26,13 +26,14 @@ import { db } from "./database";
 import { logger } from "./logger";
 
 function authorizeTransaction(command, state) {
-  logger.info("Authorizing...");           // How do you silence this in tests?
-  const rate = db.getExchangeRate("USD");  // How do you mock this?
+  logger.info("Authorizing..."); // How do you silence this in tests?
+  const rate = db.getExchangeRate("USD"); // How do you mock this?
   // ...
 }
 ```
 
 To test this handler, you need to:
+
 - Mock the `./database` module
 - Mock the `./logger` module
 - Deal with module caching, import ordering, and test isolation
@@ -64,6 +65,7 @@ commands: {
 ```
 
 Benefits:
+
 - **No container** — No IoC container, no registration phase, no runtime reflection
 - **No decorators** — Works with any TypeScript version and configuration
 - **Visible dependencies** — The parameter signature shows exactly what the handler needs
@@ -81,15 +83,11 @@ import { authorizeTransaction } from "./handler";
 // Must manage mock lifecycle, module cache, test isolation...
 
 // With parameter injection (simple)
-const result = BankAccount.commands.AuthorizeTransaction(
-  command,
-  state,
-  {
-    logger: { info: () => {}, error: () => {}, warn: () => {} },
-    bankAccountViewRepository: {} as any,
-    transactionViewRepository: {} as any,
-  },
-);
+const result = BankAccount.commands.AuthorizeTransaction(command, state, {
+  logger: { info: () => {}, error: () => {}, warn: () => {} },
+  bankAccountViewRepository: {} as any,
+  transactionViewRepository: {} as any,
+});
 // No module mocking. No lifecycle. No cache issues.
 ```
 

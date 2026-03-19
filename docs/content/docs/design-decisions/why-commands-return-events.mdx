@@ -24,13 +24,14 @@ In many frameworks, command handlers call `this.apply()` or `eventBus.dispatch()
 class BankAccount {
   authorizeTransaction(command, eventBus) {
     const event = new TransactionAuthorized(command);
-    eventBus.dispatch(event);          // Side effect!
+    eventBus.dispatch(event); // Side effect!
     this.state.balance -= command.amount; // Mutation!
   }
 }
 ```
 
 This creates problems:
+
 - **Hidden side effects** — The handler modifies external state (event bus, aggregate state)
 - **Ordering issues** — Events are published before persistence; if persistence fails, events were already dispatched
 - **Difficult testing** — Need to mock the event bus and verify calls
@@ -65,6 +66,7 @@ The framework then handles the rest in the correct order:
 3. Publish events to the event bus (for projections)
 
 Benefits:
+
 - **Pure functions** — Handlers are decision-makers, not orchestrators
 - **Correct ordering** — Framework controls persist-then-publish
 - **Easy testing** — Call the function, assert the returned events

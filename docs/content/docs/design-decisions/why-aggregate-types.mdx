@@ -19,7 +19,9 @@ function defineAggregate<
   TCommands extends AggregateCommand,
   TID,
   TInfrastructure extends Infrastructure,
->(config: { /* ... */ }): Aggregate<TState, TEvents, TCommands, TID, TInfrastructure>;
+>(config: {
+  /* ... */
+}): Aggregate<TState, TEvents, TCommands, TID, TInfrastructure>;
 
 // Usage — which parameter is which?
 defineAggregate<
@@ -28,10 +30,13 @@ defineAggregate<
   BankAccountCommand,
   string,
   BankingInfrastructure
->({ /* ... */ });
+>({
+  /* ... */
+});
 ```
 
 This is:
+
 - **Hard to read** — Five type arguments in a row
 - **Easy to mix up** — Was Events the second or third parameter?
 - **Rigid** — Adding a sixth parameter is a breaking change
@@ -63,10 +68,13 @@ type BankAccountDef = {
   infrastructure: BankingInfrastructure;
 };
 
-defineAggregate<BankAccountDef>({ /* ... */ });
+defineAggregate<BankAccountDef>({
+  /* ... */
+});
 ```
 
 Benefits:
+
 - **Named members** — `state`, `events`, `commands`, `infrastructure` are self-documenting
 - **Single generic parameter** — `defineAggregate<T>` instead of `defineAggregate<A, B, C, D, E>`
 - **Extensible** — Adding a new member does not change the generic parameter count
@@ -93,8 +101,14 @@ type BankAccountDef = {
 
 // One generic parameter, fully typed
 export const BankAccount = defineAggregate<BankAccountDef>({
-  initialState: { /* TypeScript knows this must be BankAccountState */ },
-  commands: { /* TypeScript knows each handler's parameter types */ },
-  apply: { /* TypeScript knows each handler's parameter types */ },
+  initialState: {
+    /* TypeScript knows this must be BankAccountState */
+  },
+  commands: {
+    /* TypeScript knows each handler's parameter types */
+  },
+  apply: {
+    /* TypeScript knows each handler's parameter types */
+  },
 });
 ```
