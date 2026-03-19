@@ -71,7 +71,13 @@ describe("Order aggregate — unit tests", () => {
       const result = await testAggregate(Order)
         .given({
           name: "OrderPlaced",
-          payload: { orderId: "o-1", customerId: "c-1", items: sampleItems, total: sampleTotal, placedAt: fixedDate },
+          payload: {
+            orderId: "o-1",
+            customerId: "c-1",
+            items: sampleItems,
+            total: sampleTotal,
+            placedAt: fixedDate,
+          },
         })
         .when({ name: "ConfirmOrder", targetAggregateId: "o-1" })
         .withInfrastructure(ecomInfra)
@@ -84,25 +90,59 @@ describe("Order aggregate — unit tests", () => {
     it("should cancel if order is not pending", async () => {
       const result = await testAggregate(Order)
         .given(
-          { name: "OrderPlaced", payload: { orderId: "o-1", customerId: "c-1", items: sampleItems, total: sampleTotal, placedAt: fixedDate } },
-          { name: "OrderConfirmed", payload: { orderId: "o-1", confirmedAt: fixedDate } },
+          {
+            name: "OrderPlaced",
+            payload: {
+              orderId: "o-1",
+              customerId: "c-1",
+              items: sampleItems,
+              total: sampleTotal,
+              placedAt: fixedDate,
+            },
+          },
+          {
+            name: "OrderConfirmed",
+            payload: { orderId: "o-1", confirmedAt: fixedDate },
+          },
         )
         .when({ name: "ConfirmOrder", targetAggregateId: "o-1" })
         .withInfrastructure(ecomInfra)
         .execute();
 
       expect(result.events[0]!.name).toBe("OrderCancelled");
-      expect(result.events[0]!.payload.reason).toContain("confirmed");
+      expect((result.events[0]!.payload as any).reason).toContain("confirmed");
     });
   });
 
   describe("State reconstruction", () => {
     it("should track full order lifecycle via evolveAggregate", () => {
       const state = evolveAggregate(Order, [
-        { name: "OrderPlaced", payload: { orderId: "o-1", customerId: "c-1", items: sampleItems, total: sampleTotal, placedAt: fixedDate } },
-        { name: "OrderConfirmed", payload: { orderId: "o-1", confirmedAt: fixedDate } },
-        { name: "OrderShipped", payload: { orderId: "o-1", trackingNumber: "TRK-123", shippedAt: fixedDate } },
-        { name: "OrderDelivered", payload: { orderId: "o-1", deliveredAt: fixedDate } },
+        {
+          name: "OrderPlaced",
+          payload: {
+            orderId: "o-1",
+            customerId: "c-1",
+            items: sampleItems,
+            total: sampleTotal,
+            placedAt: fixedDate,
+          },
+        },
+        {
+          name: "OrderConfirmed",
+          payload: { orderId: "o-1", confirmedAt: fixedDate },
+        },
+        {
+          name: "OrderShipped",
+          payload: {
+            orderId: "o-1",
+            trackingNumber: "TRK-123",
+            shippedAt: fixedDate,
+          },
+        },
+        {
+          name: "OrderDelivered",
+          payload: { orderId: "o-1", deliveredAt: fixedDate },
+        },
       ]);
 
       expect(state.status).toBe("delivered");
@@ -137,7 +177,12 @@ describe("Payment aggregate — unit tests", () => {
     const result = await testAggregate(Payment)
       .given({
         name: "PaymentRequested",
-        payload: { paymentId: "pay-1", referenceId: "order-1", amount: 109.97, requestedAt: fixedDate },
+        payload: {
+          paymentId: "pay-1",
+          referenceId: "order-1",
+          amount: 109.97,
+          requestedAt: fixedDate,
+        },
       })
       .when({ name: "CompletePayment", targetAggregateId: "pay-1" })
       .withInfrastructure(ecomInfra)
@@ -150,8 +195,24 @@ describe("Payment aggregate — unit tests", () => {
   it("should refund a payment", async () => {
     const result = await testAggregate(Payment)
       .given(
-        { name: "PaymentRequested", payload: { paymentId: "pay-1", referenceId: "o-1", amount: 100, requestedAt: fixedDate } },
-        { name: "PaymentCompleted", payload: { paymentId: "pay-1", referenceId: "o-1", amount: 100, completedAt: fixedDate } },
+        {
+          name: "PaymentRequested",
+          payload: {
+            paymentId: "pay-1",
+            referenceId: "o-1",
+            amount: 100,
+            requestedAt: fixedDate,
+          },
+        },
+        {
+          name: "PaymentCompleted",
+          payload: {
+            paymentId: "pay-1",
+            referenceId: "o-1",
+            amount: 100,
+            completedAt: fixedDate,
+          },
+        },
       )
       .when({
         name: "RefundPayment",
@@ -189,9 +250,32 @@ describe("Shipping aggregate — unit tests", () => {
 
   it("should track full shipment lifecycle", () => {
     const state = evolveAggregate(Shipping, [
-      { name: "ShipmentArranged", payload: { shipmentId: "s-1", customerReference: "o-1", itemCount: 2, arrangedAt: fixedDate } },
-      { name: "ShipmentDispatched", payload: { shipmentId: "s-1", customerReference: "o-1", trackingNumber: "TRK-456", dispatchedAt: fixedDate } },
-      { name: "ShipmentDelivered", payload: { shipmentId: "s-1", customerReference: "o-1", deliveredAt: fixedDate } },
+      {
+        name: "ShipmentArranged",
+        payload: {
+          shipmentId: "s-1",
+          customerReference: "o-1",
+          itemCount: 2,
+          arrangedAt: fixedDate,
+        },
+      },
+      {
+        name: "ShipmentDispatched",
+        payload: {
+          shipmentId: "s-1",
+          customerReference: "o-1",
+          trackingNumber: "TRK-456",
+          dispatchedAt: fixedDate,
+        },
+      },
+      {
+        name: "ShipmentDelivered",
+        payload: {
+          shipmentId: "s-1",
+          customerReference: "o-1",
+          deliveredAt: fixedDate,
+        },
+      },
     ]);
 
     expect(state.status).toBe("delivered");
@@ -228,7 +312,7 @@ describe("OrderFulfillmentSaga — unit tests", () => {
       expect(result.state.total).toBe(sampleTotal);
       expect(result.commands).toHaveLength(1);
       expect(result.commands[0]!.name).toBe("RequestPayment");
-      expect(result.commands[0]!.payload).toMatchObject({
+      expect((result.commands[0]! as any).payload).toMatchObject({
         referenceId: "o-1",
         amount: sampleTotal,
       });
@@ -251,7 +335,12 @@ describe("OrderFulfillmentSaga — unit tests", () => {
         .givenState(sagaState)
         .when({
           name: "PaymentCompleted",
-          payload: { paymentId: "pay-1", referenceId: "o-1", amount: sampleTotal, completedAt: fixedDate },
+          payload: {
+            paymentId: "pay-1",
+            referenceId: "o-1",
+            amount: sampleTotal,
+            completedAt: fixedDate,
+          },
         })
         .execute();
 
@@ -259,7 +348,7 @@ describe("OrderFulfillmentSaga — unit tests", () => {
       expect(result.commands).toHaveLength(2);
       expect(result.commands[0]!.name).toBe("ConfirmOrder");
       expect(result.commands[1]!.name).toBe("ArrangeShipment");
-      expect(result.commands[1]!.payload).toMatchObject({
+      expect((result.commands[1]! as any).payload).toMatchObject({
         customerReference: "o-1",
         itemCount: 3, // 2 + 1
       });
@@ -280,16 +369,23 @@ describe("OrderFulfillmentSaga — unit tests", () => {
         .givenState(sagaState)
         .when({
           name: "PaymentFailed",
-          payload: { paymentId: "pay-1", referenceId: "o-1", reason: "Insufficient funds", failedAt: fixedDate },
+          payload: {
+            paymentId: "pay-1",
+            referenceId: "o-1",
+            reason: "Insufficient funds",
+            failedAt: fixedDate,
+          },
         })
         .execute();
 
       expect(result.state.status).toBe("payment_failed");
-      expect(result.commands).toEqual([{
-        name: "CancelOrder",
-        targetAggregateId: "o-1",
-        payload: { reason: "Payment failed: Insufficient funds" },
-      }]);
+      expect(result.commands).toEqual([
+        {
+          name: "CancelOrder",
+          targetAggregateId: "o-1",
+          payload: { reason: "Payment failed: Insufficient funds" },
+        },
+      ]);
     });
   });
 
@@ -307,16 +403,22 @@ describe("OrderFulfillmentSaga — unit tests", () => {
         .givenState(sagaState)
         .when({
           name: "ShipmentDelivered",
-          payload: { shipmentId: "ship-1", customerReference: "o-1", deliveredAt: fixedDate },
+          payload: {
+            shipmentId: "ship-1",
+            customerReference: "o-1",
+            deliveredAt: fixedDate,
+          },
         })
         .withInfrastructure(ecomInfra)
         .execute();
 
       expect(result.state.status).toBe("delivered");
-      expect(result.commands).toEqual([{
-        name: "MarkOrderDelivered",
-        targetAggregateId: "o-1",
-      }]);
+      expect(result.commands).toEqual([
+        {
+          name: "MarkOrderDelivered",
+          targetAggregateId: "o-1",
+        },
+      ]);
       expect(mockNotifier.notifyCustomer).toHaveBeenCalledWith(
         "c-1",
         "Your order o-1 has been delivered!",
@@ -338,17 +440,23 @@ describe("OrderFulfillmentSaga — unit tests", () => {
         .givenState(sagaState)
         .when({
           name: "OrderCancelled",
-          payload: { orderId: "o-1", reason: "Changed my mind", cancelledAt: fixedDate },
+          payload: {
+            orderId: "o-1",
+            reason: "Changed my mind",
+            cancelledAt: fixedDate,
+          },
         })
         .withInfrastructure(ecomInfra)
         .execute();
 
       expect(result.state.status).toBe("cancelled");
-      expect(result.commands).toEqual([{
-        name: "RefundPayment",
-        targetAggregateId: "pay-1",
-        payload: { reason: "Changed my mind" },
-      }]);
+      expect(result.commands).toEqual([
+        {
+          name: "RefundPayment",
+          targetAggregateId: "pay-1",
+          payload: { reason: "Changed my mind" },
+        },
+      ]);
     });
 
     it("should NOT refund when no payment was taken", async () => {
@@ -364,7 +472,11 @@ describe("OrderFulfillmentSaga — unit tests", () => {
         .givenState(sagaState)
         .when({
           name: "OrderCancelled",
-          payload: { orderId: "o-1", reason: "Changed my mind", cancelledAt: fixedDate },
+          payload: {
+            orderId: "o-1",
+            reason: "Changed my mind",
+            cancelledAt: fixedDate,
+          },
         })
         .withInfrastructure(ecomInfra)
         .execute();
@@ -377,8 +489,15 @@ describe("OrderFulfillmentSaga — unit tests", () => {
   describe("Observation-only events", () => {
     it("should update state without dispatching commands for OrderConfirmed", async () => {
       const result = await testSaga(OrderFulfillmentSaga)
-        .givenState({ ...initialFulfillmentState, orderId: "o-1", status: "awaiting_shipment" as const })
-        .when({ name: "OrderConfirmed", payload: { orderId: "o-1", confirmedAt: fixedDate } })
+        .givenState({
+          ...initialFulfillmentState,
+          orderId: "o-1",
+          status: "awaiting_shipment" as const,
+        })
+        .when({
+          name: "OrderConfirmed",
+          payload: { orderId: "o-1", confirmedAt: fixedDate },
+        })
         .execute();
 
       expect(result.commands).toEqual([]);
@@ -393,19 +512,44 @@ describe("OrderFulfillmentSaga — unit tests", () => {
 describe("OrderFulfillmentSaga associations", () => {
   it("should extract orderId from Order events", () => {
     expect(
-      OrderFulfillmentSaga.associations.OrderPlaced({ name: "OrderPlaced", payload: { orderId: "o-1", customerId: "c-1", items: [], total: 0, placedAt: fixedDate } }),
+      OrderFulfillmentSaga.associations.OrderPlaced({
+        name: "OrderPlaced",
+        payload: {
+          orderId: "o-1",
+          customerId: "c-1",
+          items: [],
+          total: 0,
+          placedAt: fixedDate,
+        },
+      }),
     ).toBe("o-1");
   });
 
   it("should extract referenceId from Payment events", () => {
     expect(
-      OrderFulfillmentSaga.associations.PaymentCompleted({ name: "PaymentCompleted", payload: { paymentId: "p-1", referenceId: "o-1", amount: 100, completedAt: fixedDate } }),
+      OrderFulfillmentSaga.associations.PaymentCompleted({
+        name: "PaymentCompleted",
+        payload: {
+          paymentId: "p-1",
+          referenceId: "o-1",
+          amount: 100,
+          completedAt: fixedDate,
+        },
+      }),
     ).toBe("o-1");
   });
 
   it("should extract customerReference from Shipping events", () => {
     expect(
-      OrderFulfillmentSaga.associations.ShipmentDispatched({ name: "ShipmentDispatched", payload: { shipmentId: "s-1", customerReference: "o-1", trackingNumber: "TRK", dispatchedAt: fixedDate } }),
+      OrderFulfillmentSaga.associations.ShipmentDispatched({
+        name: "ShipmentDispatched",
+        payload: {
+          shipmentId: "s-1",
+          customerReference: "o-1",
+          trackingNumber: "TRK",
+          dispatchedAt: fixedDate,
+        },
+      }),
     ).toBe("o-1");
   });
 });
@@ -418,10 +562,32 @@ describe("OrderSummaryProjection — unit tests", () => {
   it("should build a complete order summary from events", async () => {
     const result = await testProjection(OrderSummaryProjection)
       .given(
-        { name: "OrderPlaced", payload: { orderId: "o-1", customerId: "c-1", items: sampleItems, total: sampleTotal, placedAt: fixedDate } },
-        { name: "OrderConfirmed", payload: { orderId: "o-1", confirmedAt: fixedDate } },
-        { name: "OrderShipped", payload: { orderId: "o-1", trackingNumber: "TRK-789", shippedAt: fixedDate } },
-        { name: "OrderDelivered", payload: { orderId: "o-1", deliveredAt: fixedDate } },
+        {
+          name: "OrderPlaced",
+          payload: {
+            orderId: "o-1",
+            customerId: "c-1",
+            items: sampleItems,
+            total: sampleTotal,
+            placedAt: fixedDate,
+          },
+        },
+        {
+          name: "OrderConfirmed",
+          payload: { orderId: "o-1", confirmedAt: fixedDate },
+        },
+        {
+          name: "OrderShipped",
+          payload: {
+            orderId: "o-1",
+            trackingNumber: "TRK-789",
+            shippedAt: fixedDate,
+          },
+        },
+        {
+          name: "OrderDelivered",
+          payload: { orderId: "o-1", deliveredAt: fixedDate },
+        },
       )
       .execute();
 
@@ -438,8 +604,24 @@ describe("OrderSummaryProjection — unit tests", () => {
   it("should show cancelled status", async () => {
     const result = await testProjection(OrderSummaryProjection)
       .given(
-        { name: "OrderPlaced", payload: { orderId: "o-1", customerId: "c-1", items: sampleItems, total: sampleTotal, placedAt: fixedDate } },
-        { name: "OrderCancelled", payload: { orderId: "o-1", reason: "Payment failed", cancelledAt: fixedDate } },
+        {
+          name: "OrderPlaced",
+          payload: {
+            orderId: "o-1",
+            customerId: "c-1",
+            items: sampleItems,
+            total: sampleTotal,
+            placedAt: fixedDate,
+          },
+        },
+        {
+          name: "OrderCancelled",
+          payload: {
+            orderId: "o-1",
+            reason: "Payment failed",
+            cancelledAt: fixedDate,
+          },
+        },
       )
       .execute();
 
@@ -482,7 +664,9 @@ describe("Order fulfillment domain — slice test", () => {
     );
 
     // Projection should show pending order
-    const summary = domain.getProjectionView<OrderSummary>("OrderSummaryProjection");
+    const summary = domain.getProjectionView<OrderSummary>(
+      "OrderSummaryProjection",
+    );
     expect(summary?.status).toBe("pending");
     expect(summary?.total).toBe(sampleTotal);
     expect(summary?.itemCount).toBe(3);

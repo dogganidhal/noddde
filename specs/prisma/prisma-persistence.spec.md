@@ -21,7 +21,7 @@ docs:
 
 # Prisma Persistence
 
-> Prisma ORM adapter for noddde providing persistence, advisory locking, and UnitOfWork implementations. The developer provides a PrismaClient instance; the adapter handles schema mapping, transactions, and concurrency control internally. Supports PostgreSQL and MySQL for advisory locks; SQLite for persistence only.
+> Prisma ORM adapter for noddde providing persistence, advisory locking, and UnitOfWork implementations. The developer provides a PrismaClient instance; the adapter handles schema mapping, transactions, and concurrency control internally. Supports PostgreSQL, MySQL, and MariaDB for advisory locks; SQLite for persistence only. Internally uses the strategy pattern: each database dialect is a separate `AggregateLocker` implementation, and the public `PrismaAdvisoryLocker` delegates to the appropriate one.
 
 ## Type Contract
 
@@ -119,11 +119,15 @@ export class PrismaUnitOfWork implements UnitOfWork {
 
 /**
  * Database-backed AggregateLocker using advisory locks via Prisma.
- * Supports PostgreSQL (pg_advisory_lock) and MySQL (GET_LOCK).
+ * Supports PostgreSQL (pg_advisory_lock), MySQL (GET_LOCK),
+ * and MariaDB (GET_LOCK, same as MySQL).
  * SQLite is not supported.
  */
 export class PrismaAdvisoryLocker implements AggregateLocker {
-  constructor(prisma: PrismaClient, dialect: "postgresql" | "mysql");
+  constructor(
+    prisma: PrismaClient,
+    dialect: "postgresql" | "mysql" | "mariadb",
+  );
   acquire(
     aggregateName: string,
     aggregateId: string,
@@ -165,10 +169,10 @@ export class PrismaAdvisoryLocker implements AggregateLocker {
 ### Advisory Locker
 
 16. PostgreSQL: `acquire()` without timeout uses `pg_advisory_lock($1::bigint)` via `$queryRawUnsafe`. With timeout, polls `pg_try_advisory_lock` every 50ms until acquired or deadline exceeded, then throws `LockTimeoutError`.
-17. MySQL: `acquire()` uses `GET_LOCK(?, ?)` with timeout in seconds (ceiling of `timeoutMs / 1000`). If `acquired !== 1`, throws `LockTimeoutError`.
-18. `release()` uses `pg_advisory_unlock` (PostgreSQL) or `RELEASE_LOCK` (MySQL).
-19. The lock key is derived via `fnv1a64(${aggregateName}:${aggregateId})` for PostgreSQL, or the raw composite key (truncated to 64 chars) for MySQL.
-20. SQLite is not supported — no advisory lock SQL exists.
+17. MySQL/MariaDB: `acquire()` uses `GET_LOCK(?, ?)` with timeout in seconds (ceiling of `timeoutMs / 1000`). If `acquired !== 1n`, throws `LockTimeoutError`. MariaDB follows the same code path as MySQL.
+18. `release()` uses `pg_advisory_unlock` (PostgreSQL) or `RELEASE_LOCK` (MySQL/MariaDB).
+19. The lock key is derived via `fnv1a64(${aggregateName}:${aggregateId})` for PostgreSQL, or the raw composite key (truncated to 64 chars) for MySQL/MariaDB.
+20. Unsupported dialects throw at construction time with a message suggesting `InMemoryAggregateLocker`.
 
 ### Unit of Work
 

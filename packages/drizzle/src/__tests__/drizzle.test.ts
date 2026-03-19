@@ -74,11 +74,11 @@ describe("Drizzle Multi-Dialect Persistence", () => {
     expect(loaded).toHaveLength(2);
     expect(loaded[0]).toEqual({
       name: "OrderPlaced",
-      payload: { total: 100 },
+      payload: JSON.stringify({ total: 100 }),
     });
     expect(loaded[1]).toEqual({
       name: "OrderConfirmed",
-      payload: { confirmedAt: "2024-01-01" },
+      payload: JSON.stringify({ confirmedAt: "2024-01-01" }),
     });
   });
 

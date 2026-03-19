@@ -86,7 +86,7 @@ export class DrizzleEventSourcedAggregatePersistence
 
     return rows.map((row: any) => ({
       name: row.eventName,
-      payload: JSON.parse(row.payload),
+      payload: row.payload,
     }));
   }
 }

@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import "reflect-metadata";
 import { DataSource } from "typeorm";
-import { ConcurrencyError } from "@noddde/core";
-import { createTypeORMPersistence } from "../index";
+import { ConcurrencyError, LockTimeoutError } from "@noddde/core";
+import { createTypeORMPersistence, TypeORMAdvisoryLocker } from "../index";
 import {
   NodddeEventEntity,
   NodddeAggregateStateEntity,
@@ -288,5 +288,128 @@ describe("TypeORMUnitOfWork", () => {
 
     const events = await infra.eventSourcedPersistence.load("Account", "acc-1");
     expect(events).toEqual([]);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Advisory Locker
+// ═══════════════════════════════════════════════════════════════════
+
+function mockDataSource(type: string) {
+  return { options: { type }, query: vi.fn() } as unknown as DataSource;
+}
+
+describe("TypeORMAdvisoryLocker", () => {
+  it("should accept postgres database type", () => {
+    expect(
+      () => new TypeORMAdvisoryLocker(mockDataSource("postgres")),
+    ).not.toThrow();
+  });
+
+  it("should accept mysql database type", () => {
+    expect(
+      () => new TypeORMAdvisoryLocker(mockDataSource("mysql")),
+    ).not.toThrow();
+  });
+
+  it("should accept mariadb database type", () => {
+    expect(
+      () => new TypeORMAdvisoryLocker(mockDataSource("mariadb")),
+    ).not.toThrow();
+  });
+
+  it("should accept mssql database type", () => {
+    expect(
+      () => new TypeORMAdvisoryLocker(mockDataSource("mssql")),
+    ).not.toThrow();
+  });
+
+  it("should reject sqlite database type", () => {
+    expect(() => new TypeORMAdvisoryLocker(mockDataSource("sqlite"))).toThrow(
+      /not supported.*sqlite/i,
+    );
+  });
+
+  it("should reject better-sqlite3 database type", () => {
+    expect(
+      () => new TypeORMAdvisoryLocker(mockDataSource("better-sqlite3")),
+    ).toThrow(/not supported/i);
+  });
+
+  it("should call sp_getapplock for MSSQL acquire", async () => {
+    const ds = mockDataSource("mssql");
+    (ds.query as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { lockResult: 0 },
+    ]);
+    const locker = new TypeORMAdvisoryLocker(ds);
+
+    await locker.acquire("Order", "o-1", 5000);
+
+    expect(ds.query).toHaveBeenCalledTimes(1);
+    const sql = (ds.query as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as string;
+    expect(sql).toContain("sp_getapplock");
+    expect(sql).toContain("Exclusive");
+  });
+
+  it("should throw LockTimeoutError on negative MSSQL return code", async () => {
+    const ds = mockDataSource("mssql");
+    (ds.query as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { lockResult: -1 },
+    ]);
+    const locker = new TypeORMAdvisoryLocker(ds);
+
+    await expect(locker.acquire("Order", "o-1", 1000)).rejects.toThrow(
+      LockTimeoutError,
+    );
+  });
+
+  it("should throw LockTimeoutError on MSSQL deadlock victim", async () => {
+    const ds = mockDataSource("mssql");
+    (ds.query as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { lockResult: -3 },
+    ]);
+    const locker = new TypeORMAdvisoryLocker(ds);
+
+    await expect(locker.acquire("Order", "o-1")).rejects.toThrow(
+      LockTimeoutError,
+    );
+  });
+
+  it("should call sp_releaseapplock for MSSQL release", async () => {
+    const ds = mockDataSource("mssql");
+    (ds.query as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    const locker = new TypeORMAdvisoryLocker(ds);
+
+    await locker.release("Order", "o-1");
+
+    const sql = (ds.query as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as string;
+    expect(sql).toContain("sp_releaseapplock");
+  });
+
+  it("should truncate MSSQL lock name to 255 characters", async () => {
+    const ds = mockDataSource("mssql");
+    (ds.query as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { lockResult: 0 },
+    ]);
+    const locker = new TypeORMAdvisoryLocker(ds);
+
+    const longName = "A".repeat(300);
+    await locker.acquire(longName, "id-1");
+
+    const params = (ds.query as ReturnType<typeof vi.fn>).mock
+      .calls[0]![1] as any[];
+    expect((params[0] as string).length).toBe(255);
+  });
+
+  it("should silently handle MSSQL release errors for idempotency", async () => {
+    const ds = mockDataSource("mssql");
+    (ds.query as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("error 1223"),
+    );
+    const locker = new TypeORMAdvisoryLocker(ds);
+
+    await expect(locker.release("Order", "o-1")).resolves.toBeUndefined();
   });
 });

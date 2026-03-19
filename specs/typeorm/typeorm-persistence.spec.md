@@ -24,7 +24,7 @@ docs:
 
 # TypeORM Persistence
 
-> TypeORM adapter for noddde providing persistence, advisory locking, and UnitOfWork implementations. The developer provides an initialized TypeORM DataSource instance and registers the provided entity classes; the adapter handles transactions, concurrency control, and entity mapping internally. Supports PostgreSQL and MySQL for advisory locks; SQLite/better-sqlite3 for persistence only.
+> TypeORM adapter for noddde providing persistence, advisory locking, and UnitOfWork implementations. The developer provides an initialized TypeORM DataSource instance and registers the provided entity classes; the adapter handles transactions, concurrency control, and entity mapping internally. Supports PostgreSQL, MySQL/MariaDB, and MSSQL for advisory locks; SQLite/better-sqlite3 for persistence only. Internally uses the strategy pattern: each database dialect is a separate `AggregateLocker` implementation, and the public `TypeORMAdvisoryLocker` delegates to the appropriate one.
 
 ## Type Contract
 
@@ -123,7 +123,8 @@ export class TypeORMUnitOfWork implements UnitOfWork {
 /**
  * Database-backed AggregateLocker using advisory locks via TypeORM.
  * Auto-detects the dialect from dataSource.options.type.
- * Supports postgres (pg_advisory_lock) and mysql/mariadb (GET_LOCK).
+ * Supports postgres (pg_advisory_lock), mysql/mariadb (GET_LOCK),
+ * and mssql (sp_getapplock/sp_releaseapplock).
  * SQLite/better-sqlite3 are not supported — throws on construction.
  */
 export class TypeORMAdvisoryLocker implements AggregateLocker {
@@ -238,30 +239,31 @@ export class NodddeSagaStateEntity {
 
 ### Advisory Locker
 
-16. Constructor auto-detects dialect from `dataSource.options.type`: `"postgres"` maps to PostgreSQL, `"mysql"` or `"mariadb"` maps to MySQL. Any other type throws an error at construction time.
+16. Constructor auto-detects dialect from `dataSource.options.type`: `"postgres"` maps to PostgreSQL, `"mysql"` or `"mariadb"` maps to MySQL, `"mssql"` maps to MSSQL. Any other type throws an error at construction time.
 17. PostgreSQL: `acquire()` without timeout uses `pg_advisory_lock($1::bigint)` via `dataSource.query()`. With timeout, polls `pg_try_advisory_lock` every 50ms until acquired or deadline exceeded, then throws `LockTimeoutError`.
-18. MySQL: `acquire()` uses `GET_LOCK(?, ?)` with timeout in seconds (ceiling of `timeoutMs / 1000`). If `acquired !== 1`, throws `LockTimeoutError`.
-19. `release()` uses `pg_advisory_unlock` (PostgreSQL) or `RELEASE_LOCK` (MySQL) via `dataSource.query()`.
-20. The lock key is derived via `fnv1a64(${aggregateName}:${aggregateId})` for PostgreSQL, or the raw composite key (truncated to 64 chars) for MySQL.
-21. SQLite/better-sqlite3 are explicitly not supported — constructor throws with a message suggesting `InMemoryAggregateLocker`.
+18. MySQL/MariaDB: `acquire()` uses `GET_LOCK(?, ?)` with timeout in seconds (ceiling of `timeoutMs / 1000`). If `acquired !== 1`, throws `LockTimeoutError`.
+19. MSSQL: `acquire()` uses `sp_getapplock` with `@LockMode = 'Exclusive'`, `@LockOwner = 'Session'`, and `@LockTimeout` set to `timeoutMs` (or `-1` for infinite). Return codes `< 0` (timeout, cancelled, deadlock) throw `LockTimeoutError`.
+20. `release()` uses `pg_advisory_unlock` (PostgreSQL), `RELEASE_LOCK` (MySQL/MariaDB), or `sp_releaseapplock` (MSSQL) via `dataSource.query()`. MSSQL release is idempotent — releasing an unheld lock is silently ignored.
+21. The lock key is derived via `fnv1a64(${aggregateName}:${aggregateId})` for PostgreSQL, the raw composite key truncated to 64 chars for MySQL/MariaDB, or truncated to 255 chars for MSSQL.
+22. SQLite/better-sqlite3 are explicitly not supported — constructor throws with a message suggesting `InMemoryAggregateLocker`.
 
 ### Unit of Work
 
-22. `enlist(operation)` buffers an async operation for deferred execution.
-23. `deferPublish(...events)` accumulates events for post-commit publishing.
-24. `commit()` wraps all enlisted operations in `dataSource.manager.transaction(async (transactionalEntityManager) => { ... })`. Sets `txStore.current = transactionalEntityManager` before executing operations, and resets it to `null` in a `finally` block. Returns deferred events on success.
-25. `rollback()` discards all operations and events without touching the database.
-26. After `commit()` or `rollback()`, further calls to `enlist`, `deferPublish`, `commit`, or `rollback` throw `"UnitOfWork already completed"`.
+23. `enlist(operation)` buffers an async operation for deferred execution.
+24. `deferPublish(...events)` accumulates events for post-commit publishing.
+25. `commit()` wraps all enlisted operations in `dataSource.manager.transaction(async (transactionalEntityManager) => { ... })`. Sets `txStore.current = transactionalEntityManager` before executing operations, and resets it to `null` in a `finally` block. Returns deferred events on success.
+26. `rollback()` discards all operations and events without touching the database.
+27. After `commit()` or `rollback()`, further calls to `enlist`, `deferPublish`, `commit`, or `rollback` throw `"UnitOfWork already completed"`.
 
 ### Transaction Store
 
-27. All persistence classes use `getManager()` which returns `txStore.current ?? dataSource.manager`, routing operations through the active transaction when inside a UoW.
+28. All persistence classes use `getManager()` which returns `txStore.current ?? dataSource.manager`, routing operations through the active transaction when inside a UoW.
 
 ### Entity Definitions
 
-28. `NodddeEventEntity` maps to table `noddde_events` with a `@PrimaryGeneratedColumn()` id and a unique `@Index` on `[aggregateName, aggregateId, sequenceNumber]`. Columns use `@Column({ name: "snake_case" })` for mapping.
-29. `NodddeAggregateStateEntity` maps to table `noddde_aggregate_states` with `@PrimaryColumn` composite key on `[aggregateName, aggregateId]` and a `version` column with `default: 0`.
-30. `NodddeSagaStateEntity` maps to table `noddde_saga_states` with `@PrimaryColumn` composite key on `[sagaName, sagaId]`.
+29. `NodddeEventEntity` maps to table `noddde_events` with a `@PrimaryGeneratedColumn()` id and a unique `@Index` on `[aggregateName, aggregateId, sequenceNumber]`. Columns use `@Column({ name: "snake_case" })` for mapping.
+30. `NodddeAggregateStateEntity` maps to table `noddde_aggregate_states` with `@PrimaryColumn` composite key on `[aggregateName, aggregateId]` and a `version` column with `default: 0`.
+31. `NodddeSagaStateEntity` maps to table `noddde_saga_states` with `@PrimaryColumn` composite key on `[sagaName, sagaId]`.
 
 ## Invariants
 
@@ -287,6 +289,8 @@ export class NodddeSagaStateEntity {
 - **Concurrent saves with same expectedVersion**: One succeeds, the other throws `ConcurrencyError` (via unique constraint regex match for event-sourced, or version check for state-stored).
 - **Non-zero expectedVersion on new state-stored aggregate**: Throws `ConcurrencyError` with `actualVersion: 0`.
 - **Unsupported database type for advisory locker**: Constructor throws immediately with a descriptive error message.
+- **MSSQL deadlock victim**: `sp_getapplock` returns `-3` (deadlock victim), treated as `LockTimeoutError`.
+- **MSSQL release of unheld lock**: `sp_releaseapplock` raises error 1223; silently caught for idempotency.
 
 ## Integration Points
 

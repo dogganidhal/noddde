@@ -6,9 +6,7 @@
  * ephemeral MySQL instance.
  */
 import { MySqlContainer } from "@testcontainers/mysql";
-import { PrismaClient } from "@prisma/client";
 import { execSync } from "child_process";
-import { createPrismaPersistence, PrismaAdvisoryLocker } from "@noddde/prisma";
 import {
   configureDomain,
   EventEmitterEventBus,
@@ -29,24 +27,35 @@ async function main() {
   console.log("Starting MySQL container...");
   const container = await new MySqlContainer("mysql:8")
     .withDatabase("seat_reservation")
+    .withReuse()
     .start();
 
   const connectionUri = `mysql://${container.getUsername()}:${container.getUserPassword()}@${container.getHost()}:${container.getMappedPort(3306)}/${container.getDatabase()}`;
   console.log("  MySQL running\n");
 
   try {
-    // Step 2: Run Prisma migrations
-    console.log("Running Prisma schema push...");
+    // Step 2: Generate Prisma client for MySQL + push schema
+    // IMPORTANT: prisma generate must run BEFORE importing @prisma/client
+    // because the monorepo root generates it for SQLite, not MySQL.
+    console.log("Running Prisma generate + schema push...");
+    const sampleRoot = path.resolve(__dirname, "..");
     execSync(
-      `DATABASE_URL="${connectionUri}" npx prisma db push --skip-generate`,
-      {
-        cwd: path.resolve(__dirname, ".."),
-        stdio: "pipe",
-      },
+      `DATABASE_URL="${connectionUri}" npx prisma generate --schema=prisma/schema.prisma`,
+      { cwd: sampleRoot, stdio: "pipe" },
+    );
+    execSync(
+      `DATABASE_URL="${connectionUri}" npx prisma db push --skip-generate --schema=prisma/schema.prisma`,
+      { cwd: sampleRoot, stdio: "pipe" },
     );
     console.log("  Database schema created\n");
 
     // Step 3: Create Prisma client + advisory locker
+    // Dynamic imports: must load AFTER prisma generate regenerates @prisma/client for MySQL
+    const { PrismaClient } = await import("@prisma/client");
+    const { createPrismaPersistence, PrismaAdvisoryLocker } = await import(
+      "@noddde/prisma"
+    );
+
     const prisma = new PrismaClient({
       datasources: { db: { url: connectionUri } },
     });

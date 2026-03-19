@@ -1,9 +1,9 @@
 /* eslint-disable no-unused-vars */
-import { sql } from "drizzle-orm";
 import type { AggregateLocker } from "@noddde/core";
-import { LockTimeoutError, fnv1a64 } from "@noddde/core";
+import { PostgresLocker } from "./pg/advisory-locker";
+import { MySQLLocker } from "./mysql/advisory-locker";
 
-type DrizzleDialect = "pg" | "mysql" | "sqlite";
+export type DrizzleDialect = "pg" | "mysql" | "sqlite";
 
 /**
  * Database-backed {@link AggregateLocker} using advisory locks via Drizzle ORM.
@@ -33,62 +33,30 @@ type DrizzleDialect = "pg" | "mysql" | "sqlite";
  * ```
  */
 export class DrizzleAdvisoryLocker implements AggregateLocker {
-  constructor(
-    private readonly db: any,
-    private readonly dialect: DrizzleDialect,
-  ) {
-    if (dialect === "sqlite") {
+  private readonly inner: AggregateLocker;
+
+  constructor(db: any, dialect: DrizzleDialect) {
+    if (dialect === "pg") {
+      this.inner = new PostgresLocker(db);
+    } else if (dialect === "mysql") {
+      this.inner = new MySQLLocker(db);
+    } else {
       throw new Error(
-        "Pessimistic locking is not supported with SQLite. " +
-          "Use InMemoryAggregateLocker for single-process SQLite deployments.",
+        `Pessimistic locking is not supported with ${dialect}. ` +
+          "Use InMemoryAggregateLocker for single-process deployments.",
       );
     }
   }
 
-  async acquire(
+  acquire(
     aggregateName: string,
     aggregateId: string,
     timeoutMs?: number,
   ): Promise<void> {
-    const key = `${aggregateName}:${aggregateId}`;
-    if (this.dialect === "pg") {
-      const hashKey = fnv1a64(key);
-      if (timeoutMs && timeoutMs > 0) {
-        const deadline = Date.now() + timeoutMs;
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
-          const result = await this.db.execute(
-            sql`SELECT pg_try_advisory_lock(${hashKey}::bigint) AS acquired`,
-          );
-          const acquired = result.rows?.[0]?.acquired ?? result[0]?.acquired;
-          if (acquired === true || acquired === "t") return;
-          if (Date.now() >= deadline)
-            throw new LockTimeoutError(aggregateName, aggregateId, timeoutMs);
-          await new Promise((r) => setTimeout(r, 50));
-        }
-      } else {
-        await this.db.execute(sql`SELECT pg_advisory_lock(${hashKey}::bigint)`);
-      }
-    } else if (this.dialect === "mysql") {
-      const timeoutSec = timeoutMs ? Math.ceil(timeoutMs / 1000) : -1;
-      const lockName = key.slice(0, 64);
-      const result = await this.db.execute(
-        sql`SELECT GET_LOCK(${lockName}, ${timeoutSec}) AS acquired`,
-      );
-      const acquired = result.rows?.[0]?.acquired ?? result[0]?.acquired;
-      if (acquired !== 1)
-        throw new LockTimeoutError(aggregateName, aggregateId, timeoutMs ?? 0);
-    }
+    return this.inner.acquire(aggregateName, aggregateId, timeoutMs);
   }
 
-  async release(aggregateName: string, aggregateId: string): Promise<void> {
-    const key = `${aggregateName}:${aggregateId}`;
-    if (this.dialect === "pg") {
-      const hashKey = fnv1a64(key);
-      await this.db.execute(sql`SELECT pg_advisory_unlock(${hashKey}::bigint)`);
-    } else if (this.dialect === "mysql") {
-      const lockName = key.slice(0, 64);
-      await this.db.execute(sql`SELECT RELEASE_LOCK(${lockName})`);
-    }
+  release(aggregateName: string, aggregateId: string): Promise<void> {
+    return this.inner.release(aggregateName, aggregateId);
   }
 }

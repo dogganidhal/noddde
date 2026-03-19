@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import { ConcurrencyError } from "@noddde/core";
-import { createPrismaPersistence } from "../index";
+import { createPrismaPersistence, PrismaAdvisoryLocker } from "../index";
 
 const TEST_DB = path.resolve(__dirname, "../../prisma/test.db");
 const DATABASE_URL = `file:${TEST_DB}`;
@@ -277,5 +277,65 @@ describe("PrismaUnitOfWork", () => {
 
     const events = await infra.eventSourcedPersistence.load("Account", "acc-1");
     expect(events).toEqual([]);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Advisory Locker
+// ═══════════════════════════════════════════════════════════════════
+
+function mockPrisma() {
+  return { $queryRawUnsafe: vi.fn() } as unknown as PrismaClient;
+}
+
+describe("PrismaAdvisoryLocker", () => {
+  it("should accept postgresql dialect", () => {
+    expect(
+      () => new PrismaAdvisoryLocker(mockPrisma(), "postgresql"),
+    ).not.toThrow();
+  });
+
+  it("should accept mysql dialect", () => {
+    expect(() => new PrismaAdvisoryLocker(mockPrisma(), "mysql")).not.toThrow();
+  });
+
+  it("should accept mariadb dialect", () => {
+    expect(
+      () => new PrismaAdvisoryLocker(mockPrisma(), "mariadb"),
+    ).not.toThrow();
+  });
+
+  it("should reject unsupported dialects", () => {
+    expect(
+      () => new PrismaAdvisoryLocker(mockPrisma(), "sqlite" as any),
+    ).toThrow(/not supported/i);
+  });
+
+  it("should use GET_LOCK for mariadb acquire (same as mysql)", async () => {
+    const client = mockPrisma();
+    (
+      client.$queryRawUnsafe as unknown as ReturnType<typeof vi.fn>
+    ).mockResolvedValue([{ acquired: 1n }]);
+    const locker = new PrismaAdvisoryLocker(client, "mariadb");
+
+    await locker.acquire("Order", "o-1", 5000);
+
+    const sql = (client.$queryRawUnsafe as unknown as ReturnType<typeof vi.fn>)
+      .mock.calls[0]![0] as string;
+    expect(sql).toContain("GET_LOCK");
+  });
+
+  it("should use RELEASE_LOCK for mariadb release (same as mysql)", async () => {
+    const client = mockPrisma();
+    (
+      client.$queryRawUnsafe as unknown as ReturnType<typeof vi.fn>
+    ).mockResolvedValue([]);
+    const locker = new PrismaAdvisoryLocker(client, "mariadb");
+
+    await locker.release("Order", "o-1");
+
+    const sql = (client.$queryRawUnsafe as unknown as ReturnType<typeof vi.fn>)
+      .mock.calls[0]![0] as string;
+    expect(sql).toContain("RELEASE_LOCK");
   });
 });
