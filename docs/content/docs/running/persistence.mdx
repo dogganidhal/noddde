@@ -89,15 +89,13 @@ const domain = await configureDomain<BankingInfrastructure>({
 
 The `aggregatePersistence` factory returns either an `EventSourcedAggregatePersistence` or a `StateStoredAggregatePersistence`. The framework uses it to load and save state for all aggregates in the domain.
 
-## Optimistic Concurrency Control
+## Concurrency Control
 
-Both persistence strategies enforce optimistic concurrency via a version check on `save()`. When two concurrent commands load the same aggregate, the first to save succeeds. The second detects the version mismatch and throws `ConcurrencyError`.
+noddde offers two concurrency strategies for aggregate persistence, configured via `aggregateConcurrency`:
 
-```ts
-import { ConcurrencyError } from "@noddde/core";
-```
+### Optimistic Concurrency (default)
 
-The domain handles this automatically. You can configure retry behavior via `aggregateConcurrency`:
+Both persistence strategies enforce optimistic concurrency via a version check on `save()`. When two concurrent commands load the same aggregate, the first to save succeeds. The second detects the version mismatch and throws `ConcurrencyError`. The domain can automatically retry the full load-execute-save cycle.
 
 ```ts
 const domain = await configureDomain<MyInfrastructure>({
@@ -112,11 +110,52 @@ const domain = await configureDomain<MyInfrastructure>({
 });
 ```
 
-When a retry occurs, the domain re-loads the aggregate, re-executes the command handler against the updated state, and re-attempts the save. Command handlers may be called multiple times during retry and should be side-effect-free (the Decider pattern already ensures this: handlers only produce events).
+Command handlers may be called multiple times during retry and should be side-effect-free (the Decider pattern already ensures this: handlers only produce events). If `maxRetries` is 0 (the default), `ConcurrencyError` propagates immediately.
 
-If `maxRetries` is 0 (the default), `ConcurrencyError` propagates immediately to the caller.
+### Pessimistic Concurrency
 
-Inside an explicit `withUnitOfWork()`, `ConcurrencyError` is never retried -- it propagates immediately. The caller is responsible for retrying the entire unit of work.
+For high-contention aggregates where retries waste work, pessimistic locking serializes access by acquiring an exclusive lock before loading the aggregate.
+
+```ts
+import { InMemoryAggregateLocker } from "@noddde/engine";
+
+const domain = await configureDomain<MyInfrastructure>({
+  writeModel: { aggregates: { BankAccount } },
+  readModel: { projections: {} },
+  infrastructure: {
+    aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
+    aggregateConcurrency: {
+      strategy: "pessimistic",
+      locker: new InMemoryAggregateLocker(),
+      lockTimeoutMs: 5000, // optional: throw LockTimeoutError after 5s
+    },
+  },
+});
+```
+
+The lock is acquired before loading, held during command execution, and released after persistence commits (or on error). The version check on `save()` remains as a safety net. No retry loop is needed since the lock prevents conflicts.
+
+For production, use database-backed advisory lockers instead of the in-memory implementation:
+
+| Package           | Locker                  | PostgreSQL                         | MySQL                      |
+| ----------------- | ----------------------- | ---------------------------------- | -------------------------- |
+| `@noddde/drizzle` | `DrizzleAdvisoryLocker` | `pg_advisory_lock`                 | `GET_LOCK`                 |
+| `@noddde/prisma`  | `PrismaAdvisoryLocker`  | `pg_advisory_lock` via `$queryRaw` | `GET_LOCK` via `$queryRaw` |
+| `@noddde/typeorm` | `TypeORMAdvisoryLocker` | `pg_advisory_lock` via `query()`   | `GET_LOCK` via `query()`   |
+
+SQLite does not support advisory locks -- use `InMemoryAggregateLocker` for single-process SQLite deployments.
+
+### When to Choose Each Strategy
+
+| Factor                   | Optimistic              | Pessimistic                  |
+| ------------------------ | ----------------------- | ---------------------------- |
+| Low contention           | Best (no lock overhead) | Unnecessary overhead         |
+| High contention          | Retries waste work      | Best (serialized access)     |
+| Distributed systems      | Works everywhere        | Requires shared lock backend |
+| Complexity               | Lower                   | Higher (lock management)     |
+| Latency under contention | Variable (retries)      | Predictable (queueing)       |
+
+Inside an explicit `withUnitOfWork()`, optimistic `ConcurrencyError` is never retried -- it propagates immediately. Pessimistic locking still acquires/releases per command within the UoW.
 
 ## Built-in In-Memory Implementations
 

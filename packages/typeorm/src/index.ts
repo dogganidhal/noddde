@@ -8,7 +8,11 @@ export {
   TypeORMStateStoredAggregatePersistence,
   TypeORMSagaPersistence,
 } from "./persistence";
-export { TypeORMUnitOfWork, createTypeORMUnitOfWorkFactory } from "./unit-of-work";
+export { TypeORMAdvisoryLocker } from "./advisory-locker";
+export {
+  TypeORMUnitOfWork,
+  createTypeORMUnitOfWorkFactory,
+} from "./unit-of-work";
 export type { TypeORMTransactionStore } from "./unit-of-work";
 
 import type { DataSource } from "typeorm";
@@ -79,8 +83,14 @@ export function createTypeORMPersistence(
   const txStore: TypeORMTransactionStore = { current: null };
 
   return {
-    eventSourcedPersistence: new TypeORMEventSourcedAggregatePersistence(dataSource, txStore),
-    stateStoredPersistence: new TypeORMStateStoredAggregatePersistence(dataSource, txStore),
+    eventSourcedPersistence: new TypeORMEventSourcedAggregatePersistence(
+      dataSource,
+      txStore,
+    ),
+    stateStoredPersistence: new TypeORMStateStoredAggregatePersistence(
+      dataSource,
+      txStore,
+    ),
     sagaPersistence: new TypeORMSagaPersistence(dataSource, txStore),
     unitOfWorkFactory: createTypeORMUnitOfWorkFactory(dataSource, txStore),
   };
