@@ -8,7 +8,7 @@
     "prisma"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "prisma generate && tsc",
     "lint": "eslint . --max-warnings 0",
     "prisma:generate": "prisma generate",
     "test": "prisma generate && vitest run",
