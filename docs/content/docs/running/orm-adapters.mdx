@@ -235,38 +235,28 @@ This shared transaction store pattern means persistence classes do not need to k
 
 ## Concurrency Control
 
-All three adapters support both optimistic and pessimistic concurrency strategies. See [Concurrency Strategies](/docs/running/persistence#concurrency-control) for the full explanation.
+All three adapters support both [optimistic and pessimistic concurrency strategies](/docs/running/persistence#concurrency-control). Here is what each adapter provides at the database level.
 
 ### Optimistic Concurrency (built-in)
 
-Enforced at the database level via unique constraints and version columns:
+Handled automatically by the persistence implementations via database constraints:
 
-- **Event-sourced**: A unique constraint on `(aggregate_name, aggregate_id, sequence_number)` prevents concurrent appends. The `save()` method uses `expectedVersion + index + 1` for sequence numbers instead of querying `MAX(sequence_number)`.
-- **State-stored**: A `version` integer column (default 0) enables optimistic locking. On update, `WHERE version = expectedVersion` ensures the state has not changed since it was loaded.
+- **Events table**: A unique constraint on `(aggregate_name, aggregate_id, sequence_number)` prevents concurrent appends. Violations throw `ConcurrencyError`.
+- **States table**: A `version` column enables optimistic locking. Updates use `WHERE version = expectedVersion`; zero rows affected throws `ConcurrencyError`.
 
-Both strategies throw `ConcurrencyError` when a conflict is detected.
+### Advisory Lockers (for pessimistic concurrency)
 
-### Pessimistic Concurrency (advisory lockers)
+Each adapter exports an advisory locker for use with the pessimistic strategy:
 
-Each adapter exports an advisory locker that uses database-native locking:
+| Adapter                 | Constructor         | Dialect Detection                                    |
+| ----------------------- | ------------------- | ---------------------------------------------------- |
+| `DrizzleAdvisoryLocker` | `(db, dialect)`     | Explicit: `"pg"` \| `"mysql"` \| `"sqlite"` (throws) |
+| `PrismaAdvisoryLocker`  | `(prisma, dialect)` | Explicit: `"postgresql"` \| `"mysql"`                |
+| `TypeORMAdvisoryLocker` | `(dataSource)`      | Auto-detects from `dataSource.options.type`          |
 
-```ts
-import { DrizzleAdvisoryLocker } from "@noddde/drizzle";
-import { PrismaAdvisoryLocker } from "@noddde/prisma";
-import { TypeORMAdvisoryLocker } from "@noddde/typeorm";
-```
+All three use `pg_advisory_lock` for PostgreSQL and `GET_LOCK` for MySQL. SQLite has no advisory locks — use `InMemoryAggregateLocker` from `@noddde/engine` for single-process deployments.
 
-| Adapter                                 | PostgreSQL                    | MySQL                         | SQLite        |
-| --------------------------------------- | ----------------------------- | ----------------------------- | ------------- |
-| `DrizzleAdvisoryLocker(db, dialect)`    | `pg_advisory_lock(bigint)`    | `GET_LOCK(string, timeout)`   | Not supported |
-| `PrismaAdvisoryLocker(prisma, dialect)` | Same via `$queryRawUnsafe`    | Same via `$queryRawUnsafe`    | Not supported |
-| `TypeORMAdvisoryLocker(dataSource)`     | Same via `DataSource.query()` | Same via `DataSource.query()` | Not supported |
-
-The TypeORM locker auto-detects the dialect from `dataSource.options.type`. The Drizzle and Prisma lockers require an explicit dialect parameter.
-
-Advisory locks are session-level (not transaction-level), which means they span beyond the database transaction boundary. This is correct because the lock must cover the entire load-execute-save lifecycle.
-
-For SQLite, use `InMemoryAggregateLocker` from `@noddde/engine` for single-process deployments.
+Advisory locks are session-level, spanning beyond the database transaction. This is intentional: the lock covers the entire load→execute→save lifecycle.
 
 ## Database Tables
 

@@ -63,6 +63,8 @@ interface SagaPersistence {
 }
 ```
 
+Saga persistence has no `expectedVersion` parameter and no concurrency control. Sagas coordinate workflows, not domain truth — each saga instance is triggered by events arriving sequentially on the event bus. If you need concurrency guarantees on saga state, implement versioning in a custom `SagaPersistence` adapter.
+
 Required when using sagas (`processModel`) in your [domain configuration](/docs/running/domain-configuration).
 
 ## Configuring Persistence
@@ -278,14 +280,18 @@ class PostgresEventStore implements EventSourcedAggregatePersistence {
           ],
         );
       }
-    } catch (error) {
-      // Unique constraint violation on (aggregate_name, aggregate_id, sequence_number)
-      throw new ConcurrencyError(
-        aggregateName,
-        aggregateId,
-        expectedVersion,
-        -1,
-      );
+    } catch (error: unknown) {
+      // Check for unique constraint violation (database-specific)
+      const message = error instanceof Error ? error.message : "";
+      if (/unique|duplicate/i.test(message)) {
+        throw new ConcurrencyError(
+          aggregateName,
+          aggregateId,
+          expectedVersion,
+          -1,
+        );
+      }
+      throw error; // Re-throw unexpected errors (connection issues, etc.)
     }
   }
 }
