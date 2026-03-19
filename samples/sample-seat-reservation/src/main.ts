@@ -1,0 +1,178 @@
+/**
+ * Seat Reservation Sample — Pessimistic Concurrency with Prisma + MySQL
+ *
+ * Demonstrates advisory locking via MySQL GET_LOCK to serialize
+ * concurrent seat reservations. Uses Testcontainers for an
+ * ephemeral MySQL instance.
+ */
+import { MySqlContainer } from "@testcontainers/mysql";
+import { PrismaClient } from "@prisma/client";
+import { execSync } from "child_process";
+import { createPrismaPersistence, PrismaAdvisoryLocker } from "@noddde/prisma";
+import {
+  configureDomain,
+  EventEmitterEventBus,
+  InMemoryCommandBus,
+  InMemoryQueryBus,
+} from "@noddde/engine";
+import type { VenueInfrastructure } from "./infrastructure";
+import { SystemClock } from "./infrastructure";
+import { Venue } from "./aggregate";
+import path from "path";
+
+async function main() {
+  console.log(
+    "Seat Reservation Sample — Pessimistic Concurrency with Prisma + MySQL\n",
+  );
+
+  // Step 1: Start MySQL container
+  console.log("Starting MySQL container...");
+  const container = await new MySqlContainer("mysql:8")
+    .withDatabase("seat_reservation")
+    .start();
+
+  const connectionUri = `mysql://${container.getUsername()}:${container.getUserPassword()}@${container.getHost()}:${container.getMappedPort(3306)}/${container.getDatabase()}`;
+  console.log("  MySQL running\n");
+
+  try {
+    // Step 2: Run Prisma migrations
+    console.log("Running Prisma schema push...");
+    execSync(
+      `DATABASE_URL="${connectionUri}" npx prisma db push --skip-generate`,
+      {
+        cwd: path.resolve(__dirname, ".."),
+        stdio: "pipe",
+      },
+    );
+    console.log("  Database schema created\n");
+
+    // Step 3: Create Prisma client + advisory locker
+    const prisma = new PrismaClient({
+      datasources: { db: { url: connectionUri } },
+    });
+    const prismaInfra = createPrismaPersistence(prisma);
+    const locker = new PrismaAdvisoryLocker(prisma, "mysql");
+
+    // Step 4: Configure domain with pessimistic concurrency
+    const domain = await configureDomain<VenueInfrastructure>({
+      writeModel: { aggregates: { Venue } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: () => prismaInfra.eventSourcedPersistence,
+        unitOfWorkFactory: () => prismaInfra.unitOfWorkFactory,
+        aggregateConcurrency: {
+          strategy: "pessimistic",
+          locker,
+          lockTimeoutMs: 5000,
+        },
+        provideInfrastructure: () => ({
+          clock: new SystemClock(),
+        }),
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+    console.log(
+      "Domain configured: pessimistic concurrency with MySQL GET_LOCK (timeout: 5s)\n",
+    );
+
+    // Step 5: Create venue with 3 seats
+    const seatIds = ["A1", "A2", "A3"];
+    await domain.dispatchCommand({
+      name: "CreateVenue",
+      targetAggregateId: "concert-hall",
+      payload: { seatIds },
+    });
+    console.log(
+      `Venue created: 'concert-hall' with seats ${seatIds.join(", ")}\n`,
+    );
+
+    // Step 6: Fire 3 concurrent reservation attempts for seat A1
+    const customers = ["alice", "bob", "charlie"];
+    console.log(
+      `Firing ${customers.length} concurrent ReserveSeat commands for seat A1...\n`,
+    );
+    console.log(
+      "  With pessimistic locking, commands are serialized via MySQL GET_LOCK.",
+    );
+    console.log(
+      "  The first to acquire the lock reserves the seat; others see it as taken.\n",
+    );
+
+    const results = await Promise.allSettled(
+      customers.map((customerId) =>
+        domain.dispatchCommand({
+          name: "ReserveSeat",
+          targetAggregateId: "concert-hall",
+          payload: { seatId: "A1", customerId },
+        }),
+      ),
+    );
+
+    // Step 7: Report results
+    const fulfilled = results.filter((r) => r.status === "fulfilled").length;
+    const failed = results.filter((r) => r.status === "rejected").length;
+    console.log(`Results: ${fulfilled} commands completed, ${failed} failed\n`);
+
+    // Step 8: Verify final state
+    const finalEvents = await prismaInfra.eventSourcedPersistence.load(
+      "Venue",
+      "concert-hall",
+    );
+    const reserved = finalEvents.filter((e) => e.name === "SeatReserved");
+    const rejected = finalEvents.filter(
+      (e) => e.name === "ReservationRejected",
+    );
+
+    console.log("Final event stream:");
+    for (const event of finalEvents) {
+      if (event.name === "VenueCreated") {
+        console.log(
+          `  VenueCreated — seats: ${(event.payload as { seatIds: string[] }).seatIds.join(", ")}`,
+        );
+      } else if (event.name === "SeatReserved") {
+        const p = event.payload as { seatId: string; customerId: string };
+        console.log(
+          `  SeatReserved — seat: ${p.seatId}, customer: ${p.customerId}`,
+        );
+      } else if (event.name === "ReservationRejected") {
+        const p = event.payload as {
+          seatId: string;
+          customerId: string;
+          reason: string;
+        };
+        console.log(
+          `  ReservationRejected — seat: ${p.seatId}, customer: ${p.customerId} (${p.reason})`,
+        );
+      }
+    }
+    console.log(
+      `\nSummary: ${reserved.length} reserved, ${rejected.length} rejected (out of ${customers.length} attempts)`,
+    );
+
+    // Step 9: Also demonstrate releasing and re-reserving
+    if (reserved.length > 0) {
+      const winner = (reserved[0]!.payload as { customerId: string })
+        .customerId;
+      console.log(`\nReleasing seat A1 (held by ${winner})...`);
+      await domain.dispatchCommand({
+        name: "ReleaseSeat",
+        targetAggregateId: "concert-hall",
+        payload: { seatId: "A1" },
+      });
+      console.log("  Seat A1 released — now available for re-reservation");
+    }
+
+    await prisma.$disconnect();
+  } finally {
+    // Step 10: Cleanup
+    console.log("\nStopping MySQL container...");
+    await container.stop();
+    console.log("  Done!");
+  }
+}
+
+main().catch(console.error);
