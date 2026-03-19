@@ -57,9 +57,13 @@ type DomainConfiguration<
     aggregatePersistence?: () =>
       | PersistenceConfiguration
       | Promise<PersistenceConfiguration>;
-    aggregateConcurrency?: {
-      maxRetries?: number; // default: 0 (propagate ConcurrencyError immediately)
-    };
+    aggregateConcurrency?:
+      | { strategy?: "optimistic"; maxRetries?: number }
+      | {
+          strategy: "pessimistic";
+          locker: AggregateLocker;
+          lockTimeoutMs?: number;
+        };
     sagaPersistence?: () => SagaPersistence | Promise<SagaPersistence>;
     provideInfrastructure?: () => Promise<TInfrastructure> | TInfrastructure;
     cqrsInfrastructure?: (
@@ -132,15 +136,41 @@ The `dispatchCommand` method executes the following lifecycle for aggregate comm
 6. **Publish** -- For each new event, call `eventBus.dispatch(event)`. This triggers projections and sagas.
 7. **Return** -- Return `command.targetAggregateId`.
 
-### Domain.dispatchCommand() -- Concurrency Retry
+### Domain.dispatchCommand() -- Concurrency Strategy (Strategy Pattern)
 
-When `dispatchCommand` creates its own implicit UnitOfWork (no outer `withUnitOfWork`), the full load→execute→apply→persist→publish cycle is wrapped in a retry loop:
+The domain delegates concurrency control to a `ConcurrencyStrategy` instance, constructed during `init()` based on `aggregateConcurrency` configuration. The strategy wraps the command attempt — the Domain itself has no concurrency-specific branching.
 
-1. **Retry loop** -- If `save()` throws `ConcurrencyError` and the retry count has not exceeded `aggregateConcurrency.maxRetries` (default: 0), the domain re-executes the entire lifecycle from step 2 (Load) with a fresh UnitOfWork. This re-loads the latest state, re-executes the command handler against the updated state, and re-attempts the save.
-2. **No retry inside explicit UoW** -- When running inside `withUnitOfWork()`, `ConcurrencyError` propagates immediately without retry. The caller who set up the explicit UoW is responsible for handling the error.
-3. **No retry inside saga UoW** -- When a saga dispatches a command, the command runs inside the saga's UoW. `ConcurrencyError` propagates to the saga handler without retry.
-4. **Max retries exhausted** -- If all retries are exhausted, the `ConcurrencyError` from the last attempt propagates to the caller.
-5. **Handler re-execution** -- Command handlers may be called multiple times during retry. Handlers should be side-effect-free (the Decider pattern already implies this: handlers only produce events, they don't perform side effects).
+**Strategy interface** (engine-internal, not exported):
+
+```ts
+interface ConcurrencyStrategy {
+  execute(
+    aggregateName: string,
+    aggregateId: string,
+    attempt: () => Promise<Event[]>,
+  ): Promise<Event[]>;
+}
+```
+
+**Optimistic strategy** (`{ strategy: "optimistic", maxRetries }` or `{ maxRetries }` without `strategy`):
+
+1. **Retry loop** -- Executes the `attempt` callback up to `1 + maxRetries` times. On `ConcurrencyError`, retries with a fresh UoW. Non-`ConcurrencyError` exceptions propagate immediately.
+2. **Max retries exhausted** -- The `ConcurrencyError` from the last attempt propagates.
+3. **Handler re-execution** -- Command handlers may be called multiple times during retry. Handlers should be side-effect-free (the Decider pattern already implies this).
+
+**Pessimistic strategy** (`{ strategy: "pessimistic", locker, lockTimeoutMs? }`):
+
+1. **Lock acquisition** -- Before executing the attempt, acquires an exclusive lock via `locker.acquire(aggregateName, aggregateId, lockTimeoutMs)`.
+2. **Single attempt** -- Executes the attempt callback once (no retry loop). The lock prevents concurrent access, so `ConcurrencyError` should not occur (the version check on `save()` remains as a safety net).
+3. **Lock release** -- Always releases the lock in a `finally` block, even if the attempt throws.
+4. **Lock timeout** -- If the lock cannot be acquired within `lockTimeoutMs`, throws `LockTimeoutError` (not retried).
+
+**Both strategies apply to both UoW paths**:
+
+- **Implicit UoW** (normal commands): The strategy wraps the full attempt including UoW creation and commit.
+- **Explicit UoW** (`withUnitOfWork`): The strategy wraps just the lifecycle call (not UoW creation/commit). For optimistic, this is a pass-through since `ConcurrencyError` happens at commit time (outside the strategy). For pessimistic, the lock still serializes access to the aggregate during the load phase.
+
+**Backward compatibility**: `aggregateConcurrency: { maxRetries: 3 }` (without `strategy` field) defaults to optimistic. Omitting `aggregateConcurrency` entirely defaults to optimistic with 0 retries.
 
 ### Saga Event Handling Lifecycle
 
@@ -1221,6 +1251,170 @@ describe("Domain.dispatchCommand - concurrency retry", () => {
         payload: { by: 5 },
       }),
     ).rejects.toThrow(ConcurrencyError);
+  });
+});
+```
+
+### dispatchCommand works with pessimistic locking
+
+```ts
+import { describe, it, expect } from "vitest";
+import {
+  configureDomain,
+  defineAggregate,
+  EventEmitterEventBus,
+  InMemoryCommandBus,
+  InMemoryQueryBus,
+  InMemoryEventSourcedAggregatePersistence,
+  InMemoryAggregateLocker,
+} from "@noddde/core";
+import type {
+  DefineCommands,
+  DefineEvents,
+  AggregateTypes,
+  Infrastructure,
+} from "@noddde/core";
+
+type CounterState = { count: number };
+type CounterEvent = DefineEvents<{ Incremented: { by: number } }>;
+type CounterCommand = DefineCommands<{ Increment: { by: number } }>;
+type CounterTypes = AggregateTypes & {
+  state: CounterState;
+  events: CounterEvent;
+  commands: CounterCommand;
+  infrastructure: Infrastructure;
+};
+
+const Counter = defineAggregate<CounterTypes>({
+  initialState: { count: 0 },
+  commands: {
+    Increment: (cmd) => ({
+      name: "Incremented",
+      payload: { by: cmd.payload.by },
+    }),
+  },
+  apply: {
+    Incremented: (payload, state) => ({ count: state.count + payload.by }),
+  },
+});
+
+describe("Domain - pessimistic concurrency", () => {
+  it("should execute command successfully with pessimistic locking", async () => {
+    const locker = new InMemoryAggregateLocker();
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: () => persistence,
+        aggregateConcurrency: {
+          strategy: "pessimistic",
+          locker,
+        },
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "counter-1",
+      payload: { by: 5 },
+    });
+
+    const events = await persistence.load("Counter", "counter-1");
+    expect(events).toHaveLength(1);
+  });
+
+  it("should release lock even when command handler throws", async () => {
+    const locker = new InMemoryAggregateLocker();
+
+    const FailingAggregate = defineAggregate<CounterTypes>({
+      initialState: { count: 0 },
+      commands: {
+        Increment: () => {
+          throw new Error("handler failure");
+        },
+      },
+      apply: {
+        Incremented: (payload, state) => ({ count: state.count + payload.by }),
+      },
+    });
+
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { FailingAggregate } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregateConcurrency: {
+          strategy: "pessimistic",
+          locker,
+        },
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    await expect(
+      domain.dispatchCommand({
+        name: "Increment",
+        targetAggregateId: "counter-1",
+        payload: { by: 5 },
+      }),
+    ).rejects.toThrow("handler failure");
+
+    // Lock should be released — a second command should not hang
+    await expect(
+      domain.dispatchCommand({
+        name: "Increment",
+        targetAggregateId: "counter-1",
+        payload: { by: 5 },
+      }),
+    ).rejects.toThrow("handler failure");
+  });
+
+  it("should serialize concurrent commands on same aggregate", async () => {
+    const locker = new InMemoryAggregateLocker();
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: () => persistence,
+        aggregateConcurrency: {
+          strategy: "pessimistic",
+          locker,
+        },
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    await Promise.all([
+      domain.dispatchCommand({
+        name: "Increment",
+        targetAggregateId: "counter-1",
+        payload: { by: 1 },
+      }),
+      domain.dispatchCommand({
+        name: "Increment",
+        targetAggregateId: "counter-1",
+        payload: { by: 2 },
+      }),
+    ]);
+
+    const events = await persistence.load("Counter", "counter-1");
+    expect(events).toHaveLength(2);
   });
 });
 ```
