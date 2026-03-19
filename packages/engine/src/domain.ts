@@ -123,19 +123,30 @@ export type DomainConfiguration<
     /**
      * Concurrency control strategy for aggregate persistence.
      *
-     * - **Optimistic** (default): execute the command, check version on save.
-     *   If a concurrent write is detected (`ConcurrencyError`), retry the
-     *   full load→execute→save cycle up to `maxRetries` times.
+     * When **omitted** (the default), no concurrency control is applied.
+     * The version check on `save()` still catches conflicts at the
+     * database level (throwing `ConcurrencyError`), but there is no
+     * retry logic and no locking — the error propagates directly to
+     * the caller. This is appropriate for low-contention scenarios
+     * and works with every database dialect.
      *
-     * - **Pessimistic**: acquire an exclusive lock before loading the aggregate.
-     *   The lock serializes all commands to the same aggregate instance,
-     *   preventing concurrent writes entirely.
+     * - **Optimistic**: same as the default, but with automatic retries.
+     *   On `ConcurrencyError`, the full load→execute→save cycle is
+     *   retried up to `maxRetries` times. Works with every dialect.
      *
-     * @default `{ strategy: "optimistic", maxRetries: 0 }`
+     * - **Pessimistic**: acquire an exclusive advisory lock before loading
+     *   the aggregate, preventing concurrent access entirely. Requires
+     *   a database that supports advisory locks (PostgreSQL, MySQL/MariaDB,
+     *   or MSSQL via TypeORM). SQLite is not supported — use
+     *   `InMemoryAggregateLocker` for single-process deployments.
+     *
+     * @default undefined (no concurrency control — conflicts throw `ConcurrencyError`)
      *
      * @example
      * ```ts
-     * // Optimistic with 3 retries (backward compatible)
+     * // No concurrency control (default) — omit aggregateConcurrency entirely
+     *
+     * // Optimistic with 3 retries
      * aggregateConcurrency: { maxRetries: 3 }
      *
      * // Pessimistic with in-memory locker

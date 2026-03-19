@@ -31,6 +31,12 @@ export interface ConcurrencyStrategy {
  * Optimistic concurrency strategy: execute the attempt and retry
  * on {@link ConcurrencyError} up to `maxRetries` times.
  *
+ * With `maxRetries = 0` (the default when no `aggregateConcurrency`
+ * is configured), this acts as a **no-op passthrough** — the attempt
+ * runs once and any `ConcurrencyError` propagates to the caller.
+ * The version check on `save()` still catches conflicts at the
+ * database level; only the retry behavior is opt-in.
+ *
  * Each retry re-executes the full load→execute→save cycle against
  * the latest state. Command handlers may be called multiple times
  * and should be side-effect-free.

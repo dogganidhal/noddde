@@ -15,17 +15,17 @@ noddde provides three ORM adapter packages that implement all persistence interf
 
 ### Dialect Support Matrix
 
-The table below shows which database dialects are supported for **persistence** (event store, state store, saga store) and **advisory locking** (pessimistic concurrency) per adapter.
+Persistence (event store, state store, saga store) and [concurrency control](/docs/running/persistence#concurrency-control) work with **every dialect** supported by your ORM. The only dialect restriction applies to **pessimistic locking**, which requires database-level advisory locks:
 
-| Dialect    | Drizzle               | Prisma                | TypeORM               |
-| ---------- | --------------------- | --------------------- | --------------------- |
-| PostgreSQL | ✅ Persistence + Lock | ✅ Persistence + Lock | ✅ Persistence + Lock |
-| MySQL      | ✅ Persistence + Lock | ✅ Persistence + Lock | ✅ Persistence + Lock |
-| MariaDB    | ✅ Persistence + Lock | ✅ Persistence + Lock | ✅ Persistence + Lock |
-| SQLite     | ✅ Persistence only   | ✅ Persistence only   | ✅ Persistence only   |
-| MSSQL      | —                     | —                     | ✅ Persistence + Lock |
+| Dialect    | Persistence | No concurrency / Optimistic | Pessimistic locking  |
+| ---------- | ----------- | --------------------------- | -------------------- |
+| PostgreSQL | ✅ All ORMs | ✅ All ORMs                 | ✅ All ORMs          |
+| MySQL      | ✅ All ORMs | ✅ All ORMs                 | ✅ All ORMs          |
+| MariaDB    | ✅ All ORMs | ✅ All ORMs                 | ✅ All ORMs          |
+| SQLite     | ✅ All ORMs | ✅ All ORMs                 | ❌ No advisory locks |
+| MSSQL      | ✅ TypeORM  | ✅ TypeORM                  | ✅ TypeORM only      |
 
-**Lock** = advisory lock support via `*AdvisoryLocker`. SQLite has no advisory lock mechanism — use `InMemoryAggregateLocker` from `@noddde/engine` for single-process deployments.
+For SQLite or any dialect without advisory lock support, use `InMemoryAggregateLocker` from `@noddde/engine` for single-process deployments, or choose the optimistic strategy instead.
 
 Each package exports a single factory function that returns all persistence implementations wired to share a transaction context:
 

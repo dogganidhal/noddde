@@ -93,11 +93,28 @@ The `aggregatePersistence` factory returns either an `EventSourcedAggregatePersi
 
 ## Concurrency Control
 
-noddde offers two concurrency strategies for aggregate persistence, configured via `aggregateConcurrency`:
+noddde offers three concurrency modes for aggregate persistence, configured via `aggregateConcurrency`. All modes work with every database dialect — only pessimistic locking has [dialect restrictions](/docs/running/orm-adapters#dialect-support-matrix).
 
-### Optimistic Concurrency (default)
+### No Concurrency Control (default)
 
-Both persistence strategies enforce optimistic concurrency via a version check on `save()`. When two concurrent commands load the same aggregate, the first to save succeeds. The second detects the version mismatch and throws `ConcurrencyError`. The domain can automatically retry the full load-execute-save cycle.
+When `aggregateConcurrency` is omitted, no retry logic or locking is applied. The version check on `save()` still catches conflicts at the database level — if two concurrent commands target the same aggregate, the second to persist will throw `ConcurrencyError`. The error propagates directly to the caller.
+
+This is appropriate for low-contention scenarios and works with every database dialect supported by your ORM adapter.
+
+```ts
+const domain = await configureDomain<MyInfrastructure>({
+  writeModel: { aggregates: { BankAccount } },
+  readModel: { projections: {} },
+  infrastructure: {
+    aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
+    // no aggregateConcurrency — ConcurrencyError propagates to caller
+  },
+});
+```
+
+### Optimistic Concurrency (with retries)
+
+Opt into automatic retries by setting `maxRetries`. On `ConcurrencyError`, the domain re-executes the full load→execute→save cycle against the latest state, up to `maxRetries` times. If all retries are exhausted, `ConcurrencyError` propagates.
 
 ```ts
 const domain = await configureDomain<MyInfrastructure>({
@@ -112,7 +129,7 @@ const domain = await configureDomain<MyInfrastructure>({
 });
 ```
 
-Command handlers may be called multiple times during retry and should be side-effect-free (the Decider pattern already ensures this: handlers only produce events). If `maxRetries` is 0 (the default), `ConcurrencyError` propagates immediately.
+Command handlers may be called multiple times during retry and should be side-effect-free (the Decider pattern already ensures this: handlers only produce events).
 
 ### Pessimistic Concurrency
 
@@ -149,13 +166,14 @@ SQLite does not support advisory locks -- use `InMemoryAggregateLocker` for sing
 
 ### When to Choose Each Strategy
 
-| Factor                   | Optimistic              | Pessimistic                  |
-| ------------------------ | ----------------------- | ---------------------------- |
-| Low contention           | Best (no lock overhead) | Unnecessary overhead         |
-| High contention          | Retries waste work      | Best (serialized access)     |
-| Distributed systems      | Works everywhere        | Requires shared lock backend |
-| Complexity               | Lower                   | Higher (lock management)     |
-| Latency under contention | Variable (retries)      | Predictable (queueing)       |
+| Factor                   | None (default)             | Optimistic (retries) | Pessimistic                  |
+| ------------------------ | -------------------------- | -------------------- | ---------------------------- |
+| Low contention           | Best (zero overhead)       | Unnecessary overhead | Unnecessary overhead         |
+| High contention          | Errors propagate to caller | Retries waste work   | Best (serialized access)     |
+| Distributed systems      | Works everywhere           | Works everywhere     | Requires shared lock backend |
+| Dialect support          | All dialects               | All dialects         | PG, MySQL, MSSQL (TypeORM)   |
+| Complexity               | Lowest                     | Low                  | Higher (lock management)     |
+| Latency under contention | Fails fast                 | Variable (retries)   | Predictable (queueing)       |
 
 Inside an explicit `withUnitOfWork()`, optimistic `ConcurrencyError` is never retried -- it propagates immediately. Pessimistic locking still acquires/releases per command within the UoW.
 
