@@ -178,8 +178,8 @@ describe("First command with state-stored persistence", () => {
     });
 
     // State-stored persistence saves the final state, not events
-    const state = await persistence.load("Counter", "counter-1");
-    expect(state).toEqual({ count: 10 });
+    const loaded = await persistence.load("Counter", "counter-1");
+    expect(loaded).toEqual({ state: { count: 10 }, version: 1 });
   });
 
   it("should accumulate state across multiple commands", async () => {
@@ -210,8 +210,8 @@ describe("First command with state-stored persistence", () => {
       payload: { amount: 1 },
     });
 
-    const state = await persistence.load("Counter", "counter-1");
-    expect(state).toEqual({ count: 2 });
+    const loaded = await persistence.load("Counter", "counter-1");
+    expect(loaded).toEqual({ state: { count: 2 }, version: 2 });
   });
 });
 

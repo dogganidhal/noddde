@@ -20,10 +20,10 @@ describe("Persistence Interface Contracts", () => {
         const persistence = createPersistence();
         const state = { balance: 100, owner: "Alice" };
 
-        await persistence.save("BankAccount", "acc-1", state);
+        await persistence.save("BankAccount", "acc-1", state, 0);
         const loaded = await persistence.load("BankAccount", "acc-1");
 
-        expect(loaded).toEqual(state);
+        expect(loaded).toEqual({ state, version: 1 });
       });
 
       it("should return null or undefined for an unknown aggregate", async () => {
@@ -36,22 +36,26 @@ describe("Persistence Interface Contracts", () => {
       it("should overwrite state on repeated saves", async () => {
         const persistence = createPersistence();
 
-        await persistence.save("BankAccount", "acc-1", { balance: 100 });
-        await persistence.save("BankAccount", "acc-1", { balance: 200 });
+        await persistence.save("BankAccount", "acc-1", { balance: 100 }, 0);
+        await persistence.save("BankAccount", "acc-1", { balance: 200 }, 1);
         const loaded = await persistence.load("BankAccount", "acc-1");
 
-        expect(loaded).toEqual({ balance: 200 });
+        expect(loaded).toEqual({ state: { balance: 200 }, version: 2 });
       });
 
       it("should isolate by aggregate name", async () => {
         const persistence = createPersistence();
 
-        await persistence.save("Order", "1", { total: 50 });
-        await persistence.save("Account", "1", { balance: 999 });
+        await persistence.save("Order", "1", { total: 50 }, 0);
+        await persistence.save("Account", "1", { balance: 999 }, 0);
 
-        expect(await persistence.load("Order", "1")).toEqual({ total: 50 });
+        expect(await persistence.load("Order", "1")).toEqual({
+          state: { total: 50 },
+          version: 1,
+        });
         expect(await persistence.load("Account", "1")).toEqual({
-          balance: 999,
+          state: { balance: 999 },
+          version: 1,
         });
       });
     }
@@ -73,7 +77,7 @@ describe("Persistence Interface Contracts", () => {
           { name: "DepositMade", payload: { amount: 100 } },
         ];
 
-        await persistence.save("BankAccount", "acc-1", events);
+        await persistence.save("BankAccount", "acc-1", events, 0);
         const loaded = await persistence.load("BankAccount", "acc-1");
 
         expect(loaded).toEqual(events);
@@ -89,12 +93,18 @@ describe("Persistence Interface Contracts", () => {
       it("should append events across multiple saves preserving order", async () => {
         const persistence = createPersistence();
 
-        await persistence.save("BankAccount", "acc-1", [
-          { name: "AccountCreated", payload: { id: "acc-1" } },
-        ]);
-        await persistence.save("BankAccount", "acc-1", [
-          { name: "DepositMade", payload: { amount: 50 } },
-        ]);
+        await persistence.save(
+          "BankAccount",
+          "acc-1",
+          [{ name: "AccountCreated", payload: { id: "acc-1" } }],
+          0,
+        );
+        await persistence.save(
+          "BankAccount",
+          "acc-1",
+          [{ name: "DepositMade", payload: { amount: 50 } }],
+          1,
+        );
 
         const loaded = await persistence.load("BankAccount", "acc-1");
 
@@ -106,12 +116,18 @@ describe("Persistence Interface Contracts", () => {
       it("should isolate by aggregate name", async () => {
         const persistence = createPersistence();
 
-        await persistence.save("Order", "1", [
-          { name: "OrderPlaced", payload: { total: 200 } },
-        ]);
-        await persistence.save("Account", "1", [
-          { name: "AccountCreated", payload: { owner: "Bob" } },
-        ]);
+        await persistence.save(
+          "Order",
+          "1",
+          [{ name: "OrderPlaced", payload: { total: 200 } }],
+          0,
+        );
+        await persistence.save(
+          "Account",
+          "1",
+          [{ name: "AccountCreated", payload: { owner: "Bob" } }],
+          0,
+        );
 
         const orderEvents = await persistence.load("Order", "1");
         const accountEvents = await persistence.load("Account", "1");

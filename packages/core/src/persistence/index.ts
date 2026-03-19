@@ -1,9 +1,15 @@
 /* eslint-disable no-unused-vars */
 import type { Event } from "../edd";
 
+export { ConcurrencyError } from "./concurrency-error";
+export type { AggregateLocker } from "./aggregate-locker";
+export { LockTimeoutError } from "./lock-timeout-error";
+export { fnv1a64 } from "./hash";
+
 /**
  * Persistence strategy that stores the current aggregate state directly.
- * On load, the latest snapshot is returned. On save, the full state is overwritten.
+ * On load, the latest snapshot and version are returned. On save, the full
+ * state is overwritten after an optimistic concurrency check.
  *
  * Simpler than event sourcing but does not preserve event history.
  *
@@ -12,47 +18,66 @@ import type { Event } from "../edd";
 export interface StateStoredAggregatePersistence {
   /**
    * Persists the current state snapshot for an aggregate instance.
+   * Throws {@link ConcurrencyError} if `expectedVersion` does not match
+   * the current stored version.
    *
    * @param aggregateName - The aggregate type name (used as a namespace).
    * @param aggregateId - The unique identifier of the aggregate instance.
    * @param state - The full aggregate state to persist.
+   * @param expectedVersion - The version observed at load time. Must match
+   *   the current stored version (0 for new aggregates).
    */
-  save(aggregateName: string, aggregateId: string, state: any): Promise<void>;
+  save(
+    aggregateName: string,
+    aggregateId: string,
+    state: any,
+    expectedVersion: number,
+  ): Promise<void>;
 
   /**
-   * Loads the latest state snapshot for an aggregate instance.
-   * Returns `undefined` or `null` if the aggregate does not exist.
+   * Loads the latest state snapshot and version for an aggregate instance.
+   * Returns `null` if the aggregate does not exist (version is implicitly 0).
    *
    * @param aggregateName - The aggregate type name (used as a namespace).
    * @param aggregateId - The unique identifier of the aggregate instance.
    */
-  load(aggregateName: string, aggregateId: string): Promise<any>;
+  load(
+    aggregateName: string,
+    aggregateId: string,
+  ): Promise<{ state: any; version: number } | null>;
 }
 
 /**
  * Persistence strategy that stores domain events as the source of truth.
  * On load, the full event stream for an aggregate is returned. On save,
- * new events are appended to the stream.
+ * new events are appended to the stream after an optimistic concurrency check.
+ *
+ * The version is implicitly `events.length` (the stream length).
  *
  * @see {@link StateStoredAggregatePersistence} for the state-snapshot alternative.
  */
 export interface EventSourcedAggregatePersistence {
   /**
    * Appends new events to the event stream of an aggregate instance.
+   * Throws {@link ConcurrencyError} if `expectedVersion` does not match
+   * the current stream length.
    *
    * @param aggregateName - The aggregate type name (used as a namespace).
    * @param aggregateId - The unique identifier of the aggregate instance.
    * @param events - The new events to append.
+   * @param expectedVersion - The stream length observed at load time.
    */
   save(
     aggregateName: string,
     aggregateId: string,
     events: Event[],
+    expectedVersion: number,
   ): Promise<void>;
 
   /**
    * Loads the full event stream for an aggregate instance.
    * Returns an empty array if the aggregate does not exist.
+   * The version is derived as `events.length` by the caller.
    *
    * @param aggregateName - The aggregate type name (used as a namespace).
    * @param aggregateId - The unique identifier of the aggregate instance.

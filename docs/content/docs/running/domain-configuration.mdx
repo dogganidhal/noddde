@@ -12,21 +12,39 @@ import { configureDomain } from "@noddde/engine";
 
 const domain = await configureDomain<BankingInfrastructure>({
   writeModel: {
-    aggregates: { /* ... */ },
-    standaloneCommandHandlers: { /* ... */ },
+    aggregates: {
+      /* ... */
+    },
+    standaloneCommandHandlers: {
+      /* ... */
+    },
   },
   readModel: {
-    projections: { /* ... */ },
-    standaloneQueryHandlers: { /* ... */ },
+    projections: {
+      /* ... */
+    },
+    standaloneQueryHandlers: {
+      /* ... */
+    },
   },
   processModel: {
-    sagas: { /* ... */ },
+    sagas: {
+      /* ... */
+    },
   },
   infrastructure: {
-    aggregatePersistence: () => { /* ... */ },
-    sagaPersistence: () => { /* ... */ },
-    provideInfrastructure: () => { /* ... */ },
-    cqrsInfrastructure: () => { /* ... */ },
+    aggregatePersistence: () => {
+      /* ... */
+    },
+    sagaPersistence: () => {
+      /* ... */
+    },
+    provideInfrastructure: () => {
+      /* ... */
+    },
+    cqrsInfrastructure: () => {
+      /* ... */
+    },
   },
 });
 ```
@@ -50,6 +68,9 @@ type DomainConfiguration<TInfrastructure extends Infrastructure> = {
   };
   infrastructure: {
     aggregatePersistence?: () => PersistenceConfiguration | Promise<PersistenceConfiguration>;
+    aggregateConcurrency?:
+      | { strategy?: "optimistic"; maxRetries?: number }
+      | { strategy: "pessimistic"; locker: AggregateLocker; lockTimeoutMs?: number };
     sagaPersistence?: () => SagaPersistence | Promise<SagaPersistence>;
     provideInfrastructure?: () => TInfrastructure | Promise<TInfrastructure>;
     cqrsInfrastructure?: (infra: TInfrastructure) => CQRSInfrastructure | Promise<CQRSInfrastructure>;
@@ -193,6 +214,7 @@ The four providers are:
 - **`provideInfrastructure`** -- Your custom domain infrastructure (loggers, repositories, clients)
 - **`cqrsInfrastructure`** -- The three CQRS buses (CommandBus, EventBus, QueryBus)
 - **`aggregatePersistence`** -- The persistence strategy for aggregate state
+- **`aggregateConcurrency`** -- Concurrency strategy: optimistic (version check + retry, throws `ConcurrencyError`) or pessimistic (exclusive lock before load, throws `LockTimeoutError` on timeout). See [Concurrency Strategies](/docs/running/persistence#concurrency-control).
 - **`unitOfWorkFactory`** -- The factory for atomic command dispatch boundaries
 
 For a full treatment of each provider, how they are initialized, and how to swap them for testing, see the [Infrastructure](/docs/running/infrastructure) page.
@@ -274,8 +296,7 @@ const domain = await configureDomain<BankingInfrastructure>({
     },
   },
   infrastructure: {
-    aggregatePersistence: () =>
-      new InMemoryEventSourcedAggregatePersistence(),
+    aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
     provideInfrastructure: () => ({
       logger: new ConsoleLogger(),
       bankAccountViewRepository: new InMemoryBankAccountViewRepository(),

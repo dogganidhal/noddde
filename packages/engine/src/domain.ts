@@ -21,12 +21,18 @@ import type {
   UnitOfWork,
   UnitOfWorkFactory,
 } from "@noddde/core";
+import type { AggregateLocker } from "@noddde/core";
 import { InMemoryCommandBus } from "./implementations/in-memory-command-bus";
 import { EventEmitterEventBus } from "./implementations/ee-event-bus";
 import { InMemoryQueryBus } from "./implementations/in-memory-query-bus";
 import { InMemoryEventSourcedAggregatePersistence } from "./implementations/in-memory-aggregate-persistence";
 import { InMemorySagaPersistence } from "./implementations/in-memory-saga-persistence";
 import { createInMemoryUnitOfWork } from "./implementations/in-memory-unit-of-work";
+import type { ConcurrencyStrategy } from "./concurrency-strategy";
+import {
+  OptimisticConcurrencyStrategy,
+  PessimisticConcurrencyStrategy,
+} from "./concurrency-strategy";
 
 type AggregateMap = Record<string | symbol, Aggregate<any>>;
 
@@ -115,6 +121,39 @@ export type DomainConfiguration<
       | PersistenceConfiguration
       | Promise<PersistenceConfiguration>;
     /**
+     * Concurrency control strategy for aggregate persistence.
+     *
+     * - **Optimistic** (default): execute the command, check version on save.
+     *   If a concurrent write is detected (`ConcurrencyError`), retry the
+     *   full load→execute→save cycle up to `maxRetries` times.
+     *
+     * - **Pessimistic**: acquire an exclusive lock before loading the aggregate.
+     *   The lock serializes all commands to the same aggregate instance,
+     *   preventing concurrent writes entirely.
+     *
+     * @default `{ strategy: "optimistic", maxRetries: 0 }`
+     *
+     * @example
+     * ```ts
+     * // Optimistic with 3 retries (backward compatible)
+     * aggregateConcurrency: { maxRetries: 3 }
+     *
+     * // Pessimistic with in-memory locker
+     * aggregateConcurrency: {
+     *   strategy: "pessimistic",
+     *   locker: new InMemoryAggregateLocker(),
+     *   lockTimeoutMs: 5000,
+     * }
+     * ```
+     */
+    aggregateConcurrency?:
+      | { strategy?: "optimistic"; maxRetries?: number }
+      | {
+          strategy: "pessimistic";
+          locker: AggregateLocker;
+          lockTimeoutMs?: number;
+        };
+    /**
      * Factory for saga persistence. Required if `processModel` is configured.
      *
      * @see {@link InMemorySagaPersistence} for the built-in in-memory implementation.
@@ -160,6 +199,7 @@ export class Domain<
   private _persistence!: PersistenceConfiguration;
   private _sagaPersistence?: SagaPersistence;
   private _unitOfWorkFactory!: UnitOfWorkFactory;
+  private _concurrencyStrategy!: ConcurrencyStrategy;
   private readonly _uowStorage = new AsyncLocalStorage<UnitOfWork>();
   private readonly _projectionViews = new Map<string, any>();
 
@@ -239,6 +279,23 @@ export class Domain<
     this._unitOfWorkFactory = configuration.infrastructure.unitOfWorkFactory
       ? await configuration.infrastructure.unitOfWorkFactory()
       : createInMemoryUnitOfWork;
+
+    // Step 5.6: Resolve concurrency strategy
+    const concurrency = configuration.infrastructure.aggregateConcurrency;
+    if (
+      concurrency &&
+      "strategy" in concurrency &&
+      concurrency.strategy === "pessimistic"
+    ) {
+      this._concurrencyStrategy = new PessimisticConcurrencyStrategy(
+        concurrency.locker,
+        concurrency.lockTimeoutMs,
+      );
+    } else {
+      this._concurrencyStrategy = new OptimisticConcurrencyStrategy(
+        (concurrency as { maxRetries?: number } | undefined)?.maxRetries ?? 0,
+      );
+    }
 
     const { commandBus, eventBus, queryBus } = this._infrastructure;
 
@@ -415,7 +472,9 @@ export class Domain<
     await this._uowStorage.run(uow, async () => {
       try {
         // Enlist saga state persistence
-        uow.enlist(() => sagaPersistence.save(sagaName, sagaId, reaction.state));
+        uow.enlist(() =>
+          sagaPersistence.save(sagaName, sagaId, reaction.state),
+        );
 
         // Step 6: Dispatch commands (within the saga's UoW)
         if (reaction.commands) {
@@ -449,6 +508,10 @@ export class Domain<
    * Executes the full aggregate command lifecycle:
    * load, execute, apply, persist, publish.
    *
+   * Delegates concurrency control to {@link ConcurrencyStrategy}:
+   * - **Optimistic**: retries the attempt on {@link ConcurrencyError}
+   * - **Pessimistic**: acquires a lock before the attempt, releases after
+   *
    * If a UnitOfWork is active (via {@link withUnitOfWork} or saga handling),
    * persistence and event publishing are deferred to the owning UoW.
    * Otherwise, an implicit UoW is created and committed immediately.
@@ -462,93 +525,136 @@ export class Domain<
     const eventBus = this._infrastructure.eventBus;
 
     const existingUow = this._uowStorage.getStore();
-    const uow = existingUow ?? this._unitOfWorkFactory();
     const ownsUow = !existingUow;
 
-    try {
-      // Step 1: Load
-      const loaded = await persistence.load(
+    const runLifecycle = (uow: UnitOfWork) =>
+      this.executeCommandLifecycle(
         aggregateName,
-        command.targetAggregateId,
+        aggregate,
+        command,
+        persistence,
+        uow,
       );
 
-      let currentState: any;
-      const isEventSourced = Array.isArray(loaded);
-
-      if (isEventSourced) {
-        // Event-sourced: replay events to rebuild state
-        currentState = (loaded as Event[]).reduce(
-          (state: any, event: Event) => {
-            const applyHandler = aggregate.apply[event.name];
-            return applyHandler ? applyHandler(event.payload, state) : state;
-          },
-          aggregate.initialState,
-        );
-      } else {
-        // State-stored: use loaded state or initial state
-        currentState = loaded ?? aggregate.initialState;
+    if (ownsUow) {
+      // Implicit UoW — strategy wraps the full attempt (UoW create + commit)
+      const events = await this._concurrencyStrategy.execute(
+        aggregateName,
+        command.targetAggregateId,
+        async () => {
+          const uow = this._unitOfWorkFactory();
+          try {
+            await runLifecycle(uow);
+            return await uow.commit();
+          } catch (error) {
+            try {
+              await uow.rollback();
+            } catch {
+              // UoW may already be completed if commit failed partway through
+            }
+            throw error;
+          }
+        },
+      );
+      for (const event of events) {
+        await eventBus.dispatch(event);
       }
-
-      // Step 2: Execute command handler
-      const handler = aggregate.commands[command.name];
-      if (!handler) {
-        throw new Error(
-          `No command handler found for command: ${command.name} on aggregate: ${aggregateName}`,
-        );
-      }
-      const result = await handler(command, currentState, this._infrastructure);
-
-      // Step 3: Normalize to array
-      const newEvents: Event[] = Array.isArray(result) ? result : [result];
-
-      // Step 4: Apply events to get new state
-      let newState = currentState;
-      for (const event of newEvents) {
-        const applyHandler = aggregate.apply[event.name];
-        if (applyHandler) {
-          newState = applyHandler(event.payload, newState);
-        }
-      }
-
-      // Step 5: Enlist persistence in UoW (deferred until commit)
-      if (isEventSourced) {
-        uow.enlist(() =>
-          (persistence as EventSourcedAggregatePersistence).save(
-            aggregateName,
-            command.targetAggregateId,
-            newEvents,
-          ),
-        );
-      } else {
-        uow.enlist(() =>
-          (persistence as StateStoredAggregatePersistence).save(
-            aggregateName,
-            command.targetAggregateId,
-            newState,
-          ),
-        );
-      }
-
-      // Step 6: Defer event publishing (published after commit)
-      uow.deferPublish(...newEvents);
-
-      // Step 7: Commit if we own the UoW (implicit unit of work)
-      if (ownsUow) {
-        const events = await uow.commit();
-        for (const event of events) {
-          await eventBus.dispatch(event);
-        }
-      }
-    } catch (error) {
-      if (ownsUow) {
-        try {
-          await uow.rollback();
-        } catch {
-          // UoW may already be completed if commit failed partway through
-        }
-      }
-      throw error;
+    } else {
+      // Explicit UoW — strategy wraps just the lifecycle (for pessimistic locking)
+      await this._concurrencyStrategy.execute(
+        aggregateName,
+        command.targetAggregateId,
+        async () => {
+          await runLifecycle(existingUow!);
+          return [];
+        },
+      );
     }
+  }
+
+  /**
+   * The core load→execute→apply→enlist→defer cycle, extracted to support
+   * retry in the implicit UoW path.
+   */
+  private async executeCommandLifecycle(
+    aggregateName: string,
+    aggregate: Aggregate<any>,
+    command: AggregateCommand,
+    persistence: PersistenceConfiguration,
+    uow: UnitOfWork,
+  ): Promise<void> {
+    // Step 1: Load
+    const loaded = await persistence.load(
+      aggregateName,
+      command.targetAggregateId,
+    );
+
+    let currentState: any;
+    let version: number;
+    const isEventSourced = Array.isArray(loaded);
+
+    if (isEventSourced) {
+      // Event-sourced: replay events to rebuild state; version = stream length
+      const events = loaded as Event[];
+      version = events.length;
+      currentState = events.reduce((state: any, event: Event) => {
+        const applyHandler = aggregate.apply[event.name];
+        return applyHandler ? applyHandler(event.payload, state) : state;
+      }, aggregate.initialState);
+    } else {
+      // State-stored: load returns { state, version } | null
+      const stateResult = loaded as {
+        state: any;
+        version: number;
+      } | null;
+      version = stateResult?.version ?? 0;
+      currentState = stateResult?.state ?? aggregate.initialState;
+    }
+
+    // Step 2: Execute command handler
+    const handler = aggregate.commands[command.name];
+    if (!handler) {
+      throw new Error(
+        `No command handler found for command: ${command.name} on aggregate: ${aggregateName}`,
+      );
+    }
+    const result = await handler(command, currentState, this._infrastructure);
+
+    // Step 3: Normalize to array
+    const newEvents: Event[] = Array.isArray(result) ? result : [result];
+
+    // Step 4: Apply events to get new state
+    let newState = currentState;
+    for (const event of newEvents) {
+      const applyHandler = aggregate.apply[event.name];
+      if (applyHandler) {
+        newState = applyHandler(event.payload, newState);
+      }
+    }
+
+    // Step 5: Enlist persistence in UoW with version (deferred until commit)
+    if (isEventSourced) {
+      uow.enlist(() =>
+        (persistence as EventSourcedAggregatePersistence).save(
+          aggregateName,
+          command.targetAggregateId,
+          newEvents,
+          version,
+        ),
+      );
+    } else {
+      uow.enlist(() =>
+        (persistence as StateStoredAggregatePersistence).save(
+          aggregateName,
+          command.targetAggregateId,
+          newState,
+          version,
+        ),
+      );
+    }
+
+    // Step 6: Defer event publishing (published after commit)
+    uow.deferPublish(...newEvents);
   }
 
   /**

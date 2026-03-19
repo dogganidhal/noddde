@@ -6,6 +6,7 @@ import type {
   StateStoredAggregatePersistence,
   SagaPersistence,
 } from "@noddde/core";
+import { ConcurrencyError } from "@noddde/core";
 import {
   NodddeEventEntity,
   NodddeAggregateStateEntity,
@@ -32,35 +33,37 @@ export class TypeORMEventSourcedAggregatePersistence
     aggregateName: string,
     aggregateId: string,
     events: Event[],
+    expectedVersion: number,
   ): Promise<void> {
     if (events.length === 0) return;
 
     const manager = this.getManager();
     const repo = manager.getRepository(NodddeEventEntity);
 
-    // Get current max sequence number
-    const result = await repo
-      .createQueryBuilder("e")
-      .select("COALESCE(MAX(e.sequence_number), 0)", "maxSeq")
-      .where("e.aggregate_name = :aggregateName AND e.aggregate_id = :aggregateId", {
-        aggregateName,
-        aggregateId,
-      })
-      .getRawOne();
-
-    const maxSeq = result?.maxSeq ?? 0;
-
     const entities = events.map((event, index) => {
       const entity = new NodddeEventEntity();
       entity.aggregateName = aggregateName;
       entity.aggregateId = aggregateId;
-      entity.sequenceNumber = maxSeq + index + 1;
+      entity.sequenceNumber = expectedVersion + index + 1;
       entity.eventName = event.name;
       entity.payload = JSON.stringify(event.payload);
       return entity;
     });
 
-    await repo.save(entities);
+    try {
+      await repo.save(entities);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/UNIQUE|duplicate|unique/i.test(message)) {
+        throw new ConcurrencyError(
+          aggregateName,
+          aggregateId,
+          expectedVersion,
+          -1,
+        );
+      }
+      throw error;
+    }
   }
 
   async load(aggregateName: string, aggregateId: string): Promise<Event[]> {
@@ -98,6 +101,7 @@ export class TypeORMStateStoredAggregatePersistence
     aggregateName: string,
     aggregateId: string,
     state: any,
+    expectedVersion: number,
   ): Promise<void> {
     const manager = this.getManager();
     const repo = manager.getRepository(NodddeAggregateStateEntity);
@@ -108,18 +112,39 @@ export class TypeORMStateStoredAggregatePersistence
     });
 
     if (existing) {
+      if (existing.version !== expectedVersion) {
+        throw new ConcurrencyError(
+          aggregateName,
+          aggregateId,
+          expectedVersion,
+          existing.version,
+        );
+      }
       existing.state = serialized;
+      existing.version = expectedVersion + 1;
       await repo.save(existing);
     } else {
+      if (expectedVersion !== 0) {
+        throw new ConcurrencyError(
+          aggregateName,
+          aggregateId,
+          expectedVersion,
+          0,
+        );
+      }
       const entity = new NodddeAggregateStateEntity();
       entity.aggregateName = aggregateName;
       entity.aggregateId = aggregateId;
       entity.state = serialized;
+      entity.version = 1;
       await repo.save(entity);
     }
   }
 
-  async load(aggregateName: string, aggregateId: string): Promise<any> {
+  async load(
+    aggregateName: string,
+    aggregateId: string,
+  ): Promise<{ state: any; version: number } | null> {
     const manager = this.getManager();
     const repo = manager.getRepository(NodddeAggregateStateEntity);
 
@@ -127,8 +152,8 @@ export class TypeORMStateStoredAggregatePersistence
       where: { aggregateName, aggregateId },
     });
 
-    if (!row) return undefined;
-    return JSON.parse(row.state);
+    if (!row) return null;
+    return { state: JSON.parse(row.state), version: row.version };
   }
 }
 

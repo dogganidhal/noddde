@@ -6,9 +6,12 @@ import type {
   StateStoredAggregatePersistence,
   SagaPersistence,
 } from "@noddde/core";
+import { ConcurrencyError } from "@noddde/core";
 import type { PrismaTransactionStore } from "./unit-of-work";
 
-type PrismaExecutor = PrismaClient | Parameters<Parameters<PrismaClient["$transaction"]>[0]>[0];
+type PrismaExecutor =
+  | PrismaClient
+  | Parameters<Parameters<PrismaClient["$transaction"]>[0]>[0];
 
 /**
  * Prisma-backed event-sourced aggregate persistence.
@@ -29,28 +32,37 @@ export class PrismaEventSourcedAggregatePersistence
     aggregateName: string,
     aggregateId: string,
     events: Event[],
+    expectedVersion: number,
   ): Promise<void> {
     if (events.length === 0) return;
 
     const executor = this.getExecutor() as any;
 
-    // Get current max sequence number
-    const maxResult = await executor.nodddeEvent.aggregate({
-      _max: { sequenceNumber: true },
-      where: { aggregateName, aggregateId },
-    });
-
-    const maxSeq = maxResult._max.sequenceNumber ?? 0;
-
-    await executor.nodddeEvent.createMany({
-      data: events.map((event, index) => ({
-        aggregateName,
-        aggregateId,
-        sequenceNumber: maxSeq + index + 1,
-        eventName: event.name,
-        payload: JSON.stringify(event.payload),
-      })),
-    });
+    try {
+      await executor.nodddeEvent.createMany({
+        data: events.map((event, index) => ({
+          aggregateName,
+          aggregateId,
+          sequenceNumber: expectedVersion + index + 1,
+          eventName: event.name,
+          payload: JSON.stringify(event.payload),
+        })),
+      });
+    } catch (error: unknown) {
+      if (
+        error instanceof Error &&
+        "code" in error &&
+        (error as any).code === "P2002"
+      ) {
+        throw new ConcurrencyError(
+          aggregateName,
+          aggregateId,
+          expectedVersion,
+          -1,
+        );
+      }
+      throw error;
+    }
   }
 
   async load(aggregateName: string, aggregateId: string): Promise<Event[]> {
@@ -87,35 +99,64 @@ export class PrismaStateStoredAggregatePersistence
     aggregateName: string,
     aggregateId: string,
     state: any,
+    expectedVersion: number,
   ): Promise<void> {
     const executor = this.getExecutor() as any;
     const serialized = JSON.stringify(state);
 
-    const existing = await executor.nodddeAggregateState.findUnique({
-      where: { aggregateName_aggregateId: { aggregateName, aggregateId } },
-    });
-
-    if (existing) {
-      await executor.nodddeAggregateState.update({
-        where: { aggregateName_aggregateId: { aggregateName, aggregateId } },
-        data: { state: serialized },
-      });
+    if (expectedVersion === 0) {
+      try {
+        await executor.nodddeAggregateState.create({
+          data: {
+            aggregateName,
+            aggregateId,
+            state: serialized,
+            version: 1,
+          },
+        });
+      } catch (error: unknown) {
+        if (
+          error instanceof Error &&
+          "code" in error &&
+          (error as any).code === "P2002"
+        ) {
+          throw new ConcurrencyError(aggregateName, aggregateId, 0, -1);
+        }
+        throw error;
+      }
     } else {
-      await executor.nodddeAggregateState.create({
-        data: { aggregateName, aggregateId, state: serialized },
+      const result = await executor.nodddeAggregateState.updateMany({
+        where: {
+          aggregateName,
+          aggregateId,
+          version: expectedVersion,
+        },
+        data: { state: serialized, version: expectedVersion + 1 },
       });
+
+      if (result.count === 0) {
+        throw new ConcurrencyError(
+          aggregateName,
+          aggregateId,
+          expectedVersion,
+          -1,
+        );
+      }
     }
   }
 
-  async load(aggregateName: string, aggregateId: string): Promise<any> {
+  async load(
+    aggregateName: string,
+    aggregateId: string,
+  ): Promise<{ state: any; version: number } | null> {
     const executor = this.getExecutor() as any;
 
     const row = await executor.nodddeAggregateState.findUnique({
       where: { aggregateName_aggregateId: { aggregateName, aggregateId } },
     });
 
-    if (!row) return undefined;
-    return JSON.parse(row.state);
+    if (!row) return null;
+    return { state: JSON.parse(row.state), version: row.version };
   }
 }
 

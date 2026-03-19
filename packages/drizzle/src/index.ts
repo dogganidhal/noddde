@@ -1,4 +1,5 @@
 /* eslint-disable no-unused-vars */
+export { DrizzleAdvisoryLocker } from "./advisory-locker";
 import type { UnitOfWorkFactory } from "@noddde/core";
 import type {
   EventSourcedAggregatePersistence,
@@ -26,7 +27,7 @@ import { createDrizzleUnitOfWorkFactory } from "./unit-of-work";
 export interface DrizzleNodddeSchema {
   /** Events table with columns: aggregateName, aggregateId, sequenceNumber, eventName, payload */
   events: any;
-  /** Aggregate states table with columns: aggregateName, aggregateId, state */
+  /** Aggregate states table with columns: aggregateName, aggregateId, state, version */
   aggregateStates: any;
   /** Saga states table with columns: sagaName, sagaId, state */
   sagaStates: any;

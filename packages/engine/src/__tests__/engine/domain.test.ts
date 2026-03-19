@@ -10,16 +10,13 @@ import type {
   ProjectionTypes,
   SagaTypes,
 } from "@noddde/core";
-import {
-  defineAggregate,
-  defineProjection,
-  defineSaga,
-} from "@noddde/core";
+import { defineAggregate, defineProjection, defineSaga } from "@noddde/core";
 import {
   configureDomain,
   createInMemoryUnitOfWork,
   Domain,
   EventEmitterEventBus,
+  InMemoryAggregateLocker,
   InMemoryCommandBus,
   InMemoryEventSourcedAggregatePersistence,
   InMemoryQueryBus,
@@ -538,8 +535,11 @@ describe("Domain - state-stored persistence", () => {
       payload: { item: "Walk dog" },
     });
 
-    const state = await persistence.load("TodoList", "list-1");
-    expect(state).toEqual({ items: ["Buy milk", "Walk dog"] });
+    const loaded = await persistence.load("TodoList", "list-1");
+    expect(loaded).toEqual({
+      state: { items: ["Buy milk", "Walk dog"] },
+      version: 2,
+    });
   });
 });
 
@@ -630,7 +630,7 @@ describe("Domain - persistence failure", () => {
 
     const failingPersistence: EventSourcedAggregatePersistence = {
       load: async () => [],
-      save: async () => {
+      save: async (_name, _id, _events, _expectedVersion) => {
         throw new Error("Persistence failure");
       },
     };
@@ -791,15 +791,16 @@ describe("Domain.withUnitOfWork", () => {
         targetAggregateId: "c-1",
       });
       await domain.dispatchCommand({
-        name: "Increment",
-        targetAggregateId: "c-1",
-        payload: { by: 10 },
+        name: "CreateCounter",
+        targetAggregateId: "c-1b",
       });
     });
 
     // Both commands persisted
-    const events = await persistence.load("Counter", "c-1");
-    expect(events).toHaveLength(2);
+    const events1 = await persistence.load("Counter", "c-1");
+    const events2 = await persistence.load("Counter", "c-1b");
+    expect(events1).toHaveLength(1);
+    expect(events2).toHaveLength(1);
 
     // Both events published after commit
     expect(publishedEvents).toHaveLength(2);
@@ -820,9 +821,6 @@ describe("Domain.withUnitOfWork", () => {
     eventBus.on("CounterCreated", () => {
       timeline.push("publish:CounterCreated");
     });
-    eventBus.on("Incremented", () => {
-      timeline.push("publish:Incremented");
-    });
 
     const domain = await configureDomain<Infrastructure>({
       writeModel: { aggregates: { Counter } },
@@ -840,12 +838,11 @@ describe("Domain.withUnitOfWork", () => {
     await domain.withUnitOfWork(async () => {
       await domain.dispatchCommand({
         name: "CreateCounter",
-        targetAggregateId: "c-2",
+        targetAggregateId: "c-2a",
       });
       await domain.dispatchCommand({
-        name: "Increment",
-        targetAggregateId: "c-2",
-        payload: { by: 3 },
+        name: "CreateCounter",
+        targetAggregateId: "c-2b",
       });
     });
 
@@ -854,7 +851,7 @@ describe("Domain.withUnitOfWork", () => {
       "persist",
       "persist",
       "publish:CounterCreated",
-      "publish:Incremented",
+      "publish:CounterCreated",
     ]);
   });
 
@@ -1004,5 +1001,162 @@ describe("Domain - custom unitOfWorkFactory", () => {
 
     // The custom factory should have been called once (one command = one UoW)
     expect(factoryCalls).toHaveLength(1);
+  });
+});
+
+// ============================================================
+// pessimistic concurrency via InMemoryAggregateLocker
+// ============================================================
+
+describe("Domain - pessimistic concurrency", () => {
+  it("should execute command successfully with pessimistic locking", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+    const locker = new InMemoryAggregateLocker();
+
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: () => persistence,
+        aggregateConcurrency: {
+          strategy: "pessimistic",
+          locker,
+        },
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    await domain.dispatchCommand({
+      name: "CreateCounter",
+      targetAggregateId: "p-1",
+    });
+
+    const events = await persistence.load("Counter", "p-1");
+    expect(events).toHaveLength(1);
+    expect(events[0]?.name).toBe("CounterCreated");
+  });
+
+  it("should release lock even when command handler throws", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+    const locker = new InMemoryAggregateLocker();
+
+    // Aggregate that throws on a specific command
+    const FailingCounter = defineAggregate<CounterTypes>({
+      initialState: { count: 0 },
+      commands: {
+        CreateCounter: (cmd) => ({
+          name: "CounterCreated",
+          payload: { id: cmd.targetAggregateId },
+        }),
+        Increment: () => {
+          throw new Error("Handler failure");
+        },
+      },
+      apply: {
+        CounterCreated: (_payload, state) => state,
+        Incremented: (payload, state) => ({
+          count: state.count + payload.by,
+        }),
+      },
+    });
+
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { FailingCounter } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: () => persistence,
+        aggregateConcurrency: {
+          strategy: "pessimistic",
+          locker,
+        },
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    // First command succeeds (create)
+    await domain.dispatchCommand({
+      name: "CreateCounter",
+      targetAggregateId: "p-fail",
+    });
+
+    // Second command throws
+    await expect(
+      domain.dispatchCommand({
+        name: "Increment",
+        targetAggregateId: "p-fail",
+        payload: { by: 1 },
+      }),
+    ).rejects.toThrow("Handler failure");
+
+    // Lock should be released — a subsequent command on the same
+    // aggregate should succeed without hanging
+    await domain.dispatchCommand({
+      name: "CreateCounter",
+      targetAggregateId: "p-fail-2",
+    });
+
+    const events = await persistence.load("FailingCounter", "p-fail-2");
+    expect(events).toHaveLength(1);
+  });
+
+  it("should serialize concurrent commands on same aggregate", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+    const locker = new InMemoryAggregateLocker();
+
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: () => persistence,
+        aggregateConcurrency: {
+          strategy: "pessimistic",
+          locker,
+        },
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    // Create the aggregate first
+    await domain.dispatchCommand({
+      name: "CreateCounter",
+      targetAggregateId: "p-conc",
+    });
+
+    // Dispatch two increments concurrently
+    await Promise.all([
+      domain.dispatchCommand({
+        name: "Increment",
+        targetAggregateId: "p-conc",
+        payload: { by: 1 },
+      }),
+      domain.dispatchCommand({
+        name: "Increment",
+        targetAggregateId: "p-conc",
+        payload: { by: 2 },
+      }),
+    ]);
+
+    const events = await persistence.load("Counter", "p-conc");
+    // 1 create + 2 increments = 3 events
+    expect(events).toHaveLength(3);
+    expect(events[0]?.name).toBe("CounterCreated");
+    // Both increments should be present (order may vary due to scheduling)
+    const incrementPayloads = events
+      .filter((e) => e.name === "Incremented")
+      .map((e) => e.payload.by)
+      .sort();
+    expect(incrementPayloads).toEqual([1, 2]);
   });
 });

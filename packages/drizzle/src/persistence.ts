@@ -1,10 +1,11 @@
 /* eslint-disable no-unused-vars */
-import { eq, and, asc, sql } from "drizzle-orm";
-import type {
-  Event,
-  EventSourcedAggregatePersistence,
-  StateStoredAggregatePersistence,
-  SagaPersistence,
+import { eq, and, asc } from "drizzle-orm";
+import {
+  ConcurrencyError,
+  type Event,
+  type EventSourcedAggregatePersistence,
+  type StateStoredAggregatePersistence,
+  type SagaPersistence,
 } from "@noddde/core";
 import type { DrizzleTransactionStore, DrizzleNodddeSchema } from "./index";
 
@@ -31,36 +32,41 @@ export class DrizzleEventSourcedAggregatePersistence
     aggregateName: string,
     aggregateId: string,
     events: Event[],
+    expectedVersion: number,
   ): Promise<void> {
     if (events.length === 0) return;
 
     const executor = this.getExecutor();
     const eventsTable = this.schema.events;
 
-    // Get current max sequence number
-    const result = await executor
-      .select({
-        maxSeq: sql<number>`COALESCE(MAX(${eventsTable.sequenceNumber}), 0)`,
-      })
-      .from(eventsTable)
-      .where(
-        and(
-          eq(eventsTable.aggregateName, aggregateName),
-          eq(eventsTable.aggregateId, aggregateId),
-        ),
+    try {
+      await executor.insert(eventsTable).values(
+        events.map((event, index) => ({
+          aggregateName,
+          aggregateId,
+          sequenceNumber: expectedVersion + index + 1,
+          eventName: event.name,
+          payload: JSON.stringify(event.payload),
+        })),
       );
-
-    const maxSeq = result[0]?.maxSeq ?? 0;
-
-    await executor.insert(eventsTable).values(
-      events.map((event, index) => ({
-        aggregateName,
-        aggregateId,
-        sequenceNumber: maxSeq + index + 1,
-        eventName: event.name,
-        payload: JSON.stringify(event.payload),
-      })),
-    );
+    } catch (error: any) {
+      // Detect unique constraint violation across dialects
+      const message = error?.message ?? "";
+      if (
+        message.includes("UNIQUE constraint failed") || // SQLite
+        message.includes("unique constraint") || // PostgreSQL
+        message.includes("Duplicate entry") || // MySQL
+        message.includes("duplicate key") // PostgreSQL variant
+      ) {
+        throw new ConcurrencyError(
+          aggregateName,
+          aggregateId,
+          expectedVersion,
+          -1,
+        );
+      }
+      throw error;
+    }
   }
 
   async load(aggregateName: string, aggregateId: string): Promise<Event[]> {
@@ -106,42 +112,69 @@ export class DrizzleStateStoredAggregatePersistence
     aggregateName: string,
     aggregateId: string,
     state: any,
+    expectedVersion: number,
   ): Promise<void> {
     const executor = this.getExecutor();
     const table = this.schema.aggregateStates;
     const serialized = JSON.stringify(state);
 
-    // Upsert: check existence, then insert or update
-    const existing = await executor
-      .select()
-      .from(table)
-      .where(
-        and(
-          eq(table.aggregateName, aggregateName),
-          eq(table.aggregateId, aggregateId),
-        ),
-      );
-
-    if (existing.length > 0) {
-      await executor
+    if (expectedVersion === 0) {
+      // Insert path: new aggregate
+      try {
+        await executor.insert(table).values({
+          aggregateName,
+          aggregateId,
+          state: serialized,
+          version: 1,
+        });
+      } catch (error: any) {
+        const message = error?.message ?? "";
+        if (
+          message.includes("UNIQUE constraint failed") || // SQLite
+          message.includes("unique constraint") || // PostgreSQL
+          message.includes("Duplicate entry") || // MySQL
+          message.includes("duplicate key") // PostgreSQL variant
+        ) {
+          throw new ConcurrencyError(
+            aggregateName,
+            aggregateId,
+            expectedVersion,
+            -1,
+          );
+        }
+        throw error;
+      }
+    } else {
+      // Update path: optimistic concurrency check via version match
+      const result = await executor
         .update(table)
-        .set({ state: serialized })
+        .set({ state: serialized, version: expectedVersion + 1 })
         .where(
           and(
             eq(table.aggregateName, aggregateName),
             eq(table.aggregateId, aggregateId),
+            eq(table.version, expectedVersion),
           ),
         );
-    } else {
-      await executor.insert(table).values({
-        aggregateName,
-        aggregateId,
-        state: serialized,
-      });
+
+      // Check if no rows were updated (concurrency conflict)
+      const rowsAffected =
+        result?.rowsAffected ?? result?.changes ?? result?.rowCount ?? 0;
+      if (rowsAffected === 0) {
+        throw new ConcurrencyError(
+          aggregateName,
+          aggregateId,
+          expectedVersion,
+          -1,
+        );
+      }
     }
   }
 
-  async load(aggregateName: string, aggregateId: string): Promise<any> {
+  async load(
+    aggregateName: string,
+    aggregateId: string,
+  ): Promise<{ state: any; version: number } | null> {
     const executor = this.getExecutor();
     const table = this.schema.aggregateStates;
 
@@ -155,8 +188,9 @@ export class DrizzleStateStoredAggregatePersistence
         ),
       );
 
-    if (rows.length === 0) return undefined;
-    return JSON.parse(rows[0]!.state);
+    if (rows.length === 0) return null;
+    const row = rows[0]!;
+    return { state: JSON.parse(row.state), version: row.version };
   }
 }
 

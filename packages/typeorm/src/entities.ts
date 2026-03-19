@@ -3,12 +3,14 @@ import {
   PrimaryGeneratedColumn,
   Column,
   PrimaryColumn,
+  Index,
 } from "typeorm";
 
 /**
  * TypeORM entity for event-sourced aggregate persistence.
  */
 @Entity("noddde_events")
+@Index(["aggregateName", "aggregateId", "sequenceNumber"], { unique: true })
 export class NodddeEventEntity {
   @PrimaryGeneratedColumn()
   id!: number;
@@ -42,6 +44,9 @@ export class NodddeAggregateStateEntity {
 
   @Column({ type: "text" })
   state!: string;
+
+  @Column({ type: "int", default: 0 })
+  version!: number;
 }
 
 /**
