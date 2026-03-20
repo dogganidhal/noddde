@@ -1,4 +1,4 @@
-import type { SagaPersistence } from "@noddde/core";
+import type { ID, SagaPersistence } from "@noddde/core";
 
 /**
  * In-memory {@link SagaPersistence} implementation that stores saga state
@@ -22,10 +22,7 @@ export class InMemorySagaPersistence implements SagaPersistence {
    * @param sagaId - The unique identifier of the saga instance.
    * @returns The stored state, or `undefined` if not found.
    */
-  public async load(
-    sagaName: string,
-    sagaId: string,
-  ): Promise<any | undefined> {
+  public async load(sagaName: string, sagaId: ID): Promise<any | undefined> {
     const key = `${sagaName}:${sagaId}`;
     return this.store.get(key);
   }
@@ -38,11 +35,7 @@ export class InMemorySagaPersistence implements SagaPersistence {
    * @param sagaId - The unique identifier of the saga instance.
    * @param state - The full saga state to persist.
    */
-  public async save(
-    sagaName: string,
-    sagaId: string,
-    state: any,
-  ): Promise<void> {
+  public async save(sagaName: string, sagaId: ID, state: any): Promise<void> {
     const key = `${sagaName}:${sagaId}`;
     this.store.set(key, state);
   }

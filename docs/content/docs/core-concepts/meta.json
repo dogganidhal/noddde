@@ -1,4 +1,9 @@
 {
   "title": "Core Concepts",
-  "pages": ["messages-and-types", "decider-pattern", "cqrs-and-event-sourcing"]
+  "pages": [
+    "messages-and-types",
+    "id-types",
+    "decider-pattern",
+    "cqrs-and-event-sourcing"
+  ]
 }

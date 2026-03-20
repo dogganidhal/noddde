@@ -17,11 +17,11 @@ With event sourcing, events are the source of truth. State is ephemeral -- deriv
 interface EventSourcedAggregatePersistence {
   save(
     aggregateName: string,
-    aggregateId: string,
+    aggregateId: ID,
     events: Event[],
     expectedVersion: number,
   ): Promise<void>;
-  load(aggregateName: string, aggregateId: string): Promise<Event[]>;
+  load(aggregateName: string, aggregateId: ID): Promise<Event[]>;
 }
 ```
 
@@ -38,13 +38,13 @@ With state storage, the current state is saved directly. No event replay is need
 interface StateStoredAggregatePersistence {
   save(
     aggregateName: string,
-    aggregateId: string,
+    aggregateId: ID,
     state: any,
     expectedVersion: number,
   ): Promise<void>;
   load(
     aggregateName: string,
-    aggregateId: string,
+    aggregateId: ID,
   ): Promise<{ state: any; version: number } | null>;
 }
 ```
@@ -150,8 +150,8 @@ Sagas are always state-stored. The `SagaPersistence` interface mirrors the state
 
 ```ts
 interface SagaPersistence {
-  save(sagaName: string, sagaId: string, state: any): Promise<void>;
-  load(sagaName: string, sagaId: string): Promise<any>;
+  save(sagaName: string, sagaId: ID, state: any): Promise<void>;
+  load(sagaName: string, sagaId: ID): Promise<any>;
 }
 ```
 
@@ -361,12 +361,13 @@ import {
   Event,
   EventSourcedAggregatePersistence,
   ConcurrencyError,
+  type ID,
 } from "@noddde/core";
 
 class PostgresEventStore implements EventSourcedAggregatePersistence {
   constructor(private readonly pool: Pool) {}
 
-  async load(aggregateName: string, aggregateId: string): Promise<Event[]> {
+  async load(aggregateName: string, aggregateId: ID): Promise<Event[]> {
     const result = await this.pool.query(
       `SELECT name, payload FROM events
        WHERE aggregate_name = $1 AND aggregate_id = $2
@@ -381,7 +382,7 @@ class PostgresEventStore implements EventSourcedAggregatePersistence {
 
   async save(
     aggregateName: string,
-    aggregateId: string,
+    aggregateId: ID,
     events: Event[],
     expectedVersion: number,
   ): Promise<void> {

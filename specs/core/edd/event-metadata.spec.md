@@ -4,7 +4,7 @@ module: edd/event-metadata
 source_file: packages/core/src/edd/event-metadata.ts
 status: implemented
 exports: [EventMetadata]
-depends_on: []
+depends_on: [id]
 docs:
   - events/event-metadata.mdx
 ---
@@ -20,10 +20,10 @@ docs:
   - `timestamp: string` — ISO 8601 timestamp of when the event was produced.
   - `correlationId: string` — traces a user action across aggregates and sagas. All events in a causal chain share the same correlationId.
   - `causationId: string` — ID of the command or event that directly caused this event.
-  - `userId?: string` — who initiated the action (set via metadata context).
+  - `userId?: ID` — who initiated the action (set via metadata context). Uses `ID` to support string, numeric, and bigint user identifiers.
   - `version?: number` — event schema version for future evolution support.
   - `aggregateName?: string` — which aggregate type produced this event.
-  - `aggregateId?: string` — which aggregate instance produced this event.
+  - `aggregateId?: ID` — which aggregate instance produced this event. Uses `ID` to support string, numeric, and bigint aggregate identifiers.
   - `sequenceNumber?: number` — position in the aggregate's event stream.
 
 ## Behavioral Requirements
@@ -84,7 +84,7 @@ describe("EventMetadata", () => {
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
-import type { EventMetadata } from "@noddde/core";
+import type { EventMetadata, ID } from "@noddde/core";
 
 describe("EventMetadata optional fields", () => {
   it("should accept an object with all fields", () => {
@@ -103,7 +103,7 @@ describe("EventMetadata optional fields", () => {
   });
 
   it("should have correct types for optional fields", () => {
-    expectTypeOf<EventMetadata["userId"]>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<EventMetadata["userId"]>().toEqualTypeOf<ID | undefined>();
     expectTypeOf<EventMetadata["version"]>().toEqualTypeOf<
       number | undefined
     >();
@@ -111,7 +111,7 @@ describe("EventMetadata optional fields", () => {
       string | undefined
     >();
     expectTypeOf<EventMetadata["aggregateId"]>().toEqualTypeOf<
-      string | undefined
+      ID | undefined
     >();
     expectTypeOf<EventMetadata["sequenceNumber"]>().toEqualTypeOf<
       number | undefined

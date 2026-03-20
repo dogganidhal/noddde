@@ -16,7 +16,7 @@ exports:
     InferSagaInfrastructure,
     InferSagaId,
   ]
-depends_on: [edd/event, cqrs/command/command, infrastructure/index]
+depends_on: [id, edd/event, cqrs/command/command, infrastructure/index]
 docs:
   - sagas/overview.mdx
   - sagas/defining-sagas.mdx
@@ -49,14 +49,14 @@ docs:
   - Receives the FULL event (not just payload), like projection reducers.
   - Infrastructure is merged with `CQRSInfrastructure` via intersection.
 
-- **`Saga<T extends SagaTypes, TSagaId = string>`** is an interface with four fields:
+- **`Saga<T extends SagaTypes, TSagaId extends ID = string>`** is an interface with four fields:
 
   - `initialState: T["state"]` -- zero-value state for new saga instances.
   - `startedBy: [T["events"]["name"], ...T["events"]["name"][]]` -- non-empty tuple of event names that start the saga.
   - `associations: SagaAssociationMap<T, TSagaId>` -- maps each event name to a function extracting the saga instance ID.
   - `handlers: SagaEventHandlerMap<T>` -- maps each event name to its handler.
 
-- **`defineSaga<T, TSagaId>(config): Saga<T, TSagaId>`** -- identity function for type inference.
+- **`defineSaga<T, TSagaId extends ID>(config): Saga<T, TSagaId>`** -- identity function for type inference.
 
 - **Infer utilities**:
   - `InferSagaState<T extends Saga>` = inferred `U["state"]`.
@@ -75,7 +75,7 @@ docs:
 - Commands in `SagaReaction` are optional -- a handler may only update state without dispatching.
 - Commands can be a single command or an array of commands.
 - `defineSaga` is an identity function returning the same config object.
-- `TSagaId` defaults to `string` but can be customized (e.g., `number`, branded type).
+- `TSagaId` is bounded by `ID`, defaults to `string`, and can be customized (e.g., `number`, `bigint`, branded type).
 
 ## Invariants
 

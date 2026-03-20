@@ -244,6 +244,22 @@ describe("Command handler return types", () => {
   });
 });
 
+describe("InferAggregateID with number ID", () => {
+  type MyEvent = DefineEvents<{ Created: { id: number } }>;
+  type MyCommand = DefineCommands<{ Create: { id: number } }, number>;
+
+  type NumericIdTypes = {
+    state: {};
+    events: MyEvent;
+    commands: MyCommand;
+    infrastructure: Infrastructure;
+  };
+
+  it("should infer number as the aggregate ID type", () => {
+    expectTypeOf<InferAggregateID<NumericIdTypes>>().toBeNumber();
+  });
+});
+
 describe("defineAggregate identity", () => {
   type E = DefineEvents<{ X: { v: number } }>;
   type C = DefineCommands<{ Y: { v: number } }>;

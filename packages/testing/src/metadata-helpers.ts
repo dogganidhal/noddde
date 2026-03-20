@@ -1,4 +1,4 @@
-import type { Event, EventMetadata } from "@noddde/core";
+import type { Event, EventMetadata, ID } from "@noddde/core";
 
 /**
  * Strip metadata from events for payload-only assertions.
@@ -95,17 +95,17 @@ export interface TestMetadataFactoryOptions {
   /** Fixed correlation ID. Default: "test-correlation-id" */
   correlationId?: string;
   /** Fixed user ID. Default: undefined */
-  userId?: string;
+  userId?: ID;
 }
 
 /** Context for creating test metadata for a specific event. */
 export interface TestMetadataContext {
   aggregateName: string;
-  aggregateId: string;
+  aggregateId: ID;
   sequenceNumber: number;
   correlationId?: string;
   causationId?: string;
-  userId?: string;
+  userId?: ID;
 }
 
 /**

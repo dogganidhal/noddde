@@ -4,7 +4,7 @@ module: cqrs/command/command
 source_file: packages/core/src/cqrs/command/command.ts
 status: implemented
 exports: [Command, AggregateCommand, StandaloneCommand, DefineCommands]
-depends_on: []
+depends_on: [id]
 docs:
   - commands/defining-commands.mdx
 ---
@@ -18,11 +18,11 @@ docs:
 - **`Command`** is an interface with:
   - `name: string` -- discriminant for type narrowing.
   - `payload?: any` -- optional data carried by the command.
-- **`AggregateCommand<TID = string>`** extends `Command` with:
+- **`AggregateCommand<TID extends ID = string>`** extends `Command` with:
   - `targetAggregateId: TID` -- identifies which aggregate instance handles this command.
-  - `TID` defaults to `string`.
+  - `TID` is bounded by `ID` and defaults to `string`.
 - **`StandaloneCommand`** is a type alias for `Command` (no additional fields).
-- **`DefineCommands<TPayloads, TID = string>`** maps a record of payload types to a discriminated union of `AggregateCommand` types:
+- **`DefineCommands<TPayloads, TID extends ID = string>`** maps a record of payload types to a discriminated union of `AggregateCommand` types:
   - When `TPayloads[K]` is `void`, the command has `{ name: K; targetAggregateId: TID }` (no `payload` field).
   - When `TPayloads[K]` is not `void`, the command has `{ name: K; targetAggregateId: TID; payload: TPayloads[K] }`.
 
@@ -48,6 +48,7 @@ docs:
 - **`void` payload**: `DefineCommands<{ Create: void }>` yields `{ name: "Create"; targetAggregateId: string }` with no `payload`.
 - **Mixed void and non-void**: The union correctly differentiates members with and without `payload`.
 - **Custom ID type**: `DefineCommands<{ Create: void }, number>` uses `targetAggregateId: number`.
+- **Non-ID type rejected**: `DefineCommands<{ Create: void }, boolean>` fails at the `TID extends ID` bound — `boolean` is not assignable to `ID`.
 - **Empty record**: `DefineCommands<{}>` produces `never`.
 - **`any` payload**: `DefineCommands<{ Foo: any }>` produces `{ name: "Foo"; targetAggregateId: string; payload: any }` since `any extends void` is true in TypeScript's conditional type distribution, but `any` is special -- it distributes to both branches, resulting in a union. This is a known TypeScript edge case.
 
@@ -96,6 +97,12 @@ describe("AggregateCommand", () => {
 
   it("should have targetAggregateId defaulting to string", () => {
     expectTypeOf<AggregateCommand["targetAggregateId"]>().toBeString();
+  });
+
+  it("should accept bigint as custom ID type", () => {
+    expectTypeOf<
+      AggregateCommand<bigint>["targetAggregateId"]
+    >().toEqualTypeOf<bigint>();
   });
 
   it("should accept custom ID type", () => {

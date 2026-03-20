@@ -1,5 +1,5 @@
 /* eslint-disable no-unused-vars */
-import type { Saga, SagaTypes, CQRSInfrastructure } from "@noddde/core";
+import type { ID, Saga, SagaTypes, CQRSInfrastructure } from "@noddde/core";
 import type { SagaTestResult } from "./types";
 
 /**
@@ -91,7 +91,7 @@ export interface SagaTestBuilderWithEvent<T extends SagaTypes> {
  * ]);
  * ```
  */
-export function testSaga<T extends SagaTypes, TSagaId = string>(
+export function testSaga<T extends SagaTypes, TSagaId extends ID = string>(
   saga: Saga<T, TSagaId>,
 ): SagaTestBuilder<T> {
   let currentState: T["state"] | undefined;

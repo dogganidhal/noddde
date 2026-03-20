@@ -1,3 +1,5 @@
+import type { ID } from "../id";
+
 /**
  * Metadata envelope attached to domain events by the framework at dispatch
  * time. Carries audit, tracing, and sequencing information that enables
@@ -20,13 +22,13 @@ export interface EventMetadata {
   /** ID of the command or event that directly caused this event. */
   causationId: string;
   /** Who initiated the action (set via metadata context or provider). */
-  userId?: string;
+  userId?: ID;
   /** Event schema version for future evolution support. */
   version?: number;
   /** Which aggregate type produced this event. */
   aggregateName?: string;
   /** Which aggregate instance produced this event. */
-  aggregateId?: string;
+  aggregateId?: ID;
   /** Position in the aggregate's event stream. */
   sequenceNumber?: number;
 }

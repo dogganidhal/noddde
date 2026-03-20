@@ -42,7 +42,7 @@ interface Command {
 Commands that target a specific aggregate instance extend this with `targetAggregateId`, which tells the framework which aggregate instance should handle the command:
 
 ```typescript
-interface AggregateCommand<TID = string> extends Command {
+interface AggregateCommand<TID extends ID = string> extends Command {
   targetAggregateId: TID;
 }
 ```
@@ -176,7 +176,10 @@ Let's trace through the type transformation for the banking commands above.
 The `DefineCommands` type is defined as:
 
 ```typescript
-type DefineCommands<TPayloads extends Record<string, any>, TID = string> = {
+type DefineCommands<
+  TPayloads extends Record<string, any>,
+  TID extends ID = string,
+> = {
   [K in keyof TPayloads & string]: TPayloads[K] extends void
     ? { name: K; targetAggregateId: TID }
     : { name: K; targetAggregateId: TID; payload: TPayloads[K] };
@@ -331,7 +334,7 @@ noddde uses a single named types bundle instead:
 type AggregateTypes = {
   state: any;
   events: Event;
-  commands: AggregateCommand;
+  commands: AggregateCommand<ID>;
   infrastructure: Infrastructure;
 };
 ```

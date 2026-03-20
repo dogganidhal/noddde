@@ -1,5 +1,5 @@
 /* eslint-disable no-unused-vars */
-import type { AggregateLocker } from "@noddde/core";
+import type { AggregateLocker, ID } from "@noddde/core";
 import { LockTimeoutError } from "@noddde/core";
 
 /**
@@ -42,7 +42,7 @@ export class InMemoryAggregateLocker implements AggregateLocker {
    */
   public async acquire(
     aggregateName: string,
-    aggregateId: string,
+    aggregateId: ID,
     timeoutMs?: number,
   ): Promise<void> {
     const key = `${aggregateName}:${aggregateId}`;
@@ -87,7 +87,7 @@ export class InMemoryAggregateLocker implements AggregateLocker {
    */
   public async release(
     aggregateName: string,
-    aggregateId: string,
+    aggregateId: ID,
   ): Promise<void> {
     const key = `${aggregateName}:${aggregateId}`;
     const entry = this.locks.get(key);

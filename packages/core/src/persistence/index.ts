@@ -1,4 +1,5 @@
 /* eslint-disable no-unused-vars */
+import type { ID } from "../id";
 import type { Event } from "../edd";
 
 export { ConcurrencyError } from "./concurrency-error";
@@ -36,7 +37,7 @@ export interface StateStoredAggregatePersistence {
    */
   save(
     aggregateName: string,
-    aggregateId: string,
+    aggregateId: ID,
     state: any,
     expectedVersion: number,
   ): Promise<void>;
@@ -50,7 +51,7 @@ export interface StateStoredAggregatePersistence {
    */
   load(
     aggregateName: string,
-    aggregateId: string,
+    aggregateId: ID,
   ): Promise<{ state: any; version: number } | null>;
 }
 
@@ -76,7 +77,7 @@ export interface EventSourcedAggregatePersistence {
    */
   save(
     aggregateName: string,
-    aggregateId: string,
+    aggregateId: ID,
     events: Event[],
     expectedVersion: number,
   ): Promise<void>;
@@ -118,7 +119,7 @@ export interface SagaPersistence {
    * @param sagaId - The unique identifier of the saga instance.
    * @param state - The full saga state to persist.
    */
-  save(sagaName: string, sagaId: string, state: any): Promise<void>;
+  save(sagaName: string, sagaId: ID, state: any): Promise<void>;
 
   /**
    * Loads the current state of a saga instance.

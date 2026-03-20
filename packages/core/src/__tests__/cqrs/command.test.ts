@@ -39,6 +39,12 @@ describe("Command, AggregateCommand, StandaloneCommand & DefineCommands", () => 
         AggregateCommand<number>["targetAggregateId"]
       >().toBeNumber();
     });
+
+    it("should accept bigint as custom ID type", () => {
+      expectTypeOf<
+        AggregateCommand<bigint>["targetAggregateId"]
+      >().toEqualTypeOf<bigint>();
+    });
   });
 
   // ### StandaloneCommand is an alias for Command

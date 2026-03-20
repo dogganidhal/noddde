@@ -17,12 +17,14 @@
  * }
  * ```
  */
+import type { ID } from "../id";
+
 export class ConcurrencyError extends Error {
   public override readonly name = "ConcurrencyError";
 
   constructor(
     public readonly aggregateName: string,
-    public readonly aggregateId: string,
+    public readonly aggregateId: ID,
     public readonly expectedVersion: number,
     public readonly actualVersion: number,
   ) {
