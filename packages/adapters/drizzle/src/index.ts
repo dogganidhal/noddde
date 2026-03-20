@@ -25,7 +25,7 @@ import { createDrizzleUnitOfWorkFactory } from "./unit-of-work";
  * Or define your own tables matching the expected column structure.
  */
 export interface DrizzleNodddeSchema {
-  /** Events table with columns: aggregateName, aggregateId, sequenceNumber, eventName, payload */
+  /** Events table with columns: aggregateName, aggregateId, sequenceNumber, eventName, payload, metadata */
   events: any;
   /** Aggregate states table with columns: aggregateName, aggregateId, state, version */
   aggregateStates: any;

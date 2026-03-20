@@ -15,6 +15,16 @@ export type { SagaTestBuilder, SagaTestBuilderWithEvent } from "./saga-harness";
 export { testDomain } from "./domain-harness";
 export type { TestDomainConfig, TestDomainResult } from "./domain-harness";
 
+// Metadata testing utilities
+export {
+  stripMetadata,
+  expectValidMetadata,
+  expectSameCorrelation,
+  expectCausationChain,
+  createTestMetadataFactory,
+} from "./metadata-helpers";
+export type { TestMetadataFactoryOptions } from "./metadata-helpers";
+
 // Shared types
 export type {
   AggregateTestResult,

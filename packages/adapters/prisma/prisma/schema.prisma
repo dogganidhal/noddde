@@ -15,6 +15,7 @@ model NodddeEvent {
   sequenceNumber Int    @map("sequence_number")
   eventName      String @map("event_name")
   payload        String
+  metadata       String?
 
   @@unique([aggregateName, aggregateId, sequenceNumber])
   @@map("noddde_events")

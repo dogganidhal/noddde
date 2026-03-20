@@ -46,6 +46,7 @@ export class PrismaEventSourcedAggregatePersistence
           sequenceNumber: expectedVersion + index + 1,
           eventName: event.name,
           payload: JSON.stringify(event.payload),
+          metadata: event.metadata ? JSON.stringify(event.metadata) : null,
         })),
       });
     } catch (error: unknown) {
@@ -76,6 +77,7 @@ export class PrismaEventSourcedAggregatePersistence
     return rows.map((row: any) => ({
       name: row.eventName,
       payload: JSON.parse(row.payload),
+      ...(row.metadata ? { metadata: JSON.parse(row.metadata) } : {}),
     }));
   }
 }

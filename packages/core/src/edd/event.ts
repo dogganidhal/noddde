@@ -1,7 +1,12 @@
+import type { EventMetadata } from "./event-metadata";
+
 /**
  * Base interface for all domain events. Events represent facts — things that
  * have already happened within the domain. They are immutable and named in
  * the past tense.
+ *
+ * The optional {@link metadata} field is auto-populated by the engine at
+ * dispatch time — command handlers return events without metadata.
  *
  * Use {@link DefineEvents} to build event unions from a payload map instead
  * of declaring each event interface manually.
@@ -11,6 +16,11 @@ export interface Event {
   name: string;
   /** The event's data describing what happened. */
   payload: any;
+  /**
+   * Optional metadata envelope populated by the framework at dispatch time.
+   * Contains audit, tracing, and sequencing information.
+   */
+  metadata?: EventMetadata;
 }
 
 /**

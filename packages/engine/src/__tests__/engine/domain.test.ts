@@ -130,11 +130,11 @@ describe("Domain.dispatchCommand", () => {
     const eventBus = new EventEmitterEventBus();
     const publishedEvents: any[] = [];
 
-    eventBus.on("CounterCreated", (payload: any) => {
-      publishedEvents.push({ name: "CounterCreated", payload });
+    eventBus.on("CounterCreated", (event: any) => {
+      publishedEvents.push(event);
     });
-    eventBus.on("Incremented", (payload: any) => {
-      publishedEvents.push({ name: "Incremented", payload });
+    eventBus.on("Incremented", (event: any) => {
+      publishedEvents.push(event);
     });
 
     const domain = await configureDomain<Infrastructure>({
@@ -166,17 +166,23 @@ describe("Domain.dispatchCommand", () => {
       payload: { by: 5 },
     });
 
-    // Verify events were persisted
+    // Verify events were persisted (with metadata)
     const events = await persistence.load("Counter", "counter-1");
     expect(events).toHaveLength(2);
-    expect(events[0]).toEqual({
-      name: "CounterCreated",
-      payload: { id: "counter-1" },
-    });
-    expect(events[1]).toEqual({
-      name: "Incremented",
-      payload: { by: 5 },
-    });
+    expect(events[0]).toEqual(
+      expect.objectContaining({
+        name: "CounterCreated",
+        payload: { id: "counter-1" },
+      }),
+    );
+    expect(events[0]?.metadata).toBeDefined();
+    expect(events[1]).toEqual(
+      expect.objectContaining({
+        name: "Incremented",
+        payload: { by: 5 },
+      }),
+    );
+    expect(events[1]?.metadata).toBeDefined();
 
     // Verify events were published
     expect(publishedEvents).toHaveLength(2);
@@ -268,10 +274,12 @@ describe("Domain.dispatchCommand", () => {
     // The state was rebuilt correctly before each Deposit command:
     // After first deposit: balance = 100
     // After second deposit: balance = 150 (rebuilt from replaying all prior events)
-    expect(events[2]).toEqual({
-      name: "DepositMade",
-      payload: { amount: 50 },
-    });
+    expect(events[2]).toEqual(
+      expect.objectContaining({
+        name: "DepositMade",
+        payload: { amount: 50 },
+      }),
+    );
   });
 });
 
@@ -765,11 +773,11 @@ describe("Domain.withUnitOfWork", () => {
     const eventBus = new EventEmitterEventBus();
     const publishedEvents: any[] = [];
 
-    eventBus.on("CounterCreated", (payload: any) => {
-      publishedEvents.push({ name: "CounterCreated", payload });
+    eventBus.on("CounterCreated", (event: any) => {
+      publishedEvents.push(event);
     });
-    eventBus.on("Incremented", (payload: any) => {
-      publishedEvents.push({ name: "Incremented", payload });
+    eventBus.on("Incremented", (event: any) => {
+      publishedEvents.push(event);
     });
 
     const domain = await configureDomain<Infrastructure>({

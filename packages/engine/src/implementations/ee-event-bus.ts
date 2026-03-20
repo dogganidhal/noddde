@@ -2,8 +2,8 @@
 import type { Event, EventBus } from "@noddde/core";
 import { EventEmitter } from "node:events";
 
-/** Async-capable event handler. */
-type AsyncEventHandler = (payload: any) => void | Promise<void>;
+/** Async-capable event handler that receives the full event object. */
+type AsyncEventHandler = (event: Event) => void | Promise<void>;
 
 /**
  * In-memory {@link EventBus} implementation backed by Node.js `EventEmitter`.
@@ -52,7 +52,7 @@ export class EventEmitterEventBus implements EventBus {
     const eventHandlers = this.handlers.get(event.name);
     if (eventHandlers) {
       for (const handler of eventHandlers) {
-        await handler(event.payload);
+        await handler(event);
       }
     }
   }

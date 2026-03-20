@@ -130,10 +130,12 @@ describe("testDomain", () => {
     });
 
     expect(spy.publishedEvents).toHaveLength(1);
-    expect(spy.publishedEvents[0]).toEqual({
-      name: "Incremented",
-      payload: { amount: 5 },
-    });
+    expect(spy.publishedEvents[0]).toEqual(
+      expect.objectContaining({
+        name: "Incremented",
+        payload: { amount: 5 },
+      }),
+    );
   });
 
   it("should capture dispatched commands in spy (from saga)", async () => {

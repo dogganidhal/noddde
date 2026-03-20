@@ -153,6 +153,91 @@ function createMockBankingInfrastructure() {
 
 Then pass it via `.withInfrastructure()` in unit harnesses or the `infrastructure` field in `testDomain`.
 
+## Event Metadata Testing Utilities
+
+When events flow through the `Domain`, they are automatically enriched with an [event metadata envelope](/docs/running/domain-configuration#event-metadata) containing audit, tracing, and sequencing information. The `@noddde/testing` package provides utilities for asserting on metadata and for stripping it when you only care about event payloads.
+
+### Stripping Metadata for Payload Assertions
+
+Most tests care about _what_ happened (event name + payload), not _when_ or _by whom_. Use `stripMetadata` to remove the metadata envelope:
+
+```ts
+import { stripMetadata } from "@noddde/testing";
+
+const { spy } = await testDomain({ aggregates: { BankAccount } });
+await domain.dispatchCommand({
+  name: "CreateBankAccount",
+  targetAggregateId: "acc-1",
+});
+
+expect(stripMetadata(spy.publishedEvents)).toContainEqual({
+  name: "BankAccountCreated",
+  payload: { id: "acc-1" },
+});
+```
+
+### Validating Metadata
+
+Use `expectValidMetadata` to verify that an event carries a well-formed metadata envelope with all required fields:
+
+```ts
+import { expectValidMetadata } from "@noddde/testing";
+
+// Asserts: eventId is UUID v7, timestamp is valid ISO 8601,
+// correlationId and causationId are non-empty strings
+expectValidMetadata(spy.publishedEvents[0]!);
+```
+
+### Correlation and Causation Assertions
+
+Two helpers verify that events form a proper tracing chain:
+
+```ts
+import { expectSameCorrelation, expectCausationChain } from "@noddde/testing";
+
+// All events share the same correlationId (same causal chain)
+expectSameCorrelation(spy.publishedEvents);
+
+// Each event's causationId equals the previous event's eventId
+expectCausationChain(spy.publishedEvents);
+```
+
+These are particularly useful when testing [saga workflows](/docs/process-managers/overview), where correlation should propagate across aggregate boundaries.
+
+### Deterministic Metadata for Exact Assertions
+
+For tests that need exact equality (snapshot tests, deterministic replay), use `createTestMetadataFactory` to produce predictable metadata:
+
+```ts
+import { createTestMetadataFactory } from "@noddde/testing";
+
+const metadataFactory = createTestMetadataFactory({
+  correlationId: "test-corr-id",
+  userId: "test-user",
+  // eventIdGenerator defaults to sequential "evt-1", "evt-2", ...
+  // timestampGenerator defaults to fixed "2024-01-01T00:00:00.000Z"
+});
+
+const metadata = metadataFactory({
+  aggregateName: "BankAccount",
+  aggregateId: "acc-1",
+  sequenceNumber: 1,
+});
+
+expect(metadata.eventId).toBe("evt-1");
+expect(metadata.correlationId).toBe("test-corr-id");
+```
+
+### Summary of Metadata Utilities
+
+| Utility                         | Purpose                                                                  |
+| ------------------------------- | ------------------------------------------------------------------------ |
+| `stripMetadata(events)`         | Remove metadata for payload-only assertions                              |
+| `expectValidMetadata(event)`    | Assert metadata has valid eventId, timestamp, correlationId, causationId |
+| `expectSameCorrelation(events)` | Assert all events share the same correlationId                           |
+| `expectCausationChain(events)`  | Assert events form an eventId→causationId chain                          |
+| `createTestMetadataFactory()`   | Create a deterministic metadata factory for exact assertions             |
+
 ## Next Steps
 
 - [Testing Aggregates and Projections](/docs/testing/testing-aggregates-and-projections) -- `testAggregate`, `evolveAggregate`, and `testProjection` in depth

@@ -120,12 +120,13 @@ Copy the three model definitions from the package's Prisma schema into your own 
 
 ```prisma
 model NodddeEvent {
-  id             Int    @id @default(autoincrement())
-  aggregateName  String @map("aggregate_name")
-  aggregateId    String @map("aggregate_id")
-  sequenceNumber Int    @map("sequence_number")
-  eventName      String @map("event_name")
+  id             Int     @id @default(autoincrement())
+  aggregateName  String  @map("aggregate_name")
+  aggregateId    String  @map("aggregate_id")
+  sequenceNumber Int     @map("sequence_number")
+  eventName      String  @map("event_name")
   payload        String
+  metadata       String?
 
   @@unique([aggregateName, aggregateId, sequenceNumber])
   @@map("noddde_events")
@@ -284,13 +285,27 @@ Advisory locks are session-level, spanning beyond the database transaction. This
 
 All three adapters use the same logical schema:
 
-| Table                     | Purpose         | Key                                          | Columns                                                                                                                                                      |
-| ------------------------- | --------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `noddde_events`           | Event streams   | Auto-increment `id`                          | `aggregate_name`, `aggregate_id`, `sequence_number`, `event_name`, `payload` (JSON). Unique constraint on `(aggregate_name, aggregate_id, sequence_number)`. |
-| `noddde_aggregate_states` | State snapshots | Composite (`aggregate_name`, `aggregate_id`) | `state` (JSON), `version` (integer, default 0)                                                                                                               |
-| `noddde_saga_states`      | Saga state      | Composite (`saga_name`, `saga_id`)           | `state` (JSON)                                                                                                                                               |
+| Table                     | Purpose         | Key                                          | Columns                                                                                                                                                                                   |
+| ------------------------- | --------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `noddde_events`           | Event streams   | Auto-increment `id`                          | `aggregate_name`, `aggregate_id`, `sequence_number`, `event_name`, `payload` (JSON), `metadata` (JSON, nullable). Unique constraint on `(aggregate_name, aggregate_id, sequence_number)`. |
+| `noddde_aggregate_states` | State snapshots | Composite (`aggregate_name`, `aggregate_id`) | `state` (JSON), `version` (integer, default 0)                                                                                                                                            |
+| `noddde_saga_states`      | Saga state      | Composite (`saga_name`, `saga_id`)           | `state` (JSON)                                                                                                                                                                            |
 
 States and event payloads are serialized as JSON strings, making the schema database-agnostic.
+
+### Event Metadata Column
+
+The `metadata` column on `noddde_events` stores the [event metadata envelope](/docs/running/domain-configuration#event-metadata) as a nullable JSON value. The engine auto-populates metadata (eventId, timestamp, correlationId, causationId, userId, aggregate info, sequence number) before persistence -- command handlers do not need to produce it.
+
+The column type varies by dialect:
+
+| Dialect    | Column type | Notes                                          |
+| ---------- | ----------- | ---------------------------------------------- |
+| PostgreSQL | `jsonb`     | Supports indexing via GIN for metadata queries |
+| MySQL      | `json`      | Native JSON type with validation               |
+| SQLite     | `text`      | JSON stored as text; parsed on load            |
+
+The column is nullable for backward compatibility -- events persisted before the metadata feature was added will have `null` metadata. When loading events, adapters deserialize the JSON back to an `EventMetadata` object, or leave it as `undefined` if the column is null.
 
 ## Choosing an Adapter
 

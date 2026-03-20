@@ -29,6 +29,9 @@ export class NodddeEventEntity {
 
   @Column({ type: "text" })
   payload!: string;
+
+  @Column({ type: "text", nullable: true })
+  metadata!: string | null;
 }
 
 /**

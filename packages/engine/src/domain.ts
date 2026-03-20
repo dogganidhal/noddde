@@ -1,5 +1,6 @@
 /* eslint-disable no-unused-vars */
 import { AsyncLocalStorage } from "node:async_hooks";
+import { uuidv7 } from "./uuid";
 import type {
   Aggregate,
   AggregateCommand,
@@ -7,6 +8,7 @@ import type {
   CQRSInfrastructure,
   Event,
   EventBus,
+  EventMetadata,
   EventSourcedAggregatePersistence,
   Infrastructure,
   PersistenceConfiguration,
@@ -22,6 +24,22 @@ import type {
   UnitOfWorkFactory,
 } from "@noddde/core";
 import type { AggregateLocker } from "@noddde/core";
+
+/**
+ * Context for metadata propagation. Values from `withMetadataContext`
+ * override values from the configured `metadataProvider`.
+ */
+export interface MetadataContext {
+  correlationId?: string;
+  causationId?: string;
+  userId?: string;
+}
+
+/**
+ * Optional function in DomainConfiguration that provides metadata context
+ * for every command dispatch. Called on each command execution.
+ */
+export type MetadataProvider = () => MetadataContext;
 import { InMemoryCommandBus } from "./implementations/in-memory-command-bus";
 import { EventEmitterEventBus } from "./implementations/ee-event-bus";
 import { InMemoryQueryBus } from "./implementations/in-memory-query-bus";
@@ -191,6 +209,25 @@ export type DomainConfiguration<
      */
     unitOfWorkFactory?: () => UnitOfWorkFactory | Promise<UnitOfWorkFactory>;
   };
+  /**
+   * Optional metadata provider called on every command dispatch.
+   * Returns context values (userId, correlationId) that are merged
+   * into the {@link EventMetadata} of produced events.
+   *
+   * Configure once at domain setup to provide per-request context
+   * (e.g., reading userId from AsyncLocalStorage set by HTTP middleware).
+   *
+   * Values from {@link Domain.withMetadataContext} override the provider.
+   *
+   * @example
+   * ```ts
+   * metadataProvider: () => ({
+   *   userId: getRequestUserId(),
+   *   correlationId: getTraceId(),
+   * }),
+   * ```
+   */
+  metadataProvider?: MetadataProvider;
 };
 
 /**
@@ -212,6 +249,8 @@ export class Domain<
   private _unitOfWorkFactory!: UnitOfWorkFactory;
   private _concurrencyStrategy!: ConcurrencyStrategy;
   private readonly _uowStorage = new AsyncLocalStorage<UnitOfWork>();
+  private readonly _metadataStorage = new AsyncLocalStorage<MetadataContext>();
+  private _metadataProvider?: MetadataProvider;
   private readonly _projectionViews = new Map<string, any>();
 
   /** The fully resolved infrastructure (custom + CQRS buses). */
@@ -308,6 +347,9 @@ export class Domain<
       );
     }
 
+    // Step 5.7: Store metadata provider
+    this._metadataProvider = configuration.metadataProvider;
+
     const { commandBus, eventBus, queryBus } = this._infrastructure;
 
     // Step 6: Register aggregate command handlers on the command bus
@@ -385,8 +427,7 @@ export class Domain<
       configuration.readModel.projections,
     )) {
       for (const eventName of Object.keys(projection.reducers)) {
-        this.subscribeToEvent(eventBus, eventName, async (payload: any) => {
-          const event: Event = { name: eventName, payload };
+        this.subscribeToEvent(eventBus, eventName, async (event: Event) => {
           const currentView = this._projectionViews.get(projectionName);
           const newView = await (projection.reducers as any)[eventName](
             event,
@@ -403,11 +444,8 @@ export class Domain<
         configuration.processModel.sagas,
       )) {
         for (const eventName of Object.keys(saga.handlers)) {
-          this.subscribeToEvent(eventBus, eventName, async (payload: any) => {
-            await this.executeSagaHandler(sagaName, saga, {
-              name: eventName,
-              payload,
-            });
+          this.subscribeToEvent(eventBus, eventName, async (event: Event) => {
+            await this.executeSagaHandler(sagaName, saga, event);
           });
         }
       }
@@ -421,7 +459,7 @@ export class Domain<
   private subscribeToEvent(
     eventBus: EventBus,
     eventName: string,
-    handler: (payload: any) => void | Promise<void>,
+    handler: (event: Event) => void | Promise<void>,
   ): void {
     // The EventBus interface only exposes dispatch (publish),
     // so we use a type assertion to reach the on() method.
@@ -476,42 +514,51 @@ export class Domain<
       this._infrastructure,
     );
 
-    // Step 5: Create UoW for saga reaction (spans state + commands)
+    // Step 5: Propagate correlation context from triggering event
+    const sagaCtx: MetadataContext = {
+      correlationId: event.metadata?.correlationId ?? uuidv7(),
+      causationId: event.metadata?.eventId ?? event.name,
+      userId: event.metadata?.userId,
+    };
+
+    // Step 6: Create UoW for saga reaction (spans state + commands)
     const uow = this._unitOfWorkFactory();
     const sagaPersistence = this._sagaPersistence;
 
     await this._uowStorage.run(uow, async () => {
-      try {
-        // Enlist saga state persistence
-        uow.enlist(() =>
-          sagaPersistence.save(sagaName, sagaId, reaction.state),
-        );
-
-        // Step 6: Dispatch commands (within the saga's UoW)
-        if (reaction.commands) {
-          const commands = Array.isArray(reaction.commands)
-            ? reaction.commands
-            : [reaction.commands];
-          for (const command of commands) {
-            await this._infrastructure.commandBus.dispatch(command);
-          }
-        }
-
-        // Step 7: Commit saga state + all aggregate changes atomically
-        const events = await uow.commit();
-
-        // Step 8: Publish all deferred events
-        for (const deferredEvent of events) {
-          await this._infrastructure.eventBus.dispatch(deferredEvent);
-        }
-      } catch (error) {
+      await this._metadataStorage.run(sagaCtx, async () => {
         try {
-          await uow.rollback();
-        } catch {
-          // UoW may already be completed if commit failed
+          // Enlist saga state persistence
+          uow.enlist(() =>
+            sagaPersistence.save(sagaName, sagaId, reaction.state),
+          );
+
+          // Step 7: Dispatch commands (within the saga's UoW + metadata context)
+          if (reaction.commands) {
+            const commands = Array.isArray(reaction.commands)
+              ? reaction.commands
+              : [reaction.commands];
+            for (const command of commands) {
+              await this._infrastructure.commandBus.dispatch(command);
+            }
+          }
+
+          // Step 8: Commit saga state + all aggregate changes atomically
+          const events = await uow.commit();
+
+          // Step 9: Publish all deferred events
+          for (const deferredEvent of events) {
+            await this._infrastructure.eventBus.dispatch(deferredEvent);
+          }
+        } catch (error) {
+          try {
+            await uow.rollback();
+          } catch {
+            // UoW may already be completed if commit failed
+          }
+          throw error;
         }
-        throw error;
-      }
+      });
     });
   }
 
@@ -643,13 +690,32 @@ export class Domain<
       }
     }
 
+    // Step 4.5: Enrich events with metadata
+    const providerCtx = this._metadataProvider?.() ?? {};
+    const overrideCtx = this._metadataStorage.getStore() ?? {};
+    const mergedCtx = { ...providerCtx, ...overrideCtx };
+
+    const enrichedEvents: Event[] = newEvents.map((event, index) => ({
+      ...event,
+      metadata: {
+        eventId: uuidv7(),
+        timestamp: new Date().toISOString(),
+        correlationId: mergedCtx.correlationId ?? uuidv7(),
+        causationId: mergedCtx.causationId ?? command.name,
+        userId: mergedCtx.userId,
+        aggregateName,
+        aggregateId: command.targetAggregateId,
+        sequenceNumber: version + index + 1,
+      },
+    }));
+
     // Step 5: Enlist persistence in UoW with version (deferred until commit)
     if (isEventSourced) {
       uow.enlist(() =>
         (persistence as EventSourcedAggregatePersistence).save(
           aggregateName,
           command.targetAggregateId,
-          newEvents,
+          enrichedEvents,
           version,
         ),
       );
@@ -665,7 +731,7 @@ export class Domain<
     }
 
     // Step 6: Defer event publishing (published after commit)
-    uow.deferPublish(...newEvents);
+    uow.deferPublish(...enrichedEvents);
   }
 
   /**
@@ -714,6 +780,34 @@ export class Domain<
         throw error;
       }
     });
+  }
+
+  /**
+   * Executes a function within a metadata context that overrides the
+   * configured {@link MetadataProvider}. Use this as an escape hatch
+   * for per-request metadata (e.g., manual correlation IDs, admin overrides).
+   *
+   * Values provided here take precedence over the domain's `metadataProvider`.
+   * Omitted fields fall back to the provider (if configured) or auto-generated defaults.
+   *
+   * @typeParam T - The return type of the scoped function.
+   * @param context - Metadata values to override for this scope.
+   * @param fn - The function to execute within the metadata context.
+   * @returns The return value of `fn`.
+   *
+   * @example
+   * ```ts
+   * await domain.withMetadataContext(
+   *   { userId: "admin", correlationId: "manual-fix-123" },
+   *   () => domain.dispatchCommand(fixCommand),
+   * );
+   * ```
+   */
+  public async withMetadataContext<T>(
+    context: MetadataContext,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    return this._metadataStorage.run(context, fn);
   }
 
   /**

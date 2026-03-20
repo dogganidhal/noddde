@@ -16,7 +16,7 @@ describe("EventEmitterEventBus", () => {
     await bus.dispatch(event);
 
     expect(listener).toHaveBeenCalledOnce();
-    expect(listener).toHaveBeenCalledWith({ id: "acc-1", owner: "Alice" });
+    expect(listener).toHaveBeenCalledWith(event);
   });
 
   it("dispatch resolves when no listeners are registered", async () => {
@@ -40,8 +40,9 @@ describe("EventEmitterEventBus", () => {
       payload: { amount: 100 },
     });
 
-    expect(listener1).toHaveBeenCalledWith({ amount: 100 });
-    expect(listener2).toHaveBeenCalledWith({ amount: 100 });
+    const expectedEvent = { name: "DepositMade", payload: { amount: 100 } };
+    expect(listener1).toHaveBeenCalledWith(expectedEvent);
+    expect(listener2).toHaveBeenCalledWith(expectedEvent);
   });
 
   it("dispatching the same event twice emits twice", async () => {

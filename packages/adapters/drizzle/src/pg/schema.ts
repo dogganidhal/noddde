@@ -21,6 +21,7 @@ export const events = pgTable(
     sequenceNumber: integer("sequence_number").notNull(),
     eventName: text("event_name").notNull(),
     payload: jsonb("payload").notNull(),
+    metadata: jsonb("metadata"),
   },
   (table) => ({
     streamVersionIdx: uniqueIndex("noddde_events_stream_version_idx").on(
