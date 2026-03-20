@@ -5,13 +5,17 @@ import type {
   EventSourcedAggregatePersistence,
   StateStoredAggregatePersistence,
   SagaPersistence,
+  SnapshotStore,
 } from "@noddde/core";
 import {
   DrizzleEventSourcedAggregatePersistence,
   DrizzleStateStoredAggregatePersistence,
   DrizzleSagaPersistence,
+  DrizzleSnapshotStore,
 } from "./persistence";
 import { createDrizzleUnitOfWorkFactory } from "./unit-of-work";
+
+export { DrizzleSnapshotStore } from "./persistence";
 
 /**
  * Schema tables the developer passes to the factory.
@@ -31,6 +35,8 @@ export interface DrizzleNodddeSchema {
   aggregateStates: any;
   /** Saga states table with columns: sagaName, sagaId, state */
   sagaStates: any;
+  /** Snapshots table with columns: aggregateName, aggregateId, state, version. Optional — only needed if using snapshot store. */
+  snapshots?: any;
 }
 
 /**
@@ -57,6 +63,8 @@ export interface DrizzlePersistenceInfrastructure {
   sagaPersistence: SagaPersistence;
   /** Factory for creating Drizzle-backed UnitOfWork instances. */
   unitOfWorkFactory: UnitOfWorkFactory;
+  /** Snapshot store for event-sourced aggregates. Present only when schema.snapshots is provided. */
+  snapshotStore?: SnapshotStore;
 }
 
 /**
@@ -100,7 +108,7 @@ export function createDrizzlePersistence(
 ): DrizzlePersistenceInfrastructure {
   const txStore: DrizzleTransactionStore = { current: null };
 
-  return {
+  const result: DrizzlePersistenceInfrastructure = {
     eventSourcedPersistence: new DrizzleEventSourcedAggregatePersistence(
       db,
       txStore,
@@ -114,4 +122,10 @@ export function createDrizzlePersistence(
     sagaPersistence: new DrizzleSagaPersistence(db, txStore, schema),
     unitOfWorkFactory: createDrizzleUnitOfWorkFactory(db, txStore),
   };
+
+  if (schema.snapshots) {
+    result.snapshotStore = new DrizzleSnapshotStore(db, txStore, schema);
+  }
+
+  return result;
 }

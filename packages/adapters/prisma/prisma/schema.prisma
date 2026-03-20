@@ -41,3 +41,14 @@ model NodddeSagaState {
   @@id([sagaName, sagaId])
   @@map("noddde_saga_states")
 }
+
+/// Snapshots table for event-sourced aggregate state snapshotting.
+model NodddeSnapshot {
+  aggregateName String @map("aggregate_name")
+  aggregateId   String @map("aggregate_id")
+  state         String
+  version       Int
+
+  @@id([aggregateName, aggregateId])
+  @@map("noddde_snapshots")
+}

@@ -4,6 +4,10 @@ import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import { ConcurrencyError } from "@noddde/core";
+import type {
+  PartialEventLoad,
+  EventSourcedAggregatePersistence,
+} from "@noddde/core";
 import { createPrismaPersistence, PrismaAdvisoryLocker } from "../index";
 
 const TEST_DB = path.resolve(__dirname, "../../prisma/test.db");
@@ -277,6 +281,117 @@ describe("PrismaUnitOfWork", () => {
 
     const events = await infra.eventSourcedPersistence.load("Account", "acc-1");
     expect(events).toEqual([]);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Snapshot Store
+// ═══════════════════════════════════════════════════════════════════
+
+describe("PrismaSnapshotStore", () => {
+  beforeEach(setupDb);
+  afterEach(teardownDb);
+
+  it("should save and load a snapshot", async () => {
+    await infra.snapshotStore.save("Account", "acc-1", {
+      state: { balance: 500 },
+      version: 5,
+    });
+    const snapshot = await infra.snapshotStore.load("Account", "acc-1");
+    expect(snapshot).toEqual({ state: { balance: 500 }, version: 5 });
+  });
+
+  it("should return null for unknown aggregate", async () => {
+    const snapshot = await infra.snapshotStore.load("Account", "nonexistent");
+    expect(snapshot).toBeNull();
+  });
+
+  it("should overwrite snapshot on repeated saves", async () => {
+    await infra.snapshotStore.save("Account", "acc-1", {
+      state: { balance: 100 },
+      version: 2,
+    });
+    await infra.snapshotStore.save("Account", "acc-1", {
+      state: { balance: 500 },
+      version: 5,
+    });
+    const snapshot = await infra.snapshotStore.load("Account", "acc-1");
+    expect(snapshot).toEqual({ state: { balance: 500 }, version: 5 });
+  });
+
+  it("should isolate snapshots by aggregate name", async () => {
+    await infra.snapshotStore.save("Account", "1", {
+      state: { balance: 100 },
+      version: 2,
+    });
+    await infra.snapshotStore.save("Order", "1", {
+      state: { total: 200 },
+      version: 3,
+    });
+    const account = await infra.snapshotStore.load("Account", "1");
+    const order = await infra.snapshotStore.load("Order", "1");
+    expect(account).toEqual({ state: { balance: 100 }, version: 2 });
+    expect(order).toEqual({ state: { total: 200 }, version: 3 });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// PartialEventLoad (loadAfterVersion)
+// ═══════════════════════════════════════════════════════════════════
+
+describe("PrismaEventSourcedAggregatePersistence - PartialEventLoad", () => {
+  beforeEach(setupDb);
+  afterEach(teardownDb);
+
+  it("should load events after a given version", async () => {
+    await infra.eventSourcedPersistence.save(
+      "Account",
+      "acc-1",
+      [
+        { name: "AccountCreated", payload: { owner: "Alice" } },
+        { name: "DepositMade", payload: { amount: 100 } },
+        { name: "DepositMade", payload: { amount: 200 } },
+      ],
+      0,
+    );
+    const persistence =
+      infra.eventSourcedPersistence as EventSourcedAggregatePersistence &
+        PartialEventLoad;
+    const events = await persistence.loadAfterVersion("Account", "acc-1", 1);
+    expect(events).toHaveLength(2);
+    expect(events[0]!.name).toBe("DepositMade");
+    expect(events[0]!.payload).toEqual({ amount: 100 });
+  });
+
+  it("should return empty array when afterVersion >= stream length", async () => {
+    await infra.eventSourcedPersistence.save(
+      "Account",
+      "acc-1",
+      [{ name: "AccountCreated", payload: { owner: "Alice" } }],
+      0,
+    );
+    const persistence =
+      infra.eventSourcedPersistence as EventSourcedAggregatePersistence &
+        PartialEventLoad;
+    const events = await persistence.loadAfterVersion("Account", "acc-1", 99);
+    expect(events).toEqual([]);
+  });
+
+  it("should return all events when afterVersion is 0", async () => {
+    await infra.eventSourcedPersistence.save(
+      "Account",
+      "acc-1",
+      [
+        { name: "AccountCreated", payload: { owner: "Alice" } },
+        { name: "DepositMade", payload: { amount: 50 } },
+      ],
+      0,
+    );
+    const persistence =
+      infra.eventSourcedPersistence as EventSourcedAggregatePersistence &
+        PartialEventLoad;
+    const events = await persistence.loadAfterVersion("Account", "acc-1", 0);
+    expect(events).toHaveLength(2);
   });
 });
 

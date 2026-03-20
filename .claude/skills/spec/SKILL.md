@@ -297,13 +297,13 @@ Update spec frontmatter: `status: implemented`
 **Run autonomously — no gate.**
 
 1. Read the spec's `docs` frontmatter field for explicitly mapped documentation pages.
-2. Grep `packages/docs/content/docs/` for references to the spec's exports (discover additional pages).
+2. Grep `docs/content/docs/` for references to the spec's exports (discover additional pages).
 3. For each affected documentation page:
    - Update code examples that use changed API signatures
    - Update explanatory text if behavioral requirements changed
    - Add deprecation notices if applicable
-4. If this is a new spec (new module), create stub documentation pages in the appropriate category under `packages/docs/content/docs/` and update the category's `meta.json`.
-5. Flag auto-generated API reference pages (in `packages/docs/src/content/docs/api/`) for regeneration if exports changed — do NOT manually edit them.
+4. If this is a new spec (new module), create stub documentation pages in the appropriate category under `docs/content/docs/` and update the category's `meta.json`.
+5. Flag auto-generated API reference pages (in `docs/src/content/docs/api/`) for regeneration if exports changed — do NOT manually edit them.
 6. Report briefly and continue to the Final Report:
    ```
    📖 Step 6 complete: Documentation updated

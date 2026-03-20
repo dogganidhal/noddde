@@ -2,11 +2,13 @@ export {
   NodddeEventEntity,
   NodddeAggregateStateEntity,
   NodddeSagaStateEntity,
+  NodddeSnapshotEntity,
 } from "./entities";
 export {
   TypeORMEventSourcedAggregatePersistence,
   TypeORMStateStoredAggregatePersistence,
   TypeORMSagaPersistence,
+  TypeORMSnapshotStore,
 } from "./persistence";
 export { TypeORMAdvisoryLocker } from "./advisory-locker";
 export {
@@ -21,11 +23,13 @@ import type {
   EventSourcedAggregatePersistence,
   StateStoredAggregatePersistence,
   SagaPersistence,
+  SnapshotStore,
 } from "@noddde/core";
 import {
   TypeORMEventSourcedAggregatePersistence,
   TypeORMStateStoredAggregatePersistence,
   TypeORMSagaPersistence,
+  TypeORMSnapshotStore,
 } from "./persistence";
 import { createTypeORMUnitOfWorkFactory } from "./unit-of-work";
 import type { TypeORMTransactionStore } from "./unit-of-work";
@@ -37,6 +41,7 @@ export interface TypeORMPersistenceInfrastructure {
   eventSourcedPersistence: EventSourcedAggregatePersistence;
   stateStoredPersistence: StateStoredAggregatePersistence;
   sagaPersistence: SagaPersistence;
+  snapshotStore: SnapshotStore;
   unitOfWorkFactory: UnitOfWorkFactory;
 }
 
@@ -54,12 +59,13 @@ export interface TypeORMPersistenceInfrastructure {
  *   NodddeEventEntity,
  *   NodddeAggregateStateEntity,
  *   NodddeSagaStateEntity,
+ *   NodddeSnapshotEntity,
  * } from "@noddde/typeorm";
  *
  * const dataSource = new DataSource({
  *   type: "sqlite",
  *   database: ":memory:",
- *   entities: [NodddeEventEntity, NodddeAggregateStateEntity, NodddeSagaStateEntity],
+ *   entities: [NodddeEventEntity, NodddeAggregateStateEntity, NodddeSagaStateEntity, NodddeSnapshotEntity],
  *   synchronize: true,
  * });
  * await dataSource.initialize();
@@ -92,6 +98,7 @@ export function createTypeORMPersistence(
       txStore,
     ),
     sagaPersistence: new TypeORMSagaPersistence(dataSource, txStore),
+    snapshotStore: new TypeORMSnapshotStore(dataSource, txStore),
     unitOfWorkFactory: createTypeORMUnitOfWorkFactory(dataSource, txStore),
   };
 }

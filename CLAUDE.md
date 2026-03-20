@@ -11,7 +11,7 @@ noddde is a TypeScript framework for building business applications using Domain
 - `packages/core/` — Types, interfaces, and definition functions (`@noddde/core`) — zero runtime dependencies
 - `packages/engine/` — Runtime: Domain orchestration + in-memory implementations (`@noddde/engine`) — depends on `@noddde/core`
 - `packages/samples/` — 3 sample domains (auction, banking, order-fulfillment)
-- `packages/docs/` — Fumadocs documentation site
+- `docs/` — Fumadocs documentation site
 - `specs/` — Spec-driven development specs (see below)
 
 ## Architecture Map
@@ -41,6 +41,7 @@ noddde is a TypeScript framework for building business applications using Domain
 | `infrastructure/index.ts`         | `Infrastructure` (empty base), `CQRSInfrastructure` (commandBus + eventBus + queryBus)   |
 | **persistence/**                  |                                                                                          |
 | `persistence/index.ts`            | `StateStoredAggregatePersistence`, `EventSourcedAggregatePersistence`, `SagaPersistence` |
+| `persistence/snapshot.ts`         | `Snapshot`, `SnapshotStore`, `SnapshotStrategy`, `PartialEventLoad`, `everyNEvents`      |
 
 ### Engine Source Files (`packages/engine/src/`)
 
@@ -53,6 +54,7 @@ noddde is a TypeScript framework for building business applications using Domain
 | `implementations/in-memory-query-bus.ts`             | `InMemoryQueryBus`                                                                    |
 | `implementations/in-memory-aggregate-persistence.ts` | `InMemoryEventSourcedAggregatePersistence`, `InMemoryStateStoredAggregatePersistence` |
 | `implementations/in-memory-saga-persistence.ts`      | `InMemorySagaPersistence`                                                             |
+| `implementations/in-memory-snapshot-store.ts`        | `InMemorySnapshotStore`                                                               |
 
 ### Key Patterns
 

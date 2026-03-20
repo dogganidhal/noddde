@@ -15,7 +15,7 @@ noddde provides three ORM adapter packages that implement all persistence interf
 
 ### Dialect Support Matrix
 
-Persistence (event store, state store, saga store) and [concurrency control](/docs/running/persistence#concurrency-control) work with **every dialect** supported by your ORM. The only dialect restriction applies to **pessimistic locking**, which requires database-level advisory locks:
+Persistence (event store, state store, saga store, snapshot store) and [concurrency control](/docs/running/persistence#concurrency-control) work with **every dialect** supported by your ORM. The only dialect restriction applies to **pessimistic locking**, which requires database-level advisory locks:
 
 | Dialect    | Persistence | No concurrency / Optimistic | Pessimistic locking  |
 | ---------- | ----------- | --------------------------- | -------------------- |
@@ -30,19 +30,26 @@ For SQLite or any dialect without advisory lock support, use `InMemoryAggregateL
 Each package exports a single factory function that returns all persistence implementations wired to share a transaction context:
 
 ```ts
-import { events, aggregateStates, sagaStates } from "@noddde/drizzle/pg";
+import {
+  events,
+  aggregateStates,
+  sagaStates,
+  snapshots,
+} from "@noddde/drizzle/pg";
 const infra = createDrizzlePersistence(db, {
   events,
   aggregateStates,
   sagaStates,
+  snapshots,
 });
 // or: createPrismaPersistence(prisma)
 // or: createTypeORMPersistence(dataSource)
 
 // Returns:
-// infra.eventSourcedPersistence  -- EventSourcedAggregatePersistence
+// infra.eventSourcedPersistence  -- EventSourcedAggregatePersistence & PartialEventLoad
 // infra.stateStoredPersistence   -- StateStoredAggregatePersistence
 // infra.sagaPersistence          -- SagaPersistence
+// infra.snapshotStore            -- SnapshotStore (Drizzle: only when snapshots schema provided)
 // infra.unitOfWorkFactory        -- UnitOfWorkFactory (real DB transactions)
 ```
 
@@ -62,13 +69,28 @@ The package exports convenience table definitions for each Drizzle dialect. Impo
 
 ```ts
 // SQLite
-import { events, aggregateStates, sagaStates } from "@noddde/drizzle/sqlite";
+import {
+  events,
+  aggregateStates,
+  sagaStates,
+  snapshots,
+} from "@noddde/drizzle/sqlite";
 
 // PostgreSQL (uses serial PK, jsonb for payloads)
-import { events, aggregateStates, sagaStates } from "@noddde/drizzle/pg";
+import {
+  events,
+  aggregateStates,
+  sagaStates,
+  snapshots,
+} from "@noddde/drizzle/pg";
 
 // MySQL (uses int auto-increment, varchar(255), json)
-import { events, aggregateStates, sagaStates } from "@noddde/drizzle/mysql";
+import {
+  events,
+  aggregateStates,
+  sagaStates,
+  snapshots,
+} from "@noddde/drizzle/mysql";
 ```
 
 You can also define your own tables matching the expected column structure -- the adapter does not require using the provided schemas.
@@ -79,13 +101,20 @@ You can also define your own tables matching the expected column structure -- th
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { createDrizzlePersistence } from "@noddde/drizzle";
-import { events, aggregateStates, sagaStates } from "@noddde/drizzle/sqlite";
+import {
+  events,
+  aggregateStates,
+  sagaStates,
+  snapshots,
+} from "@noddde/drizzle/sqlite";
+import { everyNEvents } from "@noddde/core";
 
 const db = drizzle(new Database("app.db"));
 const infra = createDrizzlePersistence(db, {
   events,
   aggregateStates,
   sagaStates,
+  snapshots,
 });
 
 const domain = await configureDomain({
@@ -94,6 +123,8 @@ const domain = await configureDomain({
   infrastructure: {
     aggregatePersistence: () => infra.eventSourcedPersistence,
     sagaPersistence: () => infra.sagaPersistence,
+    snapshotStore: () => infra.snapshotStore,
+    snapshotStrategy: everyNEvents(100),
     unitOfWorkFactory: () => infra.unitOfWorkFactory,
   },
 });
@@ -150,6 +181,16 @@ model NodddeSagaState {
   @@id([sagaName, sagaId])
   @@map("noddde_saga_states")
 }
+
+model NodddeSnapshot {
+  aggregateName String @map("aggregate_name")
+  aggregateId   String @map("aggregate_id")
+  state         String
+  version       Int    @default(0)
+
+  @@id([aggregateName, aggregateId])
+  @@map("noddde_snapshots")
+}
 ```
 
 Then run `prisma generate` and your preferred migration command.
@@ -159,6 +200,7 @@ Then run `prisma generate` and your preferred migration command.
 ```ts
 import { PrismaClient } from "@prisma/client";
 import { createPrismaPersistence } from "@noddde/prisma";
+import { everyNEvents } from "@noddde/core";
 
 const prisma = new PrismaClient();
 const infra = createPrismaPersistence(prisma);
@@ -169,6 +211,8 @@ const domain = await configureDomain({
   infrastructure: {
     aggregatePersistence: () => infra.eventSourcedPersistence,
     sagaPersistence: () => infra.sagaPersistence,
+    snapshotStore: () => infra.snapshotStore,
+    snapshotStrategy: everyNEvents(100),
     unitOfWorkFactory: () => infra.unitOfWorkFactory,
   },
 });
@@ -197,6 +241,7 @@ import {
   NodddeEventEntity,
   NodddeAggregateStateEntity,
   NodddeSagaStateEntity,
+  NodddeSnapshotEntity,
 } from "@noddde/typeorm";
 
 const dataSource = new DataSource({
@@ -206,6 +251,7 @@ const dataSource = new DataSource({
     NodddeEventEntity,
     NodddeAggregateStateEntity,
     NodddeSagaStateEntity,
+    NodddeSnapshotEntity,
   ],
   synchronize: true, // use migrations in production
 });
@@ -218,6 +264,7 @@ For production, use TypeORM migrations instead of `synchronize: true`.
 
 ```ts
 import { createTypeORMPersistence } from "@noddde/typeorm";
+import { everyNEvents } from "@noddde/core";
 
 const infra = createTypeORMPersistence(dataSource);
 
@@ -227,6 +274,8 @@ const domain = await configureDomain({
   infrastructure: {
     aggregatePersistence: () => infra.eventSourcedPersistence,
     sagaPersistence: () => infra.sagaPersistence,
+    snapshotStore: () => infra.snapshotStore,
+    snapshotStrategy: everyNEvents(100),
     unitOfWorkFactory: () => infra.unitOfWorkFactory,
   },
 });
@@ -285,11 +334,12 @@ Advisory locks are session-level, spanning beyond the database transaction. This
 
 All three adapters use the same logical schema:
 
-| Table                     | Purpose         | Key                                          | Columns                                                                                                                                                                                   |
-| ------------------------- | --------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `noddde_events`           | Event streams   | Auto-increment `id`                          | `aggregate_name`, `aggregate_id`, `sequence_number`, `event_name`, `payload` (JSON), `metadata` (JSON, nullable). Unique constraint on `(aggregate_name, aggregate_id, sequence_number)`. |
-| `noddde_aggregate_states` | State snapshots | Composite (`aggregate_name`, `aggregate_id`) | `state` (JSON), `version` (integer, default 0)                                                                                                                                            |
-| `noddde_saga_states`      | Saga state      | Composite (`saga_name`, `saga_id`)           | `state` (JSON)                                                                                                                                                                            |
+| Table                     | Purpose                 | Key                                          | Columns                                                                                                                                                                                   |
+| ------------------------- | ----------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `noddde_events`           | Event streams           | Auto-increment `id`                          | `aggregate_name`, `aggregate_id`, `sequence_number`, `event_name`, `payload` (JSON), `metadata` (JSON, nullable). Unique constraint on `(aggregate_name, aggregate_id, sequence_number)`. |
+| `noddde_aggregate_states` | State snapshots         | Composite (`aggregate_name`, `aggregate_id`) | `state` (JSON), `version` (integer, default 0)                                                                                                                                            |
+| `noddde_saga_states`      | Saga state              | Composite (`saga_name`, `saga_id`)           | `state` (JSON)                                                                                                                                                                            |
+| `noddde_snapshots`        | Event-sourced snapshots | Composite (`aggregate_name`, `aggregate_id`) | `state` (JSON), `version` (integer, default 0)                                                                                                                                            |
 
 States and event payloads are serialized as JSON strings, making the schema database-agnostic.
 

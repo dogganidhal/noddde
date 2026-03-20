@@ -1,9 +1,13 @@
 /* eslint-disable no-unused-vars */
 import type { DataSource, EntityManager } from "typeorm";
+import { MoreThan } from "typeorm";
 import type {
   Event,
   EventMetadata,
   EventSourcedAggregatePersistence,
+  PartialEventLoad,
+  Snapshot,
+  SnapshotStore,
   StateStoredAggregatePersistence,
   SagaPersistence,
 } from "@noddde/core";
@@ -12,6 +16,7 @@ import {
   NodddeEventEntity,
   NodddeAggregateStateEntity,
   NodddeSagaStateEntity,
+  NodddeSnapshotEntity,
 } from "./entities";
 import type { TypeORMTransactionStore } from "./unit-of-work";
 
@@ -19,7 +24,7 @@ import type { TypeORMTransactionStore } from "./unit-of-work";
  * TypeORM-backed event-sourced aggregate persistence.
  */
 export class TypeORMEventSourcedAggregatePersistence
-  implements EventSourcedAggregatePersistence
+  implements EventSourcedAggregatePersistence, PartialEventLoad
 {
   constructor(
     private readonly dataSource: DataSource,
@@ -74,6 +79,32 @@ export class TypeORMEventSourcedAggregatePersistence
 
     const rows = await repo.find({
       where: { aggregateName, aggregateId },
+      order: { sequenceNumber: "ASC" },
+    });
+
+    return rows.map((row) => ({
+      name: row.eventName,
+      payload: JSON.parse(row.payload),
+      ...(row.metadata
+        ? { metadata: JSON.parse(row.metadata) as EventMetadata }
+        : {}),
+    }));
+  }
+
+  async loadAfterVersion(
+    aggregateName: string,
+    aggregateId: string,
+    afterVersion: number,
+  ): Promise<Event[]> {
+    const manager = this.getManager();
+    const repo = manager.getRepository(NodddeEventEntity);
+
+    const rows = await repo.find({
+      where: {
+        aggregateName,
+        aggregateId,
+        sequenceNumber: MoreThan(afterVersion),
+      },
       order: { sequenceNumber: "ASC" },
     });
 
@@ -209,5 +240,61 @@ export class TypeORMSagaPersistence implements SagaPersistence {
 
     if (!row) return undefined;
     return JSON.parse(row.state);
+  }
+}
+
+/**
+ * TypeORM-backed snapshot store for aggregate state snapshots.
+ */
+export class TypeORMSnapshotStore implements SnapshotStore {
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly txStore: TypeORMTransactionStore,
+  ) {}
+
+  private getManager(): EntityManager {
+    return this.txStore.current ?? this.dataSource.manager;
+  }
+
+  async load(
+    aggregateName: string,
+    aggregateId: string,
+  ): Promise<Snapshot | null> {
+    const manager = this.getManager();
+    const repo = manager.getRepository(NodddeSnapshotEntity);
+
+    const row = await repo.findOne({
+      where: { aggregateName, aggregateId },
+    });
+
+    if (!row) return null;
+    return { state: JSON.parse(row.state), version: row.version };
+  }
+
+  async save(
+    aggregateName: string,
+    aggregateId: string,
+    snapshot: Snapshot,
+  ): Promise<void> {
+    const manager = this.getManager();
+    const repo = manager.getRepository(NodddeSnapshotEntity);
+    const serialized = JSON.stringify(snapshot.state);
+
+    const existing = await repo.findOne({
+      where: { aggregateName, aggregateId },
+    });
+
+    if (existing) {
+      existing.state = serialized;
+      existing.version = snapshot.version;
+      await repo.save(existing);
+    } else {
+      const entity = new NodddeSnapshotEntity();
+      entity.aggregateName = aggregateName;
+      entity.aggregateId = aggregateId;
+      entity.state = serialized;
+      entity.version = snapshot.version;
+      await repo.save(entity);
+    }
   }
 }

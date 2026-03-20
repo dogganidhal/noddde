@@ -7,21 +7,26 @@ exports:
   - createDrizzlePersistence
   - DrizzlePersistenceInfrastructure
   - DrizzleNodddeSchema
+  - DrizzleSnapshotStore
   # @noddde/drizzle/sqlite
   - events (sqliteTable)
   - aggregateStates (sqliteTable)
   - sagaStates (sqliteTable)
+  - snapshots (sqliteTable)
   # @noddde/drizzle/pg
   - events (pgTable)
   - aggregateStates (pgTable)
   - sagaStates (pgTable)
+  - snapshots (pgTable)
   # @noddde/drizzle/mysql
   - events (mysqlTable)
   - aggregateStates (mysqlTable)
   - sagaStates (mysqlTable)
+  - snapshots (mysqlTable)
 depends_on:
   - core/persistence/persistence
   - core/persistence/unit-of-work
+  - core/persistence/snapshot
 docs:
   - docs/content/docs/infrastructure/orm-adapters.mdx
   - docs/content/docs/domain-configuration/unit-of-work.mdx
@@ -41,6 +46,10 @@ import type {
   StateStoredAggregatePersistence,
   SagaPersistence,
   UnitOfWorkFactory,
+  SnapshotStore,
+  Snapshot,
+  PartialEventLoad,
+  Event,
 } from "@noddde/core";
 
 /**
@@ -51,6 +60,7 @@ export interface DrizzleNodddeSchema {
   events: any;
   aggregateStates: any;
   sagaStates: any;
+  snapshots?: any; // Optional — only needed if using snapshot store
 }
 
 /**
@@ -61,6 +71,38 @@ export interface DrizzlePersistenceInfrastructure {
   stateStoredPersistence: StateStoredAggregatePersistence;
   sagaPersistence: SagaPersistence;
   unitOfWorkFactory: UnitOfWorkFactory;
+  snapshotStore?: SnapshotStore; // Present only when schema.snapshots is provided
+}
+
+/**
+ * Drizzle-backed snapshot store for event-sourced aggregates.
+ */
+export class DrizzleSnapshotStore implements SnapshotStore {
+  constructor(
+    db: any,
+    txStore: DrizzleTransactionStore,
+    schema: DrizzleNodddeSchema,
+  );
+  load(aggregateName: string, aggregateId: string): Promise<Snapshot | null>;
+  save(
+    aggregateName: string,
+    aggregateId: string,
+    snapshot: Snapshot,
+  ): Promise<void>;
+}
+
+/**
+ * DrizzleEventSourcedAggregatePersistence also implements PartialEventLoad.
+ */
+export class DrizzleEventSourcedAggregatePersistence
+  implements EventSourcedAggregatePersistence, PartialEventLoad
+{
+  // ... existing methods ...
+  loadAfterVersion(
+    aggregateName: string,
+    aggregateId: string,
+    afterVersion: number,
+  ): Promise<Event[]>;
 }
 
 /**
@@ -87,6 +129,7 @@ import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 export const events: SQLiteTableWithColumns<...>;
 export const aggregateStates: SQLiteTableWithColumns<...>;
 export const sagaStates: SQLiteTableWithColumns<...>;
+export const snapshots: SQLiteTableWithColumns<...>;
 ```
 
 **`@noddde/drizzle/pg`**
@@ -97,6 +140,7 @@ import { pgTable, text, serial, integer, jsonb } from "drizzle-orm/pg-core";
 export const events: PgTableWithColumns<...>;       // serial PK, jsonb payload
 export const aggregateStates: PgTableWithColumns<...>;
 export const sagaStates: PgTableWithColumns<...>;
+export const snapshots: PgTableWithColumns<...>;     // jsonb state
 ```
 
 **`@noddde/drizzle/mysql`**
@@ -107,6 +151,7 @@ import { mysqlTable, varchar, int, text, json } from "drizzle-orm/mysql-core";
 export const events: MySqlTableWithColumns<...>;     // auto-increment int PK, json payload, varchar(255) for names
 export const aggregateStates: MySqlTableWithColumns<...>;
 export const sagaStates: MySqlTableWithColumns<...>;
+export const snapshots: MySqlTableWithColumns<...>;
 ```
 
 All three dialects define the same logical schema with the same table names (`noddde_events`, `noddde_aggregate_states`, `noddde_saga_states`) and column names.
@@ -150,6 +195,14 @@ All three dialects define the same logical schema with the same table names (`no
 24. PostgreSQL schema uses `serial` for auto-increment PK and `jsonb` for payload/state columns.
 25. MySQL schema uses `int` with `.autoincrement()` for PK, `varchar(255)` for name columns, and `json` for payload/state columns.
 26. SQLite schema uses `integer` with `autoIncrement` for PK and `text` for all string/JSON columns.
+
+### Snapshots and Partial Event Load
+
+27. `DrizzleSnapshotStore.save()` upserts the snapshot (insert if new, update if exists) using the `snapshots` schema table.
+28. `DrizzleSnapshotStore.load()` returns the JSON-parsed state and version, or `null` if no snapshot exists.
+29. `DrizzleEventSourcedAggregatePersistence.loadAfterVersion()` loads events with `sequence_number > afterVersion` ordered by `sequence_number ASC`.
+30. `snapshotStore` is only included in the factory return when `schema.snapshots` is provided.
+31. Snapshot operations route through `txStore.current` like all other persistence operations.
 
 ## Invariants
 
@@ -199,6 +252,12 @@ noddde_saga_states
 ├── saga_name        (string, PK part 1)
 ├── saga_id          (string, PK part 2)
 └── state            (JSON string, NOT NULL)
+
+noddde_snapshots
+├── aggregate_name   (string, PK part 1)
+├── aggregate_id     (string, PK part 2)
+├── state            (JSON string, NOT NULL)
+└── version          (integer, NOT NULL)
 ```
 
 ## Test Scenarios
@@ -514,5 +573,157 @@ it("throws on any operation after commit or rollback", async () => {
   expect(() => uow.deferPublish()).toThrow("UnitOfWork already completed");
   await expect(uow.commit()).rejects.toThrow("UnitOfWork already completed");
   await expect(uow.rollback()).rejects.toThrow("UnitOfWork already completed");
+});
+```
+
+### Snapshot store: save and load roundtrip
+
+```ts
+it("snapshot store: save and load roundtrip", async () => {
+  const db = createTestDb();
+  const infra = createDrizzlePersistence(db, {
+    events,
+    aggregateStates,
+    sagaStates,
+    snapshots,
+  });
+
+  expect(infra.snapshotStore).toBeDefined();
+  const store = infra.snapshotStore!;
+
+  await store.save("Order", "order-1", {
+    state: { status: "confirmed", total: 100 },
+    version: 5,
+  });
+
+  const loaded = await store.load("Order", "order-1");
+  expect(loaded).toEqual({
+    state: { status: "confirmed", total: 100 },
+    version: 5,
+  });
+});
+```
+
+### Snapshot store: returns null for unknown aggregate
+
+```ts
+it("snapshot store: returns null for unknown aggregate", async () => {
+  const db = createTestDb();
+  const infra = createDrizzlePersistence(db, {
+    events,
+    aggregateStates,
+    sagaStates,
+    snapshots,
+  });
+
+  const loaded = await infra.snapshotStore!.load("Order", "nonexistent");
+  expect(loaded).toBeNull();
+});
+```
+
+### Snapshot store: overwrites on repeated saves
+
+```ts
+it("snapshot store: overwrites on repeated saves", async () => {
+  const db = createTestDb();
+  const infra = createDrizzlePersistence(db, {
+    events,
+    aggregateStates,
+    sagaStates,
+    snapshots,
+  });
+  const store = infra.snapshotStore!;
+
+  await store.save("Order", "order-1", {
+    state: { status: "placed" },
+    version: 1,
+  });
+  await store.save("Order", "order-1", {
+    state: { status: "confirmed" },
+    version: 3,
+  });
+
+  const loaded = await store.load("Order", "order-1");
+  expect(loaded).toEqual({
+    state: { status: "confirmed" },
+    version: 3,
+  });
+});
+```
+
+### snapshotStore is not present when schema.snapshots is not provided
+
+```ts
+it("snapshotStore is not present when schema.snapshots is not provided", () => {
+  const db = createTestDb();
+  const infra = createDrizzlePersistence(db, {
+    events,
+    aggregateStates,
+    sagaStates,
+  });
+
+  expect(infra.snapshotStore).toBeUndefined();
+});
+```
+
+### loadAfterVersion: returns events after given version
+
+```ts
+it("loadAfterVersion: returns events after given version", async () => {
+  const db = createTestDb();
+  const infra = createDrizzlePersistence(db, {
+    events,
+    aggregateStates,
+    sagaStates,
+    snapshots,
+  });
+  const persistence = infra.eventSourcedPersistence;
+
+  await persistence.save(
+    "Order",
+    "order-1",
+    [
+      { name: "OrderPlaced", payload: { total: 100 } },
+      { name: "OrderConfirmed", payload: {} },
+      { name: "OrderShipped", payload: { trackingId: "T1" } },
+    ],
+    0,
+  );
+
+  const afterV1 = await persistence.loadAfterVersion("Order", "order-1", 1);
+  expect(afterV1).toHaveLength(2);
+  expect(afterV1[0]!.name).toBe("OrderConfirmed");
+  expect(afterV1[1]!.name).toBe("OrderShipped");
+});
+```
+
+### loadAfterVersion: returns empty array when afterVersion >= stream length
+
+```ts
+it("loadAfterVersion: returns empty array when afterVersion >= stream length", async () => {
+  const db = createTestDb();
+  const infra = createDrizzlePersistence(db, {
+    events,
+    aggregateStates,
+    sagaStates,
+    snapshots,
+  });
+  const persistence = infra.eventSourcedPersistence;
+
+  await persistence.save(
+    "Order",
+    "order-1",
+    [
+      { name: "OrderPlaced", payload: {} },
+      { name: "OrderConfirmed", payload: {} },
+    ],
+    0,
+  );
+
+  const afterV2 = await persistence.loadAfterVersion("Order", "order-1", 2);
+  expect(afterV2).toEqual([]);
+
+  const afterV10 = await persistence.loadAfterVersion("Order", "order-1", 10);
+  expect(afterV10).toEqual([]);
 });
 ```

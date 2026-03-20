@@ -1,9 +1,12 @@
 /* eslint-disable no-unused-vars */
-import { eq, and, asc } from "drizzle-orm";
+import { eq, and, asc, gt } from "drizzle-orm";
 import {
   ConcurrencyError,
   type Event,
   type EventSourcedAggregatePersistence,
+  type PartialEventLoad,
+  type Snapshot,
+  type SnapshotStore,
   type StateStoredAggregatePersistence,
   type SagaPersistence,
 } from "@noddde/core";
@@ -16,7 +19,7 @@ import type { DrizzleTransactionStore, DrizzleNodddeSchema } from "./index";
  * schema tables as constructor parameters.
  */
 export class DrizzleEventSourcedAggregatePersistence
-  implements EventSourcedAggregatePersistence
+  implements EventSourcedAggregatePersistence, PartialEventLoad
 {
   constructor(
     private readonly db: any,
@@ -81,6 +84,44 @@ export class DrizzleEventSourcedAggregatePersistence
         and(
           eq(eventsTable.aggregateName, aggregateName),
           eq(eventsTable.aggregateId, aggregateId),
+        ),
+      )
+      .orderBy(asc(eventsTable.sequenceNumber));
+
+    return rows.map((row: any) => {
+      const event: Event = {
+        name: row.eventName,
+        payload: row.payload,
+      };
+      if (row.metadata != null) {
+        const meta =
+          typeof row.metadata === "string"
+            ? JSON.parse(row.metadata)
+            : row.metadata;
+        if (meta != null) {
+          event.metadata = meta;
+        }
+      }
+      return event;
+    });
+  }
+
+  async loadAfterVersion(
+    aggregateName: string,
+    aggregateId: string,
+    afterVersion: number,
+  ): Promise<Event[]> {
+    const executor = this.getExecutor();
+    const eventsTable = this.schema.events;
+
+    const rows = await executor
+      .select()
+      .from(eventsTable)
+      .where(
+        and(
+          eq(eventsTable.aggregateName, aggregateName),
+          eq(eventsTable.aggregateId, aggregateId),
+          gt(eventsTable.sequenceNumber, afterVersion),
         ),
       )
       .orderBy(asc(eventsTable.sequenceNumber));
@@ -260,5 +301,91 @@ export class DrizzleSagaPersistence implements SagaPersistence {
 
     if (rows.length === 0) return undefined;
     return JSON.parse(rows[0]!.state);
+  }
+}
+
+/**
+ * Drizzle-backed snapshot store for event-sourced aggregates.
+ * Stores and retrieves state snapshots to avoid full event stream
+ * replay. Dialect-agnostic — accepts schema tables as constructor parameters.
+ */
+export class DrizzleSnapshotStore implements SnapshotStore {
+  constructor(
+    private readonly db: any,
+    private readonly txStore: DrizzleTransactionStore,
+    private readonly schema: DrizzleNodddeSchema,
+  ) {}
+
+  private getExecutor() {
+    return this.txStore.current ?? this.db;
+  }
+
+  async load(
+    aggregateName: string,
+    aggregateId: string,
+  ): Promise<Snapshot | null> {
+    const executor = this.getExecutor();
+    const table = this.schema.snapshots;
+    if (!table) return null;
+
+    const rows = await executor
+      .select()
+      .from(table)
+      .where(
+        and(
+          eq(table.aggregateName, aggregateName),
+          eq(table.aggregateId, aggregateId),
+        ),
+      );
+
+    if (rows.length === 0) return null;
+    const row = rows[0]!;
+    const state =
+      typeof row.state === "string" ? JSON.parse(row.state) : row.state;
+    return { state, version: row.version };
+  }
+
+  async save(
+    aggregateName: string,
+    aggregateId: string,
+    snapshot: Snapshot,
+  ): Promise<void> {
+    const executor = this.getExecutor();
+    const table = this.schema.snapshots;
+    if (!table) return;
+
+    const serialized =
+      typeof snapshot.state === "string"
+        ? snapshot.state
+        : JSON.stringify(snapshot.state);
+
+    const existing = await executor
+      .select()
+      .from(table)
+      .where(
+        and(
+          eq(table.aggregateName, aggregateName),
+          eq(table.aggregateId, aggregateId),
+        ),
+      );
+
+    if (existing.length > 0) {
+      await executor
+        .update(table)
+        .set({ state: serialized, version: snapshot.version })
+        .where(
+          and(
+            eq(table.aggregateName, aggregateName),
+            eq(table.aggregateId, aggregateId),
+          ),
+        );
+    } else {
+      await executor.insert(table).values({
+        aggregateName,
+        aggregateId,
+        state: serialized,
+        version: snapshot.version,
+      });
+    }
   }
 }

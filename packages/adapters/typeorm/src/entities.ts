@@ -66,3 +66,21 @@ export class NodddeSagaStateEntity {
   @Column({ type: "text" })
   state!: string;
 }
+
+/**
+ * TypeORM entity for aggregate state snapshots.
+ */
+@Entity("noddde_snapshots")
+export class NodddeSnapshotEntity {
+  @PrimaryColumn({ name: "aggregate_name" })
+  aggregateName!: string;
+
+  @PrimaryColumn({ name: "aggregate_id" })
+  aggregateId!: string;
+
+  @Column({ type: "text" })
+  state!: string;
+
+  @Column({ type: "int" })
+  version!: number;
+}

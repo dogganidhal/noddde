@@ -54,3 +54,16 @@ export const sagaStates = pgTable("noddde_saga_states", {
   sagaId: text("saga_id").notNull(),
   state: jsonb("state").notNull(),
 });
+
+/**
+ * PostgreSQL table definition for aggregate state snapshots.
+ * Stores the latest snapshot per aggregate instance for
+ * optimized event-sourced aggregate loading.
+ * Uses `jsonb` for native JSON storage with indexing support.
+ */
+export const snapshots = pgTable("noddde_snapshots", {
+  aggregateName: text("aggregate_name").notNull(),
+  aggregateId: text("aggregate_id").notNull(),
+  state: jsonb("state").notNull(),
+  version: integer("version").notNull(),
+});

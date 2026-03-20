@@ -49,3 +49,15 @@ export const sagaStates = sqliteTable("noddde_saga_states", {
   sagaId: text("saga_id").notNull(),
   state: text("state").notNull(),
 });
+
+/**
+ * SQLite table definition for aggregate state snapshots.
+ * Stores the latest snapshot per aggregate instance for
+ * optimized event-sourced aggregate loading.
+ */
+export const snapshots = sqliteTable("noddde_snapshots", {
+  aggregateName: text("aggregate_name").notNull(),
+  aggregateId: text("aggregate_id").notNull(),
+  state: text("state").notNull(),
+  version: integer("version").notNull(),
+});
