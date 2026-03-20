@@ -95,9 +95,15 @@ describe("InMemoryUnitOfWork", () => {
     const uow = new InMemoryUnitOfWork();
     const log: string[] = [];
 
-    uow.enlist(async () => { log.push("first"); });
-    uow.enlist(async () => { log.push("second"); });
-    uow.enlist(async () => { log.push("third"); });
+    uow.enlist(async () => {
+      log.push("first");
+    });
+    uow.enlist(async () => {
+      log.push("second");
+    });
+    uow.enlist(async () => {
+      log.push("third");
+    });
 
     await uow.commit();
 
@@ -160,7 +166,9 @@ describe("InMemoryUnitOfWork", () => {
     const uow = new InMemoryUnitOfWork();
     let executed = false;
 
-    uow.enlist(async () => { executed = true; });
+    uow.enlist(async () => {
+      executed = true;
+    });
     uow.deferPublish({ name: "E", payload: {} });
 
     await uow.rollback();
@@ -197,7 +205,9 @@ describe("InMemoryUnitOfWork", () => {
     const uow = new InMemoryUnitOfWork();
     await uow.commit();
 
-    await expect(uow.rollback()).rejects.toThrow("UnitOfWork already completed");
+    await expect(uow.rollback()).rejects.toThrow(
+      "UnitOfWork already completed",
+    );
   });
 });
 ```
@@ -213,7 +223,9 @@ describe("InMemoryUnitOfWork", () => {
     const uow = new InMemoryUnitOfWork();
     await uow.commit();
 
-    expect(() => uow.enlist(async () => {})).toThrow("UnitOfWork already completed");
+    expect(() => uow.enlist(async () => {})).toThrow(
+      "UnitOfWork already completed",
+    );
   });
 });
 ```
@@ -229,7 +241,9 @@ describe("InMemoryUnitOfWork", () => {
     const uow = new InMemoryUnitOfWork();
     await uow.rollback();
 
-    expect(() => uow.deferPublish({ name: "E", payload: {} })).toThrow("UnitOfWork already completed");
+    expect(() => uow.deferPublish({ name: "E", payload: {} })).toThrow(
+      "UnitOfWork already completed",
+    );
   });
 });
 ```
@@ -267,9 +281,15 @@ describe("InMemoryUnitOfWork", () => {
     const uow = new InMemoryUnitOfWork();
     const log: string[] = [];
 
-    uow.enlist(async () => { log.push("first"); });
-    uow.enlist(async () => { throw new Error("persistence failure"); });
-    uow.enlist(async () => { log.push("third"); });
+    uow.enlist(async () => {
+      log.push("first");
+    });
+    uow.enlist(async () => {
+      throw new Error("persistence failure");
+    });
+    uow.enlist(async () => {
+      log.push("third");
+    });
     uow.deferPublish({ name: "E", payload: {} });
 
     await expect(uow.commit()).rejects.toThrow("persistence failure");
@@ -278,7 +298,9 @@ describe("InMemoryUnitOfWork", () => {
     expect(log).toEqual(["first"]);
 
     // UoW is sealed after failed commit
-    expect(() => uow.enlist(async () => {})).toThrow("UnitOfWork already completed");
+    expect(() => uow.enlist(async () => {})).toThrow(
+      "UnitOfWork already completed",
+    );
   });
 });
 ```

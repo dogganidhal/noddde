@@ -17,14 +17,14 @@ This example demonstrates a full e-commerce order fulfillment domain with **thre
 
 The saga listens to events from all three aggregates and dispatches commands to coordinate the workflow:
 
-| Step | Event | Saga Reaction |
-|---|---|---|
-| 1 | `OrderPlaced` | Dispatch `RequestPayment` |
-| 2a | `PaymentCompleted` | Dispatch `ConfirmOrder` + `ArrangeShipment` |
-| 2b | `PaymentFailed` | Dispatch `CancelOrder` |
-| 3 | `ShipmentDispatched` | Dispatch `MarkOrderShipped` |
-| 4 | `ShipmentDelivered` | Dispatch `MarkOrderDelivered` + notify customer |
-| Compensation | `OrderCancelled` | Dispatch `RefundPayment` (if payment taken) |
+| Step         | Event                | Saga Reaction                                   |
+| ------------ | -------------------- | ----------------------------------------------- |
+| 1            | `OrderPlaced`        | Dispatch `RequestPayment`                       |
+| 2a           | `PaymentCompleted`   | Dispatch `ConfirmOrder` + `ArrangeShipment`     |
+| 2b           | `PaymentFailed`      | Dispatch `CancelOrder`                          |
+| 3            | `ShipmentDispatched` | Dispatch `MarkOrderShipped`                     |
+| 4            | `ShipmentDelivered`  | Dispatch `MarkOrderDelivered` + notify customer |
+| Compensation | `OrderCancelled`     | Dispatch `RefundPayment` (if payment taken)     |
 
 ## Events
 
@@ -33,7 +33,13 @@ Each aggregate defines its own events using `DefineEvents`:
 ```ts
 // order/events.ts
 type OrderEvent = DefineEvents<{
-  OrderPlaced: { orderId: string; customerId: string; items: OrderItem[]; total: number; placedAt: Date };
+  OrderPlaced: {
+    orderId: string;
+    customerId: string;
+    items: OrderItem[];
+    total: number;
+    placedAt: Date;
+  };
   OrderConfirmed: { orderId: string; confirmedAt: Date };
   OrderCancelled: { orderId: string; reason: string; cancelledAt: Date };
   OrderShipped: { orderId: string; trackingNumber: string; shippedAt: Date };
@@ -42,17 +48,52 @@ type OrderEvent = DefineEvents<{
 
 // payment/events.ts — uses "referenceId" (generic payment reference, not order-specific)
 type PaymentEvent = DefineEvents<{
-  PaymentRequested: { paymentId: string; referenceId: string; amount: number; requestedAt: Date };
-  PaymentCompleted: { paymentId: string; referenceId: string; amount: number; completedAt: Date };
-  PaymentFailed: { paymentId: string; referenceId: string; reason: string; failedAt: Date };
-  PaymentRefunded: { paymentId: string; referenceId: string; amount: number; reason: string; refundedAt: Date };
+  PaymentRequested: {
+    paymentId: string;
+    referenceId: string;
+    amount: number;
+    requestedAt: Date;
+  };
+  PaymentCompleted: {
+    paymentId: string;
+    referenceId: string;
+    amount: number;
+    completedAt: Date;
+  };
+  PaymentFailed: {
+    paymentId: string;
+    referenceId: string;
+    reason: string;
+    failedAt: Date;
+  };
+  PaymentRefunded: {
+    paymentId: string;
+    referenceId: string;
+    amount: number;
+    reason: string;
+    refundedAt: Date;
+  };
 }>;
 
 // shipping/events.ts — uses "customerReference" (external order reference)
 type ShippingEvent = DefineEvents<{
-  ShipmentArranged: { shipmentId: string; customerReference: string; itemCount: number; arrangedAt: Date };
-  ShipmentDispatched: { shipmentId: string; customerReference: string; trackingNumber: string; dispatchedAt: Date };
-  ShipmentDelivered: { shipmentId: string; customerReference: string; deliveredAt: Date };
+  ShipmentArranged: {
+    shipmentId: string;
+    customerReference: string;
+    itemCount: number;
+    arrangedAt: Date;
+  };
+  ShipmentDispatched: {
+    shipmentId: string;
+    customerReference: string;
+    trackingNumber: string;
+    dispatchedAt: Date;
+  };
+  ShipmentDelivered: {
+    shipmentId: string;
+    customerReference: string;
+    deliveredAt: Date;
+  };
 }>;
 ```
 

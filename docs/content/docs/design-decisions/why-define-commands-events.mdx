@@ -34,6 +34,7 @@ type BankAccountEvent = BankAccountCreated | TransactionAuthorized;
 ```
 
 This is:
+
 - **Verbose** — Three declarations for what is logically one thing
 - **Redundant** — The name appears in the enum AND the interface
 - **Error-prone** — Forgetting to add a new event to the union type
@@ -58,6 +59,7 @@ type BankAccountEvent = DefineEvents<{
 ```
 
 This single declaration:
+
 - **Defines the names** — Keys of the payload map become the `name` discriminant
 - **Defines the payloads** — Values become the `payload` type
 - **Builds the union** — The mapped type automatically constructs the discriminated union
@@ -67,7 +69,7 @@ This single declaration:
 
 ```ts
 type BankAccountCommand = DefineCommands<{
-  CreateBankAccount: void;           // void = no payload
+  CreateBankAccount: void; // void = no payload
   AuthorizeTransaction: { amount: number; merchant: string };
 }>;
 ```
@@ -114,9 +116,18 @@ switch (event.name) {
 
 ```ts
 // Before: ~30 lines, 3 declarations, name appears 3 times
-enum Events { Created = "Created", Updated = "Updated" }
-interface Created extends Event { name: Events.Created; payload: { id: string } }
-interface Updated extends Event { name: Events.Updated; payload: { value: number } }
+enum Events {
+  Created = "Created",
+  Updated = "Updated",
+}
+interface Created extends Event {
+  name: Events.Created;
+  payload: { id: string };
+}
+interface Updated extends Event {
+  name: Events.Updated;
+  payload: { value: number };
+}
 type MyEvent = Created | Updated;
 
 // After: 4 lines, 1 declaration, name appears once

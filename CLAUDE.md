@@ -18,41 +18,41 @@ noddde is a TypeScript framework for building business applications using Domain
 
 ### Core Source Files (`packages/core/src/`)
 
-| File                                                        | Purpose                                                                                       |
-| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `index.ts`                                                  | Re-exports all public API                                                                     |
-| **ddd/**                                                    |                                                                                               |
-| `ddd/aggregate-root.ts`                                     | `AggregateTypes`, `Aggregate`, `defineAggregate`, `CommandHandler`, `Infer*` types            |
-| `ddd/projection.ts`                                         | `ProjectionTypes`, `Projection`, `defineProjection`, `ReducerMap`, `Infer*` types             |
-| `ddd/saga.ts`                                               | `SagaTypes`, `Saga`, `defineSaga`, `SagaReaction`, `SagaEventHandler`, `Infer*` types         |
-| **edd/**                                                    |                                                                                               |
-| `edd/event.ts`                                              | `Event` interface, `DefineEvents` mapped type builder                                         |
-| `edd/event-bus.ts`                                          | `EventBus` interface                                                                          |
-| `edd/event-handler.ts`                                      | `EventHandler` type (impure, async, has infrastructure)                                       |
-| `edd/event-sourcing-handler.ts`                             | `ApplyHandler` type (pure, sync, no infrastructure)                                           |
-| **cqrs/**                                                   |                                                                                               |
-| `cqrs/command/command.ts`                                   | `Command`, `AggregateCommand`, `StandaloneCommand`, `DefineCommands`                          |
-| `cqrs/command/command-bus.ts`                               | `CommandBus` interface                                                                        |
-| `cqrs/command/command-handler.ts`                           | `StandaloneCommandHandler` type                                                               |
-| `cqrs/query/query.ts`                                       | `Query`, `QueryResult`, `DefineQueries`                                                       |
-| `cqrs/query/query-bus.ts`                                   | `QueryBus` interface                                                                          |
-| `cqrs/query/query-handler.ts`                               | `QueryHandler` type                                                                           |
-| **infrastructure/**                                         |                                                                                               |
-| `infrastructure/index.ts`                                   | `Infrastructure` (empty base), `CQRSInfrastructure` (commandBus + eventBus + queryBus)        |
-| **persistence/**                                            |                                                                                               |
-| `persistence/index.ts`                                      | `StateStoredAggregatePersistence`, `EventSourcedAggregatePersistence`, `SagaPersistence`       |
+| File                              | Purpose                                                                                  |
+| --------------------------------- | ---------------------------------------------------------------------------------------- |
+| `index.ts`                        | Re-exports all public API                                                                |
+| **ddd/**                          |                                                                                          |
+| `ddd/aggregate-root.ts`           | `AggregateTypes`, `Aggregate`, `defineAggregate`, `CommandHandler`, `Infer*` types       |
+| `ddd/projection.ts`               | `ProjectionTypes`, `Projection`, `defineProjection`, `ReducerMap`, `Infer*` types        |
+| `ddd/saga.ts`                     | `SagaTypes`, `Saga`, `defineSaga`, `SagaReaction`, `SagaEventHandler`, `Infer*` types    |
+| **edd/**                          |                                                                                          |
+| `edd/event.ts`                    | `Event` interface, `DefineEvents` mapped type builder                                    |
+| `edd/event-bus.ts`                | `EventBus` interface                                                                     |
+| `edd/event-handler.ts`            | `EventHandler` type (impure, async, has infrastructure)                                  |
+| `edd/event-sourcing-handler.ts`   | `ApplyHandler` type (pure, sync, no infrastructure)                                      |
+| **cqrs/**                         |                                                                                          |
+| `cqrs/command/command.ts`         | `Command`, `AggregateCommand`, `StandaloneCommand`, `DefineCommands`                     |
+| `cqrs/command/command-bus.ts`     | `CommandBus` interface                                                                   |
+| `cqrs/command/command-handler.ts` | `StandaloneCommandHandler` type                                                          |
+| `cqrs/query/query.ts`             | `Query`, `QueryResult`, `DefineQueries`                                                  |
+| `cqrs/query/query-bus.ts`         | `QueryBus` interface                                                                     |
+| `cqrs/query/query-handler.ts`     | `QueryHandler` type                                                                      |
+| **infrastructure/**               |                                                                                          |
+| `infrastructure/index.ts`         | `Infrastructure` (empty base), `CQRSInfrastructure` (commandBus + eventBus + queryBus)   |
+| **persistence/**                  |                                                                                          |
+| `persistence/index.ts`            | `StateStoredAggregatePersistence`, `EventSourcedAggregatePersistence`, `SagaPersistence` |
 
 ### Engine Source Files (`packages/engine/src/`)
 
-| File                                          | Purpose                                                                              |
-| --------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `index.ts`                                    | Re-exports `@noddde/core` + all engine exports                                      |
-| `domain.ts`                                   | `Domain` class, `DomainConfiguration`, `configureDomain`                             |
-| `implementations/ee-event-bus.ts`             | `EventEmitterEventBus` (Node.js EventEmitter-backed)                                 |
-| `implementations/in-memory-command-bus.ts`    | `InMemoryCommandBus`                                                                 |
-| `implementations/in-memory-query-bus.ts`      | `InMemoryQueryBus`                                                                   |
+| File                                                 | Purpose                                                                               |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `index.ts`                                           | Re-exports `@noddde/core` + all engine exports                                        |
+| `domain.ts`                                          | `Domain` class, `DomainConfiguration`, `configureDomain`                              |
+| `implementations/ee-event-bus.ts`                    | `EventEmitterEventBus` (Node.js EventEmitter-backed)                                  |
+| `implementations/in-memory-command-bus.ts`           | `InMemoryCommandBus`                                                                  |
+| `implementations/in-memory-query-bus.ts`             | `InMemoryQueryBus`                                                                    |
 | `implementations/in-memory-aggregate-persistence.ts` | `InMemoryEventSourcedAggregatePersistence`, `InMemoryStateStoredAggregatePersistence` |
-| `implementations/in-memory-saga-persistence.ts`      | `InMemorySagaPersistence`                                                            |
+| `implementations/in-memory-saga-persistence.ts`      | `InMemorySagaPersistence`                                                             |
 
 ### Key Patterns
 
@@ -75,6 +75,7 @@ noddde is a TypeScript framework for building business applications using Domain
 Specs live in `specs/` and mirror the package source directories. See `specs/README.md` for the full format documentation.
 
 **Finding a spec**:
+
 - `packages/core/src/<path>.ts` → `specs/core/<path>.spec.md`
 - `packages/engine/src/<path>.ts` → `specs/engine/<path>.spec.md`
 
@@ -228,11 +229,11 @@ Everything between gates runs without asking.
 
 Test files map from spec `## Test Scenarios`:
 
-| Spec Path                                                                     | Test File Path                                                                                 |
-| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `specs/core/ddd/aggregate.spec.md`                                            | `packages/core/src/__tests__/ddd/aggregate.test.ts`                                            |
-| `specs/engine/implementations/in-memory-aggregate-persistence.spec.md`        | `packages/engine/src/__tests__/engine/implementations/in-memory-aggregate-persistence.test.ts`  |
-| `specs/integration/command-dispatch-lifecycle.spec.md`                         | `packages/engine/src/__tests__/integration/command-dispatch-lifecycle.test.ts`                  |
+| Spec Path                                                              | Test File Path                                                                                 |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `specs/core/ddd/aggregate.spec.md`                                     | `packages/core/src/__tests__/ddd/aggregate.test.ts`                                            |
+| `specs/engine/implementations/in-memory-aggregate-persistence.spec.md` | `packages/engine/src/__tests__/engine/implementations/in-memory-aggregate-persistence.test.ts` |
+| `specs/integration/command-dispatch-lifecycle.spec.md`                 | `packages/engine/src/__tests__/integration/command-dispatch-lifecycle.test.ts`                 |
 
 **Mapping rules**:
 
@@ -240,7 +241,7 @@ Test files map from spec `## Test Scenarios`:
 - Group tests under `describe("<spec title>", () => { ... })`
 - TypeScript code fences are the test body
 - Use `import { ... } from "@noddde/core"` for type/definition imports
-- Use `import { ... } from "@noddde/engine"` for runtime imports (Domain, configureDomain, InMemory*, etc.)
+- Use `import { ... } from "@noddde/engine"` for runtime imports (Domain, configureDomain, InMemory\*, etc.)
 - Use `expectTypeOf` from vitest for type-level assertions
 - Use `expect` from vitest for runtime assertions
 

@@ -33,10 +33,10 @@ Every projection is parameterized by a `ProjectionTypes` bundle -- a single name
 
 ```ts
 type MyProjectionDef = {
-  events: MyEvent;           // The event union this projection handles
-  queries: MyQuery;          // The query union this projection answers
-  view: MyView;              // The view model this projection builds
-  infrastructure: MyInfra;   // Dependencies available to query handlers
+  events: MyEvent; // The event union this projection handles
+  queries: MyQuery; // The query union this projection answers
+  view: MyView; // The view model this projection builds
+  infrastructure: MyInfra; // Dependencies available to query handlers
 };
 ```
 
@@ -63,7 +63,10 @@ type BankAccountView = {
 
 // Queries this projection serves
 type BankAccountQuery = DefineQueries<{
-  GetBankAccountById: { payload: { id: string }; result: BankAccountView | null };
+  GetBankAccountById: {
+    payload: { id: string };
+    result: BankAccountView | null;
+  };
 }>;
 
 // The ProjectionTypes bundle
@@ -74,47 +77,49 @@ type BankAccountProjectionDef = {
   infrastructure: BankingInfrastructure;
 };
 
-export const BankAccountProjection = defineProjection<BankAccountProjectionDef>({
-  reducers: {
-    BankAccountCreated: (event) => ({
-      id: event.payload.id,
-      balance: 0,
-      transactions: [],
-    }),
+export const BankAccountProjection = defineProjection<BankAccountProjectionDef>(
+  {
+    reducers: {
+      BankAccountCreated: (event) => ({
+        id: event.payload.id,
+        balance: 0,
+        transactions: [],
+      }),
 
-    TransactionProcessed: (event, view) => ({
-      ...view,
-      balance: view.balance + event.payload.amount,
-      transactions: [
-        ...view.transactions,
-        {
-          id: event.payload.id,
-          timestamp: event.payload.timestamp,
-          amount: event.payload.amount,
-          status: "processed" as const,
-        },
-      ],
-    }),
+      TransactionProcessed: (event, view) => ({
+        ...view,
+        balance: view.balance + event.payload.amount,
+        transactions: [
+          ...view.transactions,
+          {
+            id: event.payload.id,
+            timestamp: event.payload.timestamp,
+            amount: event.payload.amount,
+            status: "processed" as const,
+          },
+        ],
+      }),
 
-    TransactionDeclined: (event, view) => ({
-      ...view,
-      transactions: [
-        ...view.transactions,
-        {
-          id: event.payload.id,
-          timestamp: event.payload.timestamp,
-          amount: event.payload.amount,
-          status: "declined" as const,
-        },
-      ],
-    }),
+      TransactionDeclined: (event, view) => ({
+        ...view,
+        transactions: [
+          ...view.transactions,
+          {
+            id: event.payload.id,
+            timestamp: event.payload.timestamp,
+            amount: event.payload.amount,
+            status: "declined" as const,
+          },
+        ],
+      }),
+    },
+
+    queryHandlers: {
+      GetBankAccountById: async (query, { bankAccountViewRepository }) =>
+        bankAccountViewRepository.getById(query.payload.id),
+    },
   },
-
-  queryHandlers: {
-    GetBankAccountById: async (query, { bankAccountViewRepository }) =>
-      bankAccountViewRepository.getById(query.payload.id),
-  },
-});
+);
 ```
 
 `defineProjection` is an identity function -- it returns the same object you pass in, but with full type inference applied. The framework uses the `ProjectionTypes` bundle to narrow event types inside each reducer and validate query handler return types.
@@ -181,10 +186,10 @@ import type {
   InferProjectionInfrastructure,
 } from "@noddde/core";
 
-type View    = InferProjectionView<typeof BankAccountProjection>;           // BankAccountView
-type Events  = InferProjectionEvents<typeof BankAccountProjection>;         // BankAccountEvent
-type Queries = InferProjectionQueries<typeof BankAccountProjection>;        // BankAccountQuery
-type Infra   = InferProjectionInfrastructure<typeof BankAccountProjection>; // BankingInfrastructure
+type View = InferProjectionView<typeof BankAccountProjection>; // BankAccountView
+type Events = InferProjectionEvents<typeof BankAccountProjection>; // BankAccountEvent
+type Queries = InferProjectionQueries<typeof BankAccountProjection>; // BankAccountQuery
+type Infra = InferProjectionInfrastructure<typeof BankAccountProjection>; // BankingInfrastructure
 ```
 
 These are useful when other modules need to reference projection types without importing the underlying type aliases directly.
@@ -203,7 +208,9 @@ const AccountBalanceProjection = defineProjection<BalanceDef>({
     }),
     // ...
   },
-  queryHandlers: { /* ... */ },
+  queryHandlers: {
+    /* ... */
+  },
 });
 
 // Projection 2: Transaction history view
@@ -211,15 +218,20 @@ const TransactionHistoryProjection = defineProjection<HistoryDef>({
   reducers: {
     TransactionProcessed: (event, view) => ({
       ...view,
-      transactions: [...view.transactions, {
-        id: event.payload.id,
-        amount: event.payload.amount,
-        merchant: event.payload.merchant,
-      }],
+      transactions: [
+        ...view.transactions,
+        {
+          id: event.payload.id,
+          amount: event.payload.amount,
+          merchant: event.payload.merchant,
+        },
+      ],
     }),
     // ...
   },
-  queryHandlers: { /* ... */ },
+  queryHandlers: {
+    /* ... */
+  },
 });
 ```
 
@@ -257,7 +269,9 @@ const domain = await configureDomain<BankingInfrastructure>({
       TransactionHistory: TransactionHistoryProjection,
     },
   },
-  infrastructure: { /* ... */ },
+  infrastructure: {
+    /* ... */
+  },
 });
 ```
 

@@ -8,6 +8,7 @@ This example walks through the complete banking domain sample included with nodd
 ## Domain Overview
 
 The banking domain models a simple bank account that supports:
+
 - **Account creation** — Creating a new bank account
 - **Transaction authorization** — Authorizing debits/credits against the account
 - **Balance tracking** — Maintaining both actual balance and available balance (accounting for pending transactions)
@@ -195,7 +196,12 @@ import { ProjectionV2 } from "@noddde/core";
 type BankAccountView = {
   id: string;
   balance: number;
-  transactions: Array<{ id: string; timestamp: Date; amount: number; status: string }>;
+  transactions: Array<{
+    id: string;
+    timestamp: Date;
+    amount: number;
+    status: string;
+  }>;
 };
 
 export const BankAccountV2: ProjectionV2<BankAccountEvent, BankAccountView> = {
@@ -207,10 +213,15 @@ export const BankAccountV2: ProjectionV2<BankAccountEvent, BankAccountView> = {
         return {
           ...view,
           balance: view.balance + event.payload.amount,
-          transactions: [...view.transactions, {
-            id: event.payload.id, timestamp: event.payload.timestamp,
-            amount: event.payload.amount, status: "processed",
-          }],
+          transactions: [
+            ...view.transactions,
+            {
+              id: event.payload.id,
+              timestamp: event.payload.timestamp,
+              amount: event.payload.amount,
+              status: "processed",
+            },
+          ],
         };
       case "TransactionDeclined":
       case "TransactionAuthorized":
@@ -223,7 +234,13 @@ export const BankAccountV2: ProjectionV2<BankAccountEvent, BankAccountView> = {
 ## Step 7: Configure and Run
 
 ```ts
-import { configureDomain, InMemoryEventSourcedAggregatePersistence, InMemoryCommandBus, EventEmitterEventBus, InMemoryQueryBus } from "@noddde/engine";
+import {
+  configureDomain,
+  InMemoryEventSourcedAggregatePersistence,
+  InMemoryCommandBus,
+  EventEmitterEventBus,
+  InMemoryQueryBus,
+} from "@noddde/engine";
 import { randomUUID } from "crypto";
 
 const domain = await configureDomain<BankingInfrastructure>({

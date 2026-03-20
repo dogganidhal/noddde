@@ -8,6 +8,7 @@ This example walks through the auction domain sample. It demonstrates infrastruc
 ## Domain Overview
 
 The auction domain models a simple auction that supports:
+
 - **Auction creation** — Creating an auction with an item, starting price, and end time
 - **Bidding** — Placing bids with multiple validation rules
 - **Closing** — Closing the auction and determining the winner
@@ -64,7 +65,9 @@ export interface Clock {
 }
 
 export class SystemClock implements Clock {
-  now(): Date { return new Date(); }
+  now(): Date {
+    return new Date();
+  }
 }
 
 export interface AuctionInfrastructure {
@@ -127,7 +130,11 @@ export const Auction = defineAggregate<AuctionDef>({
       if (amount <= minimumBid) {
         return {
           name: "BidRejected",
-          payload: { bidderId, amount, reason: `Bid must exceed ${minimumBid}` },
+          payload: {
+            bidderId,
+            amount,
+            reason: `Bid must exceed ${minimumBid}`,
+          },
         };
       }
 

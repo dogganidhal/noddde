@@ -113,52 +113,52 @@ export function testAggregate<T extends AggregateTypes>(
   let command: T["commands"] | undefined;
   let infrastructure: T["infrastructure"] | undefined;
 
-  const builder: AggregateTestBuilder<T> &
-    AggregateTestBuilderWithCommand<T> = {
-    given(...events: T["events"][]) {
-      givenEvents.push(...events);
-      return builder;
-    },
+  const builder: AggregateTestBuilder<T> & AggregateTestBuilderWithCommand<T> =
+    {
+      given(...events: T["events"][]) {
+        givenEvents.push(...events);
+        return builder;
+      },
 
-    when(cmd: T["commands"]) {
-      command = cmd;
-      return builder;
-    },
+      when(cmd: T["commands"]) {
+        command = cmd;
+        return builder;
+      },
 
-    withInfrastructure(infra: T["infrastructure"]) {
-      infrastructure = infra;
-      return builder;
-    },
+      withInfrastructure(infra: T["infrastructure"]) {
+        infrastructure = infra;
+        return builder;
+      },
 
-    async execute(): Promise<AggregateTestResult<T["state"], T["events"]>> {
-      const priorState = evolveAggregate(aggregate, givenEvents);
+      async execute(): Promise<AggregateTestResult<T["state"], T["events"]>> {
+        const priorState = evolveAggregate(aggregate, givenEvents);
 
-      try {
-        const handler = (aggregate.commands as Record<string, any>)[
-          command!.name
-        ];
-        const rawResult = await handler(
-          command,
-          priorState,
-          infrastructure ?? ({} as T["infrastructure"]),
-        );
+        try {
+          const handler = (aggregate.commands as Record<string, any>)[
+            command!.name
+          ];
+          const rawResult = await handler(
+            command,
+            priorState,
+            infrastructure ?? ({} as T["infrastructure"]),
+          );
 
-        const events: T["events"][] = Array.isArray(rawResult)
-          ? rawResult
-          : [rawResult];
+          const events: T["events"][] = Array.isArray(rawResult)
+            ? rawResult
+            : [rawResult];
 
-        const state = evolveAggregate(aggregate, events, priorState);
+          const state = evolveAggregate(aggregate, events, priorState);
 
-        return { events, state };
-      } catch (err) {
-        return {
-          events: [],
-          state: priorState,
-          error: err instanceof Error ? err : new Error(String(err)),
-        };
-      }
-    },
-  };
+          return { events, state };
+        } catch (err) {
+          return {
+            events: [],
+            state: priorState,
+            error: err instanceof Error ? err : new Error(String(err)),
+          };
+        }
+      },
+    };
 
   return builder;
 }

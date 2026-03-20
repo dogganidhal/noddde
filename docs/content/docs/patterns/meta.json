@@ -5,6 +5,8 @@
     "banking-domain",
     "auction-domain",
     "order-fulfillment",
-    "fund-transfer"
+    "fund-transfer",
+    "flash-sale",
+    "seat-reservation"
   ]
 }

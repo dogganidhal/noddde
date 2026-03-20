@@ -18,10 +18,10 @@ type ApplyHandler<TEvent extends Event, TState> = (
 ) => TState;
 ```
 
-| Parameter | Description |
-|---|---|
-| `event` | The event's **payload** only. The `name` field is already used for routing to the correct handler. |
-| `state` | The current aggregate state before this event. |
+| Parameter | Description                                                                                        |
+| --------- | -------------------------------------------------------------------------------------------------- |
+| `event`   | The event's **payload** only. The `name` field is already used for routing to the correct handler. |
+| `state`   | The current aggregate state before this event.                                                     |
 
 The return value is the new state after applying the event.
 
@@ -314,7 +314,9 @@ If a value is only needed for read models or queries, compute it in a projection
 interface BankAccountState {
   balance: number;
   availableBalance: number;
-  transactions: Array<{ /* ... */ }>;
+  transactions: Array<{
+    /* ... */
+  }>;
   // Avoid: these are read-model concerns
   // formattedBalance: string;
   // transactionCount: number;

@@ -30,7 +30,11 @@ describe("Auction aggregate — unit tests", () => {
         .when({
           name: "CreateAuction",
           targetAggregateId: "auction-1",
-          payload: { item: "Vintage Watch", startingPrice: 100, endsAt: futureDate },
+          payload: {
+            item: "Vintage Watch",
+            startingPrice: 100,
+            endsAt: futureDate,
+          },
         })
         .execute();
 
@@ -56,7 +60,10 @@ describe("Auction aggregate — unit tests", () => {
         .execute();
 
       expect(result.events[0]!.name).toBe("BidPlaced");
-      expect(result.state.highestBid).toEqual({ bidderId: "alice", amount: 150 });
+      expect(result.state.highestBid).toEqual({
+        bidderId: "alice",
+        amount: 150,
+      });
       expect(result.state.bidCount).toBe(1);
     });
 
@@ -109,7 +116,7 @@ describe("Auction aggregate — unit tests", () => {
         .execute();
 
       expect(result.events[0]!.name).toBe("BidRejected");
-      expect(result.events[0]!.payload.reason).toContain("200");
+      expect((result.events[0]!.payload as any).reason).toContain("200");
     });
 
     it("should reject a bid after auction has ended (time-based)", async () => {
@@ -124,15 +131,17 @@ describe("Auction aggregate — unit tests", () => {
         .execute();
 
       expect(result.events[0]!.name).toBe("BidRejected");
-      expect(result.events[0]!.payload.reason).toBe("Auction has ended");
+      expect((result.events[0]!.payload as any).reason).toBe(
+        "Auction has ended",
+      );
     });
 
     it("should reject a bid on a closed auction", async () => {
       const result = await testAggregate(Auction)
-        .given(
-          auctionCreated,
-          { name: "AuctionClosed", payload: { winnerId: null, winningBid: null } },
-        )
+        .given(auctionCreated, {
+          name: "AuctionClosed",
+          payload: { winnerId: null, winningBid: null },
+        })
         .when({
           name: "PlaceBid",
           targetAggregateId: "auction-1",
@@ -142,7 +151,9 @@ describe("Auction aggregate — unit tests", () => {
         .execute();
 
       expect(result.events[0]!.name).toBe("BidRejected");
-      expect(result.events[0]!.payload.reason).toBe("Auction is closed");
+      expect((result.events[0]!.payload as any).reason).toBe(
+        "Auction is closed",
+      );
     });
   });
 
@@ -183,9 +194,15 @@ describe("Auction — evolveAggregate", () => {
     const state = evolveAggregate(Auction, [
       auctionCreated,
       bidPlaced("alice", 150),
-      { name: "BidRejected", payload: { bidderId: "bob", amount: 100, reason: "Too low" } },
+      {
+        name: "BidRejected",
+        payload: { bidderId: "bob", amount: 100, reason: "Too low" },
+      },
       bidPlaced("charlie", 300),
-      { name: "AuctionClosed", payload: { winnerId: "charlie", winningBid: 300 } },
+      {
+        name: "AuctionClosed",
+        payload: { winnerId: "charlie", winningBid: 300 },
+      },
     ]);
 
     expect(state.item).toBe("Vintage Watch");
@@ -210,7 +227,11 @@ describe("Auction domain — slice test", () => {
     await domain.dispatchCommand({
       name: "CreateAuction",
       targetAggregateId: "auction-1",
-      payload: { item: "Vintage Watch", startingPrice: 100, endsAt: futureDate },
+      payload: {
+        item: "Vintage Watch",
+        startingPrice: 100,
+        endsAt: futureDate,
+      },
     });
 
     // Place valid bids

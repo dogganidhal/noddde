@@ -65,7 +65,9 @@ describe("BankAccount aggregate — unit tests", () => {
         availableBalance: 0,
         transactions: [],
       });
-      expect(mockLogger.info).toHaveBeenCalledWith("Creating bank account acc-1");
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        "Creating bank account acc-1",
+      );
     });
   });
 
@@ -110,7 +112,9 @@ describe("BankAccount aggregate — unit tests", () => {
           timestamp: fixedDate,
         }),
       });
-      expect(mockLogger.info).toHaveBeenCalledWith("Transaction authorized: 500 at Amazon");
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        "Transaction authorized: 500 at Amazon",
+      );
     });
 
     it("should decline when insufficient funds", async () => {
@@ -139,7 +143,7 @@ describe("BankAccount aggregate — unit tests", () => {
       const result = await testAggregate(BankAccount)
         .given(
           accountCreated,
-          txnAuthorized(100, "First"),  // availableBalance: 0 - 100 = -100
+          txnAuthorized(100, "First"), // availableBalance: 0 - 100 = -100
         )
         .when({
           name: "AuthorizeTransaction",
@@ -171,8 +175,12 @@ describe("BankAccount — evolveAggregate", () => {
     expect(state.balance).toBe(0);
     expect(state.availableBalance).toBe(-700); // 0 - 500 - 200
     expect(state.transactions).toHaveLength(3);
-    expect(state.transactions.filter((t) => t.status === "pending")).toHaveLength(2);
-    expect(state.transactions.filter((t) => t.status === "declined")).toHaveLength(1);
+    expect(
+      state.transactions.filter((t) => t.status === "pending"),
+    ).toHaveLength(2);
+    expect(
+      state.transactions.filter((t) => t.status === "declined"),
+    ).toHaveLength(1);
   });
 
   it("should not mutate initial state", () => {
@@ -191,8 +199,24 @@ describe("BankAccountProjection — unit tests", () => {
     const result = await testProjection(BankAccountProjection)
       .given(
         { name: "BankAccountCreated", payload: { id: "acc-1" } },
-        { name: "TransactionAuthorized", payload: { id: "txn-1", timestamp: fixedDate, amount: 500, merchant: "Salary" } },
-        { name: "TransactionAuthorized", payload: { id: "txn-2", timestamp: fixedDate, amount: -50, merchant: "Coffee" } },
+        {
+          name: "TransactionAuthorized",
+          payload: {
+            id: "txn-1",
+            timestamp: fixedDate,
+            amount: 500,
+            merchant: "Salary",
+          },
+        },
+        {
+          name: "TransactionAuthorized",
+          payload: {
+            id: "txn-2",
+            timestamp: fixedDate,
+            amount: -50,
+            merchant: "Coffee",
+          },
+        },
       )
       .execute();
 
@@ -210,8 +234,24 @@ describe("BankAccountProjection — unit tests", () => {
     const result = await testProjection(BankAccountProjection)
       .given(
         { name: "BankAccountCreated", payload: { id: "acc-1" } },
-        { name: "TransactionDeclined", payload: { id: "txn-1", timestamp: fixedDate, amount: 999, merchant: "Rejected" } },
-        { name: "TransactionProcessed", payload: { id: "txn-2", timestamp: fixedDate, amount: 100, merchant: "Processed" } },
+        {
+          name: "TransactionDeclined",
+          payload: {
+            id: "txn-1",
+            timestamp: fixedDate,
+            amount: 999,
+            merchant: "Rejected",
+          },
+        },
+        {
+          name: "TransactionProcessed",
+          payload: {
+            id: "txn-2",
+            timestamp: fixedDate,
+            amount: 100,
+            merchant: "Processed",
+          },
+        },
       )
       .execute();
 
@@ -223,14 +263,27 @@ describe("BankAccountProjection — unit tests", () => {
     const existingView: BankAccountView = {
       id: "acc-1",
       balance: 1000,
-      transactions: [{ id: "txn-0", timestamp: fixedDate, amount: 1000, status: "processed" }],
+      transactions: [
+        {
+          id: "txn-0",
+          timestamp: fixedDate,
+          amount: 1000,
+          status: "processed",
+        },
+      ],
     };
 
     const result = await testProjection(BankAccountProjection)
       .initialView(existingView)
-      .given(
-        { name: "TransactionAuthorized", payload: { id: "txn-1", timestamp: fixedDate, amount: -200, merchant: "Store" } },
-      )
+      .given({
+        name: "TransactionAuthorized",
+        payload: {
+          id: "txn-1",
+          timestamp: fixedDate,
+          amount: -200,
+          merchant: "Store",
+        },
+      })
       .execute();
 
     expect(result.view.balance).toBe(800);
@@ -273,7 +326,9 @@ describe("Banking domain — slice test", () => {
     expect(spy.publishedEvents[1]!.name).toBe("TransactionDeclined");
 
     // Projection should reflect the created account
-    const view = domain.getProjectionView<BankAccountView>("BankAccountProjection");
+    const view = domain.getProjectionView<BankAccountView>(
+      "BankAccountProjection",
+    );
     expect(view?.id).toBe("acc-1");
     expect(view?.balance).toBe(0);
   });

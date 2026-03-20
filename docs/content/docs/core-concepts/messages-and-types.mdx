@@ -84,7 +84,10 @@ Consider a set of banking events:
 ```typescript
 type BankingEvent =
   | { name: "BankAccountCreated"; payload: { id: string } }
-  | { name: "TransactionAuthorized"; payload: { id: string; amount: number; merchant: string } }
+  | {
+      name: "TransactionAuthorized";
+      payload: { id: string; amount: number; merchant: string };
+    }
   | { name: "TransactionDeclined"; payload: { reason: string } };
 ```
 
@@ -124,8 +127,16 @@ Without these utilities, defining a set of typed commands requires writing each 
 // Without DefineCommands — verbose and error-prone
 type BankingCommand =
   | { name: "CreateBankAccount"; targetAggregateId: string }
-  | { name: "AuthorizeTransaction"; targetAggregateId: string; payload: { amount: number; merchant: string } }
-  | { name: "DepositFunds"; targetAggregateId: string; payload: { amount: number } }
+  | {
+      name: "AuthorizeTransaction";
+      targetAggregateId: string;
+      payload: { amount: number; merchant: string };
+    }
+  | {
+      name: "DepositFunds";
+      targetAggregateId: string;
+      payload: { amount: number };
+    }
   | { name: "CloseAccount"; targetAggregateId: string };
 ```
 
@@ -164,10 +175,7 @@ Let's trace through the type transformation for the banking commands above.
 The `DefineCommands` type is defined as:
 
 ```typescript
-type DefineCommands<
-  TPayloads extends Record<string, any>,
-  TID = string,
-> = {
+type DefineCommands<TPayloads extends Record<string, any>, TID = string> = {
   [K in keyof TPayloads & string]: TPayloads[K] extends void
     ? { name: K; targetAggregateId: TID }
     : { name: K; targetAggregateId: TID; payload: TPayloads[K] };
@@ -180,10 +188,29 @@ Applied to our input, this produces an intermediate object type:
 
 ```typescript
 {
-  CreateBankAccount: { name: "CreateBankAccount"; targetAggregateId: string };
-  AuthorizeTransaction: { name: "AuthorizeTransaction"; targetAggregateId: string; payload: { amount: number; merchant: string } };
-  DepositFunds: { name: "DepositFunds"; targetAggregateId: string; payload: { amount: number } };
-  CloseAccount: { name: "CloseAccount"; targetAggregateId: string };
+  CreateBankAccount: {
+    name: "CreateBankAccount";
+    targetAggregateId: string;
+  }
+  AuthorizeTransaction: {
+    name: "AuthorizeTransaction";
+    targetAggregateId: string;
+    payload: {
+      amount: number;
+      merchant: string;
+    }
+  }
+  DepositFunds: {
+    name: "DepositFunds";
+    targetAggregateId: string;
+    payload: {
+      amount: number;
+    }
+  }
+  CloseAccount: {
+    name: "CloseAccount";
+    targetAggregateId: string;
+  }
 }
 ```
 
@@ -221,14 +248,14 @@ For the banking events payload map defined earlier, the result is:
 
 Both `DefineCommands` and `DefineEvents` share the same design:
 
-| Aspect | `DefineCommands` | `DefineEvents` |
-|--------|-------------------|-----------------|
-| Input | `Record<string, PayloadType>` | `Record<string, PayloadType>` |
-| Output | Discriminated union | Discriminated union |
-| Discriminant | `name` field | `name` field |
-| `void` handling | Omits `payload` field | Not applicable (events always have payloads) |
-| Extra fields | `targetAggregateId: TID` | None |
-| Generic params | `TPayloads`, `TID` | `TPayloads` |
+| Aspect          | `DefineCommands`              | `DefineEvents`                               |
+| --------------- | ----------------------------- | -------------------------------------------- |
+| Input           | `Record<string, PayloadType>` | `Record<string, PayloadType>`                |
+| Output          | Discriminated union           | Discriminated union                          |
+| Discriminant    | `name` field                  | `name` field                                 |
+| `void` handling | Omits `payload` field         | Not applicable (events always have payloads) |
+| Extra fields    | `targetAggregateId: TID`      | None                                         |
+| Generic params  | `TPayloads`, `TID`            | `TPayloads`                                  |
 
 This symmetry is intentional. Commands and events are both messages. They follow the same structural pattern (name + payload) and are defined with the same payload-map approach. The only differences are that commands target a specific aggregate instance and may have no payload.
 
@@ -240,10 +267,13 @@ The second type parameter `TID` on `DefineCommands` defaults to `string`, but yo
 // UUID-branded type
 type AccountId = string & { __brand: "AccountId" };
 
-type BankingCommand = DefineCommands<{
-  CreateBankAccount: void;
-  AuthorizeTransaction: { amount: number; merchant: string };
-}, AccountId>;
+type BankingCommand = DefineCommands<
+  {
+    CreateBankAccount: void;
+    AuthorizeTransaction: { amount: number; merchant: string };
+  },
+  AccountId
+>;
 
 // Now targetAggregateId must be an AccountId, not just any string
 ```
@@ -259,8 +289,15 @@ type MyCommands = DefineCommands<{
 }>;
 
 // Valid:
-const create: MyCommands = { name: "CreateBankAccount", targetAggregateId: "acc-1" };
-const auth: MyCommands = { name: "AuthorizeTransaction", targetAggregateId: "acc-1", payload: { amount: 100, merchant: "Store" } };
+const create: MyCommands = {
+  name: "CreateBankAccount",
+  targetAggregateId: "acc-1",
+};
+const auth: MyCommands = {
+  name: "AuthorizeTransaction",
+  targetAggregateId: "acc-1",
+  payload: { amount: 100, merchant: "Store" },
+};
 
 // Type error — CreateBankAccount has no payload field:
 // const bad = { name: "CreateBankAccount", targetAggregateId: "acc-1", payload: {} };
@@ -272,7 +309,13 @@ When defining an aggregate, you need to specify several related types: the state
 
 ```typescript
 // Hypothetical positional generics — NOT how noddde works
-defineAggregate<BankAccountState, BankingCommand, BankingEvent, string, MyInfrastructure>({
+defineAggregate<
+  BankAccountState,
+  BankingCommand,
+  BankingEvent,
+  string,
+  MyInfrastructure
+>({
   // ...
 });
 ```
@@ -308,8 +351,12 @@ Then pass it as a single generic parameter:
 ```typescript
 const BankAccount = defineAggregate<BankAccountTypes>({
   initialState: { balance: 0, status: "active" },
-  commands: { /* ... */ },
-  apply: { /* ... */ },
+  commands: {
+    /* ... */
+  },
+  apply: {
+    /* ... */
+  },
 });
 ```
 
@@ -321,17 +368,17 @@ The `AggregateTypes` bundle is not just a convenience for the developer — it i
 // How the framework uses the bundle internally
 type CommandHandlerMap<T extends AggregateTypes> = {
   [K in T["commands"]["name"]]: CommandHandler<
-    Extract<T["commands"], { name: K }>,  // Narrowed command type
-    T["state"],                            // The state type
-    T["events"],                           // The event union (return type)
-    T["infrastructure"]                    // Infrastructure for injection
+    Extract<T["commands"], { name: K }>, // Narrowed command type
+    T["state"], // The state type
+    T["events"], // The event union (return type)
+    T["infrastructure"] // Infrastructure for injection
   >;
 };
 
 type ApplyHandlerMap<T extends AggregateTypes> = {
   [K in T["events"]["name"]]: ApplyHandler<
-    Extract<T["events"], { name: K }>,  // Narrowed event type
-    T["state"]                           // The state type
+    Extract<T["events"], { name: K }>, // Narrowed event type
+    T["state"] // The state type
   >;
 };
 ```
@@ -506,7 +553,9 @@ type AllBankEvents = InferAggregateEvents<typeof BankAccount>;
 function handleEvent(event: AllBankEvents): void {
   switch (event.name) {
     case "TransactionAuthorized":
-      console.log(`Transaction: $${event.payload.amount} at ${event.payload.merchant}`);
+      console.log(
+        `Transaction: $${event.payload.amount} at ${event.payload.merchant}`,
+      );
       break;
     // ... other cases
   }
@@ -561,7 +610,9 @@ type BankAccountTypes = {
   infrastructure: {};
 };
 
-const BankAccount = defineAggregate<BankAccountTypes>({ /* ... */ });
+const BankAccount = defineAggregate<BankAccountTypes>({
+  /* ... */
+});
 
 // Avoid — harder to read and not reusable
 const BankAccount = defineAggregate<{
@@ -569,7 +620,9 @@ const BankAccount = defineAggregate<{
   commands: BankingCommand;
   events: BankingEvent;
   infrastructure: {};
-}>({ /* ... */ });
+}>({
+  /* ... */
+});
 ```
 
 ### Use `as const` for Literal State Values

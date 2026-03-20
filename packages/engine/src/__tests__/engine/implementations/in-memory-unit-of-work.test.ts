@@ -1,8 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  InMemoryUnitOfWork,
-  createInMemoryUnitOfWork,
-} from "@noddde/engine";
+import { InMemoryUnitOfWork, createInMemoryUnitOfWork } from "@noddde/engine";
 
 describe("InMemoryUnitOfWork", () => {
   it("should execute enlisted operations in order on commit", async () => {
@@ -67,9 +64,7 @@ describe("InMemoryUnitOfWork", () => {
     const uow = new InMemoryUnitOfWork();
     await uow.commit();
 
-    await expect(uow.commit()).rejects.toThrow(
-      "UnitOfWork already completed",
-    );
+    await expect(uow.commit()).rejects.toThrow("UnitOfWork already completed");
   });
 
   it("should throw on rollback after commit", async () => {
@@ -94,9 +89,9 @@ describe("InMemoryUnitOfWork", () => {
     const uow = new InMemoryUnitOfWork();
     await uow.rollback();
 
-    expect(() =>
-      uow.deferPublish({ name: "E", payload: {} }),
-    ).toThrow("UnitOfWork already completed");
+    expect(() => uow.deferPublish({ name: "E", payload: {} })).toThrow(
+      "UnitOfWork already completed",
+    );
   });
 
   it("should propagate error from a failing operation and seal the UoW", async () => {

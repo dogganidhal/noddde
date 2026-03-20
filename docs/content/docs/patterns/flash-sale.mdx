@@ -1,0 +1,109 @@
+---
+title: "Flash Sale — Optimistic Concurrency"
+description: Handling concurrent purchases with optimistic concurrency control, automatic retry, and PostgreSQL unique constraints via Drizzle.
+---
+
+A flash sale where limited stock sells first-come-first-served. Multiple buyers purchase the same item concurrently. This sample demonstrates **optimistic concurrency with retry** — the right strategy when command handlers are cheap and retries are fast.
+
+**Stack**: Drizzle + PostgreSQL + Testcontainers
+
+## Why Optimistic
+
+The command handler is trivial: check stock, decrement, return event. If two buyers load the same version simultaneously, one succeeds and the other gets a `ConcurrencyError`. The framework automatically retries — re-loading the latest stock, re-running the check, and re-attempting the save. Total cost of a retry is microseconds.
+
+Pessimistic locking would add unnecessary overhead here. Acquiring and releasing a database lock for every purchase adds latency that matters in a high-throughput flash sale.
+
+## The Aggregate
+
+```ts
+export const FlashSaleItem = defineAggregate<FlashSaleTypes>({
+  initialState: { stock: 0, sold: 0, buyers: [] },
+  commands: {
+    CreateFlashSale: (command) => ({
+      name: "FlashSaleCreated",
+      payload: {
+        itemId: command.targetAggregateId,
+        initialStock: command.payload.initialStock,
+      },
+    }),
+    PurchaseItem: (command, state) => {
+      if (state.stock <= 0) {
+        return {
+          name: "PurchaseRejected",
+          payload: { buyerId: command.payload.buyerId, reason: "out_of_stock" },
+        };
+      }
+      return {
+        name: "ItemPurchased",
+        payload: {
+          buyerId: command.payload.buyerId,
+          quantity: command.payload.quantity,
+        },
+      };
+    },
+  },
+  apply: {
+    FlashSaleCreated: (payload) => ({
+      stock: payload.initialStock,
+      sold: 0,
+      buyers: [],
+    }),
+    ItemPurchased: (payload, state) => ({
+      stock: state.stock - payload.quantity,
+      sold: state.sold + payload.quantity,
+      buyers: [...state.buyers, payload.buyerId],
+    }),
+    PurchaseRejected: (_payload, state) => state,
+  },
+});
+```
+
+The `PurchaseItem` handler either produces `ItemPurchased` (decrements stock) or `PurchaseRejected` (stock exhausted). Both are valid domain events — rejection is not an error, it is a recorded fact.
+
+## Domain Configuration
+
+```ts
+const domain = await configureDomain<Infrastructure>({
+  writeModel: { aggregates: { FlashSaleItem } },
+  readModel: { projections: {} },
+  infrastructure: {
+    aggregatePersistence: () => drizzleInfra.eventSourcedPersistence,
+    unitOfWorkFactory: () => drizzleInfra.unitOfWorkFactory,
+    aggregateConcurrency: { maxRetries: 5 },
+  },
+});
+```
+
+`maxRetries: 5` means the framework retries up to 5 times on `ConcurrencyError`. For 8 concurrent buyers competing for 5 items, this is sufficient to handle the contention.
+
+## What Happens at Runtime
+
+```
+1. Create flash sale: 5 items in stock
+2. 8 buyers fire PurchaseItem concurrently (Promise.all)
+3. All 8 load version 0 (the initial state after CreateFlashSale)
+4. Buyer 1 saves at version 1 → success
+5. Buyers 2-8 attempt to save at version 1 → ConcurrencyError (version is now 1)
+6. Framework retries: re-loads version 1, re-runs handler
+7. Buyer 2 saves at version 2 → success
+8. Process continues until stock = 0
+9. Remaining buyers get PurchaseRejected (out_of_stock) — no ConcurrencyError
+```
+
+All 8 commands complete successfully. No errors are thrown to the caller. The framework handles contention internally.
+
+## Running the Sample
+
+```bash
+cd samples/sample-flash-sale && yarn start
+```
+
+Requires Docker running (Testcontainers spins up PostgreSQL automatically).
+
+## Key Patterns Demonstrated
+
+- **Optimistic concurrency with `maxRetries`** — contention resolved via retry, not locking
+- **PostgreSQL unique constraint** — `(aggregate_name, aggregate_id, sequence_number)` catches concurrent inserts at the database level
+- **Rejection events** — `PurchaseRejected` is a domain event, not an exception. The aggregate records what happened.
+- **Testcontainers** — real PostgreSQL database, no external setup
+- **Drizzle adapter** — `createDrizzlePersistence` with PostgreSQL schema

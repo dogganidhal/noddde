@@ -7,11 +7,25 @@ noddde provides three ORM adapter packages that implement all persistence interf
 
 ## Available Adapters
 
-| Package           | ORM         | Dialects                  | Schema                                  |
-| ----------------- | ----------- | ------------------------- | --------------------------------------- |
-| `@noddde/drizzle` | Drizzle ORM | SQLite, PostgreSQL, MySQL | TypeScript table builders (per dialect) |
-| `@noddde/prisma`  | Prisma      | Any Prisma-supported DB   | `.prisma` schema file                   |
-| `@noddde/typeorm` | TypeORM     | Any TypeORM-supported DB  | TypeScript entity decorators            |
+| Package           | ORM         | Schema                                  |
+| ----------------- | ----------- | --------------------------------------- |
+| `@noddde/drizzle` | Drizzle ORM | TypeScript table builders (per dialect) |
+| `@noddde/prisma`  | Prisma      | `.prisma` schema file                   |
+| `@noddde/typeorm` | TypeORM     | TypeScript entity decorators            |
+
+### Dialect Support Matrix
+
+Persistence (event store, state store, saga store) and [concurrency control](/docs/running/persistence#concurrency-control) work with **every dialect** supported by your ORM. The only dialect restriction applies to **pessimistic locking**, which requires database-level advisory locks:
+
+| Dialect    | Persistence | No concurrency / Optimistic | Pessimistic locking  |
+| ---------- | ----------- | --------------------------- | -------------------- |
+| PostgreSQL | ✅ All ORMs | ✅ All ORMs                 | ✅ All ORMs          |
+| MySQL      | ✅ All ORMs | ✅ All ORMs                 | ✅ All ORMs          |
+| MariaDB    | ✅ All ORMs | ✅ All ORMs                 | ✅ All ORMs          |
+| SQLite     | ✅ All ORMs | ✅ All ORMs                 | ❌ No advisory locks |
+| MSSQL      | ✅ TypeORM  | ✅ TypeORM                  | ✅ TypeORM only      |
+
+For SQLite or any dialect without advisory lock support, use `InMemoryAggregateLocker` from `@noddde/engine` for single-process deployments, or choose the optimistic strategy instead.
 
 Each package exports a single factory function that returns all persistence implementations wired to share a transaction context:
 
@@ -246,15 +260,23 @@ Handled automatically by the persistence implementations via database constraint
 
 ### Advisory Lockers (for pessimistic concurrency)
 
-Each adapter exports an advisory locker for use with the pessimistic strategy:
+Each adapter exports an advisory locker for use with the pessimistic strategy. See the [Dialect Support Matrix](#dialect-support-matrix) above for which databases support locking.
 
 | Adapter                 | Constructor         | Dialect Detection                                    |
 | ----------------------- | ------------------- | ---------------------------------------------------- |
 | `DrizzleAdvisoryLocker` | `(db, dialect)`     | Explicit: `"pg"` \| `"mysql"` \| `"sqlite"` (throws) |
-| `PrismaAdvisoryLocker`  | `(prisma, dialect)` | Explicit: `"postgresql"` \| `"mysql"`                |
+| `PrismaAdvisoryLocker`  | `(prisma, dialect)` | Explicit: `"postgresql"` \| `"mysql"` \| `"mariadb"` |
 | `TypeORMAdvisoryLocker` | `(dataSource)`      | Auto-detects from `dataSource.options.type`          |
 
-All three use `pg_advisory_lock` for PostgreSQL and `GET_LOCK` for MySQL. SQLite has no advisory locks — use `InMemoryAggregateLocker` from `@noddde/engine` for single-process deployments.
+Under the hood, each dialect uses the database's native advisory lock mechanism:
+
+| Dialect       | Lock mechanism                              | Lock key format                             |
+| ------------- | ------------------------------------------- | ------------------------------------------- |
+| PostgreSQL    | `pg_advisory_lock` / `pg_try_advisory_lock` | 64-bit FNV-1a hash of `name:id`             |
+| MySQL/MariaDB | `GET_LOCK` / `RELEASE_LOCK`                 | First 64 chars of `name:id` (MySQL limit)   |
+| MSSQL         | `sp_getapplock` / `sp_releaseapplock`       | First 255 chars of `name:id` (TypeORM only) |
+
+SQLite has no advisory lock mechanism. For single-process SQLite deployments, use `InMemoryAggregateLocker` from `@noddde/engine`.
 
 Advisory locks are session-level, spanning beyond the database transaction. This is intentional: the lock covers the entire load→execute→save lifecycle.
 

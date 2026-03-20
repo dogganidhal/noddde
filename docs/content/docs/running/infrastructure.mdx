@@ -54,8 +54,12 @@ interface Logger {
 
 // Production
 class ConsoleLogger implements Logger {
-  info(message: string) { console.log(message); }
-  error(message: string) { console.error(message); }
+  info(message: string) {
+    console.log(message);
+  }
+  error(message: string) {
+    console.error(message);
+  }
 }
 
 // Test
@@ -71,13 +75,13 @@ This pattern -- interface plus swappable implementations -- is what makes noddde
 
 Infrastructure appears as a parameter in three handler types:
 
-| Handler Type | Parameter Position | Receives |
-| --- | --- | --- |
-| Aggregate command handlers | Third parameter | `TInfrastructure` |
-| Projection event handlers | Second parameter | `TInfrastructure` |
-| Query handlers | Second parameter | `TInfrastructure` |
-| Standalone command handlers | Second parameter | `TInfrastructure & CQRSInfrastructure` |
-| Saga handlers | Third parameter | `TInfrastructure & CQRSInfrastructure` |
+| Handler Type                | Parameter Position | Receives                               |
+| --------------------------- | ------------------ | -------------------------------------- |
+| Aggregate command handlers  | Third parameter    | `TInfrastructure`                      |
+| Projection event handlers   | Second parameter   | `TInfrastructure`                      |
+| Query handlers              | Second parameter   | `TInfrastructure`                      |
+| Standalone command handlers | Second parameter   | `TInfrastructure & CQRSInfrastructure` |
+| Saga handlers               | Third parameter    | `TInfrastructure & CQRSInfrastructure` |
 
 [Apply handlers](/docs/core-concepts/cqrs-and-event-sourcing) deliberately do **not** receive infrastructure. They are pure, synchronous functions for deterministic event replay -- no side effects allowed.
 
@@ -259,7 +263,9 @@ Same aggregates and projections, different infrastructure. The domain logic does
 After configuration, buses are available on `domain.infrastructure`:
 
 ```ts
-const domain = await configureDomain<BankingInfrastructure>({ /* ... */ });
+const domain = await configureDomain<BankingInfrastructure>({
+  /* ... */
+});
 
 const { commandBus, eventBus, queryBus } = domain.infrastructure;
 ```
