@@ -55,14 +55,14 @@ docs:
   - aggregates/defining-aggregates.mdx
 ```
 
-These paths are relative to `packages/docs/content/docs/`.
+These paths are relative to `docs/content/docs/`.
 
 ### Strategy 2: Grep for export references (secondary)
 
 Search for references to the spec's exported symbols in documentation:
 
 ```bash
-grep -rl "ExportName1\|ExportName2" packages/docs/content/docs/ --include="*.mdx"
+grep -rl "ExportName1\|ExportName2" docs/content/docs/ --include="*.mdx"
 ```
 
 This catches pages not listed in the `docs` frontmatter — for example, a `concepts/` or `design-decisions/` page that references `defineAggregate`.
@@ -71,10 +71,10 @@ Add any discovered pages NOT already in the `docs` list to the working set, but 
 
 ### Strategy 3: Check auto-generated API reference
 
-Search `packages/docs/src/content/docs/api/` for files matching the spec's exports:
+Search `docs/src/content/docs/api/` for files matching the spec's exports:
 
 ```bash
-ls packages/docs/src/content/docs/api/*/
+ls docs/src/content/docs/api/*/
 ```
 
 **Do NOT edit auto-generated API reference files.** Only flag them in the report if the API surface changed (new exports added, existing signatures changed).
@@ -169,7 +169,7 @@ If the module doesn't fit any category, flag it in the report for manual placeme
 
 ### 5b: Create the MDX Page
 
-Create a new file at `packages/docs/content/docs/<category>/<name>.mdx`:
+Create a new file at `docs/content/docs/<category>/<name>.mdx`:
 
 ```mdx
 ---
@@ -192,7 +192,7 @@ description: <One-line description of what this module does>
 
 ### 5c: Update `meta.json`
 
-Add the new page to the appropriate category's `meta.json` file at `packages/docs/content/docs/<category>/meta.json`.
+Add the new page to the appropriate category's `meta.json` file at `docs/content/docs/<category>/meta.json`.
 
 Read the existing `meta.json`, add the new page name (without extension) to the `pages` array in a logical position (usually at the end, unless there's a clear ordering).
 
@@ -200,7 +200,7 @@ Read the existing `meta.json`, add the new page name (without extension) to the 
 
 If the spec added new exports, removed exports, or changed existing signatures:
 
-1. List the affected auto-generated API pages in `packages/docs/src/content/docs/api/`
+1. List the affected auto-generated API pages in `docs/src/content/docs/api/`
 2. Note these in the report as needing regeneration
 3. **Do NOT manually edit these files** — they are auto-generated
 
@@ -210,11 +210,11 @@ If the spec added new exports, removed exports, or changed existing signatures:
 📖 Step 6 complete: Documentation updated
 
   Pages updated: <N>
-    - packages/docs/content/docs/<path>.mdx (<summary of changes>)
-    - packages/docs/content/docs/<path>.mdx (<summary of changes>)
+    - docs/content/docs/<path>.mdx (<summary of changes>)
+    - docs/content/docs/<path>.mdx (<summary of changes>)
 
   Pages created: <N>
-    - packages/docs/content/docs/<category>/<name>.mdx (new stub)
+    - docs/content/docs/<category>/<name>.mdx (new stub)
 
   API reference: <status>
     - <N> auto-generated pages may need regeneration (exports changed: <list>)
@@ -222,7 +222,7 @@ If the spec added new exports, removed exports, or changed existing signatures:
     - No API surface changes — auto-generated docs are up to date
 
   Flagged for review: <N>
-    - packages/docs/content/docs/<path>.mdx (prose may need updating — <reason>)
+    - docs/content/docs/<path>.mdx (prose may need updating — <reason>)
 
   No changes needed: <N> pages checked, all up to date
 ```

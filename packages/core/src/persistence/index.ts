@@ -5,6 +5,13 @@ export { ConcurrencyError } from "./concurrency-error";
 export type { AggregateLocker } from "./aggregate-locker";
 export { LockTimeoutError } from "./lock-timeout-error";
 export { fnv1a64 } from "./hash";
+export { everyNEvents } from "./snapshot";
+export type {
+  Snapshot,
+  SnapshotStore,
+  SnapshotStrategy,
+  PartialEventLoad,
+} from "./snapshot";
 
 /**
  * Persistence strategy that stores the current aggregate state directly.

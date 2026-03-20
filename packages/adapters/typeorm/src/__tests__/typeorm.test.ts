@@ -7,7 +7,9 @@ import {
   NodddeEventEntity,
   NodddeAggregateStateEntity,
   NodddeSagaStateEntity,
+  NodddeSnapshotEntity,
 } from "../entities";
+import { TypeORMEventSourcedAggregatePersistence } from "../persistence";
 
 let dataSource: DataSource;
 let infra: ReturnType<typeof createTypeORMPersistence>;
@@ -20,6 +22,7 @@ async function setupDb() {
       NodddeEventEntity,
       NodddeAggregateStateEntity,
       NodddeSagaStateEntity,
+      NodddeSnapshotEntity,
     ],
     synchronize: true,
   });
@@ -287,6 +290,131 @@ describe("TypeORMUnitOfWork", () => {
     await uow.rollback();
 
     const events = await infra.eventSourcedPersistence.load("Account", "acc-1");
+    expect(events).toEqual([]);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Snapshot Store
+// ═══════════════════════════════════════════════════════════════════
+
+describe("TypeORMSnapshotStore", () => {
+  beforeEach(setupDb);
+  afterEach(teardownDb);
+
+  it("should save and load a snapshot", async () => {
+    await infra.snapshotStore.save("Account", "acc-1", {
+      state: { balance: 500 },
+      version: 10,
+    });
+    const snapshot = await infra.snapshotStore.load("Account", "acc-1");
+    expect(snapshot).toEqual({ state: { balance: 500 }, version: 10 });
+  });
+
+  it("should return null for unknown aggregate", async () => {
+    const snapshot = await infra.snapshotStore.load("Account", "nonexistent");
+    expect(snapshot).toBeNull();
+  });
+
+  it("should overwrite snapshot on repeated saves", async () => {
+    await infra.snapshotStore.save("Account", "acc-1", {
+      state: { balance: 100 },
+      version: 5,
+    });
+    await infra.snapshotStore.save("Account", "acc-1", {
+      state: { balance: 300 },
+      version: 15,
+    });
+    const snapshot = await infra.snapshotStore.load("Account", "acc-1");
+    expect(snapshot).toEqual({ state: { balance: 300 }, version: 15 });
+  });
+
+  it("should isolate snapshots by aggregate name and id", async () => {
+    await infra.snapshotStore.save("Order", "1", {
+      state: { total: 200 },
+      version: 3,
+    });
+    await infra.snapshotStore.save("Account", "1", {
+      state: { balance: 100 },
+      version: 7,
+    });
+
+    const orderSnapshot = await infra.snapshotStore.load("Order", "1");
+    const accountSnapshot = await infra.snapshotStore.load("Account", "1");
+    expect(orderSnapshot).toEqual({ state: { total: 200 }, version: 3 });
+    expect(accountSnapshot).toEqual({ state: { balance: 100 }, version: 7 });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Partial Event Load (loadAfterVersion)
+// ═══════════════════════════════════════════════════════════════════
+
+describe("TypeORMEventSourcedAggregatePersistence (loadAfterVersion)", () => {
+  beforeEach(setupDb);
+  afterEach(teardownDb);
+
+  it("should load events after a given version", async () => {
+    await infra.eventSourcedPersistence.save(
+      "Account",
+      "acc-1",
+      [
+        { name: "AccountCreated", payload: { owner: "Alice" } },
+        { name: "DepositMade", payload: { amount: 100 } },
+        { name: "DepositMade", payload: { amount: 50 } },
+      ],
+      0,
+    );
+
+    const persistence =
+      infra.eventSourcedPersistence as TypeORMEventSourcedAggregatePersistence;
+    const events = await persistence.loadAfterVersion("Account", "acc-1", 1);
+    expect(events).toHaveLength(2);
+    expect(events[0]!.name).toBe("DepositMade");
+    expect(events[0]!.payload).toEqual({ amount: 100 });
+    expect(events[1]!.name).toBe("DepositMade");
+    expect(events[1]!.payload).toEqual({ amount: 50 });
+  });
+
+  it("should return all events when afterVersion is 0", async () => {
+    await infra.eventSourcedPersistence.save(
+      "Account",
+      "acc-1",
+      [
+        { name: "AccountCreated", payload: { owner: "Alice" } },
+        { name: "DepositMade", payload: { amount: 100 } },
+      ],
+      0,
+    );
+
+    const persistence =
+      infra.eventSourcedPersistence as TypeORMEventSourcedAggregatePersistence;
+    const events = await persistence.loadAfterVersion("Account", "acc-1", 0);
+    expect(events).toHaveLength(2);
+  });
+
+  it("should return empty array when afterVersion >= stream length", async () => {
+    await infra.eventSourcedPersistence.save(
+      "Account",
+      "acc-1",
+      [{ name: "AccountCreated", payload: { owner: "Alice" } }],
+      0,
+    );
+
+    const persistence =
+      infra.eventSourcedPersistence as TypeORMEventSourcedAggregatePersistence;
+    const events = await persistence.loadAfterVersion("Account", "acc-1", 10);
+    expect(events).toEqual([]);
+  });
+
+  it("should return empty array for unknown aggregate", async () => {
+    const persistence =
+      infra.eventSourcedPersistence as TypeORMEventSourcedAggregatePersistence;
+    const events = await persistence.loadAfterVersion(
+      "Account",
+      "nonexistent",
+      0,
+    );
     expect(events).toEqual([]);
   });
 });

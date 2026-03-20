@@ -1,6 +1,7 @@
 import type {
   Event,
   EventSourcedAggregatePersistence,
+  PartialEventLoad,
   StateStoredAggregatePersistence,
 } from "@noddde/core";
 import { ConcurrencyError } from "@noddde/core";
@@ -18,7 +19,7 @@ import { ConcurrencyError } from "@noddde/core";
  * For production, use a durable event store (PostgreSQL, EventStoreDB, etc.).
  */
 export class InMemoryEventSourcedAggregatePersistence
-  implements EventSourcedAggregatePersistence
+  implements EventSourcedAggregatePersistence, PartialEventLoad
 {
   private readonly store = new Map<string, Event[]>();
 
@@ -49,6 +50,25 @@ export class InMemoryEventSourcedAggregatePersistence
    * @param events - The new events to append.
    * @param expectedVersion - The stream length observed at load time.
    */
+  /**
+   * Loads events that occurred after the given version.
+   * Returns events at positions `afterVersion, afterVersion+1, ...`.
+   *
+   * @param aggregateName - The aggregate type name (used as a namespace).
+   * @param aggregateId - The unique identifier of the aggregate instance.
+   * @param afterVersion - The number of events to skip from the beginning.
+   * @returns Events after the given version, or `[]` if none.
+   */
+  public async loadAfterVersion(
+    aggregateName: string,
+    aggregateId: string,
+    afterVersion: number,
+  ): Promise<Event[]> {
+    const key = `${aggregateName}:${aggregateId}`;
+    const events = this.store.get(key) ?? [];
+    return events.slice(afterVersion);
+  }
+
   public async save(
     aggregateName: string,
     aggregateId: string,

@@ -9,15 +9,18 @@ exports:
   - TypeORMEventSourcedAggregatePersistence
   - TypeORMStateStoredAggregatePersistence
   - TypeORMSagaPersistence
+  - TypeORMSnapshotStore
   - TypeORMAdvisoryLocker
   - TypeORMUnitOfWork
   - TypeORMTransactionStore
   - NodddeEventEntity
   - NodddeAggregateStateEntity
   - NodddeSagaStateEntity
+  - NodddeSnapshotEntity
 depends_on:
   - core/persistence/persistence
   - core/persistence/unit-of-work
+  - core/persistence/snapshot
 docs:
   - running/orm-adapters.mdx
 ---
@@ -32,6 +35,9 @@ docs:
 import type { DataSource, EntityManager } from "typeorm";
 import type {
   EventSourcedAggregatePersistence,
+  PartialEventLoad,
+  Snapshot,
+  SnapshotStore,
   StateStoredAggregatePersistence,
   SagaPersistence,
   UnitOfWorkFactory,
@@ -53,6 +59,7 @@ export interface TypeORMPersistenceInfrastructure {
   eventSourcedPersistence: EventSourcedAggregatePersistence;
   stateStoredPersistence: StateStoredAggregatePersistence;
   sagaPersistence: SagaPersistence;
+  snapshotStore: SnapshotStore;
   unitOfWorkFactory: UnitOfWorkFactory;
 }
 
@@ -69,7 +76,7 @@ export function createTypeORMPersistence(
  * TypeORM-backed event-sourced aggregate persistence.
  */
 export class TypeORMEventSourcedAggregatePersistence
-  implements EventSourcedAggregatePersistence
+  implements EventSourcedAggregatePersistence, PartialEventLoad
 {
   constructor(dataSource: DataSource, txStore: TypeORMTransactionStore);
   save(
@@ -79,6 +86,24 @@ export class TypeORMEventSourcedAggregatePersistence
     expectedVersion: number,
   ): Promise<void>;
   load(aggregateName: string, aggregateId: string): Promise<Event[]>;
+  loadAfterVersion(
+    aggregateName: string,
+    aggregateId: string,
+    afterVersion: number,
+  ): Promise<Event[]>;
+}
+
+/**
+ * TypeORM-backed snapshot store for aggregate state snapshots.
+ */
+export class TypeORMSnapshotStore implements SnapshotStore {
+  constructor(dataSource: DataSource, txStore: TypeORMTransactionStore);
+  load(aggregateName: string, aggregateId: string): Promise<Snapshot | null>;
+  save(
+    aggregateName: string,
+    aggregateId: string,
+    snapshot: Snapshot,
+  ): Promise<void>;
 }
 
 /**
@@ -206,6 +231,24 @@ export class NodddeSagaStateEntity {
   @Column({ type: "text" })
   state!: string;
 }
+
+/**
+ * TypeORM entity for aggregate state snapshots.
+ */
+@Entity("noddde_snapshots")
+export class NodddeSnapshotEntity {
+  @PrimaryColumn({ name: "aggregate_name" })
+  aggregateName!: string;
+
+  @PrimaryColumn({ name: "aggregate_id" })
+  aggregateId!: string;
+
+  @Column({ type: "text" })
+  state!: string;
+
+  @Column({ type: "int" })
+  version!: number;
+}
 ```
 
 ## Behavioral Requirements
@@ -265,6 +308,14 @@ export class NodddeSagaStateEntity {
 30. `NodddeAggregateStateEntity` maps to table `noddde_aggregate_states` with `@PrimaryColumn` composite key on `[aggregateName, aggregateId]` and a `version` column with `default: 0`.
 31. `NodddeSagaStateEntity` maps to table `noddde_saga_states` with `@PrimaryColumn` composite key on `[sagaName, sagaId]`.
 
+### Snapshot Store
+
+32. `TypeORMSnapshotStore.save()` upserts the snapshot using `findOne` + conditional `save` (create if new, update if exists).
+33. `TypeORMSnapshotStore.load()` uses `findOne` and returns `{ state: JSON.parse(row.state), version: row.version }`, or `null` if not found.
+34. `TypeORMEventSourcedAggregatePersistence.loadAfterVersion()` uses TypeORM's `MoreThan(afterVersion)` operator to load events with `sequenceNumber > afterVersion`, ordered by `sequenceNumber: "ASC"`.
+35. `NodddeSnapshotEntity` maps to table `noddde_snapshots` with `@PrimaryColumn` composite key on `[aggregateName, aggregateId]`.
+36. Snapshot operations route through `txStore.current` like all other persistence operations.
+
 ## Invariants
 
 - [ ] Events saved and loaded maintain FIFO order (sequenceNumber ordering).
@@ -322,6 +373,12 @@ noddde_saga_states
 ├── saga_name        (string, PK part 1, @PrimaryColumn)
 ├── saga_id          (string, PK part 2, @PrimaryColumn)
 └── state            (text, NOT NULL)
+
+noddde_snapshots
+├── aggregate_name   (string, PK part 1, @PrimaryColumn)
+├── aggregate_id     (string, PK part 2, @PrimaryColumn)
+├── state            (text, NOT NULL)
+└── version          (int, NOT NULL)
 ```
 
 ## Test Scenarios
@@ -638,6 +695,133 @@ it("should rollback without persisting anything", async () => {
   );
   await uow.rollback();
   const events = await infra.eventSourcedPersistence.load("Account", "acc-1");
+  expect(events).toEqual([]);
+});
+```
+
+### Snapshot store: save and load roundtrip
+
+```ts
+describe("TypeORMSnapshotStore", () => {
+  beforeEach(setupDb);
+  afterEach(teardownDb);
+
+  it("should save and load a snapshot", async () => {
+    await infra.snapshotStore.save("Account", "acc-1", {
+      state: { balance: 500 },
+      version: 10,
+    });
+    const snapshot = await infra.snapshotStore.load("Account", "acc-1");
+    expect(snapshot).toEqual({ state: { balance: 500 }, version: 10 });
+  });
+});
+```
+
+### Snapshot store: returns null for unknown aggregate
+
+```ts
+it("should return null for unknown aggregate", async () => {
+  const snapshot = await infra.snapshotStore.load("Account", "nonexistent");
+  expect(snapshot).toBeNull();
+});
+```
+
+### Snapshot store: overwrites on repeated saves
+
+```ts
+it("should overwrite snapshot on repeated saves", async () => {
+  await infra.snapshotStore.save("Account", "acc-1", {
+    state: { balance: 100 },
+    version: 5,
+  });
+  await infra.snapshotStore.save("Account", "acc-1", {
+    state: { balance: 300 },
+    version: 15,
+  });
+  const snapshot = await infra.snapshotStore.load("Account", "acc-1");
+  expect(snapshot).toEqual({ state: { balance: 300 }, version: 15 });
+});
+```
+
+### Snapshot store: isolates by aggregate name and id
+
+```ts
+it("should isolate snapshots by aggregate name and id", async () => {
+  await infra.snapshotStore.save("Order", "1", {
+    state: { total: 200 },
+    version: 3,
+  });
+  await infra.snapshotStore.save("Account", "1", {
+    state: { balance: 100 },
+    version: 7,
+  });
+  const orderSnapshot = await infra.snapshotStore.load("Order", "1");
+  const accountSnapshot = await infra.snapshotStore.load("Account", "1");
+  expect(orderSnapshot).toEqual({ state: { total: 200 }, version: 3 });
+  expect(accountSnapshot).toEqual({ state: { balance: 100 }, version: 7 });
+});
+```
+
+### loadAfterVersion: loads events after a given version
+
+```ts
+describe("TypeORMEventSourcedAggregatePersistence (loadAfterVersion)", () => {
+  beforeEach(setupDb);
+  afterEach(teardownDb);
+
+  it("should load events after a given version", async () => {
+    await infra.eventSourcedPersistence.save(
+      "Account",
+      "acc-1",
+      [
+        { name: "AccountCreated", payload: { owner: "Alice" } },
+        { name: "DepositMade", payload: { amount: 100 } },
+        { name: "DepositMade", payload: { amount: 50 } },
+      ],
+      0,
+    );
+    const persistence =
+      infra.eventSourcedPersistence as TypeORMEventSourcedAggregatePersistence;
+    const events = await persistence.loadAfterVersion("Account", "acc-1", 1);
+    expect(events).toHaveLength(2);
+    expect(events[0]!.name).toBe("DepositMade");
+  });
+});
+```
+
+### loadAfterVersion: returns all events when afterVersion is 0
+
+```ts
+it("should return all events when afterVersion is 0", async () => {
+  await infra.eventSourcedPersistence.save(
+    "Account",
+    "acc-1",
+    [
+      { name: "AccountCreated", payload: { owner: "Alice" } },
+      { name: "DepositMade", payload: { amount: 100 } },
+    ],
+    0,
+  );
+  const persistence =
+    infra.eventSourcedPersistence as TypeORMEventSourcedAggregatePersistence;
+  const events = await persistence.loadAfterVersion("Account", "acc-1", 0);
+  expect(events).toHaveLength(2);
+});
+```
+
+### loadAfterVersion: returns empty array when afterVersion >= stream length
+
+```ts
+it("should return empty array when afterVersion >= stream length", async () => {
+  await infra.eventSourcedPersistence.save(
+    "Account",
+    "acc-1",
+    [{ name: "AccountCreated", payload: { owner: "Alice" } }],
+    0,
+  );
+  const persistence =
+    infra.eventSourcedPersistence as TypeORMEventSourcedAggregatePersistence;
+  const events = await persistence.loadAfterVersion("Account", "acc-1", 10);
   expect(events).toEqual([]);
 });
 ```

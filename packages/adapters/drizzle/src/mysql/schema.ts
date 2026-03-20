@@ -53,3 +53,15 @@ export const sagaStates = mysqlTable("noddde_saga_states", {
   sagaId: varchar("saga_id", { length: 255 }).notNull(),
   state: text("state").notNull(),
 });
+
+/**
+ * MySQL table definition for aggregate state snapshots.
+ * Stores the latest snapshot per aggregate instance for
+ * optimized event-sourced aggregate loading.
+ */
+export const snapshots = mysqlTable("noddde_snapshots", {
+  aggregateName: varchar("aggregate_name", { length: 255 }).notNull(),
+  aggregateId: varchar("aggregate_id", { length: 255 }).notNull(),
+  state: text("state").notNull(),
+  version: int("version").notNull(),
+});

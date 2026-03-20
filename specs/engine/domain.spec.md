@@ -65,6 +65,8 @@ type DomainConfiguration<
           lockTimeoutMs?: number;
         };
     sagaPersistence?: () => SagaPersistence | Promise<SagaPersistence>;
+    snapshotStore?: () => SnapshotStore | Promise<SnapshotStore>;
+    snapshotStrategy?: SnapshotStrategy;
     provideInfrastructure?: () => Promise<TInfrastructure> | TInfrastructure;
     cqrsInfrastructure?: (
       infrastructure: TInfrastructure,
@@ -112,13 +114,14 @@ The `init()` method must execute the following steps in order:
 2. **Resolve CQRS infrastructure** -- Call `configuration.infrastructure.cqrsInfrastructure(infrastructure)` if provided, passing the resolved custom infrastructure. Store the `CommandBus`, `EventBus`, and `QueryBus`. If not provided, create default in-memory implementations (`InMemoryCommandBus`, `EventEmitterEventBus`, `InMemoryQueryBus`).
 3. **Merge infrastructure** -- Combine custom infrastructure and CQRS infrastructure into `this._infrastructure` as `TInfrastructure & CQRSInfrastructure`.
 4. **Resolve aggregate persistence** -- Call `configuration.infrastructure.aggregatePersistence()` if provided. Store as `this._persistence`. If not provided, use a default in-memory persistence.
-5. **Resolve saga persistence** -- Call `configuration.infrastructure.sagaPersistence()` if provided. Required if `processModel` is configured.
-6. **Register command handlers** -- For each aggregate in `writeModel.aggregates`, register a command handler on the command bus for each command name defined in `Aggregate.commands`. The registered handler encapsulates the full command lifecycle (load, execute, apply, persist, publish).
-7. **Register standalone command handlers** -- For each handler in `writeModel.standaloneCommandHandlers`, register it on the command bus, wrapping it to receive the merged infrastructure.
-8. **Register query handlers** -- For each projection in `readModel.projections`, register each query handler from `Projection.queryHandlers` on the query bus.
-9. **Register standalone query handlers** -- For each handler in `readModel.standaloneQueryHandlers`, register it on the query bus.
-10. **Register event listeners for projections** -- For each projection, subscribe to each event name in `Projection.reducers` on the event bus. When an event arrives, invoke the reducer to update the projection's view.
-11. **Register event listeners for sagas** -- For each saga in `processModel.sagas`, subscribe to each event name in `Saga.handlers` on the event bus. When an event arrives, execute the saga event handling lifecycle.
+5. **Resolve snapshot store** -- Call `configuration.infrastructure.snapshotStore()` if provided. Store as `this._snapshotStore`. Store `configuration.infrastructure.snapshotStrategy` as `this._snapshotStrategy`. Both are optional.
+6. **Resolve saga persistence** -- Call `configuration.infrastructure.sagaPersistence()` if provided. Required if `processModel` is configured.
+7. **Register command handlers** -- For each aggregate in `writeModel.aggregates`, register a command handler on the command bus for each command name defined in `Aggregate.commands`. The registered handler encapsulates the full command lifecycle (load, execute, apply, persist, publish).
+8. **Register standalone command handlers** -- For each handler in `writeModel.standaloneCommandHandlers`, register it on the command bus, wrapping it to receive the merged infrastructure.
+9. **Register query handlers** -- For each projection in `readModel.projections`, register each query handler from `Projection.queryHandlers` on the query bus.
+10. **Register standalone query handlers** -- For each handler in `readModel.standaloneQueryHandlers`, register it on the query bus.
+11. **Register event listeners for projections** -- For each projection, subscribe to each event name in `Projection.reducers` on the event bus. When an event arrives, invoke the reducer to update the projection's view.
+12. **Register event listeners for sagas** -- For each saga in `processModel.sagas`, subscribe to each event name in `Saga.handlers` on the event bus. When an event arrives, execute the saga event handling lifecycle.
 
 ### Domain.dispatchCommand() -- Command Dispatch Lifecycle
 
@@ -126,7 +129,8 @@ The `dispatchCommand` method executes the following lifecycle for aggregate comm
 
 1. **Route** -- Look up the aggregate whose `commands` map contains a handler for `command.name`. If no aggregate handles this command, check standalone command handlers.
 2. **Load** -- Using the resolved persistence:
-   - **Event-sourced**: Call `persistence.load(aggregateName, command.targetAggregateId)` to get the event stream. Derive `version = events.length`. Replay all events through `Aggregate.apply` handlers, starting from `Aggregate.initialState`, to rebuild the current state.
+   - **Event-sourced (with snapshot)**: If a `SnapshotStore` is configured, call `snapshotStore.load(aggregateName, command.targetAggregateId)` first. If a snapshot is found and the persistence implements `PartialEventLoad`, call `persistence.loadAfterVersion(aggregateName, id, snapshot.version)` to load only post-snapshot events. If the persistence does not implement `PartialEventLoad`, call `persistence.load(aggregateName, id)` and slice the result: `events.slice(snapshot.version)`. Derive `version = snapshot.version + loadedEvents.length`. Replay only the post-snapshot events through `Aggregate.apply` handlers, starting from `snapshot.state`.
+   - **Event-sourced (without snapshot)**: Call `persistence.load(aggregateName, command.targetAggregateId)` to get the full event stream. Derive `version = events.length`. Replay all events through `Aggregate.apply` handlers, starting from `Aggregate.initialState`, to rebuild the current state.
    - **State-stored**: Call `persistence.load(aggregateName, command.targetAggregateId)` to get `{ state, version }` or `null`. If `null`, use `Aggregate.initialState` with `version = 0`.
 3. **Execute** -- Invoke the aggregate's command handler: `aggregate.commands[command.name](command, currentState, infrastructure)`. The handler returns one or more events.
 4. **Apply** -- For each returned event, apply it to the state via `aggregate.apply[event.name](event.payload, state)` to compute the new state. This ensures the aggregate's in-memory state is consistent with the events.
@@ -134,7 +138,8 @@ The `dispatchCommand` method executes the following lifecycle for aggregate comm
    - **Event-sourced**: Call `persistence.save(aggregateName, command.targetAggregateId, newEvents, version)` to append the new events. `version` is the stream length observed at load time.
    - **State-stored**: Call `persistence.save(aggregateName, command.targetAggregateId, newState, version)` to store the updated state. `version` is the version observed at load time.
 6. **Publish** -- For each new event, call `eventBus.dispatch(event)`. This triggers projections and sagas.
-7. **Return** -- Return `command.targetAggregateId`.
+7. **Snapshot (best-effort)** -- After successful persistence and before returning, if both a `SnapshotStore` and `SnapshotStrategy` are configured, evaluate the strategy with `{ version: newVersion, lastSnapshotVersion, eventsSinceSnapshot }`. If the strategy returns `true`, save a snapshot with the new state and version. Snapshot saving is best-effort: failures are silently ignored and do not affect the command result.
+8. **Return** -- Return `command.targetAggregateId`.
 
 ### Domain.dispatchCommand() -- Concurrency Strategy (Strategy Pattern)
 

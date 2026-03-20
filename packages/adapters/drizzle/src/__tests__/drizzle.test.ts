@@ -2,8 +2,14 @@ import { describe, it, expect } from "vitest";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { ConcurrencyError } from "@noddde/core";
+import type { PartialEventLoad } from "@noddde/core";
 import { createDrizzlePersistence } from "../index";
-import { events, aggregateStates, sagaStates } from "../sqlite/schema";
+import {
+  events,
+  aggregateStates,
+  sagaStates,
+  snapshots,
+} from "../sqlite/schema";
 
 function createTestDb() {
   const sqlite = new Database(":memory:");
@@ -31,6 +37,13 @@ function createTestDb() {
       saga_id TEXT NOT NULL,
       state TEXT NOT NULL,
       PRIMARY KEY (saga_name, saga_id)
+    );
+    CREATE TABLE noddde_snapshots (
+      aggregate_name TEXT NOT NULL,
+      aggregate_id TEXT NOT NULL,
+      state TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      PRIMARY KEY (aggregate_name, aggregate_id)
     );
   `);
   return drizzle(sqlite);
@@ -360,5 +373,169 @@ describe("Drizzle Multi-Dialect Persistence", () => {
     await expect(uow.rollback()).rejects.toThrow(
       "UnitOfWork already completed",
     );
+  });
+
+  it("snapshot store: save and load roundtrip", async () => {
+    const db = createTestDb();
+    const infra = createDrizzlePersistence(db, {
+      events,
+      aggregateStates,
+      sagaStates,
+      snapshots,
+    });
+
+    expect(infra.snapshotStore).toBeDefined();
+    const store = infra.snapshotStore!;
+
+    await store.save("Order", "order-1", {
+      state: { status: "confirmed", total: 100 },
+      version: 5,
+    });
+
+    const loaded = await store.load("Order", "order-1");
+    expect(loaded).toEqual({
+      state: { status: "confirmed", total: 100 },
+      version: 5,
+    });
+  });
+
+  it("snapshot store: returns null for unknown aggregate", async () => {
+    const db = createTestDb();
+    const infra = createDrizzlePersistence(db, {
+      events,
+      aggregateStates,
+      sagaStates,
+      snapshots,
+    });
+
+    const loaded = await infra.snapshotStore!.load("Order", "nonexistent");
+    expect(loaded).toBeNull();
+  });
+
+  it("snapshot store: overwrites on repeated saves", async () => {
+    const db = createTestDb();
+    const infra = createDrizzlePersistence(db, {
+      events,
+      aggregateStates,
+      sagaStates,
+      snapshots,
+    });
+    const store = infra.snapshotStore!;
+
+    await store.save("Order", "order-1", {
+      state: { status: "placed" },
+      version: 1,
+    });
+    await store.save("Order", "order-1", {
+      state: { status: "confirmed" },
+      version: 3,
+    });
+
+    const loaded = await store.load("Order", "order-1");
+    expect(loaded).toEqual({
+      state: { status: "confirmed" },
+      version: 3,
+    });
+  });
+
+  it("snapshotStore is not present when schema.snapshots is not provided", () => {
+    const db = createTestDb();
+    const infra = createDrizzlePersistence(db, {
+      events,
+      aggregateStates,
+      sagaStates,
+    });
+
+    expect(infra.snapshotStore).toBeUndefined();
+  });
+
+  it("loadAfterVersion: returns events after given version", async () => {
+    const db = createTestDb();
+    const infra = createDrizzlePersistence(db, {
+      events,
+      aggregateStates,
+      sagaStates,
+      snapshots,
+    });
+    const persistence =
+      infra.eventSourcedPersistence as typeof infra.eventSourcedPersistence &
+        PartialEventLoad;
+
+    await persistence.save(
+      "Order",
+      "order-1",
+      [
+        { name: "OrderPlaced", payload: { total: 100 } },
+        { name: "OrderConfirmed", payload: {} },
+        { name: "OrderShipped", payload: { trackingId: "T1" } },
+      ],
+      0,
+    );
+
+    const afterV1 = await persistence.loadAfterVersion("Order", "order-1", 1);
+    expect(afterV1).toHaveLength(2);
+    expect(afterV1[0]!.name).toBe("OrderConfirmed");
+    expect(afterV1[1]!.name).toBe("OrderShipped");
+
+    const afterV2 = await persistence.loadAfterVersion("Order", "order-1", 2);
+    expect(afterV2).toHaveLength(1);
+    expect(afterV2[0]!.name).toBe("OrderShipped");
+  });
+
+  it("loadAfterVersion: returns empty array when afterVersion >= stream length", async () => {
+    const db = createTestDb();
+    const infra = createDrizzlePersistence(db, {
+      events,
+      aggregateStates,
+      sagaStates,
+      snapshots,
+    });
+    const persistence =
+      infra.eventSourcedPersistence as typeof infra.eventSourcedPersistence &
+        PartialEventLoad;
+
+    await persistence.save(
+      "Order",
+      "order-1",
+      [
+        { name: "OrderPlaced", payload: {} },
+        { name: "OrderConfirmed", payload: {} },
+      ],
+      0,
+    );
+
+    const afterV2 = await persistence.loadAfterVersion("Order", "order-1", 2);
+    expect(afterV2).toEqual([]);
+
+    const afterV10 = await persistence.loadAfterVersion("Order", "order-1", 10);
+    expect(afterV10).toEqual([]);
+  });
+
+  it("loadAfterVersion: returns all events when afterVersion is 0", async () => {
+    const db = createTestDb();
+    const infra = createDrizzlePersistence(db, {
+      events,
+      aggregateStates,
+      sagaStates,
+      snapshots,
+    });
+    const persistence =
+      infra.eventSourcedPersistence as typeof infra.eventSourcedPersistence &
+        PartialEventLoad;
+
+    await persistence.save(
+      "Order",
+      "order-1",
+      [
+        { name: "OrderPlaced", payload: {} },
+        { name: "OrderConfirmed", payload: {} },
+      ],
+      0,
+    );
+
+    const all = await persistence.loadAfterVersion("Order", "order-1", 0);
+    expect(all).toHaveLength(2);
+    expect(all[0]!.name).toBe("OrderPlaced");
+    expect(all[1]!.name).toBe("OrderConfirmed");
   });
 });

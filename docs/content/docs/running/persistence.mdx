@@ -52,6 +52,98 @@ interface StateStoredAggregatePersistence {
 - **`save`** overwrites the current state snapshot. The `expectedVersion` must match the stored version -- if it does not, a `ConcurrencyError` is thrown.
 - **`load`** returns the last saved state and version as `{ state, version }`, or `null` for new aggregates (version 0).
 
+### State Snapshotting (Event-Sourced Optimization)
+
+For long-lived aggregates with large event streams, replaying every event on each command dispatch becomes expensive. **State snapshotting** periodically caches the aggregate state at a known event stream version. On subsequent loads, the engine starts from the snapshot and replays only the events that occurred after it.
+
+Snapshots are not the source of truth — the event stream is. Deleting all snapshots is safe; the engine falls back to full replay.
+
+```ts
+interface Snapshot {
+  state: any;
+  version: number; // event stream version at snapshot time
+}
+
+interface SnapshotStore {
+  load(aggregateName: string, aggregateId: string): Promise<Snapshot | null>;
+  save(
+    aggregateName: string,
+    aggregateId: string,
+    snapshot: Snapshot,
+  ): Promise<void>;
+}
+```
+
+- **`load`** returns the latest snapshot, or `null` if none exists (triggers full replay).
+- **`save`** overwrites any previously stored snapshot for the same aggregate instance. Only the latest snapshot is kept.
+
+#### Snapshot Strategy
+
+A `SnapshotStrategy` is a pure function that decides whether to take a snapshot after each command. The built-in `everyNEvents` factory covers the common case:
+
+```ts
+import { everyNEvents } from "@noddde/core";
+
+// Snapshot every 100 events
+const strategy = everyNEvents(100);
+```
+
+You can also write custom strategies:
+
+```ts
+import type { SnapshotStrategy } from "@noddde/core";
+
+const customStrategy: SnapshotStrategy = ({ version, eventsSinceSnapshot }) => {
+  // Snapshot every 50 events, but always after the first event
+  return version === 1 || eventsSinceSnapshot >= 50;
+};
+```
+
+#### Configuring Snapshots
+
+Add `snapshotStore` and `snapshotStrategy` to the infrastructure section of your domain configuration:
+
+```ts
+import {
+  configureDomain,
+  InMemoryEventSourcedAggregatePersistence,
+  InMemorySnapshotStore,
+} from "@noddde/engine";
+import { everyNEvents } from "@noddde/core";
+
+const domain = await configureDomain<MyInfrastructure>({
+  writeModel: { aggregates: { BankAccount } },
+  readModel: { projections: {} },
+  infrastructure: {
+    aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
+    snapshotStore: () => new InMemorySnapshotStore(),
+    snapshotStrategy: everyNEvents(100),
+  },
+});
+```
+
+Both `snapshotStore` and `snapshotStrategy` are optional. If either is omitted, no automatic snapshotting occurs.
+
+#### Partial Event Loading
+
+When a snapshot exists, the engine only needs events that occurred after it. If the persistence implementation also implements `PartialEventLoad`, the engine uses `loadAfterVersion()` to avoid loading the full event stream:
+
+```ts
+interface PartialEventLoad {
+  loadAfterVersion(
+    aggregateName: string,
+    aggregateId: string,
+    afterVersion: number,
+  ): Promise<Event[]>;
+}
+```
+
+The built-in `InMemoryEventSourcedAggregatePersistence` implements `PartialEventLoad`. If the persistence does not implement it, the engine falls back to `load()` + `Array.slice()` — correct, but less efficient for large streams.
+
+#### How Snapshot Saving Works
+
+Snapshots are saved **after** the unit of work commits, as a best-effort operation. A failed snapshot save does not roll back a successfully committed command — the engine silently catches the error. The next command that triggers the strategy will attempt to save again.
+
 ### Saga Persistence
 
 Sagas are always state-stored. The `SagaPersistence` interface mirrors the state-stored aggregate interface:
@@ -189,7 +281,17 @@ import { InMemoryEventSourcedAggregatePersistence } from "@noddde/engine";
 const persistence = new InMemoryEventSourcedAggregatePersistence();
 ```
 
-Stores event streams in memory, keyed by `(aggregateName, aggregateId)`.
+Stores event streams in memory, keyed by `(aggregateName, aggregateId)`. Also implements `PartialEventLoad` for optimized snapshot-based loading.
+
+### InMemorySnapshotStore
+
+```ts
+import { InMemorySnapshotStore } from "@noddde/engine";
+
+const snapshotStore = new InMemorySnapshotStore();
+```
+
+Stores aggregate state snapshots in memory, keyed by `(aggregateName, aggregateId)`. Each `save` overwrites the previous snapshot. Returns `null` for unknown aggregates.
 
 ### InMemoryStateStoredAggregatePersistence
 
@@ -225,15 +327,15 @@ The strategy is a configuration choice, not a modeling choice.
 
 ## Decision Matrix
 
-| Factor             | Event Sourcing    | State Storage          |
-| ------------------ | ----------------- | ---------------------- |
-| Audit trail        | Full history      | Current state only     |
-| Storage growth     | Grows with events | Constant per aggregate |
-| Load performance   | Slower (replay)   | Faster (direct read)   |
-| Projection rebuild | Possible          | Not possible           |
-| Temporal queries   | Supported         | Not supported          |
-| Complexity         | Higher            | Lower                  |
-| Debugging          | Excellent         | Standard               |
+| Factor             | Event Sourcing                                                                            | State Storage          |
+| ------------------ | ----------------------------------------------------------------------------------------- | ---------------------- |
+| Audit trail        | Full history                                                                              | Current state only     |
+| Storage growth     | Grows with events                                                                         | Constant per aggregate |
+| Load performance   | Slower (replay, mitigated by [snapshots](#state-snapshotting-event-sourced-optimization)) | Faster (direct read)   |
+| Projection rebuild | Possible                                                                                  | Not possible           |
+| Temporal queries   | Supported                                                                                 | Not supported          |
+| Complexity         | Higher                                                                                    | Lower                  |
+| Debugging          | Excellent                                                                                 | Standard               |
 
 ### When to Choose Event Sourcing
 
@@ -333,6 +435,7 @@ noddde provides three ORM adapter packages that cover persistence and [unit of w
 | `InMemoryEventSourcedAggregatePersistence` | `@noddde/drizzle`, `@noddde/prisma`, or `@noddde/typeorm` |
 | `InMemoryStateStoredAggregatePersistence`  | `@noddde/drizzle`, `@noddde/prisma`, or `@noddde/typeorm` |
 | `InMemorySagaPersistence`                  | `@noddde/drizzle`, `@noddde/prisma`, or `@noddde/typeorm` |
+| `InMemorySnapshotStore`                    | `@noddde/drizzle`, `@noddde/prisma`, or `@noddde/typeorm` |
 
 Each adapter provides a single factory function that creates all persistence implementations wired to share a database transaction context. Your aggregate and projection code remains unchanged -- only the infrastructure factories in `configureDomain` need to be updated.
 

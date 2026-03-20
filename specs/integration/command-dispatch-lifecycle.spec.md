@@ -59,6 +59,9 @@ docs:
 - **Async command handler**: The command handler returns a `Promise<Event[]>`. The framework must await it.
 - **Command handler returns an empty array**: No events are applied, persisted, or published. The aggregate state is unchanged. `dispatchCommand` still returns the aggregateId.
 - **Multiple aggregates**: Two aggregates with different command names coexist; dispatching a command routes to the correct one.
+- **Snapshot-aware dispatch**: When a snapshot store is configured, the engine loads the snapshot, replays only post-snapshot events, and produces the correct state. After enough events, a snapshot is saved per the strategy.
+- **Snapshot fallback**: When the persistence does not implement `PartialEventLoad`, the engine falls back to `load()` + `slice()` and still produces correct state.
+- **No snapshot configured**: Behavior is identical to the non-snapshot path (no regression).
 
 ## Integration Points
 
@@ -455,6 +458,208 @@ describe("Async command handler", () => {
     const events = await persistence.load("AsyncAggregate", "async-1");
     expect(events).toHaveLength(1);
     expect(events[0].payload.result).toBe("HELLO");
+  });
+});
+```
+
+### Snapshot-aware dispatch: snapshot triggers and subsequent command uses snapshot
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import {
+  defineAggregate,
+  configureDomain,
+  InMemoryEventSourcedAggregatePersistence,
+  InMemorySnapshotStore,
+  InMemoryCommandBus,
+  InMemoryQueryBus,
+  EventEmitterEventBus,
+  everyNEvents,
+} from "@noddde/core";
+import type { DefineCommands, DefineEvents } from "@noddde/core";
+
+type CounterState = { count: number };
+
+type CounterEvent = DefineEvents<{
+  Incremented: { amount: number };
+}>;
+
+type CounterCommand = DefineCommands<{
+  Increment: { amount: number };
+}>;
+
+type CounterTypes = {
+  state: CounterState;
+  events: CounterEvent;
+  commands: CounterCommand;
+  infrastructure: {};
+};
+
+const Counter = defineAggregate<CounterTypes>({
+  initialState: { count: 0 },
+  commands: {
+    Increment: (command, state) => ({
+      name: "Incremented",
+      payload: { amount: command.payload.amount },
+    }),
+  },
+  apply: {
+    Incremented: (payload, state) => ({ count: state.count + payload.amount }),
+  },
+});
+
+describe("Snapshot-aware command dispatch", () => {
+  it("should save a snapshot when the strategy triggers and use it for subsequent loads", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+    const snapshotStore = new InMemorySnapshotStore();
+    const eventBus = new EventEmitterEventBus();
+
+    const domain = await configureDomain({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: () => persistence,
+        snapshotStore: () => snapshotStore,
+        snapshotStrategy: everyNEvents(3),
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus,
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    // Dispatch 3 commands — snapshot should trigger after the 3rd
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "counter-1",
+      payload: { amount: 1 },
+    });
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "counter-1",
+      payload: { amount: 2 },
+    });
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "counter-1",
+      payload: { amount: 3 },
+    });
+
+    // Verify snapshot was saved at version 3 with state { count: 6 }
+    const snapshot = await snapshotStore.load("Counter", "counter-1");
+    expect(snapshot).not.toBeNull();
+    expect(snapshot!.version).toBe(3);
+    expect(snapshot!.state).toEqual({ count: 6 });
+
+    // Spy on loadAfterVersion to verify it's used for subsequent commands
+    const loadAfterVersionSpy = vi.spyOn(persistence, "loadAfterVersion");
+
+    // Dispatch a 4th command — should use the snapshot
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "counter-1",
+      payload: { amount: 4 },
+    });
+
+    // Verify loadAfterVersion was called with snapshot version
+    expect(loadAfterVersionSpy).toHaveBeenCalledWith("Counter", "counter-1", 3);
+
+    // Verify the event stream has all 4 events
+    const events = await persistence.load("Counter", "counter-1");
+    expect(events).toHaveLength(4);
+  });
+
+  it("should produce correct state across snapshot boundaries", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+    const snapshotStore = new InMemorySnapshotStore();
+
+    const domain = await configureDomain({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: () => persistence,
+        snapshotStore: () => snapshotStore,
+        snapshotStrategy: everyNEvents(2),
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    // Dispatch 5 commands: snapshots at version 2 and 4
+    for (let i = 1; i <= 5; i++) {
+      await domain.dispatchCommand({
+        name: "Increment",
+        targetAggregateId: "counter-1",
+        payload: { amount: i },
+      });
+    }
+
+    // Verify final event stream (1+2+3+4+5 = 15 total)
+    const events = await persistence.load("Counter", "counter-1");
+    expect(events).toHaveLength(5);
+
+    // Verify the latest snapshot exists
+    const snapshot = await snapshotStore.load("Counter", "counter-1");
+    expect(snapshot).not.toBeNull();
+    // Snapshot should be at version 4 (last threshold crossing)
+    // with state { count: 1+2+3+4 = 10 }
+    expect(snapshot!.version).toBe(4);
+    expect(snapshot!.state).toEqual({ count: 10 });
+  });
+});
+```
+
+### Snapshot-aware dispatch: no snapshot configured (no regression)
+
+```ts
+import { describe, it, expect } from "vitest";
+import {
+  defineAggregate,
+  configureDomain,
+  InMemoryEventSourcedAggregatePersistence,
+  InMemoryCommandBus,
+  InMemoryQueryBus,
+  EventEmitterEventBus,
+} from "@noddde/core";
+import type { DefineCommands, DefineEvents } from "@noddde/core";
+
+// Reuse Counter from above
+
+describe("Command dispatch without snapshot (regression check)", () => {
+  it("should work identically without snapshot store configured", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+
+    const domain = await configureDomain({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: () => persistence,
+        // No snapshotStore, no snapshotStrategy
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "counter-1",
+      payload: { amount: 5 },
+    });
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "counter-1",
+      payload: { amount: 3 },
+    });
+
+    const events = await persistence.load("Counter", "counter-1");
+    expect(events).toHaveLength(2);
   });
 });
 ```

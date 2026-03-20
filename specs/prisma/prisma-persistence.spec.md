@@ -9,12 +9,14 @@ exports:
   - PrismaEventSourcedAggregatePersistence
   - PrismaStateStoredAggregatePersistence
   - PrismaSagaPersistence
+  - PrismaSnapshotStore
   - PrismaAdvisoryLocker
   - PrismaUnitOfWork
   - PrismaTransactionStore
 depends_on:
   - core/persistence/persistence
   - core/persistence/unit-of-work
+  - core/persistence/snapshot
 docs:
   - running/orm-adapters.mdx
 ---
@@ -33,6 +35,9 @@ import type {
   SagaPersistence,
   UnitOfWorkFactory,
   AggregateLocker,
+  SnapshotStore,
+  Snapshot,
+  PartialEventLoad,
 } from "@noddde/core";
 
 /**
@@ -50,6 +55,7 @@ export interface PrismaPersistenceInfrastructure {
   eventSourcedPersistence: EventSourcedAggregatePersistence;
   stateStoredPersistence: StateStoredAggregatePersistence;
   sagaPersistence: SagaPersistence;
+  snapshotStore: SnapshotStore;
   unitOfWorkFactory: UnitOfWorkFactory;
 }
 
@@ -66,7 +72,7 @@ export function createPrismaPersistence(
  * Prisma-backed event-sourced aggregate persistence.
  */
 export class PrismaEventSourcedAggregatePersistence
-  implements EventSourcedAggregatePersistence
+  implements EventSourcedAggregatePersistence, PartialEventLoad
 {
   constructor(prisma: PrismaClient, txStore: PrismaTransactionStore);
   save(
@@ -76,6 +82,11 @@ export class PrismaEventSourcedAggregatePersistence
     expectedVersion: number,
   ): Promise<void>;
   load(aggregateName: string, aggregateId: string): Promise<Event[]>;
+  loadAfterVersion(
+    aggregateName: string,
+    aggregateId: string,
+    afterVersion: number,
+  ): Promise<Event[]>;
 }
 
 /**
@@ -135,6 +146,19 @@ export class PrismaAdvisoryLocker implements AggregateLocker {
   ): Promise<void>;
   release(aggregateName: string, aggregateId: string): Promise<void>;
 }
+
+/**
+ * Prisma-backed snapshot store for event-sourced aggregate state snapshotting.
+ */
+export class PrismaSnapshotStore implements SnapshotStore {
+  constructor(prisma: PrismaClient, txStore: PrismaTransactionStore);
+  load(aggregateName: string, aggregateId: string): Promise<Snapshot | null>;
+  save(
+    aggregateName: string,
+    aggregateId: string,
+    snapshot: Snapshot,
+  ): Promise<void>;
+}
 ```
 
 ## Behavioral Requirements
@@ -186,6 +210,13 @@ export class PrismaAdvisoryLocker implements AggregateLocker {
 
 26. All persistence classes use `getExecutor()` which returns `txStore.current ?? prisma`, routing operations through the active transaction when inside a UoW.
 
+### Snapshot Store
+
+27. `PrismaSnapshotStore.save()` upserts the snapshot using `findUnique` + conditional `create`/`update` on the `NodddeSnapshot` model.
+28. `PrismaSnapshotStore.load()` uses `findUnique` on the composite key and returns `{ state: JSON.parse(row.state), version: row.version }`, or `null` if not found.
+29. `PrismaEventSourcedAggregatePersistence.loadAfterVersion()` loads events with `sequenceNumber: { gt: afterVersion }` ordered by `sequenceNumber: "asc"`.
+30. Snapshot operations route through `txStore.current` like all other persistence operations.
+
 ## Invariants
 
 - [ ] Events saved and loaded maintain FIFO order (sequenceNumber ordering).
@@ -214,7 +245,9 @@ export class PrismaAdvisoryLocker implements AggregateLocker {
 - UoW satisfies `UnitOfWork` from `@noddde/core`.
 - Advisory locker satisfies `AggregateLocker` from `@noddde/core`.
 - Factory return type matches the infrastructure shape expected by `configureDomain()`.
-- Requires a Prisma schema with `NodddeEvent`, `NodddeAggregateState`, and `NodddeSagaState` models.
+- Snapshot store satisfies `SnapshotStore` from `@noddde/core`.
+- Event-sourced persistence also satisfies `PartialEventLoad` from `@noddde/core`.
+- Requires a Prisma schema with `NodddeEvent`, `NodddeAggregateState`, `NodddeSagaState`, and `NodddeSnapshot` models.
 
 ## Storage Schema (Prisma)
 
@@ -248,6 +281,16 @@ model NodddeSagaState {
 
   @@id([sagaName, sagaId])
   @@map("noddde_saga_states")
+}
+
+model NodddeSnapshot {
+  aggregateName String @map("aggregate_name")
+  aggregateId   String @map("aggregate_id")
+  state         String
+  version       Int
+
+  @@id([aggregateName, aggregateId])
+  @@map("noddde_snapshots")
 }
 ```
 
@@ -547,5 +590,137 @@ it("should rollback without persisting anything", async () => {
   await uow.rollback();
   const events = await infra.eventSourcedPersistence.load("Account", "acc-1");
   expect(events).toEqual([]);
+});
+```
+
+### Snapshot store: save and load roundtrip
+
+```ts
+describe("PrismaSnapshotStore", () => {
+  beforeEach(setupDb);
+  afterEach(teardownDb);
+
+  it("should save and load a snapshot", async () => {
+    await infra.snapshotStore.save("Account", "acc-1", {
+      state: { balance: 500 },
+      version: 5,
+    });
+    const snapshot = await infra.snapshotStore.load("Account", "acc-1");
+    expect(snapshot).toEqual({ state: { balance: 500 }, version: 5 });
+  });
+});
+```
+
+### Snapshot store: returns null for unknown aggregate
+
+```ts
+it("should return null for unknown aggregate", async () => {
+  const snapshot = await infra.snapshotStore.load("Account", "nonexistent");
+  expect(snapshot).toBeNull();
+});
+```
+
+### Snapshot store: overwrites on repeated saves
+
+```ts
+it("should overwrite snapshot on repeated saves", async () => {
+  await infra.snapshotStore.save("Account", "acc-1", {
+    state: { balance: 100 },
+    version: 2,
+  });
+  await infra.snapshotStore.save("Account", "acc-1", {
+    state: { balance: 500 },
+    version: 5,
+  });
+  const snapshot = await infra.snapshotStore.load("Account", "acc-1");
+  expect(snapshot).toEqual({ state: { balance: 500 }, version: 5 });
+});
+```
+
+### Snapshot store: isolates by aggregate name
+
+```ts
+it("should isolate snapshots by aggregate name", async () => {
+  await infra.snapshotStore.save("Account", "1", {
+    state: { balance: 100 },
+    version: 2,
+  });
+  await infra.snapshotStore.save("Order", "1", {
+    state: { total: 200 },
+    version: 3,
+  });
+  const account = await infra.snapshotStore.load("Account", "1");
+  const order = await infra.snapshotStore.load("Order", "1");
+  expect(account).toEqual({ state: { balance: 100 }, version: 2 });
+  expect(order).toEqual({ state: { total: 200 }, version: 3 });
+});
+```
+
+### Event-sourced: loadAfterVersion returns events after given version
+
+```ts
+describe("PrismaEventSourcedAggregatePersistence - PartialEventLoad", () => {
+  beforeEach(setupDb);
+  afterEach(teardownDb);
+
+  it("should load events after a given version", async () => {
+    await infra.eventSourcedPersistence.save(
+      "Account",
+      "acc-1",
+      [
+        { name: "AccountCreated", payload: { owner: "Alice" } },
+        { name: "DepositMade", payload: { amount: 100 } },
+        { name: "DepositMade", payload: { amount: 200 } },
+      ],
+      0,
+    );
+    const events = await (
+      infra.eventSourcedPersistence as any
+    ).loadAfterVersion("Account", "acc-1", 1);
+    expect(events).toHaveLength(2);
+    expect(events[0]!.name).toBe("DepositMade");
+    expect(events[0]!.payload).toEqual({ amount: 100 });
+  });
+});
+```
+
+### Event-sourced: loadAfterVersion returns empty for version beyond stream
+
+```ts
+it("should return empty array when afterVersion >= stream length", async () => {
+  await infra.eventSourcedPersistence.save(
+    "Account",
+    "acc-1",
+    [{ name: "AccountCreated", payload: { owner: "Alice" } }],
+    0,
+  );
+  const events = await (infra.eventSourcedPersistence as any).loadAfterVersion(
+    "Account",
+    "acc-1",
+    99,
+  );
+  expect(events).toEqual([]);
+});
+```
+
+### Event-sourced: loadAfterVersion with version 0 returns all events
+
+```ts
+it("should return all events when afterVersion is 0", async () => {
+  await infra.eventSourcedPersistence.save(
+    "Account",
+    "acc-1",
+    [
+      { name: "AccountCreated", payload: { owner: "Alice" } },
+      { name: "DepositMade", payload: { amount: 50 } },
+    ],
+    0,
+  );
+  const events = await (infra.eventSourcedPersistence as any).loadAfterVersion(
+    "Account",
+    "acc-1",
+    0,
+  );
+  expect(events).toHaveLength(2);
 });
 ```

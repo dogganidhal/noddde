@@ -71,6 +71,8 @@ type DomainConfiguration<TInfrastructure extends Infrastructure> = {
     aggregateConcurrency?:
       | { strategy?: "optimistic"; maxRetries?: number }
       | { strategy: "pessimistic"; locker: AggregateLocker; lockTimeoutMs?: number };
+    snapshotStore?: () => SnapshotStore | Promise<SnapshotStore>;
+    snapshotStrategy?: SnapshotStrategy;
     sagaPersistence?: () => SagaPersistence | Promise<SagaPersistence>;
     provideInfrastructure?: () => TInfrastructure | Promise<TInfrastructure>;
     cqrsInfrastructure?: (infra: TInfrastructure) => CQRSInfrastructure | Promise<CQRSInfrastructure>;
@@ -217,6 +219,8 @@ The four providers are:
 - **`cqrsInfrastructure`** -- The three CQRS buses (CommandBus, EventBus, QueryBus)
 - **`aggregatePersistence`** -- The persistence strategy for aggregate state
 - **`aggregateConcurrency`** -- Concurrency strategy: optimistic (version check + retry, throws `ConcurrencyError`) or pessimistic (exclusive lock before load, throws `LockTimeoutError` on timeout). See [Concurrency Strategies](/docs/running/persistence#concurrency-control).
+- **`snapshotStore`** -- Factory function returning a `SnapshotStore` for caching event-sourced aggregate state. See [State Snapshotting](/docs/running/persistence#state-snapshotting-event-sourced-optimization).
+- **`snapshotStrategy`** -- A `SnapshotStrategy` function that decides when to take snapshots (e.g., `everyNEvents(100)`).
 - **`unitOfWorkFactory`** -- The factory for atomic command dispatch boundaries
 
 For a full treatment of each provider, how they are initialized, and how to swap them for testing, see the [Infrastructure](/docs/running/infrastructure) page.

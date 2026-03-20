@@ -5,6 +5,9 @@ import type {
   EventSourcedAggregatePersistence,
   StateStoredAggregatePersistence,
   SagaPersistence,
+  PartialEventLoad,
+  Snapshot,
+  SnapshotStore,
 } from "@noddde/core";
 import { ConcurrencyError } from "@noddde/core";
 import type { PrismaTransactionStore } from "./unit-of-work";
@@ -17,7 +20,7 @@ type PrismaExecutor =
  * Prisma-backed event-sourced aggregate persistence.
  */
 export class PrismaEventSourcedAggregatePersistence
-  implements EventSourcedAggregatePersistence
+  implements EventSourcedAggregatePersistence, PartialEventLoad
 {
   constructor(
     private readonly prisma: PrismaClient,
@@ -71,6 +74,29 @@ export class PrismaEventSourcedAggregatePersistence
 
     const rows = await executor.nodddeEvent.findMany({
       where: { aggregateName, aggregateId },
+      orderBy: { sequenceNumber: "asc" },
+    });
+
+    return rows.map((row: any) => ({
+      name: row.eventName,
+      payload: JSON.parse(row.payload),
+      ...(row.metadata ? { metadata: JSON.parse(row.metadata) } : {}),
+    }));
+  }
+
+  async loadAfterVersion(
+    aggregateName: string,
+    aggregateId: string,
+    afterVersion: number,
+  ): Promise<Event[]> {
+    const executor = this.getExecutor() as any;
+
+    const rows = await executor.nodddeEvent.findMany({
+      where: {
+        aggregateName,
+        aggregateId,
+        sequenceNumber: { gt: afterVersion },
+      },
       orderBy: { sequenceNumber: "asc" },
     });
 
@@ -207,5 +233,68 @@ export class PrismaSagaPersistence implements SagaPersistence {
 
     if (!row) return undefined;
     return JSON.parse(row.state);
+  }
+}
+
+/**
+ * Prisma-backed snapshot store for event-sourced aggregate state snapshotting.
+ */
+export class PrismaSnapshotStore implements SnapshotStore {
+  constructor(
+    private readonly prisma: PrismaClient,
+    private readonly txStore: PrismaTransactionStore,
+  ) {}
+
+  private getExecutor(): PrismaExecutor {
+    return (this.txStore.current ?? this.prisma) as PrismaExecutor;
+  }
+
+  async load(
+    aggregateName: string,
+    aggregateId: string,
+  ): Promise<Snapshot | null> {
+    const executor = this.getExecutor() as any;
+
+    const row = await executor.nodddeSnapshot.findUnique({
+      where: {
+        aggregateName_aggregateId: { aggregateName, aggregateId },
+      },
+    });
+
+    if (!row) return null;
+    return { state: JSON.parse(row.state), version: row.version };
+  }
+
+  async save(
+    aggregateName: string,
+    aggregateId: string,
+    snapshot: Snapshot,
+  ): Promise<void> {
+    const executor = this.getExecutor() as any;
+    const serialized = JSON.stringify(snapshot.state);
+
+    const existing = await executor.nodddeSnapshot.findUnique({
+      where: {
+        aggregateName_aggregateId: { aggregateName, aggregateId },
+      },
+    });
+
+    if (existing) {
+      await executor.nodddeSnapshot.update({
+        where: {
+          aggregateName_aggregateId: { aggregateName, aggregateId },
+        },
+        data: { state: serialized, version: snapshot.version },
+      });
+    } else {
+      await executor.nodddeSnapshot.create({
+        data: {
+          aggregateName,
+          aggregateId,
+          state: serialized,
+          version: snapshot.version,
+        },
+      });
+    }
   }
 }

@@ -12,6 +12,11 @@ exports:
     AggregateLocker,
     LockTimeoutError,
     fnv1a64,
+    Snapshot,
+    SnapshotStore,
+    SnapshotStrategy,
+    PartialEventLoad,
+    everyNEvents,
   ]
 depends_on: [edd/event]
 docs:
@@ -178,7 +183,7 @@ The framework should define a clear discrimination mechanism so that custom pers
 - **Concurrent saves to the same aggregate** -- Both persistence strategies use optimistic concurrency control via version checking. The first save succeeds; subsequent saves with the same `expectedVersion` throw `ConcurrencyError`. The domain engine may retry on `ConcurrencyError` (configurable via `aggregateConcurrency.maxRetries`).
 - **Save with expectedVersion 0 on new aggregate** -- For event-sourced: appends events to a new stream (stream was empty, so `length === 0 === expectedVersion`). For state-stored: inserts new state at version 1.
 - **Save with expectedVersion 0 on existing aggregate** -- Must throw `ConcurrencyError` (the aggregate already has events/state at a higher version).
-- **Very large event streams** -- `EventSourcedAggregatePersistence.load` returns the full stream. For aggregates with thousands of events, implementations may want to support snapshots, but the current interface does not define a snapshot mechanism.
+- **Very large event streams** -- `EventSourcedAggregatePersistence.load` returns the full stream. For aggregates with thousands of events, implementations should adopt the `SnapshotStore` and `PartialEventLoad` interfaces (defined in `persistence/snapshot`) to optimize load times. See `specs/core/persistence/snapshot.spec.md`.
 - **Null vs undefined** -- `SagaPersistence.load` returns `any | undefined | null`. The domain engine should check `state == null` (loose equality) to handle both.
 - **Empty string as name or ID** -- Valid per the interface but likely a bug. Implementations should not reject them; validation belongs at a higher layer.
 

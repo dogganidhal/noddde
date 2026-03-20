@@ -98,6 +98,75 @@ describe("InMemoryEventSourcedAggregatePersistence", () => {
     const loaded = await persistence.load("BankAccount", "acc-1");
     expect(loaded).toHaveLength(1);
   });
+
+  it("loadAfterVersion returns events after the given version", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+
+    await persistence.save(
+      "BankAccount",
+      "acc-1",
+      [
+        { name: "AccountCreated", payload: { id: "acc-1" } },
+        { name: "DepositMade", payload: { amount: 50 } },
+        { name: "DepositMade", payload: { amount: 75 } },
+      ],
+      0,
+    );
+
+    const events = await persistence.loadAfterVersion(
+      "BankAccount",
+      "acc-1",
+      1,
+    );
+
+    expect(events).toHaveLength(2);
+    expect(events[0]).toEqual({ name: "DepositMade", payload: { amount: 50 } });
+    expect(events[1]).toEqual({
+      name: "DepositMade",
+      payload: { amount: 75 },
+    });
+  });
+
+  it("loadAfterVersion returns all events when afterVersion is 0", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+
+    await persistence.save(
+      "BankAccount",
+      "acc-1",
+      [
+        { name: "AccountCreated", payload: { id: "acc-1" } },
+        { name: "DepositMade", payload: { amount: 50 } },
+      ],
+      0,
+    );
+
+    const events = await persistence.loadAfterVersion(
+      "BankAccount",
+      "acc-1",
+      0,
+    );
+
+    expect(events).toHaveLength(2);
+  });
+
+  it("loadAfterVersion returns empty array when afterVersion >= stream length", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+
+    await persistence.save(
+      "BankAccount",
+      "acc-1",
+      [{ name: "AccountCreated", payload: { id: "acc-1" } }],
+      0,
+    );
+
+    const events = await persistence.loadAfterVersion(
+      "BankAccount",
+      "acc-1",
+      5,
+    );
+
+    expect(events).toEqual([]);
+  });
 });
 
 describe("InMemoryStateStoredAggregatePersistence", () => {

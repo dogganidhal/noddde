@@ -11,6 +11,7 @@ import type {
   EventMetadata,
   EventSourcedAggregatePersistence,
   Infrastructure,
+  PartialEventLoad,
   PersistenceConfiguration,
   Projection,
   Query,
@@ -18,6 +19,9 @@ import type {
   QueryResult,
   Saga,
   SagaPersistence,
+  Snapshot,
+  SnapshotStore,
+  SnapshotStrategy,
   StandaloneCommandHandler,
   StateStoredAggregatePersistence,
   UnitOfWork,
@@ -189,6 +193,22 @@ export type DomainConfiguration<
      */
     sagaPersistence?: () => SagaPersistence | Promise<SagaPersistence>;
     /**
+     * Factory for the snapshot store. When configured alongside
+     * `snapshotStrategy`, the domain engine saves periodic aggregate state
+     * snapshots to avoid replaying the full event stream on every command.
+     *
+     * Only meaningful for event-sourced persistence.
+     */
+    snapshotStore?: () => SnapshotStore | Promise<SnapshotStore>;
+    /**
+     * Strategy that decides when to take a snapshot after processing a
+     * command. Called after each successful event-sourced command dispatch.
+     * Requires `snapshotStore` to be configured.
+     *
+     * @see {@link everyNEvents} for a built-in strategy factory.
+     */
+    snapshotStrategy?: SnapshotStrategy;
+    /**
      * Factory for custom infrastructure dependencies (repositories,
      * clocks, API clients, etc.).
      */
@@ -246,6 +266,8 @@ export class Domain<
   private _infrastructure!: TInfrastructure & CQRSInfrastructure;
   private _persistence!: PersistenceConfiguration;
   private _sagaPersistence?: SagaPersistence;
+  private _snapshotStore?: SnapshotStore;
+  private _snapshotStrategy?: SnapshotStrategy;
   private _unitOfWorkFactory!: UnitOfWorkFactory;
   private _concurrencyStrategy!: ConcurrencyStrategy;
   private readonly _uowStorage = new AsyncLocalStorage<UnitOfWork>();
@@ -314,6 +336,12 @@ export class Domain<
     this._persistence = configuration.infrastructure.aggregatePersistence
       ? await configuration.infrastructure.aggregatePersistence()
       : new InMemoryEventSourcedAggregatePersistence();
+
+    // Step 4.5: Resolve snapshot store and strategy
+    if (configuration.infrastructure.snapshotStore) {
+      this._snapshotStore = await configuration.infrastructure.snapshotStore();
+    }
+    this._snapshotStrategy = configuration.infrastructure.snapshotStrategy;
 
     // Step 5: Resolve saga persistence (only when processModel is configured)
     if (configuration.processModel) {
@@ -585,14 +613,23 @@ export class Domain<
     const existingUow = this._uowStorage.getStore();
     const ownsUow = !existingUow;
 
-    const runLifecycle = (uow: UnitOfWork) =>
-      this.executeCommandLifecycle(
+    const snapshotResult: {
+      value: {
+        aggregateName: string;
+        aggregateId: string;
+        snapshot: Snapshot;
+      } | null;
+    } = { value: null };
+
+    const runLifecycle = async (uow: UnitOfWork) => {
+      snapshotResult.value = await this.executeCommandLifecycle(
         aggregateName,
         aggregate,
         command,
         persistence,
         uow,
       );
+    };
 
     if (ownsUow) {
       // Implicit UoW — strategy wraps the full attempt (UoW create + commit)
@@ -614,6 +651,20 @@ export class Domain<
           }
         },
       );
+
+      // Save snapshot after successful commit (best-effort)
+      if (snapshotResult.value && this._snapshotStore) {
+        try {
+          await this._snapshotStore.save(
+            snapshotResult.value.aggregateName,
+            snapshotResult.value.aggregateId,
+            snapshotResult.value.snapshot,
+          );
+        } catch {
+          // Best-effort: snapshot save failure does not affect the command result
+        }
+      }
+
       for (const event of events) {
         await eventBus.dispatch(event);
       }
@@ -633,6 +684,9 @@ export class Domain<
   /**
    * The core load→execute→apply→enlist→defer cycle, extracted to support
    * retry in the implicit UoW path.
+   *
+   * Returns a pending snapshot (if the snapshot strategy triggers) for the
+   * caller to save after UoW commit. Returns `null` if no snapshot is needed.
    */
   private async executeCommandLifecycle(
     aggregateName: string,
@@ -640,33 +694,73 @@ export class Domain<
     command: AggregateCommand,
     persistence: PersistenceConfiguration,
     uow: UnitOfWork,
-  ): Promise<void> {
-    // Step 1: Load
-    const loaded = await persistence.load(
-      aggregateName,
-      command.targetAggregateId,
-    );
+  ): Promise<{
+    aggregateName: string;
+    aggregateId: string;
+    snapshot: Snapshot;
+  } | null> {
+    // Step 1: Load (snapshot-aware for event-sourced persistence)
+    let snapshot: Snapshot | null = null;
+    if (this._snapshotStore) {
+      snapshot = await this._snapshotStore.load(
+        aggregateName,
+        command.targetAggregateId,
+      );
+    }
 
     let currentState: any;
     let version: number;
-    const isEventSourced = Array.isArray(loaded);
+    let isEventSourced: boolean;
 
-    if (isEventSourced) {
-      // Event-sourced: replay events to rebuild state; version = stream length
-      const events = loaded as Event[];
-      version = events.length;
+    if (snapshot) {
+      // Snapshot available — we know this is event-sourced
+      isEventSourced = true;
+      let events: Event[];
+      if ("loadAfterVersion" in persistence) {
+        // Optimized path: load only post-snapshot events
+        events = await (persistence as PartialEventLoad).loadAfterVersion(
+          aggregateName,
+          command.targetAggregateId,
+          snapshot.version,
+        );
+      } else {
+        // Fallback: load all events and slice
+        const allEvents = await persistence.load(
+          aggregateName,
+          command.targetAggregateId,
+        );
+        events = (allEvents as Event[]).slice(snapshot.version);
+      }
+      version = snapshot.version + events.length;
       currentState = events.reduce((state: any, event: Event) => {
         const applyHandler = aggregate.apply[event.name];
         return applyHandler ? applyHandler(event.payload, state) : state;
-      }, aggregate.initialState);
+      }, snapshot.state);
     } else {
-      // State-stored: load returns { state, version } | null
-      const stateResult = loaded as {
-        state: any;
-        version: number;
-      } | null;
-      version = stateResult?.version ?? 0;
-      currentState = stateResult?.state ?? aggregate.initialState;
+      // No snapshot — standard path
+      const loaded = await persistence.load(
+        aggregateName,
+        command.targetAggregateId,
+      );
+      isEventSourced = Array.isArray(loaded);
+
+      if (isEventSourced) {
+        // Event-sourced: replay events to rebuild state; version = stream length
+        const events = loaded as Event[];
+        version = events.length;
+        currentState = events.reduce((state: any, event: Event) => {
+          const applyHandler = aggregate.apply[event.name];
+          return applyHandler ? applyHandler(event.payload, state) : state;
+        }, aggregate.initialState);
+      } else {
+        // State-stored: load returns { state, version } | null
+        const stateResult = loaded as {
+          state: any;
+          version: number;
+        } | null;
+        version = stateResult?.version ?? 0;
+        currentState = stateResult?.state ?? aggregate.initialState;
+      }
     }
 
     // Step 2: Execute command handler
@@ -732,6 +826,28 @@ export class Domain<
 
     // Step 6: Defer event publishing (published after commit)
     uow.deferPublish(...enrichedEvents);
+
+    // Step 7: Evaluate snapshot strategy (if configured)
+    if (isEventSourced && this._snapshotStore && this._snapshotStrategy) {
+      const newVersion = version + newEvents.length;
+      const lastSnapshotVersion = snapshot?.version ?? 0;
+      const eventsSinceSnapshot = newVersion - lastSnapshotVersion;
+      if (
+        this._snapshotStrategy({
+          version: newVersion,
+          lastSnapshotVersion,
+          eventsSinceSnapshot,
+        })
+      ) {
+        return {
+          aggregateName,
+          aggregateId: command.targetAggregateId,
+          snapshot: { state: newState, version: newVersion },
+        };
+      }
+    }
+
+    return null;
   }
 
   /**
