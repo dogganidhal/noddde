@@ -37,9 +37,7 @@ describe("EventMetadata optional fields", () => {
   });
 
   it("should have correct types for optional fields", () => {
-    expectTypeOf<EventMetadata["userId"]>().toEqualTypeOf<
-      string | undefined
-    >();
+    expectTypeOf<EventMetadata["userId"]>().toEqualTypeOf<string | undefined>();
     expectTypeOf<EventMetadata["version"]>().toEqualTypeOf<
       number | undefined
     >();

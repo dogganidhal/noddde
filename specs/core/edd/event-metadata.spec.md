@@ -104,10 +104,18 @@ describe("EventMetadata optional fields", () => {
 
   it("should have correct types for optional fields", () => {
     expectTypeOf<EventMetadata["userId"]>().toEqualTypeOf<string | undefined>();
-    expectTypeOf<EventMetadata["version"]>().toEqualTypeOf<number | undefined>();
-    expectTypeOf<EventMetadata["aggregateName"]>().toEqualTypeOf<string | undefined>();
-    expectTypeOf<EventMetadata["aggregateId"]>().toEqualTypeOf<string | undefined>();
-    expectTypeOf<EventMetadata["sequenceNumber"]>().toEqualTypeOf<number | undefined>();
+    expectTypeOf<EventMetadata["version"]>().toEqualTypeOf<
+      number | undefined
+    >();
+    expectTypeOf<EventMetadata["aggregateName"]>().toEqualTypeOf<
+      string | undefined
+    >();
+    expectTypeOf<EventMetadata["aggregateId"]>().toEqualTypeOf<
+      string | undefined
+    >();
+    expectTypeOf<EventMetadata["sequenceNumber"]>().toEqualTypeOf<
+      number | undefined
+    >();
   });
 });
 ```
@@ -120,19 +128,35 @@ import type { EventMetadata } from "@noddde/core";
 
 describe("EventMetadata required fields", () => {
   it("should not allow omitting eventId", () => {
-    expectTypeOf<{ timestamp: string; correlationId: string; causationId: string }>().not.toMatchTypeOf<EventMetadata>();
+    expectTypeOf<{
+      timestamp: string;
+      correlationId: string;
+      causationId: string;
+    }>().not.toMatchTypeOf<EventMetadata>();
   });
 
   it("should not allow omitting timestamp", () => {
-    expectTypeOf<{ eventId: string; correlationId: string; causationId: string }>().not.toMatchTypeOf<EventMetadata>();
+    expectTypeOf<{
+      eventId: string;
+      correlationId: string;
+      causationId: string;
+    }>().not.toMatchTypeOf<EventMetadata>();
   });
 
   it("should not allow omitting correlationId", () => {
-    expectTypeOf<{ eventId: string; timestamp: string; causationId: string }>().not.toMatchTypeOf<EventMetadata>();
+    expectTypeOf<{
+      eventId: string;
+      timestamp: string;
+      causationId: string;
+    }>().not.toMatchTypeOf<EventMetadata>();
   });
 
   it("should not allow omitting causationId", () => {
-    expectTypeOf<{ eventId: string; timestamp: string; correlationId: string }>().not.toMatchTypeOf<EventMetadata>();
+    expectTypeOf<{
+      eventId: string;
+      timestamp: string;
+      correlationId: string;
+    }>().not.toMatchTypeOf<EventMetadata>();
   });
 });
 ```

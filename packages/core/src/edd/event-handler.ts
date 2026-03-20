@@ -21,7 +21,4 @@ import { Infrastructure } from "../infrastructure";
 export type EventHandler<
   TEvent extends Event,
   TInfrastructure extends Infrastructure,
-> = (
-  event: TEvent,
-  infrastructure: TInfrastructure,
-) => void | Promise<void>;
+> = (event: TEvent, infrastructure: TInfrastructure) => void | Promise<void>;

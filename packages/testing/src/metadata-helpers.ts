@@ -5,7 +5,9 @@ import type { Event, EventMetadata } from "@noddde/core";
  * Useful when you want to assert event name/payload without
  * caring about auto-generated metadata fields.
  */
-export function stripMetadata<T extends Event>(events: T[]): Omit<T, "metadata">[] {
+export function stripMetadata<T extends Event>(
+  events: T[],
+): Omit<T, "metadata">[] {
   // eslint-disable-next-line no-unused-vars
   return events.map(({ metadata, ...rest }) => rest);
 }
@@ -20,12 +22,20 @@ export function expectValidMetadata(event: Event): void {
     throw new Error(`Event "${event.name}" has no metadata`);
   }
   // eventId should be a UUID v7 (36 chars, matches UUID format)
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(metadata.eventId)) {
-    throw new Error(`Event "${event.name}" has invalid eventId: "${metadata.eventId}" (expected UUID v7)`);
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      metadata.eventId,
+    )
+  ) {
+    throw new Error(
+      `Event "${event.name}" has invalid eventId: "${metadata.eventId}" (expected UUID v7)`,
+    );
   }
   // timestamp should be valid ISO 8601
   if (isNaN(Date.parse(metadata.timestamp))) {
-    throw new Error(`Event "${event.name}" has invalid timestamp: "${metadata.timestamp}"`);
+    throw new Error(
+      `Event "${event.name}" has invalid timestamp: "${metadata.timestamp}"`,
+    );
   }
   // correlationId and causationId should be non-empty strings
   if (!metadata.correlationId) {
@@ -44,13 +54,15 @@ export function expectSameCorrelation(events: Event[]): void {
   if (events.length === 0) return;
   const firstCorrelationId = events[0]!.metadata?.correlationId;
   if (!firstCorrelationId) {
-    throw new Error(`First event "${events[0]!.name}" has no correlationId in metadata`);
+    throw new Error(
+      `First event "${events[0]!.name}" has no correlationId in metadata`,
+    );
   }
   for (let i = 1; i < events.length; i++) {
     const event = events[i]!;
     if (event.metadata?.correlationId !== firstCorrelationId) {
       throw new Error(
-        `Event "${event.name}" at index ${i} has correlationId "${event.metadata?.correlationId}" but expected "${firstCorrelationId}"`
+        `Event "${event.name}" at index ${i} has correlationId "${event.metadata?.correlationId}" but expected "${firstCorrelationId}"`,
       );
     }
   }
@@ -66,7 +78,7 @@ export function expectCausationChain(events: Event[]): void {
     const curr = events[i]!;
     if (curr.metadata?.causationId !== prev.metadata?.eventId) {
       throw new Error(
-        `Event "${curr.name}" at index ${i} has causationId "${curr.metadata?.causationId}" but expected "${prev.metadata?.eventId}" (eventId of previous event "${prev.name}")`
+        `Event "${curr.name}" at index ${i} has causationId "${curr.metadata?.causationId}" but expected "${prev.metadata?.eventId}" (eventId of previous event "${prev.name}")`,
       );
     }
   }
@@ -108,8 +120,7 @@ export function createTestMetadataFactory(
   const eventIdGen = options?.eventIdGenerator ?? (() => `evt-${++counter}`);
   const timestampGen =
     options?.timestampGenerator ?? (() => "2024-01-01T00:00:00.000Z");
-  const defaultCorrelationId =
-    options?.correlationId ?? "test-correlation-id";
+  const defaultCorrelationId = options?.correlationId ?? "test-correlation-id";
   const defaultUserId = options?.userId;
 
   // eslint-disable-next-line no-unused-vars

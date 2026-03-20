@@ -271,13 +271,13 @@ Every event dispatched through the domain is automatically enriched with an `Eve
 
 ```ts
 interface EventMetadata {
-  eventId: string;        // UUID v7 (time-ordered)
-  timestamp: string;      // ISO 8601
-  correlationId: string;  // Shared across a causal chain
-  causationId: string;    // The command or event that caused this
-  userId?: string;        // Who initiated the action
+  eventId: string; // UUID v7 (time-ordered)
+  timestamp: string; // ISO 8601
+  correlationId: string; // Shared across a causal chain
+  causationId: string; // The command or event that caused this
+  userId?: string; // Who initiated the action
   aggregateName?: string; // Which aggregate produced this event
-  aggregateId?: string;   // Which aggregate instance
+  aggregateId?: string; // Which aggregate instance
   sequenceNumber?: number; // Position in the event stream
 }
 ```
@@ -290,9 +290,11 @@ The `metadataProvider` is a function called on every command dispatch. Use it to
 const domain = await configureDomain<MyInfrastructure>({
   writeModel: { aggregates: { BankAccount } },
   readModel: { projections: {} },
-  infrastructure: { /* ... */ },
+  infrastructure: {
+    /* ... */
+  },
   metadataProvider: () => ({
-    userId: getCurrentUserId(),        // from your auth middleware
+    userId: getCurrentUserId(), // from your auth middleware
     correlationId: getRequestTraceId(), // from your HTTP context
   }),
 });

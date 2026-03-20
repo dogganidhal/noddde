@@ -176,7 +176,9 @@ describe("Event metadata", () => {
   });
 
   it("should have metadata typed as EventMetadata or undefined", () => {
-    expectTypeOf<Event["metadata"]>().toEqualTypeOf<EventMetadata | undefined>();
+    expectTypeOf<Event["metadata"]>().toEqualTypeOf<
+      EventMetadata | undefined
+    >();
   });
 });
 ```

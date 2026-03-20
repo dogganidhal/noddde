@@ -49,6 +49,7 @@ docs:
 **Breaking change from previous version**: The first parameter changed from `TEvent["payload"]` to `TEvent`. This provides consistency with projection reducers and saga event handlers, and gives handlers access to event metadata for audit/tracing.
 
 To migrate existing handlers:
+
 ```ts
 // Before:
 const handler: EventHandler<MyEvent, MyInfra> = (payload, infra) => { ... };

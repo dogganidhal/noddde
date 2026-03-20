@@ -165,7 +165,10 @@ Most tests care about _what_ happened (event name + payload), not _when_ or _by 
 import { stripMetadata } from "@noddde/testing";
 
 const { spy } = await testDomain({ aggregates: { BankAccount } });
-await domain.dispatchCommand({ name: "CreateBankAccount", targetAggregateId: "acc-1" });
+await domain.dispatchCommand({
+  name: "CreateBankAccount",
+  targetAggregateId: "acc-1",
+});
 
 expect(stripMetadata(spy.publishedEvents)).toContainEqual({
   name: "BankAccountCreated",
@@ -227,13 +230,13 @@ expect(metadata.correlationId).toBe("test-corr-id");
 
 ### Summary of Metadata Utilities
 
-| Utility                      | Purpose                                                    |
-| ---------------------------- | ---------------------------------------------------------- |
-| `stripMetadata(events)`      | Remove metadata for payload-only assertions                |
-| `expectValidMetadata(event)` | Assert metadata has valid eventId, timestamp, correlationId, causationId |
-| `expectSameCorrelation(events)` | Assert all events share the same correlationId          |
-| `expectCausationChain(events)`  | Assert events form an eventId→causationId chain         |
-| `createTestMetadataFactory()`   | Create a deterministic metadata factory for exact assertions |
+| Utility                         | Purpose                                                                  |
+| ------------------------------- | ------------------------------------------------------------------------ |
+| `stripMetadata(events)`         | Remove metadata for payload-only assertions                              |
+| `expectValidMetadata(event)`    | Assert metadata has valid eventId, timestamp, correlationId, causationId |
+| `expectSameCorrelation(events)` | Assert all events share the same correlationId                           |
+| `expectCausationChain(events)`  | Assert events form an eventId→causationId chain                          |
+| `createTestMetadataFactory()`   | Create a deterministic metadata factory for exact assertions             |
 
 ## Next Steps
 

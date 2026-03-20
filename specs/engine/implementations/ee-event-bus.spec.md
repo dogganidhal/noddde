@@ -68,12 +68,12 @@ class EventEmitterEventBus implements EventBus {
 
 This is a **breaking change** from the previous version:
 
-| Aspect | Before | After |
-|---|---|---|
-| Handler argument | `payload` only | Full `Event` object (`{ name, payload, metadata? }`) |
-| Dispatch semantics | Fire-and-forget (`emit` + resolve immediately) | Sequential await (each handler is `await`ed) |
-| Handler registration | Direct `EventEmitter.on` | `bus.on(eventName, handler)` method |
-| Error propagation | Listener errors were unhandled rejections | Handler errors propagate via `dispatch` rejection |
+| Aspect               | Before                                         | After                                                |
+| -------------------- | ---------------------------------------------- | ---------------------------------------------------- |
+| Handler argument     | `payload` only                                 | Full `Event` object (`{ name, payload, metadata? }`) |
+| Dispatch semantics   | Fire-and-forget (`emit` + resolve immediately) | Sequential await (each handler is `await`ed)         |
+| Handler registration | Direct `EventEmitter.on`                       | `bus.on(eventName, handler)` method                  |
+| Error propagation    | Listener errors were unhandled rejections      | Handler errors propagate via `dispatch` rejection    |
 
 **Migration steps for handler consumers:**
 
