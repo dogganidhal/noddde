@@ -8,18 +8,20 @@ import { Infrastructure } from "../infrastructure";
  * or trigger downstream processes.
  *
  * Unlike {@link ApplyHandler}, event handlers have access to infrastructure
- * and may perform I/O.
+ * and may perform I/O. The handler receives the full event object (including
+ * optional {@link EventMetadata}), consistent with projection reducers and
+ * saga event handlers.
  *
  * @typeParam TEvent - The event type this handler processes.
  * @typeParam TInfrastructure - The infrastructure dependencies available to the handler.
  *
- * @param event - The event payload (not the full event envelope).
+ * @param event - The full event object (name, payload, and optional metadata).
  * @param infrastructure - External dependencies (repositories, services, etc.).
  */
 export type EventHandler<
   TEvent extends Event,
   TInfrastructure extends Infrastructure,
 > = (
-  event: TEvent["payload"],
+  event: TEvent,
   infrastructure: TInfrastructure,
 ) => void | Promise<void>;

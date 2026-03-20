@@ -75,15 +75,17 @@ type DomainConfiguration<TInfrastructure extends Infrastructure> = {
     provideInfrastructure?: () => TInfrastructure | Promise<TInfrastructure>;
     cqrsInfrastructure?: (infra: TInfrastructure) => CQRSInfrastructure | Promise<CQRSInfrastructure>;
   };
+  metadataProvider?: () => MetadataContext;
 };
 ```
 
-Four top-level sections, each with a distinct responsibility:
+Five top-level sections, each with a distinct responsibility:
 
 - **`writeModel`** -- What handles commands (aggregates and standalone command handlers)
 - **`readModel`** -- What handles events and queries (projections and standalone query handlers)
 - **`processModel`** -- What coordinates cross-aggregate workflows (sagas). Optional -- omit if you have no sagas.
 - **`infrastructure`** -- How things are wired (persistence, domain infrastructure, CQRS buses). See the [Infrastructure](/docs/running/infrastructure) page for details.
+- **`metadataProvider`** -- Optional function called on every command dispatch to provide [event metadata](/docs/running/domain-configuration#event-metadata) context (userId, correlationId, etc.).
 
 ## Write Model
 
@@ -261,9 +263,63 @@ const view = domain.getProjectionView<BankAccountView>("BankAccount");
 
 Returns the current in-memory view for a named projection. The projection name is the key under which the projection was registered in `readModel.projections`. Returns `undefined` if no events have been processed by the projection yet. Useful for testing and debugging.
 
+## Event Metadata
+
+Every event dispatched through the domain is automatically enriched with an `EventMetadata` envelope containing audit, tracing, and sequencing information. Command handlers return bare `{ name, payload }` objects — the engine adds metadata before persistence and publication.
+
+### What Metadata Contains
+
+```ts
+interface EventMetadata {
+  eventId: string;        // UUID v7 (time-ordered)
+  timestamp: string;      // ISO 8601
+  correlationId: string;  // Shared across a causal chain
+  causationId: string;    // The command or event that caused this
+  userId?: string;        // Who initiated the action
+  aggregateName?: string; // Which aggregate produced this event
+  aggregateId?: string;   // Which aggregate instance
+  sequenceNumber?: number; // Position in the event stream
+}
+```
+
+### Providing Context with `metadataProvider`
+
+The `metadataProvider` is a function called on every command dispatch. Use it to inject per-request context (e.g., the authenticated user ID or a trace ID from HTTP middleware):
+
+```ts
+const domain = await configureDomain<MyInfrastructure>({
+  writeModel: { aggregates: { BankAccount } },
+  readModel: { projections: {} },
+  infrastructure: { /* ... */ },
+  metadataProvider: () => ({
+    userId: getCurrentUserId(),        // from your auth middleware
+    correlationId: getRequestTraceId(), // from your HTTP context
+  }),
+});
+```
+
+Values from the provider are merged into every event's metadata. Fields you omit are auto-generated (e.g., `correlationId` defaults to a new UUID v7).
+
+### Per-Request Override with `withMetadataContext`
+
+For one-off overrides (admin actions, migration scripts, manual fixes), use `withMetadataContext` as an escape hatch:
+
+```ts
+await domain.withMetadataContext(
+  { userId: "admin", correlationId: "manual-fix-123" },
+  () => domain.dispatchCommand(fixCommand),
+);
+```
+
+Values from `withMetadataContext` take precedence over the `metadataProvider`.
+
+### Correlation Propagation in Sagas
+
+When a saga dispatches commands in response to an event, the engine automatically propagates the triggering event's `correlationId` to all downstream events. This creates a traceable chain across aggregates without any manual wiring.
+
 ## Complete Example
 
-Here is a full domain configuration for a banking application, showing all four sections together:
+Here is a full domain configuration for a banking application, showing all sections together:
 
 ```ts
 import {

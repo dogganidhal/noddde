@@ -2,6 +2,7 @@
 import type { DataSource, EntityManager } from "typeorm";
 import type {
   Event,
+  EventMetadata,
   EventSourcedAggregatePersistence,
   StateStoredAggregatePersistence,
   SagaPersistence,
@@ -47,6 +48,7 @@ export class TypeORMEventSourcedAggregatePersistence
       entity.sequenceNumber = expectedVersion + index + 1;
       entity.eventName = event.name;
       entity.payload = JSON.stringify(event.payload);
+      entity.metadata = event.metadata ? JSON.stringify(event.metadata) : null;
       return entity;
     });
 
@@ -78,6 +80,9 @@ export class TypeORMEventSourcedAggregatePersistence
     return rows.map((row) => ({
       name: row.eventName,
       payload: JSON.parse(row.payload),
+      ...(row.metadata
+        ? { metadata: JSON.parse(row.metadata) as EventMetadata }
+        : {}),
     }));
   }
 }

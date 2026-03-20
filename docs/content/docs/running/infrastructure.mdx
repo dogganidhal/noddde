@@ -270,6 +270,27 @@ const domain = await configureDomain<BankingInfrastructure>({
 const { commandBus, eventBus, queryBus } = domain.infrastructure;
 ```
 
+## Metadata Context
+
+The `Domain` class provides a `withMetadataContext` method for injecting per-request metadata into events. This is an imperative escape hatch that overrides values from the declarative [`metadataProvider`](/docs/running/domain-configuration#providing-context-with-metadataprovider) configured at domain startup.
+
+```ts
+await domain.withMetadataContext(
+  { userId: "admin", correlationId: "manual-fix-123" },
+  () => domain.dispatchCommand(fixCommand),
+);
+```
+
+All events produced during the callback will carry the provided `userId` and `correlationId` in their [metadata envelope](/docs/running/domain-configuration#event-metadata). Values from `withMetadataContext` take precedence over the `metadataProvider`.
+
+This is useful for:
+
+- **Admin/migration scripts** where there is no HTTP request context
+- **Manual fixes** that need explicit audit attribution
+- **Testing** when you need deterministic metadata values
+
+For the declarative approach (recommended for most use cases), see the [`metadataProvider` configuration](/docs/running/domain-configuration#providing-context-with-metadataprovider).
+
 ## Next Steps
 
 - [Domain Configuration](/docs/running/domain-configuration) -- The full configuration structure

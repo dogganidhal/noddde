@@ -81,10 +81,13 @@ describe("Command dispatch lifecycle (event-sourced)", () => {
     // Verify events were persisted
     const events = await persistence.load("Counter", "counter-1");
     expect(events).toHaveLength(1);
-    expect(events[0]).toEqual({
-      name: "Incremented",
-      payload: { amount: 5 },
-    });
+    expect(events[0]).toEqual(
+      expect.objectContaining({
+        name: "Incremented",
+        payload: { amount: 5 },
+      }),
+    );
+    expect(events[0]?.metadata).toBeDefined();
   });
 
   it("should reconstruct state from prior events on subsequent commands", async () => {
@@ -147,10 +150,12 @@ describe("Command dispatch lifecycle (event-sourced)", () => {
       payload: { amount: 1 },
     });
 
-    expect(dispatchSpy).toHaveBeenCalledWith({
-      name: "Incremented",
-      payload: { amount: 1 },
-    });
+    expect(dispatchSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "Incremented",
+        payload: { amount: 1 },
+      }),
+    );
   });
 });
 

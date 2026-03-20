@@ -55,10 +55,11 @@ Commands that do not target an aggregate (for example, commands handled by stand
 interface Event {
   name: string;
   payload: any;
+  metadata?: EventMetadata;
 }
 ```
 
-Notice that `payload` is required on events (not optional as on commands). Every event must carry data describing what happened. Even if the payload is minimal, it must be explicit.
+Events have a required `payload` (unlike commands where it is optional) — every event must carry data describing what happened. The optional `metadata` field is an `EventMetadata` envelope that the engine auto-populates at dispatch time with audit, tracing, and sequencing information (event ID, timestamp, correlation/causation IDs, etc.). Command handlers never produce metadata — they return bare `{ name, payload }` objects, and the framework enriches them before persistence and publication.
 
 ### The Query Interface
 

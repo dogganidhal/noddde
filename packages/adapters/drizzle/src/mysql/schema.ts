@@ -22,6 +22,7 @@ export const events = mysqlTable(
     sequenceNumber: int("sequence_number").notNull(),
     eventName: varchar("event_name", { length: 255 }).notNull(),
     payload: json("payload").notNull(),
+    metadata: json("metadata"),
   },
   (table) => ({
     streamVersionIdx: uniqueIndex("noddde_events_stream_version_idx").on(

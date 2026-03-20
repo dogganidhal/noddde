@@ -47,6 +47,7 @@ export class DrizzleEventSourcedAggregatePersistence
           sequenceNumber: expectedVersion + index + 1,
           eventName: event.name,
           payload: JSON.stringify(event.payload),
+          metadata: JSON.stringify(event.metadata ?? null),
         })),
       );
     } catch (error: any) {
@@ -84,10 +85,22 @@ export class DrizzleEventSourcedAggregatePersistence
       )
       .orderBy(asc(eventsTable.sequenceNumber));
 
-    return rows.map((row: any) => ({
-      name: row.eventName,
-      payload: row.payload,
-    }));
+    return rows.map((row: any) => {
+      const event: Event = {
+        name: row.eventName,
+        payload: row.payload,
+      };
+      if (row.metadata != null) {
+        const meta =
+          typeof row.metadata === "string"
+            ? JSON.parse(row.metadata)
+            : row.metadata;
+        if (meta != null) {
+          event.metadata = meta;
+        }
+      }
+      return event;
+    });
   }
 }
 

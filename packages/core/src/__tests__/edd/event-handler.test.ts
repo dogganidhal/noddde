@@ -19,11 +19,8 @@ describe("EventHandler", () => {
 
   type Handler = EventHandler<OrderPlacedEvent, MyInfrastructure>;
 
-  it("should accept payload as first parameter", () => {
-    expectTypeOf<Parameters<Handler>[0]>().toEqualTypeOf<{
-      orderId: string;
-      total: number;
-    }>();
+  it("should accept the full event as first parameter", () => {
+    expectTypeOf<Parameters<Handler>[0]>().toEqualTypeOf<OrderPlacedEvent>();
   });
 
   it("should accept infrastructure as second parameter", () => {
@@ -37,7 +34,7 @@ describe("EventHandler", () => {
 
 describe("EventHandler sync/async", () => {
   it("should allow synchronous handler", () => {
-    const handler: EventHandler<Event, Infrastructure> = (_payload, _infra) => {
+    const handler: EventHandler<Event, Infrastructure> = (_event, _infra) => {
       // no-op, sync
     };
     expect(handler).toBeDefined();
@@ -45,7 +42,7 @@ describe("EventHandler sync/async", () => {
 
   it("should allow asynchronous handler", () => {
     const handler: EventHandler<Event, Infrastructure> = async (
-      _payload,
+      _event,
       _infra,
     ) => {
       // no-op, async

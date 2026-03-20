@@ -4,7 +4,7 @@ module: edd/event
 source_file: packages/core/src/edd/event.ts
 status: implemented
 exports: [Event, DefineEvents]
-depends_on: []
+depends_on: [edd/event-metadata]
 docs:
   - events/defining-events.mdx
   - events/event-sourcing.mdx
@@ -16,20 +16,23 @@ docs:
 
 ## Type Contract
 
-- **`Event`** is an interface with two fields:
+- **`Event`** is an interface with three fields:
   - `name: string` -- the discriminant used for type narrowing.
   - `payload: any` -- the data describing what happened.
+  - `metadata?: EventMetadata` -- optional metadata envelope populated by the framework at dispatch time.
 - **`DefineEvents<TPayloads>`** accepts a `Record<string, any>` and produces a discriminated union where each member has:
   - `name` narrowed to the literal key `K`.
   - `payload` typed as `TPayloads[K]`.
-- The resulting union is a subtype of `Event` (each member satisfies `{ name: string; payload: any }`).
+- The resulting union is a subtype of `Event` (each member satisfies `{ name: string; payload: any }` and metadata is optional, so omission is valid).
 
 ## Behavioral Requirements
 
-- `Event` is a structural interface; any object with `name: string` and `payload: any` satisfies it.
+- `Event` is a structural interface; any object with `name: string` and `payload: any` satisfies it (metadata is optional).
+- The `metadata` field is optional (`?`), so events created without metadata (e.g., by command handlers) are valid `Event` instances.
 - `DefineEvents` maps over all keys of `TPayloads` that are strings (`keyof TPayloads & string`), producing one object type per key, then collapses them into a union via indexed access.
 - Each union member's `name` is a string literal, enabling exhaustive `switch`/`if` narrowing.
 - `payload` types are preserved exactly as declared in the input map.
+- `DefineEvents` output does not include `metadata` in its generated type — the field is inherited from the `Event` base interface and is structurally compatible because it is optional.
 
 ## Invariants
 
@@ -51,6 +54,8 @@ docs:
 
 - `Event` is the base constraint for `ApplyHandler`, `EventHandler`, `EventBus.dispatch`, and all aggregate/projection/saga type bundles.
 - `DefineEvents` is the primary way users define their event unions, which then flow into `AggregateTypes["events"]`, `ProjectionTypes["events"]`, and `SagaTypes["events"]`.
+- `EventMetadata` is imported from `edd/event-metadata` and referenced as the type of the optional `metadata` field.
+- The engine's `Domain` class populates the `metadata` field during command dispatch — events enter persistence and the event bus with metadata attached.
 
 ## Test Scenarios
 
@@ -140,6 +145,53 @@ describe("DefineEvents with empty record", () => {
 
   it("should produce never", () => {
     expectTypeOf<NoEvents>().toBeNever();
+  });
+});
+```
+
+### Event accepts optional metadata
+
+```ts
+import { describe, it, expectTypeOf } from "vitest";
+import type { Event, EventMetadata } from "@noddde/core";
+
+describe("Event metadata", () => {
+  it("should accept an event without metadata", () => {
+    const event: Event = { name: "OrderPlaced", payload: { orderId: "123" } };
+    expectTypeOf(event).toMatchTypeOf<Event>();
+  });
+
+  it("should accept an event with metadata", () => {
+    const event: Event = {
+      name: "OrderPlaced",
+      payload: { orderId: "123" },
+      metadata: {
+        eventId: "0190a6e0-0000-7000-8000-000000000001",
+        timestamp: "2024-01-01T00:00:00.000Z",
+        correlationId: "corr-1",
+        causationId: "cmd-1",
+      },
+    };
+    expectTypeOf(event).toMatchTypeOf<Event>();
+  });
+
+  it("should have metadata typed as EventMetadata or undefined", () => {
+    expectTypeOf<Event["metadata"]>().toEqualTypeOf<EventMetadata | undefined>();
+  });
+});
+```
+
+### DefineEvents output is assignable to Event with metadata
+
+```ts
+import { describe, it, expectTypeOf } from "vitest";
+import type { DefineEvents, Event } from "@noddde/core";
+
+describe("DefineEvents assignability with metadata", () => {
+  type MyEvent = DefineEvents<{ Created: { id: string } }>;
+
+  it("should be assignable to Event (metadata is optional)", () => {
+    expectTypeOf<MyEvent>().toMatchTypeOf<Event>();
   });
 });
 ```

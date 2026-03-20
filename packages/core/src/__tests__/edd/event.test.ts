@@ -1,5 +1,5 @@
 import { describe, it, expectTypeOf } from "vitest";
-import type { Event, DefineEvents } from "@noddde/core";
+import type { Event, DefineEvents, EventMetadata } from "@noddde/core";
 
 describe("Event & DefineEvents", () => {
   // ### Event interface accepts any conforming object
@@ -65,6 +65,43 @@ describe("Event & DefineEvents", () => {
 
     it("should produce never", () => {
       expectTypeOf<NoEvents>().toBeNever();
+    });
+  });
+
+  // ### Event accepts optional metadata
+  describe("Event metadata", () => {
+    it("should accept an event without metadata", () => {
+      const event: Event = { name: "OrderPlaced", payload: { orderId: "123" } };
+      expectTypeOf(event).toMatchTypeOf<Event>();
+    });
+
+    it("should accept an event with metadata", () => {
+      const event: Event = {
+        name: "OrderPlaced",
+        payload: { orderId: "123" },
+        metadata: {
+          eventId: "0190a6e0-0000-7000-8000-000000000001",
+          timestamp: "2024-01-01T00:00:00.000Z",
+          correlationId: "corr-1",
+          causationId: "cmd-1",
+        },
+      };
+      expectTypeOf(event).toMatchTypeOf<Event>();
+    });
+
+    it("should have metadata typed as EventMetadata or undefined", () => {
+      expectTypeOf<Event["metadata"]>().toEqualTypeOf<
+        EventMetadata | undefined
+      >();
+    });
+  });
+
+  // ### DefineEvents output is assignable to Event with metadata
+  describe("DefineEvents assignability with metadata", () => {
+    type MyEvent = DefineEvents<{ Created: { id: string } }>;
+
+    it("should be assignable to Event (metadata is optional)", () => {
+      expectTypeOf<MyEvent>().toMatchTypeOf<Event>();
     });
   });
 });
