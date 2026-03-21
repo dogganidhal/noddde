@@ -1,5 +1,5 @@
 import { describe, it, expectTypeOf } from "vitest";
-import type { EventMetadata } from "@noddde/core";
+import type { EventMetadata, ID } from "@noddde/core";
 
 describe("EventMetadata", () => {
   it("should accept an object with only required fields", () => {
@@ -37,7 +37,7 @@ describe("EventMetadata optional fields", () => {
   });
 
   it("should have correct types for optional fields", () => {
-    expectTypeOf<EventMetadata["userId"]>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<EventMetadata["userId"]>().toEqualTypeOf<ID | undefined>();
     expectTypeOf<EventMetadata["version"]>().toEqualTypeOf<
       number | undefined
     >();
@@ -45,7 +45,7 @@ describe("EventMetadata optional fields", () => {
       string | undefined
     >();
     expectTypeOf<EventMetadata["aggregateId"]>().toEqualTypeOf<
-      string | undefined
+      ID | undefined
     >();
     expectTypeOf<EventMetadata["sequenceNumber"]>().toEqualTypeOf<
       number | undefined

@@ -1,4 +1,5 @@
 /* eslint-disable no-unused-vars */
+import type { ID } from "../id";
 import { Event } from "../edd/event";
 import { ApplyHandler } from "../edd/event-sourcing-handler";
 import { AggregateCommand } from "../cqrs/command/command";
@@ -25,7 +26,7 @@ export type AggregateTypes = {
   /** The discriminated union of all events this aggregate can emit. */
   events: Event;
   /** The discriminated union of all commands this aggregate can handle. */
-  commands: AggregateCommand;
+  commands: AggregateCommand<ID>;
   /** The external dependencies available to command handlers. */
   infrastructure: Infrastructure;
 };
@@ -48,7 +49,7 @@ export type AggregateTypes = {
  * @returns One or more events, optionally wrapped in a `Promise`.
  */
 export type CommandHandler<
-  TCommand extends AggregateCommand,
+  TCommand extends AggregateCommand<ID>,
   TState,
   TEvents extends Event,
   TInfrastructure extends Infrastructure = Infrastructure,

@@ -1,5 +1,5 @@
 /* eslint-disable no-unused-vars */
-import type { AggregateLocker, Event } from "@noddde/core";
+import type { AggregateLocker, Event, ID } from "@noddde/core";
 import { ConcurrencyError } from "@noddde/core";
 
 /**
@@ -22,7 +22,7 @@ export interface ConcurrencyStrategy {
    */
   execute(
     aggregateName: string,
-    aggregateId: string,
+    aggregateId: ID,
     attempt: () => Promise<Event[]>,
   ): Promise<Event[]>;
 }
@@ -84,7 +84,7 @@ export class PessimisticConcurrencyStrategy implements ConcurrencyStrategy {
 
   async execute(
     aggregateName: string,
-    aggregateId: string,
+    aggregateId: ID,
     attempt: () => Promise<Event[]>,
   ): Promise<Event[]> {
     await this.locker.acquire(aggregateName, aggregateId, this.timeoutMs);

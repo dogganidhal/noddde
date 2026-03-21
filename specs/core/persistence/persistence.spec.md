@@ -18,7 +18,7 @@ exports:
     PartialEventLoad,
     everyNEvents,
   ]
-depends_on: [edd/event]
+depends_on: [id, edd/event]
 docs:
   - domain-configuration/persistence.mdx
 ---
@@ -33,24 +33,24 @@ docs:
 interface StateStoredAggregatePersistence {
   save(
     aggregateName: string,
-    aggregateId: string,
+    aggregateId: ID,
     state: any,
     expectedVersion: number,
   ): Promise<void>;
   load(
     aggregateName: string,
-    aggregateId: string,
+    aggregateId: ID,
   ): Promise<{ state: any; version: number } | null>;
 }
 
 interface EventSourcedAggregatePersistence {
   save(
     aggregateName: string,
-    aggregateId: string,
+    aggregateId: ID,
     events: Event[],
     expectedVersion: number,
   ): Promise<void>;
-  load(aggregateName: string, aggregateId: string): Promise<Event[]>;
+  load(aggregateName: string, aggregateId: ID): Promise<Event[]>;
 }
 
 type PersistenceConfiguration =
@@ -58,20 +58,20 @@ type PersistenceConfiguration =
   | EventSourcedAggregatePersistence;
 
 interface SagaPersistence {
-  save(sagaName: string, sagaId: string, state: any): Promise<void>;
-  load(sagaName: string, sagaId: string): Promise<any | undefined | null>;
+  save(sagaName: string, sagaId: ID, state: any): Promise<void>;
+  load(sagaName: string, sagaId: ID): Promise<any | undefined | null>;
 }
 
 class ConcurrencyError extends Error {
   readonly name: "ConcurrencyError";
   readonly aggregateName: string;
-  readonly aggregateId: string;
+  readonly aggregateId: ID;
   readonly expectedVersion: number;
   readonly actualVersion: number;
 
   constructor(
     aggregateName: string,
-    aggregateId: string,
+    aggregateId: ID,
     expectedVersion: number,
     actualVersion: number,
   );
@@ -80,19 +80,19 @@ class ConcurrencyError extends Error {
 interface AggregateLocker {
   acquire(
     aggregateName: string,
-    aggregateId: string,
+    aggregateId: ID,
     timeoutMs?: number,
   ): Promise<void>;
-  release(aggregateName: string, aggregateId: string): Promise<void>;
+  release(aggregateName: string, aggregateId: ID): Promise<void>;
 }
 
 class LockTimeoutError extends Error {
   readonly name: "LockTimeoutError";
   readonly aggregateName: string;
-  readonly aggregateId: string;
+  readonly aggregateId: ID;
   readonly timeoutMs: number;
 
-  constructor(aggregateName: string, aggregateId: string, timeoutMs: number);
+  constructor(aggregateName: string, aggregateId: ID, timeoutMs: number);
 }
 
 function fnv1a64(key: string): bigint;

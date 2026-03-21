@@ -17,6 +17,7 @@ exports:
   ]
 depends_on:
   [
+    id,
     edd/event,
     edd/event-sourcing-handler,
     cqrs/command/command,
@@ -40,14 +41,14 @@ docs:
 
   - `state: any` -- the aggregate state shape.
   - `events: Event` -- discriminated union of events the aggregate can emit.
-  - `commands: AggregateCommand` -- discriminated union of commands the aggregate handles.
+  - `commands: AggregateCommand<ID>` -- discriminated union of commands the aggregate handles. Uses `AggregateCommand<ID>` as the base constraint to support any ID type.
   - `infrastructure: Infrastructure` -- external dependencies for command handlers.
 
 - **`CommandHandler<TCommand, TState, TEvents, TInfrastructure>`** is a function type:
 
   - Parameters: `(command: TCommand, state: TState, infrastructure: TInfrastructure)`.
   - Return: `TEvents | TEvents[] | Promise<TEvents | TEvents[]>`.
-  - `TCommand extends AggregateCommand`, `TEvents extends Event`, `TInfrastructure extends Infrastructure` (defaults to `Infrastructure`).
+  - `TCommand extends AggregateCommand<ID>`, `TEvents extends Event`, `TInfrastructure extends Infrastructure` (defaults to `Infrastructure`).
 
 - **`Aggregate<T extends AggregateTypes>`** is an interface with three fields:
 
@@ -348,6 +349,34 @@ describe("Infer utilities", () => {
 
   it("should infer aggregate ID from types bundle", () => {
     expectTypeOf<InferAggregateID<MyTypes>>().toBeString();
+  });
+});
+```
+
+### InferAggregateID with number ID type
+
+```ts
+import { describe, it, expectTypeOf } from "vitest";
+import type {
+  DefineEvents,
+  DefineCommands,
+  Infrastructure,
+  InferAggregateID,
+} from "@noddde/core";
+
+describe("InferAggregateID with number ID", () => {
+  type MyEvent = DefineEvents<{ Created: { id: number } }>;
+  type MyCommand = DefineCommands<{ Create: { id: number } }, number>;
+
+  type NumericIdTypes = {
+    state: {};
+    events: MyEvent;
+    commands: MyCommand;
+    infrastructure: Infrastructure;
+  };
+
+  it("should infer number as the aggregate ID type", () => {
+    expectTypeOf<InferAggregateID<NumericIdTypes>>().toBeNumber();
   });
 });
 ```

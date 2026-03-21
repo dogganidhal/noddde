@@ -298,7 +298,7 @@ Inside each association function, `event` is narrowed to the specific event type
 The association map requires an entry for **every event** in the saga's event union. If you add an event to the `events` type but forget to add an association, TypeScript will report a compile error. This is enforced by the mapped type:
 
 ```ts
-type SagaAssociationMap<T extends SagaTypes, TSagaId = string> = {
+type SagaAssociationMap<T extends SagaTypes, TSagaId extends ID = string> = {
   [K in T["events"]["name"]]: (
     event: Extract<T["events"], { name: K }>,
   ) => TSagaId;

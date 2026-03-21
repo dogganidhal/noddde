@@ -1,4 +1,5 @@
 /* eslint-disable no-unused-vars */
+import type { ID } from "../id";
 import { Event } from "../edd/event";
 import { Command } from "../cqrs/command/command";
 import { Infrastructure, CQRSInfrastructure } from "../infrastructure";
@@ -116,7 +117,7 @@ type SagaEventHandlerMap<T extends SagaTypes> = {
  * carry a saga ID natively, the association must be user-defined per
  * event type.
  */
-type SagaAssociationMap<T extends SagaTypes, TSagaId = string> = {
+type SagaAssociationMap<T extends SagaTypes, TSagaId extends ID = string> = {
   [K in T["events"]["name"]]: (
     event: Extract<T["events"], { name: K }>,
   ) => TSagaId;
@@ -132,9 +133,12 @@ type SagaAssociationMap<T extends SagaTypes, TSagaId = string> = {
  * Use {@link defineSaga} to create a saga with full type inference.
  *
  * @typeParam T - The {@link SagaTypes} bundle for this saga.
- * @typeParam TSagaId - The saga instance identifier type (defaults to `string`).
+ * @typeParam TSagaId - The saga instance identifier type. Bounded by {@link ID}, defaults to `string`.
  */
-export interface Saga<T extends SagaTypes = SagaTypes, TSagaId = string> {
+export interface Saga<
+  T extends SagaTypes = SagaTypes,
+  TSagaId extends ID = string,
+> {
   /**
    * The zero-value state used when a saga instance is first created
    * (when a `startedBy` event arrives with no existing saga instance).
@@ -170,7 +174,7 @@ export interface Saga<T extends SagaTypes = SagaTypes, TSagaId = string> {
  * recommended way to define sagas.
  *
  * @typeParam T - Inferred {@link SagaTypes} bundle.
- * @typeParam TSagaId - The saga instance identifier type (defaults to `string`).
+ * @typeParam TSagaId - The saga instance identifier type. Bounded by {@link ID}, defaults to `string`.
  * @param config - The saga configuration (initialState, startedBy,
  *   associations, handlers).
  * @returns The same configuration object, fully typed.
@@ -199,7 +203,7 @@ export interface Saga<T extends SagaTypes = SagaTypes, TSagaId = string> {
  * });
  * ```
  */
-export function defineSaga<T extends SagaTypes, TSagaId = string>(
+export function defineSaga<T extends SagaTypes, TSagaId extends ID = string>(
   config: Saga<T, TSagaId>,
 ): Saga<T, TSagaId> {
   return config;

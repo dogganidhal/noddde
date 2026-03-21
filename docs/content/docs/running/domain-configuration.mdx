@@ -279,9 +279,9 @@ interface EventMetadata {
   timestamp: string; // ISO 8601
   correlationId: string; // Shared across a causal chain
   causationId: string; // The command or event that caused this
-  userId?: string; // Who initiated the action
+  userId?: ID; // Who initiated the action (string, number, or bigint)
   aggregateName?: string; // Which aggregate produced this event
-  aggregateId?: string; // Which aggregate instance
+  aggregateId?: ID; // Which aggregate instance
   sequenceNumber?: number; // Position in the event stream
 }
 ```

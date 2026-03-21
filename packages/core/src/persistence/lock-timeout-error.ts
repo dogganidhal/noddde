@@ -17,12 +17,14 @@
  * }
  * ```
  */
+import type { ID } from "../id";
+
 export class LockTimeoutError extends Error {
   public override readonly name = "LockTimeoutError";
 
   constructor(
     public readonly aggregateName: string,
-    public readonly aggregateId: string,
+    public readonly aggregateId: ID,
     public readonly timeoutMs: number,
   ) {
     super(

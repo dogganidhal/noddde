@@ -1,4 +1,6 @@
 /* eslint-disable no-unused-vars */
+import type { ID } from "../id";
+
 /**
  * Acquires and releases exclusive locks per aggregate instance.
  * Used by the pessimistic concurrency strategy to serialize
@@ -25,7 +27,7 @@ export interface AggregateLocker {
    */
   acquire(
     aggregateName: string,
-    aggregateId: string,
+    aggregateId: ID,
     timeoutMs?: number,
   ): Promise<void>;
 
@@ -37,5 +39,5 @@ export interface AggregateLocker {
    * @param aggregateName - The aggregate type name.
    * @param aggregateId - The unique identifier of the aggregate instance.
    */
-  release(aggregateName: string, aggregateId: string): Promise<void>;
+  release(aggregateName: string, aggregateId: ID): Promise<void>;
 }

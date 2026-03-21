@@ -1,4 +1,5 @@
 /* eslint-disable no-unused-vars */
+import type { ID } from "../id";
 import type { Event } from "../edd";
 
 /**
@@ -35,7 +36,7 @@ export interface SnapshotStore {
    * @param aggregateName - The aggregate type name (used as a namespace).
    * @param aggregateId - The unique identifier of the aggregate instance.
    */
-  load(aggregateName: string, aggregateId: string): Promise<Snapshot | null>;
+  load(aggregateName: string, aggregateId: ID): Promise<Snapshot | null>;
 
   /**
    * Saves a snapshot of an aggregate's state at a given version.
@@ -47,7 +48,7 @@ export interface SnapshotStore {
    */
   save(
     aggregateName: string,
-    aggregateId: string,
+    aggregateId: ID,
     snapshot: Snapshot,
   ): Promise<void>;
 }
@@ -92,7 +93,7 @@ export interface PartialEventLoad {
    */
   loadAfterVersion(
     aggregateName: string,
-    aggregateId: string,
+    aggregateId: ID,
     afterVersion: number,
   ): Promise<Event[]>;
 }

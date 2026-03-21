@@ -1,3 +1,5 @@
+import type { ID } from "../../id";
+
 /**
  * Base interface for all commands. Commands represent an intent to perform
  * an action in the domain. They are named in the imperative mood
@@ -18,9 +20,9 @@ export interface Command {
  * with a `targetAggregateId` that the framework uses to route the command
  * to the correct aggregate and load its state.
  *
- * @typeParam TID - The type of the aggregate identifier (defaults to `string`).
+ * @typeParam TID - The type of the aggregate identifier. Bounded by {@link ID}, defaults to `string`.
  */
-export interface AggregateCommand<TID = string> extends Command {
+export interface AggregateCommand<TID extends ID = string> extends Command {
   /** Identifies which aggregate instance should handle this command. */
   targetAggregateId: TID;
 }
@@ -41,7 +43,7 @@ export type StandaloneCommand = Command;
  *
  * @typeParam TPayloads - A record mapping command names to their payload types.
  *   Use `void` for commands with no payload.
- * @typeParam TID - The type of `targetAggregateId` (defaults to `string`).
+ * @typeParam TID - The type of `targetAggregateId`. Bounded by {@link ID}, defaults to `string`.
  *
  * @example
  * ```ts
@@ -56,7 +58,7 @@ export type StandaloneCommand = Command;
  */
 export type DefineCommands<
   TPayloads extends Record<string, any>,
-  TID = string,
+  TID extends ID = string,
 > = {
   [K in keyof TPayloads & string]: TPayloads[K] extends void
     ? { name: K; targetAggregateId: TID }

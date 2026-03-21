@@ -1,6 +1,7 @@
 import type {
   Event,
   EventSourcedAggregatePersistence,
+  ID,
   PartialEventLoad,
   StateStoredAggregatePersistence,
 } from "@noddde/core";
@@ -32,10 +33,7 @@ export class InMemoryEventSourcedAggregatePersistence
    * @param aggregateId - The unique identifier of the aggregate instance.
    * @returns The event stream in insertion order, or `[]` if not found.
    */
-  public async load(
-    aggregateName: string,
-    aggregateId: string,
-  ): Promise<Event[]> {
+  public async load(aggregateName: string, aggregateId: ID): Promise<Event[]> {
     const key = `${aggregateName}:${aggregateId}`;
     return this.store.get(key) ?? [];
   }
@@ -61,7 +59,7 @@ export class InMemoryEventSourcedAggregatePersistence
    */
   public async loadAfterVersion(
     aggregateName: string,
-    aggregateId: string,
+    aggregateId: ID,
     afterVersion: number,
   ): Promise<Event[]> {
     const key = `${aggregateName}:${aggregateId}`;
@@ -71,7 +69,7 @@ export class InMemoryEventSourcedAggregatePersistence
 
   public async save(
     aggregateName: string,
-    aggregateId: string,
+    aggregateId: ID,
     events: Event[],
     expectedVersion: number,
   ): Promise<void> {
@@ -123,7 +121,7 @@ export class InMemoryStateStoredAggregatePersistence
    */
   public async load(
     aggregateName: string,
-    aggregateId: string,
+    aggregateId: ID,
   ): Promise<{ state: any; version: number } | null> {
     const key = `${aggregateName}:${aggregateId}`;
     return this.store.get(key) ?? null;
@@ -141,7 +139,7 @@ export class InMemoryStateStoredAggregatePersistence
    */
   public async save(
     aggregateName: string,
-    aggregateId: string,
+    aggregateId: ID,
     state: any,
     expectedVersion: number,
   ): Promise<void> {

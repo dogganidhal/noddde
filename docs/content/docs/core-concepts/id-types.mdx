@@ -1,0 +1,127 @@
+---
+title: ID Types
+description: How noddde supports string, number, and bigint identifiers throughout the framework using the ID type alias
+---
+
+## The `ID` Type
+
+noddde defines a single type alias that represents the set of serializable identifier types supported by the framework:
+
+```typescript
+type ID = string | number | bigint;
+```
+
+This type is the upper bound for all aggregate, saga, and entity identifier type parameters. It enables domains to use string UUIDs, numeric auto-increment IDs, or bigint snowflake IDs interchangeably.
+
+## Why a Union?
+
+Different storage backends and domain conventions use different identifier types:
+
+| Identifier style     | TypeScript type | Examples                                 |
+| -------------------- | --------------- | ---------------------------------------- |
+| UUID, ULID, slug     | `string`        | `"550e8400-e29b-41d4-a716-446655440000"` |
+| Auto-increment       | `number`        | `42`, `1001`                             |
+| Snowflake, bigserial | `bigint`        | `7199254740992n`                         |
+
+Rather than forcing all domains to use strings (and pay the conversion cost), noddde accepts all three natively. The `ID` type codifies this choice at the framework level so that persistence interfaces, metadata, error types, and generic bounds all agree on what constitutes a valid identifier.
+
+## Where `ID` Appears
+
+`ID` is used throughout the framework as the upper bound for identifier type parameters:
+
+### Commands
+
+```typescript
+interface AggregateCommand<TID extends ID = string> extends Command {
+  targetAggregateId: TID;
+}
+
+type DefineCommands<
+  TPayloads extends Record<string, any>,
+  TID extends ID = string,
+> = {
+  /* ... */
+};
+```
+
+The default is `string`, so existing code that omits the type parameter is unaffected.
+
+### Event Metadata
+
+```typescript
+interface EventMetadata {
+  eventId: string;
+  timestamp: string;
+  correlationId: string;
+  causationId: string;
+  userId?: ID;
+  aggregateName?: string;
+  aggregateId?: ID;
+  sequenceNumber?: number;
+}
+```
+
+`aggregateId` and `userId` accept any `ID` type, reflecting that the aggregate being acted upon and the user performing the action may use non-string identifiers.
+
+### Persistence Interfaces
+
+```typescript
+interface EventSourcedAggregatePersistence {
+  save(
+    aggregateName: string,
+    aggregateId: ID,
+    events: Event[],
+    expectedVersion: number,
+  ): Promise<void>;
+  load(aggregateName: string, aggregateId: ID): Promise<Event[]>;
+}
+```
+
+All persistence interfaces accept `ID` for aggregate and saga identifiers. Custom implementations should handle the full union (string, number, bigint) -- template literal coercion (`${aggregateId}`) works for all three types when building composite keys.
+
+### Sagas
+
+```typescript
+interface Saga<T extends SagaTypes, TSagaId extends ID = string> {
+  /* ... */
+}
+function defineSaga<T extends SagaTypes, TSagaId extends ID = string>(
+  definition: Saga<T, TSagaId>,
+): Saga<T, TSagaId>;
+```
+
+### Errors and Locking
+
+`ConcurrencyError`, `AggregateLocker`, and `LockTimeoutError` all use `ID` for their `aggregateId` parameters.
+
+## Branded Types
+
+Branded types extending `string`, `number`, or `bigint` satisfy `ID`:
+
+```typescript
+type UserId = string & { __brand: "UserId" };
+type AccountId = number & { __brand: "AccountId" };
+
+// Both satisfy ID -- they can be used anywhere ID is accepted
+const userId: UserId = "user-123" as UserId;
+const accountId: AccountId = 42 as AccountId;
+```
+
+This means you can use branded types for domain-specific identifier safety while remaining compatible with the framework's `ID` bound.
+
+## Defaults
+
+All generic `ID` parameters default to `string`:
+
+```typescript
+// These are equivalent:
+type MyCommands = DefineCommands<{ Create: void }>;
+type MyCommands = DefineCommands<{ Create: void }, string>;
+```
+
+Existing code that uses string identifiers requires no changes. To use a different identifier type, provide the type parameter explicitly:
+
+```typescript
+type MyCommands = DefineCommands<{ Create: void }, number>;
+// targetAggregateId is now `number`
+```

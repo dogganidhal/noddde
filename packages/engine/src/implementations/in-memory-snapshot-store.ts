@@ -1,4 +1,4 @@
-import type { Snapshot, SnapshotStore } from "@noddde/core";
+import type { ID, Snapshot, SnapshotStore } from "@noddde/core";
 
 /**
  * In-memory {@link SnapshotStore} implementation that stores aggregate
@@ -24,7 +24,7 @@ export class InMemorySnapshotStore implements SnapshotStore {
    */
   public async load(
     aggregateName: string,
-    aggregateId: string,
+    aggregateId: ID,
   ): Promise<Snapshot | null> {
     const key = `${aggregateName}:${aggregateId}`;
     return this.store.get(key) ?? null;
@@ -40,7 +40,7 @@ export class InMemorySnapshotStore implements SnapshotStore {
    */
   public async save(
     aggregateName: string,
-    aggregateId: string,
+    aggregateId: ID,
     snapshot: Snapshot,
   ): Promise<void> {
     const key = `${aggregateName}:${aggregateId}`;

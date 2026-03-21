@@ -10,6 +10,7 @@ import type {
   EventBus,
   EventMetadata,
   EventSourcedAggregatePersistence,
+  ID,
   Infrastructure,
   PartialEventLoad,
   PersistenceConfiguration,
@@ -36,7 +37,7 @@ import type { AggregateLocker } from "@noddde/core";
 export interface MetadataContext {
   correlationId?: string;
   causationId?: string;
-  userId?: string;
+  userId?: ID;
 }
 
 /**
@@ -616,7 +617,7 @@ export class Domain<
     const snapshotResult: {
       value: {
         aggregateName: string;
-        aggregateId: string;
+        aggregateId: ID;
         snapshot: Snapshot;
       } | null;
     } = { value: null };
@@ -696,7 +697,7 @@ export class Domain<
     uow: UnitOfWork,
   ): Promise<{
     aggregateName: string;
-    aggregateId: string;
+    aggregateId: ID;
     snapshot: Snapshot;
   } | null> {
     // Step 1: Load (snapshot-aware for event-sourced persistence)
