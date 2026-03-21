@@ -85,10 +85,7 @@ export class InMemoryAggregateLocker implements AggregateLocker {
    * @param aggregateName - The aggregate type name.
    * @param aggregateId - The unique identifier of the aggregate instance.
    */
-  public async release(
-    aggregateName: string,
-    aggregateId: ID,
-  ): Promise<void> {
+  public async release(aggregateName: string, aggregateId: ID): Promise<void> {
     const key = `${aggregateName}:${aggregateId}`;
     const entry = this.locks.get(key);
     if (!entry || !entry.locked) return; // idempotent
