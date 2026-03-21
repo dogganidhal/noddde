@@ -43,16 +43,19 @@ Which approach?
 ## Resolution by Option
 
 ### Option 1: Additive
+
 - Keep old exports in the type contract
 - Add new exports alongside
 - Update `exports` frontmatter to include both
 
 ### Option 2: Deprecate
+
 - Add `@deprecated` JSDoc to old types in the type contract
 - Add `## Migration` section to the spec describing what consumers need to change
 - Add `## Deprecations` to the spec frontmatter for tracking
 
 ### Option 3: Accept
+
 - List every downstream spec that needs updating
 - For each: describe the specific change needed
 - Ask developer: "Update all <N> downstream specs now, or flag for manual review?"
@@ -60,5 +63,6 @@ Which approach?
 - **Version inference**: `0.x.y` → breaking changes expected in minor; `>=1.0.0` → major version bump required
 
 ### Option 4: Abort
+
 - Revert all changes to the spec
 - Confirm to the developer

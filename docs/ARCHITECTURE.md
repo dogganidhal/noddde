@@ -7,6 +7,7 @@ A TypeScript framework for building business applications with Domain-Driven Des
 ## Target Audience
 
 Teams building event-sourced business applications in TypeScript — particularly those who value:
+
 - Compile-time correctness over runtime discovery
 - Explicit data flow over magic (decorators, reflection, DI containers)
 - Testability through pure functions
@@ -33,17 +34,17 @@ Teams building event-sourced business applications in TypeScript — particularl
 
 Detailed rationale lives in `docs/content/docs/design-decisions/`:
 
-| Decision | Summary |
-|----------|---------|
-| Why Decider | Functional pattern (initialState + decide + evolve) vs class hierarchies |
-| Why AggregateTypes | Named type bundle vs 4+ positional generics |
-| Why Commands Return Events | Direct event emission, not side effects |
-| Why DefineCommands/Events | Mapped type builders for discriminated unions |
-| Why ID Not in State | ID as aggregate coordinate, separate from payload |
-| Why Injectable Infrastructure | Function parameters vs DI containers |
-| Why Pure Apply Handlers | Deterministic replay guarantee |
-| Why Sagas Return Commands | State machines, not orchestrators |
-| Why Two Persistence Strategies | Event sourcing vs state snapshots, swappable |
+| Decision                       | Summary                                                                  |
+| ------------------------------ | ------------------------------------------------------------------------ |
+| Why Decider                    | Functional pattern (initialState + decide + evolve) vs class hierarchies |
+| Why AggregateTypes             | Named type bundle vs 4+ positional generics                              |
+| Why Commands Return Events     | Direct event emission, not side effects                                  |
+| Why DefineCommands/Events      | Mapped type builders for discriminated unions                            |
+| Why ID Not in State            | ID as aggregate coordinate, separate from payload                        |
+| Why Injectable Infrastructure  | Function parameters vs DI containers                                     |
+| Why Pure Apply Handlers        | Deterministic replay guarantee                                           |
+| Why Sagas Return Commands      | State machines, not orchestrators                                        |
+| Why Two Persistence Strategies | Event sourcing vs state snapshots, swappable                             |
 
 ## Competitive Context
 
@@ -57,6 +58,7 @@ noddde occupies a specific niche compared to alternatives:
 ## Production Readiness
 
 See `NEXT_STEPS.md` for the full gap analysis. Current state:
+
 - API surface: complete
 - In-memory runtime: complete
 - Persistence adapters: not yet (Drizzle, Prisma, TypeORM planned)
