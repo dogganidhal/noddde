@@ -43,13 +43,17 @@ export class MetadataEnricher {
     const overrideCtx = this.metadataStorage.getStore() ?? {};
     const mergedCtx = { ...providerCtx, ...overrideCtx };
 
+    // Compute correlationId once so all events in the batch share it
+    const correlationId = mergedCtx.correlationId ?? uuidv7();
+    const causationId = mergedCtx.causationId ?? causationFallback;
+
     return events.map((event, index) => ({
       ...event,
       metadata: {
         eventId: uuidv7(),
         timestamp: new Date().toISOString(),
-        correlationId: mergedCtx.correlationId ?? uuidv7(),
-        causationId: mergedCtx.causationId ?? causationFallback,
+        correlationId,
+        causationId,
         userId: mergedCtx.userId,
         aggregateName,
         aggregateId,
