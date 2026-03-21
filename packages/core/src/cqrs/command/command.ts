@@ -13,6 +13,12 @@ export interface Command {
   name: string;
   /** Optional data carried by the command. Use `void` in {@link DefineCommands} to omit. */
   payload?: any;
+  /**
+   * Optional unique identifier for idempotent command processing.
+   * When present and an {@link IdempotencyStore} is configured on the domain,
+   * the engine checks this value to skip duplicate commands.
+   */
+  commandId?: ID;
 }
 
 /**

@@ -18,6 +18,7 @@ docs:
 - **`Command`** is an interface with:
   - `name: string` -- discriminant for type narrowing.
   - `payload?: any` -- optional data carried by the command.
+  - `commandId?: ID` -- optional unique identifier for idempotent command processing. When present and an `IdempotencyStore` is configured, the domain engine checks this value to skip duplicate commands.
 - **`AggregateCommand<TID extends ID = string>`** extends `Command` with:
   - `targetAggregateId: TID` -- identifies which aggregate instance handles this command.
   - `TID` is bounded by `ID` and defaults to `string`.
@@ -28,7 +29,7 @@ docs:
 
 ## Behavioral Requirements
 
-- `Command` is structural; any `{ name: string }` satisfies it (payload is optional).
+- `Command` is structural; any `{ name: string }` satisfies it (payload and commandId are optional).
 - `AggregateCommand` adds routing information via `targetAggregateId`.
 - `StandaloneCommand` is identical to `Command` -- it is a semantic alias for clarity.
 - `DefineCommands` conditionally omits `payload` when the value type is `void`, producing a cleaner API for payload-less commands.
@@ -40,7 +41,7 @@ docs:
 - Members with `void` payload do NOT have a `payload` property at all.
 - Members with non-`void` payload always have a `payload` property.
 - `StandaloneCommand` is structurally identical to `Command`.
-- `AggregateCommand` is a strict superset of `Command`.
+- `AggregateCommand` is a strict superset of `Command` (inherits `commandId?: ID`).
 - `DefineCommands<{}>` produces `never`.
 
 ## Edge Cases
@@ -172,6 +173,34 @@ describe("DefineCommands with custom ID", () => {
   it("should use the custom ID type for targetAggregateId", () => {
     type CreateCmd = Extract<Cmd, { name: "Create" }>;
     expectTypeOf<CreateCmd["targetAggregateId"]>().toBeNumber();
+  });
+});
+```
+
+### Command accepts optional commandId
+
+```ts
+import { describe, it, expectTypeOf } from "vitest";
+import type { Command, AggregateCommand, ID } from "@noddde/core";
+
+describe("Command.commandId", () => {
+  it("should accept an optional commandId of type ID", () => {
+    const cmd: Command = { name: "DoSomething", commandId: "cmd-123" };
+    expectTypeOf(cmd.commandId).toEqualTypeOf<ID | undefined>();
+  });
+
+  it("should be inherited by AggregateCommand", () => {
+    const cmd: AggregateCommand = {
+      name: "DoSomething",
+      targetAggregateId: "agg-1",
+      commandId: "cmd-456",
+    };
+    expectTypeOf(cmd.commandId).toEqualTypeOf<ID | undefined>();
+  });
+
+  it("should be optional — commands without commandId are valid", () => {
+    const cmd: Command = { name: "DoSomething" };
+    expect(cmd.commandId).toBeUndefined();
   });
 });
 ```

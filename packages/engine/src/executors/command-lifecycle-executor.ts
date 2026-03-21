@@ -6,6 +6,7 @@ import type {
   Event,
   EventSourcedAggregatePersistence,
   ID,
+  IdempotencyStore,
   Infrastructure,
   CQRSInfrastructure,
   PartialEventLoad,
@@ -40,6 +41,7 @@ export class CommandLifecycleExecutor {
     private readonly metadataEnricher: MetadataEnricher,
     private readonly snapshotStore?: SnapshotStore,
     private readonly snapshotStrategy?: SnapshotStrategy,
+    private readonly idempotencyStore?: IdempotencyStore,
   ) {}
 
   /**
@@ -59,6 +61,16 @@ export class CommandLifecycleExecutor {
     aggregate: Aggregate<any>,
     command: AggregateCommand,
   ): Promise<void> {
+    // Idempotency check (before any other work)
+    if (command.commandId != null && this.idempotencyStore) {
+      const alreadyProcessed = await this.idempotencyStore.exists(
+        command.commandId,
+      );
+      if (alreadyProcessed) {
+        return; // Duplicate command — skip execution entirely
+      }
+    }
+
     const { persistence, infrastructure } = this;
     const eventBus = infrastructure.eventBus;
 
@@ -262,6 +274,19 @@ export class CommandLifecycleExecutor {
           newState,
           version,
         ),
+      );
+    }
+
+    // Step 5.5: Enlist idempotency record in UoW (if commandId present)
+    if (command.commandId != null && this.idempotencyStore) {
+      const idempotencyStore = this.idempotencyStore;
+      uow.enlist(() =>
+        idempotencyStore.save({
+          commandId: command.commandId!,
+          aggregateName,
+          aggregateId: command.targetAggregateId,
+          processedAt: new Date().toISOString(),
+        }),
       );
     }
 

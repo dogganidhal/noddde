@@ -20,6 +20,7 @@ depends_on:
   - cqrs/query/query
   - edd/event
   - infrastructure
+  - persistence/idempotency
 docs:
   - domain-configuration/overview.mdx
   - domain-configuration/write-model.mdx
@@ -70,6 +71,7 @@ type DomainConfiguration<
     sagaPersistence?: () => SagaPersistence | Promise<SagaPersistence>;
     snapshotStore?: () => SnapshotStore | Promise<SnapshotStore>;
     snapshotStrategy?: SnapshotStrategy;
+    idempotencyStore?: () => IdempotencyStore | Promise<IdempotencyStore>;
     provideInfrastructure?: () => Promise<TInfrastructure> | TInfrastructure;
     cqrsInfrastructure?: (
       infrastructure: TInfrastructure,
@@ -180,6 +182,21 @@ interface ConcurrencyStrategy {
 
 **Backward compatibility**: `aggregateConcurrency: { maxRetries: 3 }` (without `strategy` field) defaults to optimistic. Omitting `aggregateConcurrency` entirely defaults to optimistic with 0 retries.
 
+### Domain.dispatchCommand() -- Idempotent Command Processing
+
+When an `IdempotencyStore` is configured (via `DomainConfiguration.infrastructure.idempotencyStore`) and a command carries a `commandId`, the domain engine enforces idempotent processing:
+
+1. **Idempotency check** (before concurrency strategy, before Load) — If `idempotencyStore` is configured AND `command.commandId != null`:
+   - Call `idempotencyStore.exists(command.commandId)`.
+   - If `true`: return `command.targetAggregateId` immediately. Skip all subsequent steps — no load, no execute, no persist, no publish.
+   - If `false`: proceed with the normal command lifecycle.
+2. **Idempotency record save** (after event persistence, within the same UoW) — If `command.commandId != null` and the command is being processed (not a duplicate):
+   - Enlist `idempotencyStore.save({ commandId, aggregateName, aggregateId, processedAt })` in the UoW, after the event persistence enlistment.
+   - This ensures atomicity: the idempotency record is only persisted if event persistence succeeds.
+3. **Bypass conditions** — Idempotency is skipped entirely when:
+   - `idempotencyStore` is not configured (no store factory in `DomainConfiguration`).
+   - `command.commandId` is `undefined` or not present on the command object.
+
 ### Saga Event Handling Lifecycle
 
 When an event arrives on the event bus for a registered saga:
@@ -217,6 +234,8 @@ The `dispatchQuery` method delegates query dispatch to the underlying query bus:
 - The command bus enforces single-handler-per-command-name. If two aggregates define handlers for the same command name, registration must fail.
 - Events are published only after successful persistence. If persistence fails, events must not be published (to avoid inconsistency between the store and downstream subscribers).
 - The order of event publication matches the order of events returned by the command handler.
+- When idempotency is active, the idempotency record and event persistence MUST be in the same UoW transaction. If event persistence fails, the idempotency record must not be saved.
+- Duplicate commands (same `commandId`, already processed) must produce zero side effects: no events persisted, no state changes, no events published.
 
 ## Edge Cases
 
@@ -233,6 +252,9 @@ The `dispatchQuery` method delegates query dispatch to the underlying query bus:
 - **Circular saga-command loops** -- A saga dispatches a command that produces an event that triggers the same saga. The framework does not prevent infinite loops; the saga handler must include termination logic (e.g., checking state to avoid re-dispatching).
 - **dispatchQuery with no handler registered** -- The error from the query bus (e.g., "No handler registered for query: \<name\>") propagates unchanged through `dispatchQuery`.
 - **dispatchQuery handler throws** -- The handler error propagates through `dispatchQuery` unchanged.
+- **Command with `commandId` but no `idempotencyStore` configured** -- Processed normally, `commandId` is ignored.
+- **Command without `commandId` with `idempotencyStore` configured** -- Processed normally, idempotency check is bypassed.
+- **Concurrent duplicate commands** -- The first to commit wins. The second will either be caught by `exists()` (if the first committed before the second checks) or by persistence version check (if both proceed concurrently).
 
 ## Integration Points
 
@@ -1424,6 +1446,181 @@ describe("Domain - pessimistic concurrency", () => {
 
     const events = await persistence.load("Counter", "counter-1");
     expect(events).toHaveLength(2);
+  });
+});
+```
+
+### Idempotent command processing skips duplicate commands
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import {
+  configureDomain,
+  InMemoryCommandBus,
+  EventEmitterEventBus,
+  InMemoryQueryBus,
+  InMemoryEventSourcedAggregatePersistence,
+  InMemoryIdempotencyStore,
+} from "@noddde/engine";
+import { defineAggregate } from "@noddde/core";
+import type { Infrastructure } from "@noddde/core";
+
+const Counter = defineAggregate({
+  name: "Counter",
+  initialState: { count: 0 },
+  commands: {
+    Increment: (command, state) => ({
+      name: "Incremented" as const,
+      payload: { by: command.payload.by },
+    }),
+  },
+  apply: {
+    Incremented: (payload: { by: number }, state: { count: number }) => ({
+      count: state.count + payload.by,
+    }),
+  },
+});
+
+describe("Idempotent command processing", () => {
+  it("should skip duplicate command with same commandId", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+    const idempotencyStore = new InMemoryIdempotencyStore();
+
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: () => persistence,
+        idempotencyStore: () => idempotencyStore,
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    // First dispatch — should process normally
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "counter-1",
+      payload: { by: 5 },
+      commandId: "cmd-1",
+    });
+
+    // Second dispatch with same commandId — should be skipped
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "counter-1",
+      payload: { by: 5 },
+      commandId: "cmd-1",
+    });
+
+    const events = await persistence.load("Counter", "counter-1");
+    expect(events).toHaveLength(1);
+  });
+
+  it("should process first command with commandId and record it", async () => {
+    const idempotencyStore = new InMemoryIdempotencyStore();
+
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      infrastructure: {
+        idempotencyStore: () => idempotencyStore,
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "counter-1",
+      payload: { by: 3 },
+      commandId: "cmd-42",
+    });
+
+    expect(await idempotencyStore.exists("cmd-42")).toBe(true);
+  });
+
+  it("should bypass idempotency for commands without commandId", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+    const idempotencyStore = new InMemoryIdempotencyStore();
+
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: () => persistence,
+        idempotencyStore: () => idempotencyStore,
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    // Dispatch twice without commandId — both should process
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "counter-1",
+      payload: { by: 1 },
+    });
+
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "counter-1",
+      payload: { by: 1 },
+    });
+
+    const events = await persistence.load("Counter", "counter-1");
+    expect(events).toHaveLength(2);
+  });
+
+  it("should persist idempotency record in same UoW as events", async () => {
+    const idempotencyStore = new InMemoryIdempotencyStore();
+    const failingPersistence = {
+      async load() {
+        return [];
+      },
+      async save() {
+        throw new Error("persistence failure");
+      },
+      async loadAfterVersion() {
+        return [];
+      },
+    };
+
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: () => failingPersistence as any,
+        idempotencyStore: () => idempotencyStore,
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    // Command should fail due to persistence failure
+    await expect(
+      domain.dispatchCommand({
+        name: "Increment",
+        targetAggregateId: "counter-1",
+        payload: { by: 1 },
+        commandId: "cmd-fail",
+      }),
+    ).rejects.toThrow("persistence failure");
+
+    // Idempotency record should NOT have been saved (UoW rolled back)
+    expect(await idempotencyStore.exists("cmd-fail")).toBe(false);
   });
 });
 ```

@@ -19,6 +19,7 @@ import {
   InMemoryAggregateLocker,
   InMemoryCommandBus,
   InMemoryEventSourcedAggregatePersistence,
+  InMemoryIdempotencyStore,
   InMemoryQueryBus,
   InMemorySagaPersistence,
   InMemoryStateStoredAggregatePersistence,
@@ -1166,5 +1167,152 @@ describe("Domain - pessimistic concurrency", () => {
       .map((e) => e.payload.by)
       .sort();
     expect(incrementPayloads).toEqual([1, 2]);
+  });
+});
+
+// ============================================================
+// Idempotent command processing
+// ============================================================
+
+describe("Idempotent command processing", () => {
+  it("should skip duplicate command with same commandId", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+    const idempotencyStore = new InMemoryIdempotencyStore();
+
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: () => persistence,
+        idempotencyStore: () => idempotencyStore,
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    // First dispatch — should process normally
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "counter-1",
+      payload: { by: 5 },
+      commandId: "cmd-1",
+    });
+
+    // Second dispatch with same commandId — should be skipped
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "counter-1",
+      payload: { by: 5 },
+      commandId: "cmd-1",
+    });
+
+    const events = await persistence.load("Counter", "counter-1");
+    expect(events).toHaveLength(1);
+  });
+
+  it("should process first command with commandId and record it", async () => {
+    const idempotencyStore = new InMemoryIdempotencyStore();
+
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      infrastructure: {
+        idempotencyStore: () => idempotencyStore,
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "counter-1",
+      payload: { by: 3 },
+      commandId: "cmd-42",
+    });
+
+    expect(await idempotencyStore.exists("cmd-42")).toBe(true);
+  });
+
+  it("should bypass idempotency for commands without commandId", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+    const idempotencyStore = new InMemoryIdempotencyStore();
+
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: () => persistence,
+        idempotencyStore: () => idempotencyStore,
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    // Dispatch twice without commandId — both should process
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "counter-1",
+      payload: { by: 1 },
+    });
+
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "counter-1",
+      payload: { by: 1 },
+    });
+
+    const events = await persistence.load("Counter", "counter-1");
+    expect(events).toHaveLength(2);
+  });
+
+  it("should persist idempotency record in same UoW as events", async () => {
+    const idempotencyStore = new InMemoryIdempotencyStore();
+    const failingPersistence = {
+      async load() {
+        return [];
+      },
+      async save() {
+        throw new Error("persistence failure");
+      },
+      async loadAfterVersion() {
+        return [];
+      },
+    };
+
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: () => failingPersistence as any,
+        idempotencyStore: () => idempotencyStore,
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    // Command should fail due to persistence failure
+    await expect(
+      domain.dispatchCommand({
+        name: "Increment",
+        targetAggregateId: "counter-1",
+        payload: { by: 1 },
+        commandId: "cmd-fail",
+      }),
+    ).rejects.toThrow("persistence failure");
+
+    // Idempotency record should NOT have been saved (UoW rolled back)
+    expect(await idempotencyStore.exists("cmd-fail")).toBe(false);
   });
 });

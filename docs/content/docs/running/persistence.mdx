@@ -303,6 +303,17 @@ const persistence = new InMemoryStateStoredAggregatePersistence();
 
 Stores aggregate state snapshots in memory, keyed by `(aggregateName, aggregateId)`.
 
+### InMemoryIdempotencyStore
+
+```ts
+import { InMemoryIdempotencyStore } from "@noddde/engine";
+
+const store = new InMemoryIdempotencyStore(); // no TTL
+const storeWithTTL = new InMemoryIdempotencyStore(3600_000); // 1 hour TTL
+```
+
+Stores processed command records in memory, keyed by `commandId`. When `ttlMs` is provided, `exists()` performs lazy cleanup of expired records.
+
 ### InMemorySagaPersistence
 
 ```ts
@@ -437,11 +448,13 @@ noddde provides three ORM adapter packages that cover persistence and [unit of w
 | `InMemoryStateStoredAggregatePersistence`  | `@noddde/drizzle`, `@noddde/prisma`, or `@noddde/typeorm` |
 | `InMemorySagaPersistence`                  | `@noddde/drizzle`, `@noddde/prisma`, or `@noddde/typeorm` |
 | `InMemorySnapshotStore`                    | `@noddde/drizzle`, `@noddde/prisma`, or `@noddde/typeorm` |
+| `InMemoryIdempotencyStore`                 | Custom implementation (PostgreSQL, Redis, etc.)           |
 
 Each adapter provides a single factory function that creates all persistence implementations wired to share a database transaction context. Your aggregate and projection code remains unchanged -- only the infrastructure factories in `configureDomain` need to be updated.
 
 ## Next Steps
 
+- [Idempotent Commands](/docs/running/idempotent-commands) -- Preventing duplicate command execution
 - [ORM Adapters](/docs/running/orm-adapters) -- Production persistence using Drizzle, Prisma, or TypeORM
 - [Unit of Work](/docs/running/unit-of-work) -- Atomic persistence and deferred event publishing
 - [Infrastructure](/docs/running/infrastructure) -- The full infrastructure provider system
