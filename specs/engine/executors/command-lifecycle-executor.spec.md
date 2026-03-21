@@ -64,12 +64,14 @@ class CommandLifecycleExecutor {
 ### Load Phase
 
 1. **Event-sourced with snapshot** -- If a `SnapshotStore` is configured, call `snapshotStore.load(aggregateName, command.targetAggregateId)` first. If a snapshot is found:
+
    - If the persistence implements `PartialEventLoad` (has a `loadAfterVersion` method), call `persistence.loadAfterVersion(aggregateName, id, snapshot.version)` to load only post-snapshot events.
    - If the persistence does not implement `PartialEventLoad`, call `persistence.load(aggregateName, id)` and slice the result: `events.slice(snapshot.version)`.
    - Derive `version = snapshot.version + loadedEvents.length`.
    - Replay only the post-snapshot events through `aggregate.apply` handlers, starting from `snapshot.state`.
 
 2. **Event-sourced without snapshot** -- If no snapshot is found (or no `SnapshotStore` is configured), call `persistence.load(aggregateName, command.targetAggregateId)`. If the result is an array (event-sourced):
+
    - Derive `version = events.length`.
    - Replay all events through `aggregate.apply` handlers, starting from `aggregate.initialState`.
 
@@ -117,6 +119,7 @@ class CommandLifecycleExecutor {
 ### UoW Management
 
 11. **Implicit UoW (no existing UoW)** -- When no UoW is in the `AsyncLocalStorage`:
+
     - The concurrency strategy wraps the full attempt: UoW creation, lifecycle execution, and UoW commit.
     - On success, `uow.commit()` is called and returns the deferred events.
     - On failure, `uow.rollback()` is called (best-effort; rollback errors are swallowed).

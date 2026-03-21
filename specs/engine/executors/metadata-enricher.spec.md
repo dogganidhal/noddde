@@ -114,9 +114,7 @@ describe("MetadataEnricher", () => {
     const storage = new AsyncLocalStorage<MetadataContext>();
     const enricher = new MetadataEnricher(storage);
 
-    const events = [
-      { name: "ThingCreated", payload: { id: "t1" } },
-    ];
+    const events = [{ name: "ThingCreated", payload: { id: "t1" } }];
 
     const enriched = enricher.enrich(events, "Thing", "t1", 0, "CreateThing");
 

@@ -42,11 +42,7 @@ class SagaExecutor {
     metadataStorage: AsyncLocalStorage<MetadataContext>,
   );
 
-  execute(
-    sagaName: string,
-    saga: Saga<any, any>,
-    event: Event,
-  ): Promise<void>;
+  execute(sagaName: string, saga: Saga<any, any>, event: Event): Promise<void>;
 }
 ```
 
@@ -66,6 +62,7 @@ class SagaExecutor {
 ### Bootstrap or Resume
 
 3. **Bootstrap on startedBy event** -- If the loaded state is `null` or `undefined`:
+
    - If `event.name` is in `saga.startedBy`, use `saga.initialState` as the current state. This starts a new saga instance.
    - If `event.name` is not in `saga.startedBy`, return immediately (the saga has not been started yet and this event cannot start it).
 
@@ -81,7 +78,7 @@ class SagaExecutor {
    - `correlationId`: from `event.metadata?.correlationId`, or a new UUID v7 if not present.
    - `causationId`: from `event.metadata?.eventId`, or `event.name` if not present.
    - `userId`: from `event.metadata?.userId`.
-   This ensures all commands dispatched by the saga carry the same correlation chain as the triggering event.
+     This ensures all commands dispatched by the saga carry the same correlation chain as the triggering event.
 
 ### Create Saga-Scoped UoW
 
