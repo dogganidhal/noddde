@@ -107,7 +107,7 @@ Standalone command handlers and saga handlers receive the merged type `TInfrastr
 
 ## The Infrastructure Providers
 
-The `infrastructure` section of the [domain configuration](/docs/running/domain-configuration) provides four factory functions that create runtime dependencies.
+The `infrastructure` section of the [domain configuration](/docs/running/domain-configuration) provides factory functions that create runtime dependencies.
 
 ### provideInfrastructure
 
@@ -151,6 +151,14 @@ Provides the factory for creating `UnitOfWork` instances used for atomic command
 unitOfWorkFactory: () => () => new PostgresUnitOfWork(pool),
 ```
 
+### idempotencyStore
+
+Provides the store for tracking processed commands. When configured, commands with a `commandId` field are checked for duplicates before execution. See [Idempotent Command Processing](/docs/running/persistence#idempotent-command-processing) for details.
+
+```ts
+idempotencyStore: () => new InMemoryIdempotencyStore(),
+```
+
 ## Why Factory Functions
 
 All providers are factory functions (not raw values). This is intentional:
@@ -183,8 +191,10 @@ When `configureDomain` is called:
 1. `provideInfrastructure()` is called first to create custom infrastructure
 2. `cqrsInfrastructure(customInfra)` is called with the custom infrastructure
 3. `aggregatePersistence()` is called to set up persistence
-4. `unitOfWorkFactory()` is called to set up the unit of work factory
-5. The `Domain` instance is created with all infrastructure merged
+4. `snapshotStore()` is called to set up the snapshot store (if configured)
+5. `idempotencyStore()` is called to set up the idempotency store (if configured)
+6. `unitOfWorkFactory()` is called to set up the unit of work factory
+7. The `Domain` instance is created with all infrastructure merged
 
 The resulting `domain.infrastructure` property is `TInfrastructure & CQRSInfrastructure` -- your custom infrastructure merged with the CQRS buses.
 
