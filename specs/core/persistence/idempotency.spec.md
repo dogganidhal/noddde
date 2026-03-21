@@ -127,22 +127,30 @@ describe("IdempotencyRecord", () => {
 describe("IdempotencyStore", () => {
   it("should have exists returning Promise<boolean>", () => {
     expectTypeOf<IdempotencyStore["exists"]>().toBeFunction();
-    expectTypeOf<ReturnType<IdempotencyStore["exists"]>>().toEqualTypeOf<Promise<boolean>>();
+    expectTypeOf<ReturnType<IdempotencyStore["exists"]>>().toEqualTypeOf<
+      Promise<boolean>
+    >();
   });
 
   it("should have save returning Promise<void>", () => {
     expectTypeOf<IdempotencyStore["save"]>().toBeFunction();
-    expectTypeOf<ReturnType<IdempotencyStore["save"]>>().toEqualTypeOf<Promise<void>>();
+    expectTypeOf<ReturnType<IdempotencyStore["save"]>>().toEqualTypeOf<
+      Promise<void>
+    >();
   });
 
   it("should have remove returning Promise<void>", () => {
     expectTypeOf<IdempotencyStore["remove"]>().toBeFunction();
-    expectTypeOf<ReturnType<IdempotencyStore["remove"]>>().toEqualTypeOf<Promise<void>>();
+    expectTypeOf<ReturnType<IdempotencyStore["remove"]>>().toEqualTypeOf<
+      Promise<void>
+    >();
   });
 
   it("should have removeExpired returning Promise<void>", () => {
     expectTypeOf<IdempotencyStore["removeExpired"]>().toBeFunction();
-    expectTypeOf<ReturnType<IdempotencyStore["removeExpired"]>>().toEqualTypeOf<Promise<void>>();
+    expectTypeOf<ReturnType<IdempotencyStore["removeExpired"]>>().toEqualTypeOf<
+      Promise<void>
+    >();
   });
 });
 ```

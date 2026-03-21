@@ -121,18 +121,11 @@ class CommandLifecycleExecutor {
 
 ### Idempotent Command Processing
 
-10b. **Idempotency check** (at the top of `execute`, before any other work) -- If `idempotencyStore` is configured AND `command.commandId != null`:
-    - Call `idempotencyStore.exists(command.commandId)`.
-    - If `true`: return immediately. Skip all subsequent phases — no load, no execute, no persist, no publish.
-    - If `false`: proceed with normal lifecycle.
+10b. **Idempotency check** (at the top of `execute`, before any other work) -- If `idempotencyStore` is configured AND `command.commandId != null`: - Call `idempotencyStore.exists(command.commandId)`. - If `true`: return immediately. Skip all subsequent phases — no load, no execute, no persist, no publish. - If `false`: proceed with normal lifecycle.
 
-10c. **Idempotency record save** (after event persistence enlistment, within the same UoW) -- If `command.commandId != null` and execution proceeds:
-    - Enlist `idempotencyStore.save({ commandId, aggregateName, aggregateId, processedAt })` in the UoW after the event persistence enlistment.
-    - This ensures atomicity: if event persistence fails and the UoW rolls back, the idempotency record is not saved.
+10c. **Idempotency record save** (after event persistence enlistment, within the same UoW) -- If `command.commandId != null` and execution proceeds: - Enlist `idempotencyStore.save({ commandId, aggregateName, aggregateId, processedAt })` in the UoW after the event persistence enlistment. - This ensures atomicity: if event persistence fails and the UoW rolls back, the idempotency record is not saved.
 
-10d. **Bypass conditions** -- Idempotency is skipped entirely when:
-    - `idempotencyStore` is not provided (undefined in constructor).
-    - `command.commandId` is `undefined` or not present.
+10d. **Bypass conditions** -- Idempotency is skipped entirely when: - `idempotencyStore` is not provided (undefined in constructor). - `command.commandId` is `undefined` or not present.
 
 ### UoW Management
 
