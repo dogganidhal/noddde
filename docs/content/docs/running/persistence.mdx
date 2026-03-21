@@ -269,82 +269,6 @@ SQLite does not support advisory locks -- use `InMemoryAggregateLocker` for sing
 
 Inside an explicit `withUnitOfWork()`, optimistic `ConcurrencyError` is never retried -- it propagates immediately. Pessimistic locking still acquires/releases per command within the UoW.
 
-## Idempotent Command Processing
-
-In distributed systems, commands may be delivered more than once — network retries, at-least-once messaging, or user double-clicks can all produce duplicates. **Idempotent command processing** ensures that a command with a given `commandId` is executed at most once.
-
-### How It Works
-
-1. The caller adds a `commandId` to the command object.
-2. Before executing the command, the domain checks the `IdempotencyStore` — if the `commandId` has already been processed, the command is silently skipped.
-3. After successful execution, the `commandId` is recorded in the same unit of work as the events, ensuring atomicity.
-
-```ts
-// Dispatch with a commandId — safe to retry
-await domain.dispatchCommand({
-  name: "Transfer",
-  targetAggregateId: "acc-123",
-  payload: { amount: 100, toAccountId: "acc-456" },
-  commandId: "transfer-req-789", // idempotency key
-});
-
-// Second dispatch with the same commandId — no-op
-await domain.dispatchCommand({
-  name: "Transfer",
-  targetAggregateId: "acc-123",
-  payload: { amount: 100, toAccountId: "acc-456" },
-  commandId: "transfer-req-789", // already processed, silently skipped
-});
-```
-
-Commands without a `commandId` bypass idempotency entirely and are always processed.
-
-### Configuring Idempotency
-
-Add an `idempotencyStore` factory to the infrastructure section:
-
-```ts
-import {
-  configureDomain,
-  InMemoryIdempotencyStore,
-} from "@noddde/engine";
-
-const domain = await configureDomain<MyInfrastructure>({
-  writeModel: { aggregates: { BankAccount } },
-  readModel: { projections: {} },
-  infrastructure: {
-    idempotencyStore: () => new InMemoryIdempotencyStore(),
-  },
-});
-```
-
-The `InMemoryIdempotencyStore` accepts an optional `ttlMs` parameter for automatic cleanup of expired records in `exists()` checks:
-
-```ts
-// Records expire after 24 hours
-const store = new InMemoryIdempotencyStore(24 * 60 * 60 * 1000);
-```
-
-For manual cleanup of expired records, call `removeExpired(ttlMs)`:
-
-```ts
-// Remove records older than 1 hour
-await store.removeExpired(60 * 60 * 1000);
-```
-
-### The IdempotencyStore Interface
-
-```ts
-interface IdempotencyStore {
-  exists(commandId: ID): Promise<boolean>;
-  save(record: IdempotencyRecord): Promise<void>;
-  remove(commandId: ID): Promise<void>;
-  removeExpired(ttlMs: number): Promise<void>;
-}
-```
-
-Implement this interface for production backends (PostgreSQL, Redis, etc.) to make idempotency durable across process restarts.
-
 ## Built-in In-Memory Implementations
 
 The `@noddde/engine` package includes in-memory implementations that require no external dependencies. These are suitable for development, testing, and prototyping. Data is lost when the process exits.
@@ -530,6 +454,7 @@ Each adapter provides a single factory function that creates all persistence imp
 
 ## Next Steps
 
+- [Idempotent Commands](/docs/running/idempotent-commands) -- Preventing duplicate command execution
 - [ORM Adapters](/docs/running/orm-adapters) -- Production persistence using Drizzle, Prisma, or TypeORM
 - [Unit of Work](/docs/running/unit-of-work) -- Atomic persistence and deferred event publishing
 - [Infrastructure](/docs/running/infrastructure) -- The full infrastructure provider system

@@ -40,7 +40,7 @@ interface Command {
 }
 ```
 
-The optional `commandId` field enables [idempotent command processing](/docs/running/persistence#idempotent-command-processing) — when set and an `IdempotencyStore` is configured, duplicate commands are silently skipped.
+The optional `commandId` field enables [idempotent command processing](/docs/running/idempotent-commands) — when set and an `IdempotencyStore` is configured, duplicate commands are silently skipped.
 
 Commands that target a specific aggregate instance extend this with `targetAggregateId`, which tells the framework which aggregate instance should handle the command:
 

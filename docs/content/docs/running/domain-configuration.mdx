@@ -222,7 +222,7 @@ The four providers are:
 - **`aggregateConcurrency`** -- Concurrency strategy: optimistic (version check + retry, throws `ConcurrencyError`) or pessimistic (exclusive lock before load, throws `LockTimeoutError` on timeout). See [Concurrency Strategies](/docs/running/persistence#concurrency-control).
 - **`snapshotStore`** -- Factory function returning a `SnapshotStore` for caching event-sourced aggregate state. See [State Snapshotting](/docs/running/persistence#state-snapshotting-event-sourced-optimization).
 - **`snapshotStrategy`** -- A `SnapshotStrategy` function that decides when to take snapshots (e.g., `everyNEvents(100)`).
-- **`idempotencyStore`** -- Factory function returning an `IdempotencyStore` for deduplicating commands. When configured, commands with a `commandId` field are checked for duplicates before execution. See [Idempotent Command Processing](/docs/running/persistence#idempotent-command-processing).
+- **`idempotencyStore`** -- Factory function returning an `IdempotencyStore` for deduplicating commands. When configured, commands with a `commandId` field are checked for duplicates before execution. See [Idempotent Commands](/docs/running/idempotent-commands).
 - **`unitOfWorkFactory`** -- The factory for atomic command dispatch boundaries
 
 For a full treatment of each provider, how they are initialized, and how to swap them for testing, see the [Infrastructure](/docs/running/infrastructure) page.

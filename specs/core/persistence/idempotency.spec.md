@@ -6,7 +6,7 @@ status: implemented
 exports: [IdempotencyRecord, IdempotencyStore]
 depends_on: [id]
 docs:
-  - running/persistence.mdx
+  - running/idempotent-commands.mdx
   - running/domain-configuration.mdx
 ---
 

@@ -153,7 +153,7 @@ unitOfWorkFactory: () => () => new PostgresUnitOfWork(pool),
 
 ### idempotencyStore
 
-Provides the store for tracking processed commands. When configured, commands with a `commandId` field are checked for duplicates before execution. See [Idempotent Command Processing](/docs/running/persistence#idempotent-command-processing) for details.
+Provides the store for tracking processed commands. When configured, commands with a `commandId` field are checked for duplicates before execution. See [Idempotent Commands](/docs/running/idempotent-commands) for details.
 
 ```ts
 idempotencyStore: () => new InMemoryIdempotencyStore(),

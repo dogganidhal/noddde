@@ -6,7 +6,7 @@ status: implemented
 exports: [InMemoryIdempotencyStore]
 depends_on: [persistence/idempotency]
 docs:
-  - running/persistence.mdx
+  - running/idempotent-commands.mdx
 ---
 
 # InMemoryIdempotencyStore
