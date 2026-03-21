@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { describe, it, expect, vi } from "vitest";
 import { defineAggregate, everyNEvents } from "@noddde/core";
@@ -425,7 +426,7 @@ describe("CommandLifecycleExecutor", () => {
     });
 
     // Spy on persistence.load to verify optimization
-    const loadSpy = vi.spyOn(persistence, "load");
+    vi.spyOn(persistence, "load");
 
     const executor = new CommandLifecycleExecutor(
       persistence,

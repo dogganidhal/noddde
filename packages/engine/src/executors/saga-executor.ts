@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import { AsyncLocalStorage } from "node:async_hooks";
 import type {
   CQRSInfrastructure,
