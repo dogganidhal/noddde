@@ -2,6 +2,7 @@
 name: spec
 description: "Spec-driven development orchestrator. The single entry point for all spec work: creating features, fixing bugs, evolving APIs. Drives the full 6-step pipeline (spec → RED tests → implement → GREEN tests → validate → update docs) autonomously, only pausing for developer approval at gate points. Use when asked to 'add a feature', 'implement', 'fix a bug', 'change the API', 'new spec', 'edit spec', or any development task."
 argument-hint: <description of what you want to build or change>
+model: opus
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 ---
 

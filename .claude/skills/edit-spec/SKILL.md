@@ -2,6 +2,7 @@
 name: edit-spec
 description: "Internal procedure for Step 1 (edit). Use /spec instead — it orchestrates the full pipeline. This skill contains detailed instructions for editing an existing spec with breaking change detection."
 user-invocable: false
+model: opus
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 ---
 
@@ -9,16 +10,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 
 Modify a behavioral specification while detecting breaking changes and managing downstream impact.
 
-This is **step 1** of the 6-step pipeline (the "edit" variant):
-
-```
-→ 1. /edit-spec          Modify the spec (type contract, requirements, test scenarios)
-  2. /generate-tests      Regenerate tests (RED — new/changed tests failing)
-  3. /implement-spec      Update the implementation (no test generation)
-  4. /run-tests           Run tests (GREEN — all passing)
-  5. /validate-spec       Cross-check spec vs implementation
-  6. /update-docs         Update documentation pages
-```
+**Pipeline step 1 of 6** (edit spec path). Called by the `/spec` orchestrator.
 
 ## Step 1: Load Context
 
@@ -63,98 +55,9 @@ Apply the requested modifications to the spec. For each section touched:
 
 Compare the snapshot (Step 1) against the new state (Step 3).
 
-### Automatic Checks
+Follow the procedure in `.claude/skills/shared/breaking-changes.md` for detection criteria, impact analysis, developer prompt, and resolution options.
 
-Run through each of these. If ANY trigger, the change is breaking:
-
-1. **Removed export**: An item in the old `exports` list is no longer present
-2. **Renamed export**: An export name changed (removal + addition of similar item)
-3. **Changed function signature**:
-   - Parameters added (without defaults)
-   - Parameter types narrowed (e.g., `string | number` → `string`)
-   - Return type changed in an incompatible way
-4. **Changed interface shape**:
-   - Required field added to an existing interface
-   - Field type narrowed
-   - Field removed
-5. **Weakened behavioral guarantee**: A requirement that downstream specs rely on is removed or softened
-6. **Changed handler signature pattern**: Any of the 6 handler signatures (command, apply, event, saga, query, projection reducer) is modified
-
-### If No Breaking Changes Detected
-
-Proceed directly to Step 5.
-
-### If Breaking Changes Detected
-
-Present the analysis to the developer:
-
-```
-⚠️  Breaking change detected while editing: <spec title>
-
-Changes that break the public API:
-  1. <specific change description>
-  2. <specific change description>
-
-Downstream impact:
-  Specs that depend on this module:
-    - <spec-path> (uses: <affected export>)
-    - <spec-path> (uses: <affected export>)
-
-  Sample code that uses affected exports:
-    - <file>:<line> — uses <export>
-
-Severity: <minor if 0.x | major if >=1.0>
-```
-
-Then ask:
-
-```
-How would you like to handle this?
-
-  1. Make it additive — keep the old API, add the new one alongside it
-  2. Deprecate and migrate — mark old API as @deprecated, add migration notes
-  3. Accept the break — update all downstream specs and samples
-  4. Abort — revert the spec change
-```
-
-**If option 1 (additive)**:
-
-- Keep old exports in the type contract
-- Add new exports alongside
-- Update `exports` frontmatter to include both
-
-**If option 2 (deprecate)**:
-
-- Add `@deprecated` annotation to old types in the type contract
-- Add a `## Migration` section to the spec:
-
-  ```markdown
-  ## Migration
-
-  ### From `OldTypeName` to `NewTypeName` (since <version>)
-
-  - `OldTypeName` is deprecated and will be removed in the next major version
-  - Replace `OldTypeName` with `NewTypeName`
-  - Change: <description of what changed and why>
-  ```
-
-- Add `## Deprecations` to the spec frontmatter for tracking
-
-**If option 3 (accept)**:
-
-- List every downstream spec that needs updating
-- For each: describe the specific change needed
-- Ask the developer: "Shall I update all <N> downstream specs now, or flag them for manual review?"
-- If updating: edit each downstream spec's type contract, behavioral requirements, and test scenarios
-- After all updates: verify the full dependency chain is consistent
-- **Version inference**: Check `packages/core/package.json` for current version
-  - If `0.x.y`: note "pre-1.0, breaking changes expected in minor bumps"
-  - If `>=1.0.0`: state "this requires a major version bump to <next major>"
-
-**If option 4 (abort)**:
-
-- Revert all changes to the spec
-- Confirm to the developer
+**If no breaking changes detected**, proceed directly to Step 5.
 
 ## Step 5: Update Spec Status
 

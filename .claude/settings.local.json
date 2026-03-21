@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git checkout:*)",
+      "Bash(git status:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(gh pr:*)",
+      "Bash(gh auth:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx next:*)",
+      "Bash(npx vitest:*)",
+      "Bash(npm --version)",
+      "Bash(yarn --version)",
+      "Bash(yarn install:*)",
+      "Bash(yarn cache:*)",
+      "Bash(netstat -ano)",
+      "Bash(pkill -f \"astro dev\")",
+      "Bash(pkill -f node)",
+      "Bash(pkill -f 'next dev')",
+      "Bash(curl:*)",
+      "WebSearch",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:www.fumadocs.dev)",
+      "WebFetch(domain:fumadocs.vercel.app)",
+      "WebFetch(domain:docs.axoniq.io)"
+    ]
+  }
+}

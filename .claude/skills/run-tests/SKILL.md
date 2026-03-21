@@ -2,6 +2,7 @@
 name: run-tests
 description: "Internal procedure for Step 4. Use /spec instead — it orchestrates the full pipeline. This skill contains detailed instructions for running tests and reporting RED/GREEN status."
 user-invocable: false
+model: sonnet
 allowed-tools: Read, Glob, Grep, Bash
 ---
 
@@ -9,16 +10,7 @@ allowed-tools: Read, Glob, Grep, Bash
 
 Run the test suite and report whether the RED tests from step 2 are now GREEN.
 
-This is **step 4** of the 6-step pipeline:
-
-```
-  1. /new-spec or /edit-spec    ✅ Done
-  2. /generate-tests            ✅ Done (tests were RED)
-  3. /implement-spec            ✅ Done (code written)
-→ 4. /run-tests                 Run tests — should be GREEN now
-  5. /validate-spec              Cross-check
-  6. /update-docs                Update documentation
-```
+**Pipeline step 4 of 6.** Called by the `/spec` orchestrator after step 3 (implementation). Loops back to step 3 if tests are RED.
 
 ## Step 1: Determine What to Run
 

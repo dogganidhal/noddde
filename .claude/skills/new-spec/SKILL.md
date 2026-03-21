@@ -2,6 +2,7 @@
 name: new-spec
 description: "Internal procedure for Step 1 (new). Use /spec instead — it orchestrates the full pipeline. This skill contains detailed instructions for creating a new behavioral spec."
 user-invocable: false
+model: opus
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 ---
 
@@ -9,16 +10,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 
 Create a behavioral specification for a new or existing module in the noddde framework.
 
-This is **step 1** of the 6-step spec-driven development pipeline:
-
-```
-→ 1. /new-spec          Write the spec (API, invariants, test scenarios)
-  2. /generate-tests     Generate tests from spec (RED — all failing)
-  3. /implement-spec     Implement the code (no test generation)
-  4. /run-tests          Run tests (GREEN — all passing)
-  5. /validate-spec      Cross-check spec vs implementation
-  6. /update-docs        Update documentation pages
-```
+**Pipeline step 1 of 6** (new spec path). Called by the `/spec` orchestrator.
 
 ## Step 1: Understand Intent
 
@@ -78,67 +70,7 @@ Fill in every section:
 
 **This step is critical.** Before finalizing the spec, analyze whether it introduces breaking changes to existing APIs.
 
-### Detection
-
-Check each of these conditions:
-
-1. **Modified type contracts**: Does this spec change the signature of any type or function already exported by an existing spec?
-
-   - Search: `grep -r "exports:" specs/core/ specs/integration/` and cross-reference with the new spec's type contract
-   - Look for: renamed fields, changed parameter types, narrowed return types, removed optional fields
-
-2. **Altered behavioral requirements**: Does this spec weaken or change guarantees made by existing specs?
-
-   - Read the `depends_on` specs — does the new spec expect something different from them?
-   - Read specs that depend on the module being modified — do they still hold?
-
-3. **New required fields on existing types**: If the new feature adds a required field to `DomainConfiguration`, `Aggregate`, `Projection`, `Saga`, or any other widely-used type, that's breaking.
-
-4. **Changed handler signatures**: If command handler, apply handler, event handler, query handler, or saga handler signatures change, that breaks all sample domains and user code.
-
-### Impact Radius
-
-If a breaking change is detected:
-
-1. **Walk the dependency graph**: Read the `depends_on` field of ALL specs in `specs/core/` and `specs/integration/`. Build a list of every spec that transitively depends on the changed module.
-2. **Check sample domains**: Search `packages/samples/src/` for usage of the affected exports.
-3. **Report the impact**: Show the developer exactly what breaks and where.
-
-### Developer Prompt
-
-Present findings to the developer and ask:
-
-```
-⚠️  Breaking change detected in: <module>
-
-Changed: <what changed>
-Impact radius: <N> specs, <M> sample files
-
-Affected specs:
-  - specs/core/ddd/aggregate.spec.md (uses <export>)
-  - specs/integration/command-dispatch-lifecycle.spec.md (tests <behavior>)
-
-Affected samples:
-  - packages/samples/src/auction/aggregate.ts (line N)
-  - packages/samples/src/banking/aggregate.ts (line N)
-
-Options:
-  1. Add the change as a NEW export (non-breaking, additive)
-  2. Deprecate the old API and add the new one alongside it
-  3. Accept the breaking change (requires major version bump)
-
-Which approach?
-```
-
-### If Breaking Change Accepted
-
-Add these extra steps to the workflow:
-
-1. **Version inference**: If the current version is `0.x.y`, note that breaking changes are expected. If `>=1.0.0`, infer next major version.
-2. **Deprecation markers**: If option 2 chosen, add `@deprecated` JSDoc to old exports in the type contract, with a migration note pointing to the new API.
-3. **Migration notes**: Add a `## Migration` section to the spec describing what consumers need to change.
-4. **Update affected specs**: List the specs that need their `depends_on`, type contracts, or test scenarios updated. Do NOT auto-update them — flag them for the developer.
-5. **Update CHANGELOG**: If a CHANGELOG exists, draft an entry under `## [Unreleased]` with a `### Breaking Changes` section.
+Follow the procedure in `.claude/skills/shared/breaking-changes.md` for detection criteria, impact analysis, developer prompt, and resolution options.
 
 ## Step 7: Finalize
 

@@ -2,6 +2,7 @@
 name: implement-spec
 description: "Internal procedure for Step 3. Use /spec instead — it orchestrates the full pipeline. This skill contains detailed instructions for implementing a spec (code only, no test generation)."
 user-invocable: false
+model: sonnet
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 ---
 
@@ -9,16 +10,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 
 Turn a behavioral specification into working code. Tests already exist and are RED — your job is to make them GREEN.
 
-This is **step 3** of the 6-step pipeline:
-
-```
-  1. /new-spec or /edit-spec    ✅ Done
-  2. /generate-tests            ✅ Done (tests are RED)
-→ 3. /implement-spec            Write the implementation code
-  4. /run-tests                  Run tests (GREEN)
-  5. /validate-spec              Cross-check
-  6. /update-docs                Update documentation
-```
+**Pipeline step 3 of 6.** Called by the `/spec` orchestrator after step 2 (test generation).
 
 **Key principle**: This step writes ONLY implementation code. It does NOT generate tests — that was step 2. If tests don't exist yet, stop and tell the developer to run `/generate-tests` first.
 

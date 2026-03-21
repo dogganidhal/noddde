@@ -2,6 +2,7 @@
 name: validate-spec
 description: "Internal procedure for Step 5. Use /spec instead — it orchestrates the full 6-step pipeline. This skill contains detailed instructions for validating implementation against spec."
 user-invocable: false
+model: opus
 allowed-tools: Read, Glob, Grep, Bash, Agent
 ---
 
@@ -9,16 +10,7 @@ allowed-tools: Read, Glob, Grep, Bash, Agent
 
 Final cross-check: verify the implementation fully satisfies the spec, beyond just passing tests.
 
-This is **step 5** of the 6-step pipeline:
-
-```
-  1. /new-spec or /edit-spec    ✅ Done
-  2. /generate-tests            ✅ Done
-  3. /implement-spec            ✅ Done
-  4. /run-tests                 ✅ Done (GREEN)
-→ 5. /validate-spec             Final audit
-  6. /update-docs               Update documentation
-```
+**Pipeline step 5 of 6.** Called by the `/spec` orchestrator after step 4 (tests GREEN).
 
 **Why this step exists**: Tests can pass while the implementation still drifts from the spec — missing exports, unenforced invariants, unhandled edge cases, leftover stubs. This step catches that.
 
