@@ -2,6 +2,7 @@
 name: generate-tests
 description: "Internal procedure for Step 2. Use /spec instead — it orchestrates the full pipeline. This skill contains detailed instructions for generating vitest tests from a spec's Test Scenarios section."
 user-invocable: false
+model: sonnet
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash
 ---
 
@@ -9,16 +10,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash
 
 Create or update a vitest test file from a spec's `## Test Scenarios` section.
 
-This is **step 2** of the 6-step pipeline:
-
-```
-  1. /new-spec or /edit-spec    ✅ Done
-→ 2. /generate-tests            Generate tests (RED — expected to fail)
-  3. /implement-spec             Implement the code
-  4. /run-tests                  Run tests (GREEN)
-  5. /validate-spec              Cross-check
-  6. /update-docs                Update documentation
-```
+**Pipeline step 2 of 6.** Called by the `/spec` orchestrator after step 1 (spec creation/editing).
 
 **Key principle**: Tests MUST be generated BEFORE the implementation. This proves the tests are meaningful — they fail when the behavior is missing and pass when it's present. If tests are generated alongside the implementation, you can't know if they'd catch regressions.
 

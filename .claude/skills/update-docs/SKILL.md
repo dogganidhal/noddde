@@ -2,6 +2,7 @@
 name: update-docs
 description: "Internal procedure for Step 6. Use /spec instead — it orchestrates the full pipeline. This skill contains detailed instructions for updating documentation pages after a spec is implemented or updated."
 user-invocable: false
+model: sonnet
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash
 ---
 
@@ -9,16 +10,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash
 
 Update documentation pages to reflect the spec changes. Docs must stay in sync with the implementation.
 
-This is **step 6** of the 6-step pipeline:
-
-```
-  1. /new-spec or /edit-spec    ✅ Done
-  2. /generate-tests            ✅ Done
-  3. /implement-spec            ✅ Done
-  4. /run-tests                 ✅ Done (GREEN)
-  5. /validate-spec             ✅ Done (PASS)
-→ 6. /update-docs              Update documentation
-```
+**Pipeline step 6 of 6.** Called by the `/spec` orchestrator after step 5 (validation).
 
 **Why this step exists**: Code and tests can be perfect while documentation silently drifts — stale code examples, undocumented exports, behavioral changes not reflected in guides. This step catches that.
 

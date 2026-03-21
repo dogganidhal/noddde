@@ -1,6 +1,7 @@
 ---
 name: spec-status
 description: Show the implementation status of all specs in the project, including which pipeline step each is on. Use when asked "what's the status", "which specs are implemented", "what's left to do", "show progress", or for sprint planning.
+model: sonnet
 allowed-tools: Read, Glob, Grep, Bash
 ---
 
