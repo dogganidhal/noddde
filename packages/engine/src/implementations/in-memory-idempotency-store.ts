@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import type { ID, IdempotencyRecord, IdempotencyStore } from "@noddde/core";
 
 /**
