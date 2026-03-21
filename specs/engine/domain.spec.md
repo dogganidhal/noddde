@@ -10,6 +10,9 @@ depends_on:
   - engine/implementations/in-memory-query-bus
   - engine/implementations/in-memory-aggregate-persistence
   - engine/implementations/in-memory-saga-persistence
+  - engine/executors/command-lifecycle-executor
+  - engine/executors/saga-executor
+  - engine/executors/metadata-enricher
   - ddd/aggregate-root
   - ddd/projection
   - ddd/saga
@@ -234,10 +237,11 @@ The `dispatchQuery` method delegates query dispatch to the underlying query bus:
 ## Integration Points
 
 - **CQRS buses** -- The domain owns the command bus, query bus, and event bus. They are wired during init and exposed via `domain.infrastructure`.
-- **Persistence** -- The domain owns aggregate and saga persistence. They are resolved during init from factory functions.
-- **Aggregates** -- The domain reads `Aggregate.initialState`, `Aggregate.commands`, and `Aggregate.apply` to implement the command lifecycle.
+- **Persistence** -- The domain resolves aggregate and saga persistence during init from factory functions, passing them to the appropriate executors.
+- **CommandLifecycleExecutor** -- Internal executor that handles the full aggregate command lifecycle (load, execute, apply, enrich, persist, publish). Created during `init()` and used by `dispatchCommand()` and command bus handlers.
+- **SagaExecutor** -- Internal executor that handles the saga event handling lifecycle (derive ID, load state, bootstrap/resume, execute handler, dispatch commands atomically). Created during `init()` when `processModel` is configured.
+- **MetadataEnricher** -- Internal helper that enriches raw events with metadata (eventId, timestamp, correlationId, causationId, userId, aggregate context). Used by `CommandLifecycleExecutor`.
 - **Projections** -- The domain reads `Projection.reducers` and `Projection.queryHandlers` to wire event listeners and query handlers.
-- **Sagas** -- The domain reads `Saga.initialState`, `Saga.startedBy`, `Saga.associations`, and `Saga.handlers` to wire event listeners and execute the saga lifecycle.
 - **External consumers** -- Applications interact with the domain via `domain.dispatchCommand(command)` and `domain.dispatchQuery(query)`. The query bus remains accessible directly via `domain.infrastructure.queryBus` for advanced use cases.
 
 ## Test Scenarios

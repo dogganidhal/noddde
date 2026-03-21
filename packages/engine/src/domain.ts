@@ -1,6 +1,5 @@
 /* eslint-disable no-unused-vars */
 import { AsyncLocalStorage } from "node:async_hooks";
-import { uuidv7 } from "./uuid";
 import type {
   Aggregate,
   AggregateCommand,
@@ -8,11 +7,8 @@ import type {
   CQRSInfrastructure,
   Event,
   EventBus,
-  EventMetadata,
-  EventSourcedAggregatePersistence,
   ID,
   Infrastructure,
-  PartialEventLoad,
   PersistenceConfiguration,
   Projection,
   Query,
@@ -20,11 +16,9 @@ import type {
   QueryResult,
   Saga,
   SagaPersistence,
-  Snapshot,
   SnapshotStore,
   SnapshotStrategy,
   StandaloneCommandHandler,
-  StateStoredAggregatePersistence,
   UnitOfWork,
   UnitOfWorkFactory,
 } from "@noddde/core";
@@ -56,6 +50,9 @@ import {
   OptimisticConcurrencyStrategy,
   PessimisticConcurrencyStrategy,
 } from "./concurrency-strategy";
+import { MetadataEnricher } from "./executors/metadata-enricher";
+import { CommandLifecycleExecutor } from "./executors/command-lifecycle-executor";
+import { SagaExecutor } from "./executors/saga-executor";
 
 type AggregateMap = Record<string | symbol, Aggregate<any>>;
 
@@ -265,15 +262,11 @@ export class Domain<
   TStandaloneQuery extends Query<any> = Query<any>,
 > {
   private _infrastructure!: TInfrastructure & CQRSInfrastructure;
-  private _persistence!: PersistenceConfiguration;
-  private _sagaPersistence?: SagaPersistence;
-  private _snapshotStore?: SnapshotStore;
-  private _snapshotStrategy?: SnapshotStrategy;
   private _unitOfWorkFactory!: UnitOfWorkFactory;
-  private _concurrencyStrategy!: ConcurrencyStrategy;
   private readonly _uowStorage = new AsyncLocalStorage<UnitOfWork>();
   private readonly _metadataStorage = new AsyncLocalStorage<MetadataContext>();
-  private _metadataProvider?: MetadataProvider;
+  private _commandExecutor!: CommandLifecycleExecutor;
+  private _sagaExecutor?: SagaExecutor;
   private readonly _projectionViews = new Map<string, any>();
 
   /** The fully resolved infrastructure (custom + CQRS buses). */
@@ -334,24 +327,23 @@ export class Domain<
     } as TInfrastructure & CQRSInfrastructure;
 
     // Step 4: Resolve aggregate persistence
-    this._persistence = configuration.infrastructure.aggregatePersistence
+    const persistence = configuration.infrastructure.aggregatePersistence
       ? await configuration.infrastructure.aggregatePersistence()
       : new InMemoryEventSourcedAggregatePersistence();
 
     // Step 4.5: Resolve snapshot store and strategy
+    let snapshotStore: SnapshotStore | undefined;
     if (configuration.infrastructure.snapshotStore) {
-      this._snapshotStore = await configuration.infrastructure.snapshotStore();
+      snapshotStore = await configuration.infrastructure.snapshotStore();
     }
-    this._snapshotStrategy = configuration.infrastructure.snapshotStrategy;
+    const snapshotStrategy = configuration.infrastructure.snapshotStrategy;
 
     // Step 5: Resolve saga persistence (only when processModel is configured)
+    let sagaPersistence: SagaPersistence | undefined;
     if (configuration.processModel) {
-      if (configuration.infrastructure.sagaPersistence) {
-        this._sagaPersistence =
-          await configuration.infrastructure.sagaPersistence();
-      } else {
-        this._sagaPersistence = new InMemorySagaPersistence();
-      }
+      sagaPersistence = configuration.infrastructure.sagaPersistence
+        ? await configuration.infrastructure.sagaPersistence()
+        : new InMemorySagaPersistence();
     }
 
     // Step 5.5: Resolve UnitOfWork factory
@@ -361,23 +353,48 @@ export class Domain<
 
     // Step 5.6: Resolve concurrency strategy
     const concurrency = configuration.infrastructure.aggregateConcurrency;
+    let concurrencyStrategy: ConcurrencyStrategy;
     if (
       concurrency &&
       "strategy" in concurrency &&
       concurrency.strategy === "pessimistic"
     ) {
-      this._concurrencyStrategy = new PessimisticConcurrencyStrategy(
+      concurrencyStrategy = new PessimisticConcurrencyStrategy(
         concurrency.locker,
         concurrency.lockTimeoutMs,
       );
     } else {
-      this._concurrencyStrategy = new OptimisticConcurrencyStrategy(
+      concurrencyStrategy = new OptimisticConcurrencyStrategy(
         (concurrency as { maxRetries?: number } | undefined)?.maxRetries ?? 0,
       );
     }
 
-    // Step 5.7: Store metadata provider
-    this._metadataProvider = configuration.metadataProvider;
+    // Step 5.7: Create metadata enricher and command executor
+    const metadataEnricher = new MetadataEnricher(
+      this._metadataStorage,
+      configuration.metadataProvider,
+    );
+
+    this._commandExecutor = new CommandLifecycleExecutor(
+      persistence,
+      this._infrastructure,
+      this._unitOfWorkFactory,
+      concurrencyStrategy,
+      this._uowStorage,
+      metadataEnricher,
+      snapshotStore,
+      snapshotStrategy,
+    );
+
+    if (sagaPersistence) {
+      this._sagaExecutor = new SagaExecutor(
+        this._infrastructure,
+        sagaPersistence,
+        this._unitOfWorkFactory,
+        this._uowStorage,
+        this._metadataStorage,
+      );
+    }
 
     const { commandBus, eventBus, queryBus } = this._infrastructure;
 
@@ -389,7 +406,7 @@ export class Domain<
         (commandBus as InMemoryCommandBus).register(
           commandName,
           async (command: Command) => {
-            await this.executeAggregateCommand(
+            await this._commandExecutor.execute(
               aggregateName,
               aggregate,
               command as AggregateCommand,
@@ -468,13 +485,13 @@ export class Domain<
     }
 
     // Step 11: Register event listeners for sagas
-    if (configuration.processModel) {
+    if (configuration.processModel && this._sagaExecutor) {
       for (const [sagaName, saga] of Object.entries(
         configuration.processModel.sagas,
       )) {
         for (const eventName of Object.keys(saga.handlers)) {
           this.subscribeToEvent(eventBus, eventName, async (event: Event) => {
-            await this.executeSagaHandler(sagaName, saga, event);
+            await this._sagaExecutor!.execute(sagaName, saga, event);
           });
         }
       }
@@ -493,362 +510,6 @@ export class Domain<
     // The EventBus interface only exposes dispatch (publish),
     // so we use a type assertion to reach the on() method.
     (eventBus as EventEmitterEventBus).on(eventName, handler);
-  }
-
-  /**
-   * Executes the full saga event handling lifecycle:
-   * derive ID, load state, bootstrap or resume, execute handler,
-   * persist state, dispatch commands.
-   *
-   * Creates its own UoW that spans the saga state persistence and
-   * all commands dispatched by the saga reaction, ensuring atomicity.
-   */
-  private async executeSagaHandler(
-    sagaName: string,
-    saga: Saga<any, any>,
-    event: Event,
-  ): Promise<void> {
-    if (!this._sagaPersistence) {
-      return;
-    }
-
-    // Step 1: Derive saga instance ID
-    const associationFn = saga.associations[event.name];
-    if (!associationFn) {
-      return;
-    }
-    const sagaId = associationFn(event);
-
-    // Step 2: Load saga state
-    let currentState = await this._sagaPersistence.load(sagaName, sagaId);
-
-    // Step 3: Bootstrap or resume
-    if (currentState == null) {
-      if ((saga.startedBy as string[]).includes(event.name)) {
-        currentState = saga.initialState;
-      } else {
-        // Saga not started yet, ignore this event
-        return;
-      }
-    }
-
-    // Step 4: Execute handler
-    const sagaHandler = saga.handlers[event.name];
-    if (!sagaHandler) {
-      return;
-    }
-    const reaction = await sagaHandler(
-      event,
-      currentState,
-      this._infrastructure,
-    );
-
-    // Step 5: Propagate correlation context from triggering event
-    const sagaCtx: MetadataContext = {
-      correlationId: event.metadata?.correlationId ?? uuidv7(),
-      causationId: event.metadata?.eventId ?? event.name,
-      userId: event.metadata?.userId,
-    };
-
-    // Step 6: Create UoW for saga reaction (spans state + commands)
-    const uow = this._unitOfWorkFactory();
-    const sagaPersistence = this._sagaPersistence;
-
-    await this._uowStorage.run(uow, async () => {
-      await this._metadataStorage.run(sagaCtx, async () => {
-        try {
-          // Enlist saga state persistence
-          uow.enlist(() =>
-            sagaPersistence.save(sagaName, sagaId, reaction.state),
-          );
-
-          // Step 7: Dispatch commands (within the saga's UoW + metadata context)
-          if (reaction.commands) {
-            const commands = Array.isArray(reaction.commands)
-              ? reaction.commands
-              : [reaction.commands];
-            for (const command of commands) {
-              await this._infrastructure.commandBus.dispatch(command);
-            }
-          }
-
-          // Step 8: Commit saga state + all aggregate changes atomically
-          const events = await uow.commit();
-
-          // Step 9: Publish all deferred events
-          for (const deferredEvent of events) {
-            await this._infrastructure.eventBus.dispatch(deferredEvent);
-          }
-        } catch (error) {
-          try {
-            await uow.rollback();
-          } catch {
-            // UoW may already be completed if commit failed
-          }
-          throw error;
-        }
-      });
-    });
-  }
-
-  /**
-   * Executes the full aggregate command lifecycle:
-   * load, execute, apply, persist, publish.
-   *
-   * Delegates concurrency control to {@link ConcurrencyStrategy}:
-   * - **Optimistic**: retries the attempt on {@link ConcurrencyError}
-   * - **Pessimistic**: acquires a lock before the attempt, releases after
-   *
-   * If a UnitOfWork is active (via {@link withUnitOfWork} or saga handling),
-   * persistence and event publishing are deferred to the owning UoW.
-   * Otherwise, an implicit UoW is created and committed immediately.
-   */
-  private async executeAggregateCommand(
-    aggregateName: string,
-    aggregate: Aggregate<any>,
-    command: AggregateCommand,
-  ): Promise<void> {
-    const persistence = this._persistence;
-    const eventBus = this._infrastructure.eventBus;
-
-    const existingUow = this._uowStorage.getStore();
-    const ownsUow = !existingUow;
-
-    const snapshotResult: {
-      value: {
-        aggregateName: string;
-        aggregateId: ID;
-        snapshot: Snapshot;
-      } | null;
-    } = { value: null };
-
-    const runLifecycle = async (uow: UnitOfWork) => {
-      snapshotResult.value = await this.executeCommandLifecycle(
-        aggregateName,
-        aggregate,
-        command,
-        persistence,
-        uow,
-      );
-    };
-
-    if (ownsUow) {
-      // Implicit UoW — strategy wraps the full attempt (UoW create + commit)
-      const events = await this._concurrencyStrategy.execute(
-        aggregateName,
-        command.targetAggregateId,
-        async () => {
-          const uow = this._unitOfWorkFactory();
-          try {
-            await runLifecycle(uow);
-            return await uow.commit();
-          } catch (error) {
-            try {
-              await uow.rollback();
-            } catch {
-              // UoW may already be completed if commit failed partway through
-            }
-            throw error;
-          }
-        },
-      );
-
-      // Save snapshot after successful commit (best-effort)
-      if (snapshotResult.value && this._snapshotStore) {
-        try {
-          await this._snapshotStore.save(
-            snapshotResult.value.aggregateName,
-            snapshotResult.value.aggregateId,
-            snapshotResult.value.snapshot,
-          );
-        } catch {
-          // Best-effort: snapshot save failure does not affect the command result
-        }
-      }
-
-      for (const event of events) {
-        await eventBus.dispatch(event);
-      }
-    } else {
-      // Explicit UoW — strategy wraps just the lifecycle (for pessimistic locking)
-      await this._concurrencyStrategy.execute(
-        aggregateName,
-        command.targetAggregateId,
-        async () => {
-          await runLifecycle(existingUow!);
-          return [];
-        },
-      );
-    }
-  }
-
-  /**
-   * The core load→execute→apply→enlist→defer cycle, extracted to support
-   * retry in the implicit UoW path.
-   *
-   * Returns a pending snapshot (if the snapshot strategy triggers) for the
-   * caller to save after UoW commit. Returns `null` if no snapshot is needed.
-   */
-  private async executeCommandLifecycle(
-    aggregateName: string,
-    aggregate: Aggregate<any>,
-    command: AggregateCommand,
-    persistence: PersistenceConfiguration,
-    uow: UnitOfWork,
-  ): Promise<{
-    aggregateName: string;
-    aggregateId: ID;
-    snapshot: Snapshot;
-  } | null> {
-    // Step 1: Load (snapshot-aware for event-sourced persistence)
-    let snapshot: Snapshot | null = null;
-    if (this._snapshotStore) {
-      snapshot = await this._snapshotStore.load(
-        aggregateName,
-        command.targetAggregateId,
-      );
-    }
-
-    let currentState: any;
-    let version: number;
-    let isEventSourced: boolean;
-
-    if (snapshot) {
-      // Snapshot available — we know this is event-sourced
-      isEventSourced = true;
-      let events: Event[];
-      if ("loadAfterVersion" in persistence) {
-        // Optimized path: load only post-snapshot events
-        events = await (persistence as PartialEventLoad).loadAfterVersion(
-          aggregateName,
-          command.targetAggregateId,
-          snapshot.version,
-        );
-      } else {
-        // Fallback: load all events and slice
-        const allEvents = await persistence.load(
-          aggregateName,
-          command.targetAggregateId,
-        );
-        events = (allEvents as Event[]).slice(snapshot.version);
-      }
-      version = snapshot.version + events.length;
-      currentState = events.reduce((state: any, event: Event) => {
-        const applyHandler = aggregate.apply[event.name];
-        return applyHandler ? applyHandler(event.payload, state) : state;
-      }, snapshot.state);
-    } else {
-      // No snapshot — standard path
-      const loaded = await persistence.load(
-        aggregateName,
-        command.targetAggregateId,
-      );
-      isEventSourced = Array.isArray(loaded);
-
-      if (isEventSourced) {
-        // Event-sourced: replay events to rebuild state; version = stream length
-        const events = loaded as Event[];
-        version = events.length;
-        currentState = events.reduce((state: any, event: Event) => {
-          const applyHandler = aggregate.apply[event.name];
-          return applyHandler ? applyHandler(event.payload, state) : state;
-        }, aggregate.initialState);
-      } else {
-        // State-stored: load returns { state, version } | null
-        const stateResult = loaded as {
-          state: any;
-          version: number;
-        } | null;
-        version = stateResult?.version ?? 0;
-        currentState = stateResult?.state ?? aggregate.initialState;
-      }
-    }
-
-    // Step 2: Execute command handler
-    const handler = aggregate.commands[command.name];
-    if (!handler) {
-      throw new Error(
-        `No command handler found for command: ${command.name} on aggregate: ${aggregateName}`,
-      );
-    }
-    const result = await handler(command, currentState, this._infrastructure);
-
-    // Step 3: Normalize to array
-    const newEvents: Event[] = Array.isArray(result) ? result : [result];
-
-    // Step 4: Apply events to get new state
-    let newState = currentState;
-    for (const event of newEvents) {
-      const applyHandler = aggregate.apply[event.name];
-      if (applyHandler) {
-        newState = applyHandler(event.payload, newState);
-      }
-    }
-
-    // Step 4.5: Enrich events with metadata
-    const providerCtx = this._metadataProvider?.() ?? {};
-    const overrideCtx = this._metadataStorage.getStore() ?? {};
-    const mergedCtx = { ...providerCtx, ...overrideCtx };
-
-    const enrichedEvents: Event[] = newEvents.map((event, index) => ({
-      ...event,
-      metadata: {
-        eventId: uuidv7(),
-        timestamp: new Date().toISOString(),
-        correlationId: mergedCtx.correlationId ?? uuidv7(),
-        causationId: mergedCtx.causationId ?? command.name,
-        userId: mergedCtx.userId,
-        aggregateName,
-        aggregateId: command.targetAggregateId,
-        sequenceNumber: version + index + 1,
-      },
-    }));
-
-    // Step 5: Enlist persistence in UoW with version (deferred until commit)
-    if (isEventSourced) {
-      uow.enlist(() =>
-        (persistence as EventSourcedAggregatePersistence).save(
-          aggregateName,
-          command.targetAggregateId,
-          enrichedEvents,
-          version,
-        ),
-      );
-    } else {
-      uow.enlist(() =>
-        (persistence as StateStoredAggregatePersistence).save(
-          aggregateName,
-          command.targetAggregateId,
-          newState,
-          version,
-        ),
-      );
-    }
-
-    // Step 6: Defer event publishing (published after commit)
-    uow.deferPublish(...enrichedEvents);
-
-    // Step 7: Evaluate snapshot strategy (if configured)
-    if (isEventSourced && this._snapshotStore && this._snapshotStrategy) {
-      const newVersion = version + newEvents.length;
-      const lastSnapshotVersion = snapshot?.version ?? 0;
-      const eventsSinceSnapshot = newVersion - lastSnapshotVersion;
-      if (
-        this._snapshotStrategy({
-          version: newVersion,
-          lastSnapshotVersion,
-          eventsSinceSnapshot,
-        })
-      ) {
-        return {
-          aggregateName,
-          aggregateId: command.targetAggregateId,
-          snapshot: { state: newState, version: newVersion },
-        };
-      }
-    }
-
-    return null;
   }
 
   /**
@@ -943,7 +604,7 @@ export class Domain<
       this.configuration.writeModel.aggregates,
     )) {
       if (command.name in aggregate.commands) {
-        await this.executeAggregateCommand(aggregateName, aggregate, command);
+        await this._commandExecutor.execute(aggregateName, aggregate, command);
         return command.targetAggregateId;
       }
     }
