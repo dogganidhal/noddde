@@ -1,9 +1,10 @@
-import { describe, it, expectTypeOf } from "vitest";
+import { describe, it, expect, expectTypeOf } from "vitest";
 import type {
   Command,
   AggregateCommand,
   StandaloneCommand,
   DefineCommands,
+  ID,
 } from "@noddde/core";
 
 describe("Command, AggregateCommand, StandaloneCommand & DefineCommands", () => {
@@ -91,6 +92,28 @@ describe("Command, AggregateCommand, StandaloneCommand & DefineCommands", () => 
     it("should use the custom ID type for targetAggregateId", () => {
       type CreateCmd = Extract<Cmd, { name: "Create" }>;
       expectTypeOf<CreateCmd["targetAggregateId"]>().toBeNumber();
+    });
+  });
+
+  // ### Command accepts optional commandId
+  describe("Command.commandId", () => {
+    it("should accept an optional commandId of type ID", () => {
+      const cmd: Command = { name: "DoSomething", commandId: "cmd-123" };
+      expectTypeOf(cmd.commandId).toEqualTypeOf<ID | undefined>();
+    });
+
+    it("should be inherited by AggregateCommand", () => {
+      const cmd: AggregateCommand = {
+        name: "DoSomething",
+        targetAggregateId: "agg-1",
+        commandId: "cmd-456",
+      };
+      expectTypeOf(cmd.commandId).toEqualTypeOf<ID | undefined>();
+    });
+
+    it("should be optional — commands without commandId are valid", () => {
+      const cmd: Command = { name: "DoSomething" };
+      expect(cmd.commandId).toBeUndefined();
     });
   });
 });

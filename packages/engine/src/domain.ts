@@ -21,6 +21,7 @@ import type {
   StandaloneCommandHandler,
   UnitOfWork,
   UnitOfWorkFactory,
+  IdempotencyStore,
 } from "@noddde/core";
 import type { AggregateLocker } from "@noddde/core";
 
@@ -207,6 +208,15 @@ export type DomainConfiguration<
      */
     snapshotStrategy?: SnapshotStrategy;
     /**
+     * Factory for the idempotency store. When configured, commands with
+     * a `commandId` field are checked for duplicates before execution.
+     * Duplicate commands are silently skipped — no events are produced,
+     * persisted, or published.
+     *
+     * @see {@link InMemoryIdempotencyStore} for the built-in in-memory implementation.
+     */
+    idempotencyStore?: () => IdempotencyStore | Promise<IdempotencyStore>;
+    /**
      * Factory for custom infrastructure dependencies (repositories,
      * clocks, API clients, etc.).
      */
@@ -369,7 +379,14 @@ export class Domain<
       );
     }
 
-    // Step 5.7: Create metadata enricher and command executor
+    // Step 5.7: Resolve idempotency store
+    let idempotencyStore: IdempotencyStore | undefined;
+    if (configuration.infrastructure.idempotencyStore) {
+      idempotencyStore =
+        await configuration.infrastructure.idempotencyStore();
+    }
+
+    // Step 5.8: Create metadata enricher and command executor
     const metadataEnricher = new MetadataEnricher(
       this._metadataStorage,
       configuration.metadataProvider,
@@ -384,6 +401,7 @@ export class Domain<
       metadataEnricher,
       snapshotStore,
       snapshotStrategy,
+      idempotencyStore,
     );
 
     if (sagaPersistence) {

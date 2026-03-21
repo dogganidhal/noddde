@@ -13,6 +13,7 @@ export type {
   SnapshotStrategy,
   PartialEventLoad,
 } from "./snapshot";
+export type { IdempotencyRecord, IdempotencyStore } from "./idempotency";
 
 /**
  * Persistence strategy that stores the current aggregate state directly.
