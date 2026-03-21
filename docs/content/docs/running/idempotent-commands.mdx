@@ -82,10 +82,7 @@ await domain.dispatchCommand({ ...cmd, commandId: requestId });
 Add an `idempotencyStore` factory to the [infrastructure section](/docs/running/infrastructure) of your domain configuration:
 
 ```ts
-import {
-  configureDomain,
-  InMemoryIdempotencyStore,
-} from "@noddde/engine";
+import { configureDomain, InMemoryIdempotencyStore } from "@noddde/engine";
 
 const domain = await configureDomain<MyInfrastructure>({
   writeModel: { aggregates: { BankAccount } },
@@ -152,13 +149,13 @@ Inside an explicit `withUnitOfWork()`, the idempotency check still happens per-c
 
 ## When to Use Idempotent Commands
 
-| Scenario | Recommendation |
-| --- | --- |
-| API endpoints with retry logic | Always — use the request ID as `commandId` |
-| Message queue consumers (at-least-once) | Always — use the message ID as `commandId` |
-| User-facing forms (double-click) | Recommended — generate a `commandId` on form submission |
-| Internal saga commands | Usually unnecessary — sagas have their own state tracking |
-| One-off scripts | Optional — depends on whether re-runs are expected |
+| Scenario                                | Recommendation                                            |
+| --------------------------------------- | --------------------------------------------------------- |
+| API endpoints with retry logic          | Always — use the request ID as `commandId`                |
+| Message queue consumers (at-least-once) | Always — use the message ID as `commandId`                |
+| User-facing forms (double-click)        | Recommended — generate a `commandId` on form submission   |
+| Internal saga commands                  | Usually unnecessary — sagas have their own state tracking |
+| One-off scripts                         | Optional — depends on whether re-runs are expected        |
 
 ## Next Steps
 

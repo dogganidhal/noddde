@@ -382,8 +382,7 @@ export class Domain<
     // Step 5.7: Resolve idempotency store
     let idempotencyStore: IdempotencyStore | undefined;
     if (configuration.infrastructure.idempotencyStore) {
-      idempotencyStore =
-        await configuration.infrastructure.idempotencyStore();
+      idempotencyStore = await configuration.infrastructure.idempotencyStore();
     }
 
     // Step 5.8: Create metadata enricher and command executor

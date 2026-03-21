@@ -448,7 +448,7 @@ noddde provides three ORM adapter packages that cover persistence and [unit of w
 | `InMemoryStateStoredAggregatePersistence`  | `@noddde/drizzle`, `@noddde/prisma`, or `@noddde/typeorm` |
 | `InMemorySagaPersistence`                  | `@noddde/drizzle`, `@noddde/prisma`, or `@noddde/typeorm` |
 | `InMemorySnapshotStore`                    | `@noddde/drizzle`, `@noddde/prisma`, or `@noddde/typeorm` |
-| `InMemoryIdempotencyStore`                 | Custom implementation (PostgreSQL, Redis, etc.)             |
+| `InMemoryIdempotencyStore`                 | Custom implementation (PostgreSQL, Redis, etc.)           |
 
 Each adapter provides a single factory function that creates all persistence implementations wired to share a database transaction context. Your aggregate and projection code remains unchanged -- only the infrastructure factories in `configureDomain` need to be updated.
 
