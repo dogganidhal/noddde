@@ -3,7 +3,7 @@ title: "Example: Fund Transfer"
 description: Atomic multi-command operations using domain.withUnitOfWork() to transfer funds between two accounts.
 ---
 
-This example walks through the fund transfer sample included with noddde. It demonstrates the [Unit of Work](/docs/running/unit-of-work) pattern for grouping multiple commands into a single atomic boundary — both succeed or neither takes effect.
+This example walks through the fund transfer sample included with noddde. It demonstrates the [Unit of Work](/docs/running/persistence#unit-of-work) pattern for grouping multiple commands into a single atomic boundary — both succeed or neither takes effect.
 
 ## Domain Overview
 
@@ -159,6 +159,6 @@ yarn run
 
 ## Next Steps
 
-- [Unit of Work](/docs/running/unit-of-work) — Full reference for `withUnitOfWork()` and the `UnitOfWork` interface
+- [Unit of Work](/docs/running/persistence#unit-of-work) — Full reference for `withUnitOfWork()` and the `UnitOfWork` interface
 - [ORM Adapters](/docs/running/orm-adapters) — Database-backed persistence with real transactions
 - [Example: Order Fulfillment](/docs/patterns/order-fulfillment) — Multi-aggregate orchestration using sagas

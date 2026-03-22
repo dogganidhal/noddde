@@ -287,7 +287,7 @@ The TypeORM adapter uses `dataSource.manager.transaction()` to wrap operations. 
 
 ## How Transactions Work
 
-All three adapters follow the same pattern for integrating with the [Unit of Work](/docs/running/unit-of-work):
+All three adapters follow the same pattern for integrating with the [Unit of Work](/docs/running/persistence#unit-of-work):
 
 1. The adapter opens a database transaction
 2. It sets `txStore.current` to the transaction-scoped database client
@@ -372,6 +372,6 @@ All three provide identical functionality for noddde's purposes. The choice come
 
 ## Next Steps
 
-- [Unit of Work](/docs/running/unit-of-work) -- Atomic persistence and deferred event publishing
+- [Unit of Work](/docs/running/persistence#unit-of-work) -- Atomic persistence and deferred event publishing
 - [Persistence](/docs/running/persistence) -- Choosing between event-sourced and state-stored strategies
 - [Infrastructure](/docs/running/infrastructure) -- The full infrastructure provider system

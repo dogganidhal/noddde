@@ -214,16 +214,15 @@ The process model is optional. Omit it entirely if your domain does not need cro
 
 The `infrastructure` section provides factory functions that create the runtime dependencies for your domain. All providers are optional and all are factory functions -- not raw values. This enables lazy initialization, async setup (database connections, config loading), and clean test isolation.
 
-The four providers are:
+The providers are:
 
 - **`provideInfrastructure`** -- Your custom domain infrastructure (loggers, repositories, clients)
 - **`cqrsInfrastructure`** -- The three CQRS buses (CommandBus, EventBus, QueryBus)
-- **`aggregatePersistence`** -- The persistence strategy for aggregate state
-- **`aggregateConcurrency`** -- Concurrency strategy: optimistic (version check + retry, throws `ConcurrencyError`) or pessimistic (exclusive lock before load, throws `LockTimeoutError` on timeout). See [Concurrency Strategies](/docs/running/persistence#concurrency-control).
-- **`snapshotStore`** -- Factory function returning a `SnapshotStore` for caching event-sourced aggregate state. See [State Snapshotting](/docs/running/persistence#state-snapshotting-event-sourced-optimization).
-- **`snapshotStrategy`** -- A `SnapshotStrategy` function that decides when to take snapshots (e.g., `everyNEvents(100)`).
-- **`idempotencyStore`** -- Factory function returning an `IdempotencyStore` for deduplicating commands. When configured, commands with a `commandId` field are checked for duplicates before execution. See [Idempotent Commands](/docs/running/idempotent-commands).
-- **`unitOfWorkFactory`** -- The factory for atomic command dispatch boundaries
+- **`aggregatePersistence`** -- The persistence strategy for aggregate state. See [Persistence](/docs/running/persistence).
+- **`aggregateConcurrency`** -- Optimistic or pessimistic concurrency strategy. See [Concurrency Control](/docs/running/persistence#concurrency-control).
+- **`snapshotStore`** / **`snapshotStrategy`** -- Snapshot caching for event-sourced aggregates. See [State Snapshotting](/docs/running/persistence#state-snapshotting-event-sourced-optimization).
+- **`idempotencyStore`** -- Duplicate command detection. See [Idempotent Commands](/docs/running/idempotent-commands).
+- **`unitOfWorkFactory`** -- Atomic command dispatch boundaries. See [Unit of Work](/docs/running/persistence#unit-of-work).
 
 For a full treatment of each provider, how they are initialized, and how to swap them for testing, see the [Infrastructure](/docs/running/infrastructure) page.
 
@@ -392,5 +391,5 @@ const account = await domain.dispatchQuery({
 
 - [Infrastructure](/docs/running/infrastructure) -- The infrastructure providers in detail
 - [Persistence](/docs/running/persistence) -- Event-sourced vs. state-stored persistence
-- [Unit of Work](/docs/running/unit-of-work) -- Atomic command dispatch
+- [Unit of Work](/docs/running/persistence#unit-of-work) -- Atomic command dispatch
 - [Process Managers](/docs/process-managers/overview) -- Coordinating workflows across aggregates
