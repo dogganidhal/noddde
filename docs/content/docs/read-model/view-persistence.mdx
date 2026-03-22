@@ -171,11 +171,7 @@ viewStore: (infra) => infra.accountViewStore,
 
 This keeps the projection definition free of infrastructure concerns — the view store is created and configured when you set up your infrastructure, not inside domain code. Constructing a view store inline (e.g., `new InMemoryViewStore()`) defeats the purpose of separating domain from infrastructure.
 
-The factory is called during `Domain.init()` with the fully resolved infrastructure (custom + CQRS). It may be async:
-
-```ts
-viewStore: async (infra) => infra.accountViewStore,
-```
+The factory is **synchronous only**. The view store must be fully initialized before being provided via infrastructure — async initialization belongs in your infrastructure setup, not in a projection definition. The factory is called during `Domain.init()` with the fully resolved infrastructure (custom + CQRS).
 
 ## Consistency Modes
 

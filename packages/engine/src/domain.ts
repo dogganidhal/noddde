@@ -406,7 +406,7 @@ export class Domain<
       if (projection.viewStore) {
         resolvedViewStores.set(
           name,
-          await (projection.viewStore as any)(this._infrastructure),
+          (projection.viewStore as any)(this._infrastructure),
         );
       }
     }
@@ -415,8 +415,7 @@ export class Domain<
     const strongProjections = Object.entries(
       configuration.readModel.projections,
     ).filter(
-      ([_, p]) =>
-        p.consistency === "strong" && p.identity && p.viewStore,
+      ([_, p]) => p.consistency === "strong" && p.identity && p.viewStore,
     );
 
     const onEventsProduced:
@@ -555,37 +554,28 @@ export class Domain<
         if (projection.identity && viewStoreInstance) {
           // Identity-based: per-entity view persistence via view store
           const identityFn = (projection.identity as any)[eventName];
-          this.subscribeToEvent(
-            eventBus,
-            eventName,
-            async (event: Event) => {
-              const viewId = identityFn(event);
-              const currentView =
-                (await viewStoreInstance.load(viewId)) ??
-                projection.initialView;
-              const newView = await (projection.reducers as any)[eventName](
-                event,
-                currentView,
-              );
-              await viewStoreInstance.save(viewId, newView);
-            },
-          );
+          this.subscribeToEvent(eventBus, eventName, async (event: Event) => {
+            const viewId = identityFn(event);
+            const currentView =
+              (await viewStoreInstance.load(viewId)) ?? projection.initialView;
+            const newView = await (projection.reducers as any)[eventName](
+              event,
+              currentView,
+            );
+            await viewStoreInstance.save(viewId, newView);
+          });
         } else {
           // Legacy: single view per projection (in-memory map)
-          this.subscribeToEvent(
-            eventBus,
-            eventName,
-            async (event: Event) => {
-              const currentView =
-                this._projectionViews.get(projectionName) ??
-                projection.initialView;
-              const newView = await (projection.reducers as any)[eventName](
-                event,
-                currentView,
-              );
-              this._projectionViews.set(projectionName, newView);
-            },
-          );
+          this.subscribeToEvent(eventBus, eventName, async (event: Event) => {
+            const currentView =
+              this._projectionViews.get(projectionName) ??
+              projection.initialView;
+            const newView = await (projection.reducers as any)[eventName](
+              event,
+              currentView,
+            );
+            this._projectionViews.set(projectionName, newView);
+          });
         }
       }
     }

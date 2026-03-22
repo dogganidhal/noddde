@@ -53,9 +53,7 @@ type ReducerMap<T extends ProjectionTypes> = {
  * route events to the correct view instance for auto-persistence.
  */
 type IdentityMap<T extends ProjectionTypes> = {
-  [K in T["events"]["name"]]: (
-    event: Extract<T["events"], { name: K }>,
-  ) => ID;
+  [K in T["events"]["name"]]: (event: Extract<T["events"], { name: K }>) => ID;
 };
 
 /**
@@ -64,22 +62,26 @@ type IdentityMap<T extends ProjectionTypes> = {
  * `T["infrastructure"] & { views: T["viewStore"] }`.
  * Otherwise, they receive just `T["infrastructure"]` (backward compatible).
  */
-type ProjectionQueryInfra<T extends ProjectionTypes> =
-  T extends { viewStore: infer VS extends ViewStore }
-    ? T["infrastructure"] & { views: VS }
-    : T["infrastructure"];
+type ProjectionQueryInfra<T extends ProjectionTypes> = T extends {
+  viewStore: infer VS extends ViewStore;
+}
+  ? T["infrastructure"] & { views: VS }
+  : T["infrastructure"];
 
 /**
- * Factory type for creating a view store from infrastructure.
- * Enables IoC: the projection definition (domain code) delegates store
- * creation to the factory, which receives infrastructure dependencies.
+ * Factory type for resolving a view store from infrastructure.
+ * The factory should return an already-initialized view store instance
+ * from the infrastructure — e.g., `(infra) => infra.myViewStore`.
+ *
+ * Synchronous only: the view store must be fully initialized before
+ * being provided via infrastructure. This keeps projection definitions
+ * free of infrastructure initialization concerns.
  */
-type ViewStoreFactory<T extends ProjectionTypes> =
-  T extends { viewStore: infer VS extends ViewStore }
-    ? (infrastructure: T["infrastructure"]) => VS | Promise<VS>
-    : (
-        infrastructure: T["infrastructure"],
-      ) => ViewStore<T["view"]> | Promise<ViewStore<T["view"]>>;
+type ViewStoreFactory<T extends ProjectionTypes> = T extends {
+  viewStore: infer VS extends ViewStore;
+}
+  ? (infrastructure: T["infrastructure"]) => VS
+  : (infrastructure: T["infrastructure"]) => ViewStore<T["view"]>;
 
 type QueryHandlerMap<T extends ProjectionTypes> = {
   [QueryName in T["queries"]["name"]]?: QueryHandler<
@@ -160,9 +162,12 @@ export interface Projection<T extends ProjectionTypes = ProjectionTypes> {
   identity?: IdentityMap<T>;
 
   /**
-   * Factory that creates the view store from infrastructure. Enables IoC:
-   * the projection definition (domain code) delegates store creation to
-   * the factory, which can use infrastructure dependencies (DB connections, etc.).
+   * Factory that resolves the view store from infrastructure. Should return
+   * an already-initialized instance — e.g., `(infra) => infra.myViewStore`.
+   *
+   * Synchronous only: the view store must be fully initialized before being
+   * provided via infrastructure. This keeps projection definitions free of
+   * infrastructure initialization concerns.
    *
    * Called during `Domain.init()` with the resolved infrastructure.
    */

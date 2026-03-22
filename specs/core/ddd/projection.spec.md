@@ -14,7 +14,13 @@ exports:
     InferProjectionInfrastructure,
   ]
 depends_on:
-  [edd/event, cqrs/query/query, cqrs/query/query-handler, infrastructure/index, persistence/view-store]
+  [
+    edd/event,
+    cqrs/query/query,
+    cqrs/query/query-handler,
+    infrastructure/index,
+    persistence/view-store,
+  ]
 docs:
   - projections/overview.mdx
   - projections/functional-projections.mdx
@@ -53,11 +59,12 @@ docs:
   - When `T` does not have a `viewStore` field: `T["infrastructure"]`
   - This is backward compatible — existing projections without `viewStore` continue to work.
 
-- **`ViewStoreFactory<T>`** (internal) is the factory type for creating a view store from infrastructure:
+- **`ViewStoreFactory<T>`** (internal) is the factory type for resolving a view store from infrastructure:
 
-  - When `T` has a `viewStore` field extending `ViewStore`: `(infrastructure: T["infrastructure"]) => T["viewStore"] | Promise<T["viewStore"]>`
-  - When `T` does not have a `viewStore` field: `(infrastructure: T["infrastructure"]) => ViewStore<T["view"]> | Promise<ViewStore<T["view"]>>`
-  - Enables IoC: the projection definition (domain code) delegates store creation to the factory.
+  - When `T` has a `viewStore` field extending `ViewStore`: `(infrastructure: T["infrastructure"]) => T["viewStore"]`
+  - When `T` does not have a `viewStore` field: `(infrastructure: T["infrastructure"]) => ViewStore<T["view"]>`
+  - Synchronous only — the view store must be fully initialized before being provided via infrastructure.
+  - Enables IoC: the projection definition (domain code) resolves the store from infrastructure rather than constructing it.
 
 - **`QueryHandlerMap<T>`** (internal) maps each query name to an OPTIONAL `QueryHandler`, using `ProjectionQueryInfra<T>` as the infrastructure type:
 
@@ -90,7 +97,7 @@ docs:
 6. When `T` has a `viewStore` field, `QueryHandlerMap` uses `ProjectionQueryInfra<T>` which merges `{ views: T["viewStore"] }` into the infrastructure type. Query handlers can access `views.load()`, `views.save()`, and any custom methods on the view store.
 7. When `T` does not have a `viewStore` field, `QueryHandlerMap` uses `T["infrastructure"]` as-is (backward compatible).
 8. `identity` requires a mapping for ALL event names (exhaustive, TypeScript enforced). This mirrors saga `associations`. When present, the engine uses it to derive the view instance ID from each event for auto-persistence.
-9. `viewStore` is a factory function `(infrastructure) => ViewStore | Promise<ViewStore>`. It receives the resolved infrastructure and returns the view store instance, enabling IoC and testability.
+9. `viewStore` is a synchronous factory function `(infrastructure) => ViewStore`. It receives the resolved infrastructure and returns an already-initialized view store instance. The factory must not be async — infrastructure initialization belongs outside the projection definition.
 10. `initialView` provides the default view state when `viewStore.load()` returns `undefined`/`null` for a new entity. Without it, reducers may receive `undefined` as the current view.
 11. `consistency` defaults to `"eventual"`. When `"strong"`, the engine enlists view persistence in the same UoW as the originating command. When `"eventual"`, views are updated asynchronously via the event bus.
 12. All new fields (`identity`, `viewStore`, `initialView`, `consistency`) are optional. Existing projections without these fields continue to work unchanged.
@@ -118,7 +125,7 @@ docs:
 - **Projection with viewStore but no identity**: Valid — the engine does not auto-persist views, but query handlers still receive `{ views }`. Manual persistence by the user.
 - **Projection with identity but no viewStore**: The engine MUST throw an error at init time. `identity` without `viewStore` is nonsensical (no store to persist to).
 - **initialView is undefined**: Reducers may receive `undefined` as the current view when processing the first event for a new entity. The user is responsible for handling this in their reducer.
-- **ViewStore factory returns a Promise**: The engine `await`s the factory result during `Domain.init()`.
+- **ViewStore factory is synchronous**: The factory must return the view store instance directly (not a Promise). Async initialization belongs in infrastructure setup.
 
 ## Integration Points
 
@@ -406,7 +413,12 @@ describe("defineProjection identity", () => {
 
 ```ts
 import { describe, it, expectTypeOf, expect } from "vitest";
-import type { DefineEvents, DefineQueries, Infrastructure, ViewStore } from "@noddde/core";
+import type {
+  DefineEvents,
+  DefineQueries,
+  Infrastructure,
+  ViewStore,
+} from "@noddde/core";
 import { defineProjection } from "@noddde/core";
 
 describe("Projection with identity", () => {
@@ -542,11 +554,7 @@ describe("Query handlers with views injection", () => {
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
-import type {
-  DefineEvents,
-  DefineQueries,
-  Infrastructure,
-} from "@noddde/core";
+import type { DefineEvents, DefineQueries, Infrastructure } from "@noddde/core";
 import { defineProjection } from "@noddde/core";
 
 describe("Backward compatible query handlers (no viewStore)", () => {
@@ -619,7 +627,12 @@ describe("Projection with initialView", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
-import type { DefineEvents, Infrastructure, Query, ViewStore } from "@noddde/core";
+import type {
+  DefineEvents,
+  Infrastructure,
+  Query,
+  ViewStore,
+} from "@noddde/core";
 import { defineProjection } from "@noddde/core";
 
 describe("Projection consistency mode", () => {
@@ -674,7 +687,12 @@ describe("Projection consistency mode", () => {
 
 ```ts
 import { describe, it, expectTypeOf, expect } from "vitest";
-import type { DefineEvents, Infrastructure, Query, ViewStore } from "@noddde/core";
+import type {
+  DefineEvents,
+  Infrastructure,
+  Query,
+  ViewStore,
+} from "@noddde/core";
 import { defineProjection } from "@noddde/core";
 
 describe("viewStore factory", () => {
