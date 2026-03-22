@@ -440,7 +440,7 @@ For production-ready persistence with transaction support, consider the [ORM Ada
 
 ## Moving to Production
 
-noddde provides three ORM adapter packages that cover persistence and [unit of work](/docs/running/unit-of-work) out of the box:
+noddde provides three ORM adapter packages that cover persistence and unit of work out of the box:
 
 | In-Memory                                  | Production Alternative                                    |
 | ------------------------------------------ | --------------------------------------------------------- |
@@ -452,10 +452,124 @@ noddde provides three ORM adapter packages that cover persistence and [unit of w
 
 Each adapter provides a single factory function that creates all persistence implementations wired to share a database transaction context. Your aggregate and projection code remains unchanged -- only the infrastructure factories in `configureDomain` need to be updated.
 
+## Unit of Work
+
+The domain uses the **Unit of Work** pattern to ensure atomicity in the write model. Every command dispatch buffers persistence operations and defers event publishing until all writes succeed. You can also group multiple commands into an explicit unit of work.
+
+### How Unit of Work Works
+
+When you dispatch a command, the domain automatically creates a unit of work that:
+
+1. **Buffers persistence** -- aggregate state/events are not written immediately
+2. **Defers event publishing** -- events are collected but not dispatched to the EventBus
+3. **Commits atomically** -- all persistence operations execute together
+4. **Publishes after commit** -- events reach projections and sagas only after persistence succeeds
+
+If persistence fails, no events are published. This prevents inconsistencies between the store and downstream subscribers.
+
+### Implicit Unit of Work
+
+Every `dispatchCommand` call is automatically wrapped in its own unit of work. No configuration needed:
+
+```ts
+// This is already wrapped in a unit of work
+await domain.dispatchCommand({
+  name: "CreateBankAccount",
+  targetAggregateId: "acc-001",
+  payload: { owner: "Alice" },
+});
+```
+
+### Explicit Unit of Work
+
+Use `domain.withUnitOfWork()` to group multiple commands into a single atomic boundary:
+
+```ts
+await domain.withUnitOfWork(async () => {
+  await domain.dispatchCommand({
+    name: "DebitAccount",
+    targetAggregateId: "acc-001",
+    payload: { amount: 500 },
+  });
+  await domain.dispatchCommand({
+    name: "CreditAccount",
+    targetAggregateId: "acc-002",
+    payload: { amount: 500 },
+  });
+  // Both commands persist atomically
+  // Events are published together after commit
+});
+```
+
+If any command within the unit of work throws, all buffered persistence operations are discarded and no events are published.
+
+`withUnitOfWork()` returns the value from its callback:
+
+```ts
+const accountId = await domain.withUnitOfWork(async () => {
+  const id = await domain.dispatchCommand(createAccountCommand);
+  await domain.dispatchCommand(initialDepositCommand);
+  return id;
+});
+```
+
+**Nesting is not supported** -- calling `withUnitOfWork()` inside an active unit of work throws an error.
+
+### Saga Unit of Work
+
+Saga reactions are automatically wrapped in a unit of work. When a saga handler dispatches commands, the saga state persistence and all dispatched command operations share a single unit of work:
+
+```
+Event arrives --> saga handler executes
+  --> saga state persisted  |
+  --> command 1 persisted    |-- all in one unit of work
+  --> command 2 persisted    |
+  --> events published after commit
+```
+
+This ensures that saga state transitions and the commands they trigger are always consistent.
+
+### The UnitOfWork Interface
+
+```ts
+interface UnitOfWork {
+  enlist(operation: () => Promise<void>): void;
+  deferPublish(...events: Event[]): void;
+  commit(): Promise<Event[]>;
+  rollback(): Promise<void>;
+}
+```
+
+- `enlist` -- buffers a persistence operation
+- `deferPublish` -- schedules events for post-commit publishing
+- `commit` -- executes all operations, returns events for the domain to publish
+- `rollback` -- discards all operations and events
+
+A UnitOfWork is single-use: after `commit()` or `rollback()`, further calls throw.
+
+### Custom UnitOfWork Factory
+
+By default, the domain uses `InMemoryUnitOfWork`. For production use with a database, provide a custom `unitOfWorkFactory` in the [domain configuration](/docs/running/domain-configuration):
+
+```ts
+const domain = await configureDomain<BankingInfrastructure>({
+  writeModel: { aggregates: { BankAccount } },
+  readModel: { projections: { BankAccount: BankAccountProjection } },
+  infrastructure: {
+    aggregatePersistence: () => new PostgresEventStore(),
+    unitOfWorkFactory: () => () => new PostgresUnitOfWork(pool),
+    // ...other providers
+  },
+});
+```
+
+The factory is a function that returns a `UnitOfWorkFactory` (a function that returns a `UnitOfWork`). The outer function is called once during domain initialization. The inner factory is called once per unit of work boundary.
+
+For database-backed unit of work implementations using real transactions, see the [ORM Adapters](/docs/running/orm-adapters) packages.
+
 ## Next Steps
 
 - [Idempotent Commands](/docs/running/idempotent-commands) -- Preventing duplicate command execution
 - [ORM Adapters](/docs/running/orm-adapters) -- Production persistence using Drizzle, Prisma, or TypeORM
-- [Unit of Work](/docs/running/unit-of-work) -- Atomic persistence and deferred event publishing
 - [Infrastructure](/docs/running/infrastructure) -- The full infrastructure provider system
 - [CQRS and Event Sourcing](/docs/core-concepts/cqrs-and-event-sourcing) -- Conceptual foundation

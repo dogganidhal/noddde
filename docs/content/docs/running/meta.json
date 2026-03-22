@@ -5,7 +5,6 @@
     "infrastructure",
     "persistence",
     "idempotent-commands",
-    "orm-adapters",
-    "unit-of-work"
+    "orm-adapters"
   ]
 }

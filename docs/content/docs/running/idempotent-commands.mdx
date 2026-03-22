@@ -43,7 +43,7 @@ Command received
 Load state → Execute handler → Apply events → Persist → Publish
 ```
 
-After successful execution, the `commandId` is recorded in the same [unit of work](/docs/running/unit-of-work) as the events. This ensures atomicity:
+After successful execution, the `commandId` is recorded in the same [unit of work](/docs/running/persistence#unit-of-work) as the events. This ensures atomicity:
 
 - If event persistence **succeeds**, the idempotency record is saved — future duplicates will be skipped.
 - If event persistence **fails**, the idempotency record is not saved — the command can be safely retried.
@@ -160,5 +160,5 @@ Inside an explicit `withUnitOfWork()`, the idempotency check still happens per-c
 ## Next Steps
 
 - [Persistence](/docs/running/persistence) — Event-sourced vs. state-stored strategies
-- [Unit of Work](/docs/running/unit-of-work) — Atomic command dispatch boundaries
+- [Unit of Work](/docs/running/persistence#unit-of-work) — Atomic command dispatch boundaries
 - [Domain Configuration](/docs/running/domain-configuration) — Full infrastructure configuration reference
