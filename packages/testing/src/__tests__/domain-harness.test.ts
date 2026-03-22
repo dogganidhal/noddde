@@ -58,25 +58,33 @@ type CounterProjectionDef = {
   viewStore: ViewStore<CounterViewType>;
 };
 
-const counterViewStore = new InMemoryViewStore<CounterViewType>();
+/**
+ * Creates a fresh CounterProjection with its own InMemoryViewStore.
+ * Each call returns an isolated pair to prevent state leakage across tests.
+ */
+function createCounterProjection() {
+  const viewStore = new InMemoryViewStore<CounterViewType>();
 
-const CounterProjection = defineProjection<CounterProjectionDef>({
-  reducers: {
-    Incremented: (event, view) => ({
-      total: (view?.total ?? 0) + event.payload.amount,
-    }),
-  },
-  identity: {
-    Incremented: () => "global",
-  },
-  viewStore: () => counterViewStore,
-  queryHandlers: {
-    GetTotal: async (_payload, { views }) => {
-      const view = await views.load("global");
-      return view?.total ?? 0;
+  const projection = defineProjection<CounterProjectionDef>({
+    reducers: {
+      Incremented: (event, view) => ({
+        total: (view?.total ?? 0) + event.payload.amount,
+      }),
     },
-  },
-});
+    identity: {
+      Incremented: () => "global",
+    },
+    viewStore: () => viewStore,
+    queryHandlers: {
+      GetTotal: async (_payload, { views }) => {
+        const view = await views.load("global");
+        return view?.total ?? 0;
+      },
+    },
+  });
+
+  return { projection, viewStore };
+}
 
 // ---- Simple saga for testing command spy ----
 
@@ -122,9 +130,10 @@ const TestSaga = defineSaga<TestSagaDef>({
 
 describe("testDomain", () => {
   it("should create a domain with aggregates and projections", async () => {
+    const { projection } = createCounterProjection();
     const { domain } = await testDomain({
       aggregates: { Counter },
-      projections: { CounterProjection },
+      projections: { CounterProjection: projection },
     });
 
     expect(domain).toBeDefined();
@@ -198,9 +207,10 @@ describe("testDomain", () => {
   });
 
   it("should work without sagas", async () => {
+    const { projection } = createCounterProjection();
     const { domain, spy } = await testDomain({
       aggregates: { Counter },
-      projections: { CounterProjection },
+      projections: { CounterProjection: projection },
     });
 
     await domain.dispatchCommand({
@@ -237,9 +247,10 @@ describe("testDomain", () => {
   });
 
   it("should update projection views on command dispatch", async () => {
+    const { projection, viewStore } = createCounterProjection();
     const { domain } = await testDomain({
       aggregates: { Counter },
-      projections: { CounterProjection },
+      projections: { CounterProjection: projection },
     });
 
     await domain.dispatchCommand({
@@ -254,7 +265,7 @@ describe("testDomain", () => {
       payload: { amount: 3 },
     });
 
-    const view = await counterViewStore.load("global");
+    const view = await viewStore.load("global");
     expect(view).toEqual({ total: 8 });
   });
 
