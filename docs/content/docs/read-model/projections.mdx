@@ -347,7 +347,7 @@ No mocks needed. No infrastructure setup. Just inputs and outputs.
 
 ## View Persistence
 
-By default, projection views are stored in an in-memory map per projection name. For production use, noddde provides **view stores** -- typed persistence interfaces for per-entity view management.
+noddde provides **view stores** — typed persistence interfaces for per-entity view management. Projections use `identity` maps and `viewStore` factories to automatically persist views when events arrive.
 
 A `ViewStore<TView>` provides `save(viewId, view)` and `load(viewId)` methods. You can extend it with custom query methods for advanced filtering:
 

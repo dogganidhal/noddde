@@ -221,6 +221,6 @@ The engine validates projection configuration during `Domain.init()`:
 - **`viewStore` without `identity`**: Valid. Query handlers receive `{ views }`, but auto-persistence is not enabled (manual persistence by the user).
 - **`consistency: "strong"` without `identity` and `viewStore`**: Silently ignored -- treated as eventual.
 
-## Backward Compatibility
+## Optional Fields
 
-All view persistence fields are optional. Existing projections without `identity`, `viewStore`, `initialView`, or `consistency` continue to work unchanged -- views are stored in the legacy in-memory map per projection name.
+All view persistence fields (`identity`, `viewStore`, `initialView`, `consistency`) are optional at the type level. However, projections without `identity` and `viewStore` will not have their reducers subscribed to the event bus — they serve only as query handler containers. To enable auto-persistence, provide both `identity` and `viewStore`.

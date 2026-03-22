@@ -25,7 +25,6 @@ docs:
   - projections/overview.mdx
   - projections/functional-projections.mdx
   - projections/connecting-events.mdx
-  - projections/legacy-projections.mdx
   - projections/view-persistence.mdx
 ---
 
