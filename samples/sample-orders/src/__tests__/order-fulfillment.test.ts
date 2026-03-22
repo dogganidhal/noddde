@@ -15,6 +15,7 @@ import { OrderSummaryProjection } from "../projection";
 import { FixedClock } from "../infrastructure";
 import type { OrderItem } from "../order/events";
 import type { OrderSummary } from "../infrastructure";
+import { InMemoryViewStore } from "@noddde/engine";
 
 // ---- Shared fixtures ----
 
@@ -25,10 +26,12 @@ const mockNotifier = {
   notifyCustomer: vi.fn().mockResolvedValue(undefined),
 };
 
+const orderSummaryViewStore = new InMemoryViewStore<OrderSummary>();
+
 const ecomInfra = {
   clock: fixedClock,
   notificationService: mockNotifier,
-  orderSummaryRepository: {} as any,
+  orderSummaryViewStore,
 };
 
 const sampleItems: OrderItem[] = [
@@ -663,10 +666,8 @@ describe("Order fulfillment domain — slice test", () => {
       }),
     );
 
-    // Projection should show pending order
-    const summary = domain.getProjectionView<OrderSummary>(
-      "OrderSummaryProjection",
-    );
+    // Projection should have persisted the view via ViewStore
+    const summary = await orderSummaryViewStore.load("order-1");
     expect(summary?.status).toBe("pending");
     expect(summary?.total).toBe(sampleTotal);
     expect(summary?.itemCount).toBe(3);

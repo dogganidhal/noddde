@@ -25,10 +25,11 @@ import { OrderFulfillmentSaga } from "./saga/order-fulfillment";
 import { OrderSummaryProjection } from "./projection";
 import {
   EcommerceInfrastructure,
+  OrderSummary,
   SystemClock,
   ConsoleNotificationService,
-  InMemoryOrderSummaryRepository,
 } from "./infrastructure";
+import { InMemoryViewStore } from "@noddde/engine";
 import { randomUUID } from "crypto";
 
 const main = async () => {
@@ -73,7 +74,7 @@ const main = async () => {
       provideInfrastructure: () => ({
         clock: new SystemClock(),
         notificationService: new ConsoleNotificationService(),
-        orderSummaryRepository: new InMemoryOrderSummaryRepository(),
+        orderSummaryViewStore: new InMemoryViewStore<OrderSummary>(),
       }),
       cqrsInfrastructure: () => ({
         commandBus: new InMemoryCommandBus(),
