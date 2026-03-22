@@ -57,9 +57,13 @@ noddde occupies a specific niche compared to alternatives:
 
 ## Production Readiness
 
-See `NEXT_STEPS.md` for the full gap analysis. Current state:
+See `ROADMAP.md` for the full roadmap. Current state:
 
 - API surface: complete
 - In-memory runtime: complete
-- Persistence adapters: not yet (Drizzle, Prisma, TypeORM planned)
-- Production gaps: concurrency control, event metadata, snapshotting, projection rebuild (all tracked as specs)
+- Persistence adapters: complete (Drizzle, Prisma, TypeORM with transaction support)
+- Concurrency control: complete (optimistic with retries, pessimistic with advisory locks)
+- Event metadata: complete (auto-enrichment, correlation propagation through sagas)
+- Snapshotting: complete (configurable strategies, partial event loading)
+- Idempotent commands: complete (commandId deduplication with TTL)
+- Remaining gaps: projection rebuild, observability, distributed systems support (see ROADMAP.md)
