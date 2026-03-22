@@ -42,6 +42,10 @@ export class CommandLifecycleExecutor {
     private readonly snapshotStore?: SnapshotStore,
     private readonly snapshotStrategy?: SnapshotStrategy,
     private readonly idempotencyStore?: IdempotencyStore,
+    private readonly onEventsProduced?: (
+      events: Event[],
+      uow: UnitOfWork,
+    ) => Promise<void>,
   ) {}
 
   /**
@@ -292,6 +296,11 @@ export class CommandLifecycleExecutor {
 
     // Step 6: Defer event publishing (published after commit)
     uow.deferPublish(...enrichedEvents);
+
+    // Step 6.5: Strong-consistency projection view updates (if configured)
+    if (this.onEventsProduced) {
+      await this.onEventsProduced(enrichedEvents, uow);
+    }
 
     // Step 7: Evaluate snapshot strategy (if configured)
     if (isEventSourced && this.snapshotStore && this.snapshotStrategy) {

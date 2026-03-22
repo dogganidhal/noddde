@@ -324,12 +324,5 @@ describe("Banking domain — slice test", () => {
     expect(spy.publishedEvents).toHaveLength(2);
     expect(spy.publishedEvents[0]!.name).toBe("BankAccountCreated");
     expect(spy.publishedEvents[1]!.name).toBe("TransactionDeclined");
-
-    // Projection should reflect the created account
-    const view = domain.getProjectionView<BankAccountView>(
-      "BankAccountProjection",
-    );
-    expect(view?.id).toBe("acc-1");
-    expect(view?.balance).toBe(0);
   });
 });

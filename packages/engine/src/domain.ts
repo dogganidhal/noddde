@@ -22,6 +22,7 @@ import type {
   UnitOfWork,
   UnitOfWorkFactory,
   IdempotencyStore,
+  ViewStore,
 } from "@noddde/core";
 import type { AggregateLocker } from "@noddde/core";
 
@@ -277,26 +278,9 @@ export class Domain<
   private readonly _metadataStorage = new AsyncLocalStorage<MetadataContext>();
   private _commandExecutor!: CommandLifecycleExecutor;
   private _sagaExecutor?: SagaExecutor;
-  private readonly _projectionViews = new Map<string, any>();
-
   /** The fully resolved infrastructure (custom + CQRS buses). */
   public get infrastructure(): TInfrastructure & CQRSInfrastructure {
     return this._infrastructure;
-  }
-
-  /**
-   * Returns the current in-memory view for a named projection.
-   * Useful for testing and debugging. Returns `undefined` if no events
-   * have been processed by the projection yet.
-   *
-   * @param projectionName - The key under which the projection was registered
-   *   in `readModel.projections`.
-   * @returns The current view state, or `undefined` if no events were processed.
-   */
-  public getProjectionView<TView = any>(
-    projectionName: string,
-  ): TView | undefined {
-    return this._projectionViews.get(projectionName);
   }
 
   constructor(
@@ -385,12 +369,62 @@ export class Domain<
       idempotencyStore = await configuration.infrastructure.idempotencyStore();
     }
 
-    // Step 5.8: Create metadata enricher and command executor
+    // Step 5.8: Create metadata enricher
     const metadataEnricher = new MetadataEnricher(
       this._metadataStorage,
       configuration.metadataProvider,
     );
 
+    // Step 5.9: Resolve view stores for projections with identity
+    const resolvedViewStores = new Map<string, ViewStore>();
+    for (const [name, projection] of Object.entries(
+      configuration.readModel.projections,
+    )) {
+      if (projection.identity && !projection.viewStore) {
+        throw new Error(
+          `Projection "${name}" has identity but no viewStore. ` +
+            `Provide a viewStore factory or remove identity.`,
+        );
+      }
+      if (projection.viewStore) {
+        resolvedViewStores.set(
+          name,
+          (projection.viewStore as any)(this._infrastructure),
+        );
+      }
+    }
+
+    // Step 5.10: Build strong-consistency callback for projections
+    const strongProjections = Object.entries(
+      configuration.readModel.projections,
+    ).filter(
+      ([_, p]) => p.consistency === "strong" && p.identity && p.viewStore,
+    );
+
+    const onEventsProduced:
+      | ((events: Event[], uow: UnitOfWork) => Promise<void>)
+      | undefined =
+      strongProjections.length > 0
+        ? async (events, uow) => {
+            for (const [_projName, projection] of strongProjections) {
+              const viewStoreInstance = resolvedViewStores.get(_projName)!;
+              for (const event of events) {
+                const reducerFn = (projection.reducers as any)[event.name];
+                const identityFn = (projection.identity as any)?.[event.name];
+                if (reducerFn && identityFn) {
+                  const viewId = identityFn(event);
+                  const currentView =
+                    (await viewStoreInstance.load(viewId)) ??
+                    projection.initialView;
+                  const newView = await reducerFn(event, currentView);
+                  uow.enlist(() => viewStoreInstance.save(viewId, newView));
+                }
+              }
+            }
+          }
+        : undefined;
+
+    // Step 5.11: Create command executor
     this._commandExecutor = new CommandLifecycleExecutor(
       persistence,
       this._infrastructure,
@@ -401,6 +435,7 @@ export class Domain<
       snapshotStore,
       snapshotStrategy,
       idempotencyStore,
+      onEventsProduced,
     );
 
     if (sagaPersistence) {
@@ -450,10 +485,11 @@ export class Domain<
     }
 
     // Step 8: Register projection query handlers on the query bus
-    for (const [_projectionName, projection] of Object.entries(
+    for (const [projectionName, projection] of Object.entries(
       configuration.readModel.projections,
     )) {
       if (projection.queryHandlers) {
+        const viewStoreInstance = resolvedViewStores.get(projectionName);
         for (const [queryName, handler] of Object.entries(
           projection.queryHandlers,
         )) {
@@ -461,7 +497,10 @@ export class Domain<
             (queryBus as InMemoryQueryBus).register(
               queryName,
               async (payload: any) => {
-                return await (handler as any)(payload, this._infrastructure);
+                const handlerInfra = viewStoreInstance
+                  ? { ...this._infrastructure, views: viewStoreInstance }
+                  : this._infrastructure;
+                return await (handler as any)(payload, handlerInfra);
               },
             );
           }
@@ -489,14 +528,24 @@ export class Domain<
     for (const [projectionName, projection] of Object.entries(
       configuration.readModel.projections,
     )) {
+      // Skip strong-consistency projections — they're handled via onEventsProduced
+      if (projection.consistency === "strong") continue;
+
+      const viewStoreInstance = resolvedViewStores.get(projectionName);
+
+      if (!projection.identity || !viewStoreInstance) continue;
+
       for (const eventName of Object.keys(projection.reducers)) {
+        const identityFn = (projection.identity as any)[eventName];
         this.subscribeToEvent(eventBus, eventName, async (event: Event) => {
-          const currentView = this._projectionViews.get(projectionName);
+          const viewId = identityFn(event);
+          const currentView =
+            (await viewStoreInstance.load(viewId)) ?? projection.initialView;
           const newView = await (projection.reducers as any)[eventName](
             event,
             currentView,
           );
-          this._projectionViews.set(projectionName, newView);
+          await viewStoreInstance.save(viewId, newView);
         });
       }
     }

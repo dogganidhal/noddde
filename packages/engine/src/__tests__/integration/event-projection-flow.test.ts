@@ -1,6 +1,11 @@
 /* eslint-disable no-unused-vars */
 import { describe, expect, it } from "vitest";
-import type { DefineCommands, DefineEvents, DefineQueries } from "@noddde/core";
+import type {
+  DefineCommands,
+  DefineEvents,
+  DefineQueries,
+  ViewStore,
+} from "@noddde/core";
 import { defineAggregate, defineProjection } from "@noddde/core";
 import {
   configureDomain,
@@ -8,6 +13,7 @@ import {
   InMemoryCommandBus,
   InMemoryEventSourcedAggregatePersistence,
   InMemoryQueryBus,
+  InMemoryViewStore,
 } from "@noddde/engine";
 
 // ---- Scenario 1: Projection reducer updates view after event publication ----
@@ -66,7 +72,10 @@ describe("Event-to-projection flow", () => {
     queries: TodoQuery;
     view: TodoView;
     infrastructure: {};
+    viewStore: ViewStore<TodoView>;
   };
+
+  const todoViewStore = new InMemoryViewStore<TodoView>();
 
   const TodoProjection = defineProjection<TodoProjectionTypes>({
     reducers: {
@@ -86,6 +95,11 @@ describe("Event-to-projection flow", () => {
         ),
       }),
     },
+    identity: {
+      TodoAdded: () => "global",
+      TodoCompleted: () => "global",
+    },
+    viewStore: () => todoViewStore,
     queryHandlers: {},
   });
 
@@ -123,8 +137,8 @@ describe("Event-to-projection flow", () => {
       targetAggregateId: "todo-1",
     });
 
-    // The projection should have processed all three events
-    const view = domain.getProjectionView<TodoView>("TodoProjection");
+    // The projection should have persisted the view via ViewStore
+    const view = await todoViewStore.load("global");
     expect(view).toBeDefined();
     expect(view!.todos).toHaveLength(2);
     expect(view!.todos[0]).toEqual({
@@ -174,11 +188,16 @@ describe("Multiple projections for same event", () => {
   });
 
   // Projection 1: catalog of items
+  const catalogViewStore = new InMemoryViewStore<{
+    items: Array<{ id: string; name: string }>;
+  }>();
+
   const CatalogProjection = defineProjection<{
     events: ItemEvent;
     queries: never;
     view: { items: Array<{ id: string; name: string }> };
     infrastructure: {};
+    viewStore: ViewStore<{ items: Array<{ id: string; name: string }> }>;
   }>({
     reducers: {
       ItemCreated: (event, view) => ({
@@ -188,15 +207,25 @@ describe("Multiple projections for same event", () => {
         ],
       }),
     },
+    identity: {
+      ItemCreated: () => "global",
+    },
+    viewStore: () => catalogViewStore,
     queryHandlers: {},
   });
 
   // Projection 2: price index
+  const priceViewStore = new InMemoryViewStore<{
+    totalValue: number;
+    count: number;
+  }>();
+
   const PriceIndexProjection = defineProjection<{
     events: ItemEvent;
     queries: never;
     view: { totalValue: number; count: number };
     infrastructure: {};
+    viewStore: ViewStore<{ totalValue: number; count: number }>;
   }>({
     reducers: {
       ItemCreated: (event, view) => ({
@@ -204,6 +233,10 @@ describe("Multiple projections for same event", () => {
         count: (view?.count ?? 0) + 1,
       }),
     },
+    identity: {
+      ItemCreated: () => "global",
+    },
+    viewStore: () => priceViewStore,
     queryHandlers: {},
   });
 
@@ -233,17 +266,12 @@ describe("Multiple projections for same event", () => {
     });
 
     // Both projections should have processed the ItemCreated event independently.
-    const catalogView = domain.getProjectionView<{
-      items: Array<{ id: string; name: string }>;
-    }>("CatalogProjection");
+    const catalogView = await catalogViewStore.load("global");
     expect(catalogView).toEqual({
       items: [{ id: "item-1", name: "Widget" }],
     });
 
-    const priceView = domain.getProjectionView<{
-      totalValue: number;
-      count: number;
-    }>("PriceIndexProjection");
+    const priceView = await priceViewStore.load("global");
     expect(priceView).toEqual({ totalValue: 9.99, count: 1 });
   });
 });
@@ -277,11 +305,14 @@ describe("Async projection reducer", () => {
     },
   });
 
+  const asyncLogViewStore = new InMemoryViewStore<{ entries: string[] }>();
+
   const AsyncLogProjection = defineProjection<{
     events: LogEvent;
     queries: never;
     view: { entries: string[] };
     infrastructure: {};
+    viewStore: ViewStore<{ entries: string[] }>;
   }>({
     reducers: {
       EntryLogged: async (event, view) => {
@@ -292,6 +323,10 @@ describe("Async projection reducer", () => {
         };
       },
     },
+    identity: {
+      EntryLogged: () => "global",
+    },
+    viewStore: () => asyncLogViewStore,
     queryHandlers: {},
   });
 
@@ -317,9 +352,7 @@ describe("Async projection reducer", () => {
     });
 
     // After dispatch resolves, the async reducer should have completed.
-    const view = domain.getProjectionView<{ entries: string[] }>(
-      "AsyncLogProjection",
-    );
+    const view = await asyncLogViewStore.load("global");
     expect(view).toEqual({ entries: ["hello world"] });
   });
 });
@@ -364,11 +397,17 @@ describe("Sequential events produce cumulative view", () => {
     },
   });
 
+  const balanceViewStore = new InMemoryViewStore<{
+    totalDeposits: number;
+    totalWithdrawals: number;
+  }>();
+
   const BalanceProjection = defineProjection<{
     events: BalanceEvent;
     queries: never;
     view: { totalDeposits: number; totalWithdrawals: number };
     infrastructure: {};
+    viewStore: ViewStore<{ totalDeposits: number; totalWithdrawals: number }>;
   }>({
     reducers: {
       Deposited: (event, view) => ({
@@ -380,6 +419,11 @@ describe("Sequential events produce cumulative view", () => {
         totalWithdrawals: (view?.totalWithdrawals ?? 0) + event.payload.amount,
       }),
     },
+    identity: {
+      Deposited: () => "global",
+      Withdrawn: () => "global",
+    },
+    viewStore: () => balanceViewStore,
     queryHandlers: {},
   });
 
@@ -417,10 +461,7 @@ describe("Sequential events produce cumulative view", () => {
     });
 
     // Expected view: { totalDeposits: 150, totalWithdrawals: 30 }
-    const view = domain.getProjectionView<{
-      totalDeposits: number;
-      totalWithdrawals: number;
-    }>("BalanceProjection");
+    const view = await balanceViewStore.load("global");
     expect(view).toEqual({ totalDeposits: 150, totalWithdrawals: 30 });
   });
 });

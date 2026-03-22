@@ -31,8 +31,8 @@ expect(spy.publishedEvents).toHaveLength(2);
 expect(spy.publishedEvents[0].name).toBe("BankAccountCreated");
 expect(spy.publishedEvents[1].name).toBe("TransactionAuthorized");
 
-// Assert on projection views
-const view = domain.getProjectionView<BankAccountViewType>("BankAccountView");
+// Assert on projection views via the view store
+const view = await bankAccountViewStore.load("acc-1");
 expect(view?.balance).toBe(-100);
 ```
 
@@ -141,7 +141,7 @@ await domain.dispatchCommand({
   payload: { amount: 1000 },
 });
 
-const view = domain.getProjectionView<{ balance: number }>("BankAccountView");
+const view = await bankAccountViewStore.load("acc-1");
 expect(view?.balance).toBe(1000);
 ```
 
@@ -202,8 +202,8 @@ await domain.dispatchCommand({
   payload: { transactionId: "txn-1" },
 });
 
-// Verify the projection shows the order status
-const summary = domain.getProjectionView<OrderSummaryView>("OrderSummary");
+// Verify the projection shows the order status via view store
+const summary = await orderSummaryViewStore.load("o-1");
 expect(summary?.status).toBe("confirmed");
 ```
 

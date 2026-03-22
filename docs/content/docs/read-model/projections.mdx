@@ -29,7 +29,7 @@ Command --> Aggregate --> Events --> EventBus --> Projection Reducers --> View
 
 ## The ProjectionTypes Bundle
 
-Every projection is parameterized by a `ProjectionTypes` bundle -- a single named type that captures four dimensions:
+Every projection is parameterized by a `ProjectionTypes` bundle -- a single named type that captures the projection's type universe:
 
 ```ts
 type MyProjectionDef = {
@@ -37,8 +37,11 @@ type MyProjectionDef = {
   queries: MyQuery; // The query union this projection answers
   view: MyView; // The view model this projection builds
   infrastructure: MyInfra; // Dependencies available to query handlers
+  viewStore: MyViewStore; // (optional) Typed view store for persistence and queries
 };
 ```
+
+The first four fields are required. The `viewStore` field is optional -- when present, it enables automatic view persistence and typed `{ views }` injection into query handlers. See [View Persistence](/docs/read-model/view-persistence) for details.
 
 This follows the same pattern as `AggregateTypes` in [defining aggregates](/docs/modeling/defining-aggregates) -- instead of threading positional generics, you declare a single named type.
 
@@ -47,6 +50,7 @@ This follows the same pattern as `AggregateTypes` in [defining aggregates](/docs
 Use `defineProjection` to create a projection with full type inference:
 
 ```ts
+import type { ViewStore } from "@noddde/core";
 import { defineProjection, DefineQueries } from "@noddde/core";
 
 // View model -- read-optimized, display-focused
@@ -69,12 +73,18 @@ type BankAccountQuery = DefineQueries<{
   };
 }>;
 
+// Infrastructure provides the view store instance
+type BankingInfrastructure = {
+  bankAccountViewStore: ViewStore<BankAccountView>;
+};
+
 // The ProjectionTypes bundle
 type BankAccountProjectionDef = {
   events: BankAccountEvent;
   queries: BankAccountQuery;
   view: BankAccountView;
   infrastructure: BankingInfrastructure;
+  viewStore: ViewStore<BankAccountView>;
 };
 
 export const BankAccountProjection = defineProjection<BankAccountProjectionDef>(
@@ -114,9 +124,16 @@ export const BankAccountProjection = defineProjection<BankAccountProjectionDef>(
       }),
     },
 
+    identity: {
+      BankAccountCreated: (event) => event.payload.id,
+      TransactionProcessed: (event) => event.payload.accountId,
+      TransactionDeclined: (event) => event.payload.accountId,
+    },
+
+    viewStore: (infra) => infra.bankAccountViewStore,
+
     queryHandlers: {
-      GetBankAccountById: async (query, { bankAccountViewRepository }) =>
-        bankAccountViewRepository.getById(query.payload.id),
+      GetBankAccountById: (query, { views }) => views.load(query.id),
     },
   },
 );
@@ -161,16 +178,15 @@ The reducer pattern mirrors the apply handler pattern used in aggregates. Both a
 
 ## Query Handlers
 
-The `queryHandlers` map contains handlers for serving queries from the projection's view. Each handler receives the query and the infrastructure:
+The `queryHandlers` map contains handlers for serving queries from the projection's view. When the projection has a `viewStore`, handlers automatically receive `{ views }` -- a typed view store instance -- in their infrastructure parameter:
 
 ```ts
 queryHandlers: {
-  GetBankAccountById: async (query, { bankAccountViewRepository }) =>
-    bankAccountViewRepository.getById(query.payload.id),
+  GetBankAccountById: (query, { views }) => views.load(query.id),
 }
 ```
 
-Query handlers access data through infrastructure -- typically view repositories that encapsulate the underlying storage. The handler's return type is validated against the `result` type declared in the `DefineQueries` map.
+The `views` object is typed to the projection's view store, giving you access to both the base `save`/`load` methods and any custom query methods you defined on the store interface. The handler's return type is validated against the `result` type declared in the `DefineQueries` map.
 
 Query handlers are optional. A projection may handle events (updating a view) without directly serving queries.
 
@@ -329,7 +345,93 @@ describe("BankAccountProjection", () => {
 
 No mocks needed. No infrastructure setup. Just inputs and outputs.
 
+## View Persistence
+
+noddde provides **view stores** — typed persistence interfaces for per-entity view management. Projections use `identity` maps and `viewStore` factories to automatically persist views when events arrive.
+
+A `ViewStore<TView>` provides `save(viewId, view)` and `load(viewId)` methods. You can extend it with custom query methods for advanced filtering:
+
+```ts
+import type { ViewStore } from "@noddde/core";
+
+interface BankAccountViewStore extends ViewStore<BankAccountView> {
+  findByBalanceRange(min: number, max: number): Promise<BankAccountView[]>;
+}
+```
+
+### Identity Maps
+
+To enable automatic view persistence, declare an `identity` map that extracts the view instance ID from each event:
+
+```ts
+type BankAccountProjectionDef = {
+  events: BankAccountEvent;
+  queries: BankAccountQuery;
+  view: BankAccountView;
+  infrastructure: BankingInfrastructure;
+  viewStore: BankAccountViewStore;
+};
+
+const BankAccountProjection = defineProjection<BankAccountProjectionDef>({
+  reducers: {
+    BankAccountCreated: (event) => ({
+      id: event.payload.id,
+      balance: 0,
+      transactions: [],
+    }),
+    TransactionProcessed: (event, view) => ({
+      ...view,
+      balance: view.balance + event.payload.amount,
+    }),
+  },
+  identity: {
+    BankAccountCreated: (event) => event.payload.id,
+    TransactionProcessed: (event) => event.payload.accountId,
+  },
+  viewStore: (infra) => infra.bankAccountViewStore,
+  queryHandlers: {
+    GetBankAccountById: (query, { views }) => views.load(query.id),
+  },
+});
+```
+
+When both `identity` and `viewStore` are present, the engine automatically:
+1. Extracts the view ID from the event via `identity[eventName](event)`
+2. Loads the current view from the view store (falling back to `initialView` if not found)
+3. Runs the reducer to produce the new view
+4. Saves the new view to the view store
+
+### Query Handler Views Injection
+
+When a projection has a `viewStore`, query handlers automatically receive `{ views }` in their infrastructure parameter, typed to the projection's view store:
+
+```ts
+queryHandlers: {
+  GetBankAccountById: (query, { views }) =>
+    views.load(query.id),                           // views is BankAccountViewStore
+  GetAccountsInRange: (query, { views }) =>
+    views.findByBalanceRange(query.min, query.max),  // custom method
+},
+```
+
+### Consistency Modes
+
+Projections support two consistency modes via the `consistency` field:
+
+- **`"eventual"`** (default): Views are updated asynchronously after the command's unit of work is committed and events are dispatched via the event bus.
+- **`"strong"`**: View updates are enlisted in the same unit of work as the originating command. If the command fails, view updates are rolled back atomically.
+
+```ts
+const projection = defineProjection<Def>({
+  // ...
+  consistency: "strong",
+});
+```
+
+For more details, see [View Persistence](/docs/read-model/view-persistence).
+
 ## Next Steps
 
+- [View Persistence](/docs/read-model/view-persistence) -- ViewStore interface, InMemoryViewStore, ORM adapters, and consistency modes
 - [Queries](/docs/read-model/queries) -- Defining and dispatching type-safe queries
 - [Testing Aggregates and Projections](/docs/testing/testing-aggregates-and-projections) -- Testing strategies for both sides of the domain

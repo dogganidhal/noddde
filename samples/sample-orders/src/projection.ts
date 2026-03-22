@@ -1,3 +1,4 @@
+import type { ViewStore } from "@noddde/core";
 import { defineProjection } from "@noddde/core";
 import { EcommerceInfrastructure, OrderSummary } from "./infrastructure";
 import { OrderEvent } from "./order/events";
@@ -8,6 +9,7 @@ type OrderSummaryProjectionDef = {
   queries: OrderSummaryQuery;
   view: OrderSummary;
   infrastructure: EcommerceInfrastructure;
+  viewStore: ViewStore<OrderSummary>;
 };
 
 export const OrderSummaryProjection =
@@ -47,8 +49,18 @@ export const OrderSummaryProjection =
       }),
     },
 
+    identity: {
+      OrderPlaced: (event) => event.payload.orderId,
+      OrderConfirmed: (event) => event.payload.orderId,
+      OrderCancelled: (event) => event.payload.orderId,
+      OrderShipped: (event) => event.payload.orderId,
+      OrderDelivered: (event) => event.payload.orderId,
+    },
+
+    viewStore: (infra) => infra.orderSummaryViewStore,
+
     queryHandlers: {
-      GetOrderSummary: async (query, { orderSummaryRepository }) =>
-        orderSummaryRepository.getById(query.orderId),
+      GetOrderSummary: async (query, { views }) =>
+        (await views.load(query.orderId)) ?? null,
     },
   });

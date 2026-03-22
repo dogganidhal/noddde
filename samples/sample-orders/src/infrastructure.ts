@@ -1,5 +1,7 @@
 /* eslint-disable no-unused-vars */
 
+import type { ViewStore } from "@noddde/core";
+
 // ---- Clock (deterministic time injection) ----
 
 export interface Clock {
@@ -31,7 +33,7 @@ export class ConsoleNotificationService implements NotificationService {
   }
 }
 
-// ---- Order view repository (for projections) ----
+// ---- Order summary view ----
 
 export interface OrderSummary {
   orderId: string;
@@ -42,24 +44,10 @@ export interface OrderSummary {
   trackingNumber: string | null;
 }
 
-export interface OrderSummaryRepository {
-  getById(orderId: string): Promise<OrderSummary | null>;
-  save(summary: OrderSummary): Promise<void>;
-}
-
-export class InMemoryOrderSummaryRepository implements OrderSummaryRepository {
-  async getById(orderId: string): Promise<OrderSummary | null> {
-    throw new Error("Not implemented");
-  }
-  async save(summary: OrderSummary): Promise<void> {
-    throw new Error("Not implemented");
-  }
-}
-
 // ---- Aggregate infrastructure (shared) ----
 
 export interface EcommerceInfrastructure {
   clock: Clock;
   notificationService: NotificationService;
-  orderSummaryRepository: OrderSummaryRepository;
+  orderSummaryViewStore: ViewStore<OrderSummary>;
 }
