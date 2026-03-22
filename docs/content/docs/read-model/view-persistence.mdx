@@ -1,0 +1,227 @@
+---
+title: View Persistence
+description: Persisting projection views with ViewStore, auto-persistence via identity maps, and choosing between eventual and strong consistency.
+---
+
+View persistence enables projections to automatically store and retrieve per-entity views using typed view stores. Instead of manually wiring event handlers to save views and writing boilerplate query handlers that delegate to repositories, you declare an `identity` map and a `viewStore` factory -- the framework handles the rest.
+
+## The ViewStore Interface
+
+`ViewStore<TView>` is the base persistence interface for projection views:
+
+```ts
+import type { ID } from "@noddde/core";
+
+interface ViewStore<TView = any> {
+  save(viewId: ID, view: TView): Promise<void>;
+  load(viewId: ID): Promise<TView | undefined | null>;
+}
+```
+
+- `save` persists a view instance, replacing any previously stored view for the given ID.
+- `load` retrieves a view by ID, returning `undefined` or `null` if not found.
+- `viewId` uses the framework's `ID` type (`string | number | bigint`).
+
+### Extending with Custom Query Methods
+
+The base interface provides only `save` and `load`. For advanced filtering, extend it:
+
+```ts
+interface BankAccountViewStore extends ViewStore<BankAccountView> {
+  findByBalanceRange(min: number, max: number): Promise<BankAccountView[]>;
+  findByOwner(ownerId: string): Promise<BankAccountView[]>;
+}
+```
+
+Custom methods are available in query handlers via the `{ views }` injection.
+
+## InMemoryViewStore
+
+The engine provides `InMemoryViewStore<TView>` for development and testing:
+
+```ts
+import { InMemoryViewStore } from "@noddde/engine";
+
+const store = new InMemoryViewStore<BankAccountView>();
+await store.save("acc-1", { id: "acc-1", balance: 100 });
+const view = await store.load("acc-1"); // { id: "acc-1", balance: 100 }
+```
+
+It also includes convenience methods not on the base interface:
+- `findAll()` -- returns all stored views
+- `find(predicate)` -- filters views by a predicate function
+
+For production, use ORM adapters or implement your own `ViewStore`.
+
+## Configuring View Persistence
+
+To enable automatic view persistence on a projection, provide three things:
+
+1. **`viewStore`** field in your `ProjectionTypes` bundle
+2. **`identity`** map on the projection definition
+3. **`viewStore`** factory on the projection definition
+
+```ts
+import type { ViewStore, DefineEvents, DefineQueries, Infrastructure } from "@noddde/core";
+import { defineProjection } from "@noddde/core";
+import { InMemoryViewStore } from "@noddde/engine";
+
+interface AccountView {
+  id: string;
+  balance: number;
+}
+
+interface AccountViewStore extends ViewStore<AccountView> {
+  findByBalanceRange(min: number, max: number): Promise<AccountView[]>;
+}
+
+type AccountEvent = DefineEvents<{
+  AccountCreated: { id: string; owner: string };
+  DepositMade: { accountId: string; amount: number };
+}>;
+
+type AccountQuery = DefineQueries<{
+  GetAccountById: { payload: { id: string }; result: AccountView | null };
+  GetAccountsInRange: {
+    payload: { min: number; max: number };
+    result: AccountView[];
+  };
+}>;
+
+type AccountProjectionDef = {
+  events: AccountEvent;
+  queries: AccountQuery;
+  view: AccountView;
+  infrastructure: Infrastructure;
+  viewStore: AccountViewStore;  // Typed view store
+};
+
+const AccountProjection = defineProjection<AccountProjectionDef>({
+  reducers: {
+    AccountCreated: (event) => ({
+      id: event.payload.id,
+      balance: 0,
+    }),
+    DepositMade: (event, view) => ({
+      ...view,
+      balance: view.balance + event.payload.amount,
+    }),
+  },
+
+  // Maps each event to the view instance ID
+  identity: {
+    AccountCreated: (event) => event.payload.id,
+    DepositMade: (event) => event.payload.accountId,
+  },
+
+  // Factory that creates the view store (receives infrastructure for IoC)
+  viewStore: (_infra) => new InMemoryViewStore(),
+
+  // Query handlers receive { views } typed as AccountViewStore
+  queryHandlers: {
+    GetAccountById: (query, { views }) => views.load(query.id),
+    GetAccountsInRange: (query, { views }) =>
+      views.findByBalanceRange(query.min, query.max),
+  },
+});
+```
+
+## The Identity Map
+
+The `identity` map tells the engine how to derive the view instance ID from each event. It must be **exhaustive** -- every event in the projection's event union must have a mapping.
+
+```ts
+identity: {
+  AccountCreated: (event) => event.payload.id,
+  DepositMade: (event) => event.payload.accountId,
+},
+```
+
+This mirrors the saga `associations` pattern. When an event arrives, the engine:
+1. Calls `identity[event.name](event)` to get the view ID
+2. Loads the current view from the view store
+3. Runs the reducer with the event and current view
+4. Saves the new view to the view store
+
+### initialView
+
+When `load()` returns `undefined` (new entity), the reducer receives `undefined` as the current view. To provide a default starting state, use `initialView`:
+
+```ts
+const projection = defineProjection<Def>({
+  reducers: { /* ... */ },
+  identity: { /* ... */ },
+  viewStore: (_infra) => new InMemoryViewStore(),
+  initialView: { id: "", balance: 0 },  // Default for new entities
+  queryHandlers: {},
+});
+```
+
+## The viewStore Factory
+
+The `viewStore` field is a factory function, not a direct instance. It receives the resolved infrastructure, enabling inversion of control:
+
+```ts
+viewStore: (infra) => new TypeORMAccountViewStore(infra.dataSource),
+```
+
+The factory is called during `Domain.init()` with the fully resolved infrastructure (custom + CQRS). It may be async:
+
+```ts
+viewStore: async (infra) => {
+  const repo = infra.dataSource.getRepository(AccountEntity);
+  return new TypeORMAccountViewStore(repo);
+},
+```
+
+## Consistency Modes
+
+Projections support two consistency modes:
+
+### Eventual Consistency (default)
+
+Views are updated asynchronously after the command's unit of work is committed and events are dispatched via the event bus.
+
+```
+Command -> Aggregate -> Events -> UoW commit -> Event Bus -> Projection reducer -> viewStore.save()
+                                      |                                                |
+                                atomic boundary                                  independent
+```
+
+If the view update fails, the aggregate state is already committed. This is the standard CQRS pattern.
+
+### Strong Consistency
+
+View updates are enlisted in the same unit of work as the originating command. The projection reducer runs and `viewStore.save()` is deferred alongside aggregate persistence. If the command's UoW fails, both aggregate and view changes are rolled back atomically.
+
+```
+Command -> Aggregate -> Events -> [Projection reducer -> viewStore.save()] -> UoW commit
+                                                                                  |
+                                                                    single atomic boundary
+```
+
+Enable it with `consistency: "strong"`:
+
+```ts
+const projection = defineProjection<Def>({
+  reducers: { /* ... */ },
+  identity: { /* ... */ },
+  viewStore: (_infra) => new InMemoryViewStore(),
+  consistency: "strong",
+  queryHandlers: {},
+});
+```
+
+Strong-consistency projections do **not** subscribe to the event bus (to avoid double processing). They are processed inline during command execution.
+
+## Validation
+
+The engine validates projection configuration during `Domain.init()`:
+
+- **`identity` without `viewStore`**: Throws an error. Identity maps require a view store to persist to.
+- **`viewStore` without `identity`**: Valid. Query handlers receive `{ views }`, but auto-persistence is not enabled (manual persistence by the user).
+- **`consistency: "strong"` without `identity` and `viewStore`**: Silently ignored -- treated as eventual.
+
+## Backward Compatibility
+
+All view persistence fields are optional. Existing projections without `identity`, `viewStore`, `initialView`, or `consistency` continue to work unchanged -- views are stored in the legacy in-memory map per projection name.

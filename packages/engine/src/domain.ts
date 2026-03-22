@@ -22,6 +22,7 @@ import type {
   UnitOfWork,
   UnitOfWorkFactory,
   IdempotencyStore,
+  ViewStore,
 } from "@noddde/core";
 import type { AggregateLocker } from "@noddde/core";
 
@@ -385,12 +386,63 @@ export class Domain<
       idempotencyStore = await configuration.infrastructure.idempotencyStore();
     }
 
-    // Step 5.8: Create metadata enricher and command executor
+    // Step 5.8: Create metadata enricher
     const metadataEnricher = new MetadataEnricher(
       this._metadataStorage,
       configuration.metadataProvider,
     );
 
+    // Step 5.9: Resolve view stores for projections with identity
+    const resolvedViewStores = new Map<string, ViewStore>();
+    for (const [name, projection] of Object.entries(
+      configuration.readModel.projections,
+    )) {
+      if (projection.identity && !projection.viewStore) {
+        throw new Error(
+          `Projection "${name}" has identity but no viewStore. ` +
+            `Provide a viewStore factory or remove identity.`,
+        );
+      }
+      if (projection.viewStore) {
+        resolvedViewStores.set(
+          name,
+          await (projection.viewStore as any)(this._infrastructure),
+        );
+      }
+    }
+
+    // Step 5.10: Build strong-consistency callback for projections
+    const strongProjections = Object.entries(
+      configuration.readModel.projections,
+    ).filter(
+      ([_, p]) =>
+        p.consistency === "strong" && p.identity && p.viewStore,
+    );
+
+    const onEventsProduced:
+      | ((events: Event[], uow: UnitOfWork) => Promise<void>)
+      | undefined =
+      strongProjections.length > 0
+        ? async (events, uow) => {
+            for (const [_projName, projection] of strongProjections) {
+              const viewStoreInstance = resolvedViewStores.get(_projName)!;
+              for (const event of events) {
+                const reducerFn = (projection.reducers as any)[event.name];
+                const identityFn = (projection.identity as any)?.[event.name];
+                if (reducerFn && identityFn) {
+                  const viewId = identityFn(event);
+                  const currentView =
+                    (await viewStoreInstance.load(viewId)) ??
+                    projection.initialView;
+                  const newView = await reducerFn(event, currentView);
+                  uow.enlist(() => viewStoreInstance.save(viewId, newView));
+                }
+              }
+            }
+          }
+        : undefined;
+
+    // Step 5.11: Create command executor
     this._commandExecutor = new CommandLifecycleExecutor(
       persistence,
       this._infrastructure,
@@ -401,6 +453,7 @@ export class Domain<
       snapshotStore,
       snapshotStrategy,
       idempotencyStore,
+      onEventsProduced,
     );
 
     if (sagaPersistence) {
@@ -450,10 +503,11 @@ export class Domain<
     }
 
     // Step 8: Register projection query handlers on the query bus
-    for (const [_projectionName, projection] of Object.entries(
+    for (const [projectionName, projection] of Object.entries(
       configuration.readModel.projections,
     )) {
       if (projection.queryHandlers) {
+        const viewStoreInstance = resolvedViewStores.get(projectionName);
         for (const [queryName, handler] of Object.entries(
           projection.queryHandlers,
         )) {
@@ -461,7 +515,10 @@ export class Domain<
             (queryBus as InMemoryQueryBus).register(
               queryName,
               async (payload: any) => {
-                return await (handler as any)(payload, this._infrastructure);
+                const handlerInfra = viewStoreInstance
+                  ? { ...this._infrastructure, views: viewStoreInstance }
+                  : this._infrastructure;
+                return await (handler as any)(payload, handlerInfra);
               },
             );
           }
@@ -489,15 +546,47 @@ export class Domain<
     for (const [projectionName, projection] of Object.entries(
       configuration.readModel.projections,
     )) {
+      // Skip strong-consistency projections — they're handled via onEventsProduced
+      if (projection.consistency === "strong") continue;
+
+      const viewStoreInstance = resolvedViewStores.get(projectionName);
+
       for (const eventName of Object.keys(projection.reducers)) {
-        this.subscribeToEvent(eventBus, eventName, async (event: Event) => {
-          const currentView = this._projectionViews.get(projectionName);
-          const newView = await (projection.reducers as any)[eventName](
-            event,
-            currentView,
+        if (projection.identity && viewStoreInstance) {
+          // Identity-based: per-entity view persistence via view store
+          const identityFn = (projection.identity as any)[eventName];
+          this.subscribeToEvent(
+            eventBus,
+            eventName,
+            async (event: Event) => {
+              const viewId = identityFn(event);
+              const currentView =
+                (await viewStoreInstance.load(viewId)) ??
+                projection.initialView;
+              const newView = await (projection.reducers as any)[eventName](
+                event,
+                currentView,
+              );
+              await viewStoreInstance.save(viewId, newView);
+            },
           );
-          this._projectionViews.set(projectionName, newView);
-        });
+        } else {
+          // Legacy: single view per projection (in-memory map)
+          this.subscribeToEvent(
+            eventBus,
+            eventName,
+            async (event: Event) => {
+              const currentView =
+                this._projectionViews.get(projectionName) ??
+                projection.initialView;
+              const newView = await (projection.reducers as any)[eventName](
+                event,
+                currentView,
+              );
+              this._projectionViews.set(projectionName, newView);
+            },
+          );
+        }
       }
     }
 
