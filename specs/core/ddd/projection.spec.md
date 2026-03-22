@@ -100,7 +100,7 @@ docs:
 9. `viewStore` is a synchronous factory function `(infrastructure) => ViewStore`. It receives the resolved infrastructure and returns an already-initialized view store instance. The factory must not be async — infrastructure initialization belongs outside the projection definition.
 10. `initialView` provides the default view state when `viewStore.load()` returns `undefined`/`null` for a new entity. Without it, reducers may receive `undefined` as the current view.
 11. `consistency` defaults to `"eventual"`. When `"strong"`, the engine enlists view persistence in the same UoW as the originating command. When `"eventual"`, views are updated asynchronously via the event bus.
-12. All new fields (`identity`, `viewStore`, `initialView`, `consistency`) are optional. Existing projections without these fields continue to work unchanged.
+12. All fields (`identity`, `viewStore`, `initialView`, `consistency`) are optional at the type level. However, projections without `identity` and `viewStore` will not have their reducers subscribed to the event bus — they serve only as query handler containers.
 
 ## Invariants
 
@@ -121,7 +121,7 @@ docs:
 - **Async reducers**: Returning `Promise<T["view"]>` is valid.
 - **Single event projection**: The reducer map has one key.
 - **View type is a primitive**: `view: number` is valid; reducers accept and return `number`.
-- **Projection without viewStore**: All fields (`identity`, `viewStore`, `initialView`, `consistency`) are optional. A projection without them works exactly as before.
+- **Projection without viewStore**: All fields (`identity`, `viewStore`, `initialView`, `consistency`) are optional at the type level. A projection without `identity` and `viewStore` will not have its reducers subscribed to the event bus — it serves only as a query handler container.
 - **Projection with viewStore but no identity**: Valid — the engine does not auto-persist views, but query handlers still receive `{ views }`. Manual persistence by the user.
 - **Projection with identity but no viewStore**: The engine MUST throw an error at init time. `identity` without `viewStore` is nonsensical (no store to persist to).
 - **initialView is undefined**: Reducers may receive `undefined` as the current view when processing the first event for a new entity. The user is responsible for handling this in their reducer.
@@ -732,7 +732,7 @@ describe("viewStore factory", () => {
 });
 ```
 
-### All new fields are optional (backward compatible)
+### All view persistence fields are optional
 
 ```ts
 import { describe, it, expect } from "vitest";

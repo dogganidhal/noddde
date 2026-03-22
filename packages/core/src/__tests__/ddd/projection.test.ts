@@ -478,7 +478,7 @@ describe("viewStore factory", () => {
   });
 });
 
-describe("Backward compatibility", () => {
+describe("All view persistence fields are optional", () => {
   type Events = DefineEvents<{ Created: { id: string } }>;
   type Def = {
     events: Events;
