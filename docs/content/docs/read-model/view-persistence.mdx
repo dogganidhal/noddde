@@ -62,9 +62,8 @@ To enable automatic view persistence on a projection, provide three things:
 3. **`viewStore`** factory on the projection definition
 
 ```ts
-import type { ViewStore, DefineEvents, DefineQueries, Infrastructure } from "@noddde/core";
+import type { ViewStore, DefineEvents, DefineQueries } from "@noddde/core";
 import { defineProjection } from "@noddde/core";
-import { InMemoryViewStore } from "@noddde/engine";
 
 interface AccountView {
   id: string;
@@ -88,11 +87,16 @@ type AccountQuery = DefineQueries<{
   };
 }>;
 
+// Infrastructure provides the view store — initialized outside the domain
+type AccountInfrastructure = {
+  accountViewStore: AccountViewStore;
+};
+
 type AccountProjectionDef = {
   events: AccountEvent;
   queries: AccountQuery;
   view: AccountView;
-  infrastructure: Infrastructure;
+  infrastructure: AccountInfrastructure;
   viewStore: AccountViewStore;  // Typed view store
 };
 
@@ -114,8 +118,8 @@ const AccountProjection = defineProjection<AccountProjectionDef>({
     DepositMade: (event) => event.payload.accountId,
   },
 
-  // Factory that creates the view store (receives infrastructure for IoC)
-  viewStore: (_infra) => new InMemoryViewStore(),
+  // Returns the already-initialized view store from infrastructure
+  viewStore: (infra) => infra.accountViewStore,
 
   // Query handlers receive { views } typed as AccountViewStore
   queryHandlers: {
@@ -151,7 +155,7 @@ When `load()` returns `undefined` (new entity), the reducer receives `undefined`
 const projection = defineProjection<Def>({
   reducers: { /* ... */ },
   identity: { /* ... */ },
-  viewStore: (_infra) => new InMemoryViewStore(),
+  viewStore: (infra) => infra.accountViewStore,
   initialView: { id: "", balance: 0 },  // Default for new entities
   queryHandlers: {},
 });
@@ -159,19 +163,18 @@ const projection = defineProjection<Def>({
 
 ## The viewStore Factory
 
-The `viewStore` field is a factory function, not a direct instance. It receives the resolved infrastructure, enabling inversion of control:
+The `viewStore` field is a factory function, not a direct instance. It receives the resolved infrastructure and should return an **already-initialized** view store instance from it:
 
 ```ts
-viewStore: (infra) => new TypeORMAccountViewStore(infra.dataSource),
+viewStore: (infra) => infra.accountViewStore,
 ```
+
+This keeps the projection definition free of infrastructure concerns — the view store is created and configured when you set up your infrastructure, not inside domain code. Constructing a view store inline (e.g., `new InMemoryViewStore()`) defeats the purpose of separating domain from infrastructure.
 
 The factory is called during `Domain.init()` with the fully resolved infrastructure (custom + CQRS). It may be async:
 
 ```ts
-viewStore: async (infra) => {
-  const repo = infra.dataSource.getRepository(AccountEntity);
-  return new TypeORMAccountViewStore(repo);
-},
+viewStore: async (infra) => infra.accountViewStore,
 ```
 
 ## Consistency Modes
@@ -206,7 +209,7 @@ Enable it with `consistency: "strong"`:
 const projection = defineProjection<Def>({
   reducers: { /* ... */ },
   identity: { /* ... */ },
-  viewStore: (_infra) => new InMemoryViewStore(),
+  viewStore: (infra) => infra.accountViewStore,
   consistency: "strong",
   queryHandlers: {},
 });

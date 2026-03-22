@@ -52,7 +52,6 @@ Use `defineProjection` to create a projection with full type inference:
 ```ts
 import type { ViewStore } from "@noddde/core";
 import { defineProjection, DefineQueries } from "@noddde/core";
-import { InMemoryViewStore } from "@noddde/engine";
 
 // View model -- read-optimized, display-focused
 type BankAccountView = {
@@ -73,6 +72,11 @@ type BankAccountQuery = DefineQueries<{
     result: BankAccountView | null;
   };
 }>;
+
+// Infrastructure provides the view store instance
+type BankingInfrastructure = {
+  bankAccountViewStore: ViewStore<BankAccountView>;
+};
 
 // The ProjectionTypes bundle
 type BankAccountProjectionDef = {
@@ -126,7 +130,7 @@ export const BankAccountProjection = defineProjection<BankAccountProjectionDef>(
       TransactionDeclined: (event) => event.payload.accountId,
     },
 
-    viewStore: (_infra) => new InMemoryViewStore(),
+    viewStore: (infra) => infra.bankAccountViewStore,
 
     queryHandlers: {
       GetBankAccountById: (query, { views }) => views.load(query.id),
@@ -384,7 +388,7 @@ const BankAccountProjection = defineProjection<BankAccountProjectionDef>({
     BankAccountCreated: (event) => event.payload.id,
     TransactionProcessed: (event) => event.payload.accountId,
   },
-  viewStore: (_infra) => new InMemoryViewStore(),
+  viewStore: (infra) => infra.bankAccountViewStore,
   queryHandlers: {
     GetBankAccountById: (query, { views }) => views.load(query.id),
   },
