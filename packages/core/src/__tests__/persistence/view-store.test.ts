@@ -34,10 +34,7 @@ describe("ViewStore extension", () => {
   }
 
   interface AccountViewStore extends ViewStore<AccountView> {
-    findByBalanceRange(
-      min: number,
-      max: number,
-    ): Promise<AccountView[]>;
+    findByBalanceRange(min: number, max: number): Promise<AccountView[]>;
   }
 
   it("should allow extending with custom query methods", () => {

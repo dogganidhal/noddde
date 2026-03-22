@@ -240,10 +240,7 @@ describe("Projection with identity", () => {
   }>;
 
   interface AccountViewStore extends ViewStore<AccountView> {
-    findByBalanceRange(
-      min: number,
-      max: number,
-    ): Promise<AccountView[]>;
+    findByBalanceRange(min: number, max: number): Promise<AccountView[]>;
   }
 
   type Def = {

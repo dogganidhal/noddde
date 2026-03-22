@@ -88,7 +88,9 @@ describe("ViewStore", () => {
     const store: ViewStore<{ id: string; balance: number }> = {
       save: async (_viewId: ID, _view: { id: string; balance: number }) => {},
       load: async (_viewId: ID) =>
-        ({ id: "1", balance: 100 }) as { id: string; balance: number } | undefined,
+        ({ id: "1", balance: 100 }) as
+          | { id: string; balance: number }
+          | undefined,
     };
     expectTypeOf(store.save).toBeFunction();
     expectTypeOf(store.load).toBeFunction();
@@ -127,10 +129,7 @@ describe("ViewStore extension", () => {
   }
 
   interface AccountViewStore extends ViewStore<AccountView> {
-    findByBalanceRange(
-      min: number,
-      max: number,
-    ): Promise<AccountView[]>;
+    findByBalanceRange(min: number, max: number): Promise<AccountView[]>;
   }
 
   it("should allow extending with custom query methods", () => {
