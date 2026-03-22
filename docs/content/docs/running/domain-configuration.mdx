@@ -262,11 +262,20 @@ The `infrastructure` getter returns the merged custom infrastructure and CQRS in
 
 ### Reading Projection Views
 
+Projection views are persisted via `ViewStore`. To read a projection's view, query through the query bus or access the view store directly from your infrastructure:
+
 ```ts
-const view = domain.getProjectionView<BankAccountView>("BankAccount");
+// Via query bus
+const view = await domain.infrastructure.queryBus.dispatch({
+  name: "GetOrderSummary",
+  payload: { orderId: "order-1" },
+});
+
+// Or via the view store on your infrastructure
+const view = await domain.infrastructure.orderSummaryViewStore.load("order-1");
 ```
 
-Returns the current in-memory view for a named projection. The projection name is the key under which the projection was registered in `readModel.projections`. Returns `undefined` if no events have been processed by the projection yet. Useful for testing and debugging.
+See [View Persistence](/docs/read-model/view-persistence) for details on configuring projections with `ViewStore`.
 
 ## Event Metadata
 

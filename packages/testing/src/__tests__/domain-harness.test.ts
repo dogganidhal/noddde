@@ -1,8 +1,14 @@
 /* eslint-disable no-unused-vars */
 import { describe, expect, it } from "vitest";
-import type { DefineCommands, DefineEvents, DefineQueries } from "@noddde/core";
+import type {
+  DefineCommands,
+  DefineEvents,
+  DefineQueries,
+  ViewStore,
+} from "@noddde/core";
 import { defineAggregate, defineProjection, defineSaga } from "@noddde/core";
 import { testDomain } from "@noddde/testing";
+import { InMemoryViewStore } from "@noddde/engine";
 
 // ---- Counter aggregate ----
 
@@ -49,7 +55,10 @@ type CounterProjectionDef = {
   queries: CounterQuery;
   view: CounterViewType;
   infrastructure: {};
+  viewStore: ViewStore<CounterViewType>;
 };
+
+const counterViewStore = new InMemoryViewStore<CounterViewType>();
 
 const CounterProjection = defineProjection<CounterProjectionDef>({
   reducers: {
@@ -57,10 +66,14 @@ const CounterProjection = defineProjection<CounterProjectionDef>({
       total: (view?.total ?? 0) + event.payload.amount,
     }),
   },
+  identity: {
+    Incremented: () => "global",
+  },
+  viewStore: () => counterViewStore,
   queryHandlers: {
-    GetTotal: (payload, infrastructure) => {
-      // In a real scenario this would query a repository
-      return 0;
+    GetTotal: async (_payload, { views }) => {
+      const view = await views.load("global");
+      return view?.total ?? 0;
     },
   },
 });
@@ -241,7 +254,7 @@ describe("testDomain", () => {
       payload: { amount: 3 },
     });
 
-    const view = domain.getProjectionView<CounterViewType>("CounterProjection");
+    const view = await counterViewStore.load("global");
     expect(view).toEqual({ total: 8 });
   });
 

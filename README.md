@@ -204,7 +204,7 @@ expect(spy.publishedEvents).toContainEqual({
   name: "DepositMade",
   payload: { amount: 500 },
 });
-expect(domain.getProjectionView("BankAccountView")).toEqual({ balance: 500 });
+expect(await bankAccountViewStore.load("acc-1")).toEqual({ balance: 500 });
 ```
 
 The full toolkit includes `testAggregate`, `testProjection`, `testSaga`, `testDomain`, and `evolveAggregate`. See the [testing documentation](https://noddde.dev/docs/testing/overview) for the complete guide.

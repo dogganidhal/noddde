@@ -278,26 +278,9 @@ export class Domain<
   private readonly _metadataStorage = new AsyncLocalStorage<MetadataContext>();
   private _commandExecutor!: CommandLifecycleExecutor;
   private _sagaExecutor?: SagaExecutor;
-  private readonly _projectionViews = new Map<string, any>();
-
   /** The fully resolved infrastructure (custom + CQRS buses). */
   public get infrastructure(): TInfrastructure & CQRSInfrastructure {
     return this._infrastructure;
-  }
-
-  /**
-   * Returns the current in-memory view for a named projection.
-   * Useful for testing and debugging. Returns `undefined` if no events
-   * have been processed by the projection yet.
-   *
-   * @param projectionName - The key under which the projection was registered
-   *   in `readModel.projections`.
-   * @returns The current view state, or `undefined` if no events were processed.
-   */
-  public getProjectionView<TView = any>(
-    projectionName: string,
-  ): TView | undefined {
-    return this._projectionViews.get(projectionName);
   }
 
   constructor(
@@ -550,33 +533,20 @@ export class Domain<
 
       const viewStoreInstance = resolvedViewStores.get(projectionName);
 
+      if (!projection.identity || !viewStoreInstance) continue;
+
       for (const eventName of Object.keys(projection.reducers)) {
-        if (projection.identity && viewStoreInstance) {
-          // Identity-based: per-entity view persistence via view store
-          const identityFn = (projection.identity as any)[eventName];
-          this.subscribeToEvent(eventBus, eventName, async (event: Event) => {
-            const viewId = identityFn(event);
-            const currentView =
-              (await viewStoreInstance.load(viewId)) ?? projection.initialView;
-            const newView = await (projection.reducers as any)[eventName](
-              event,
-              currentView,
-            );
-            await viewStoreInstance.save(viewId, newView);
-          });
-        } else {
-          // Legacy: single view per projection (in-memory map)
-          this.subscribeToEvent(eventBus, eventName, async (event: Event) => {
-            const currentView =
-              this._projectionViews.get(projectionName) ??
-              projection.initialView;
-            const newView = await (projection.reducers as any)[eventName](
-              event,
-              currentView,
-            );
-            this._projectionViews.set(projectionName, newView);
-          });
-        }
+        const identityFn = (projection.identity as any)[eventName];
+        this.subscribeToEvent(eventBus, eventName, async (event: Event) => {
+          const viewId = identityFn(event);
+          const currentView =
+            (await viewStoreInstance.load(viewId)) ?? projection.initialView;
+          const newView = await (projection.reducers as any)[eventName](
+            event,
+            currentView,
+          );
+          await viewStoreInstance.save(viewId, newView);
+        });
       }
     }
 
