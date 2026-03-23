@@ -29,18 +29,11 @@ jobs:
           node-version: 22
           cache: yarn
 
-      - name: Restore Turbo cache
-        uses: actions/cache@v4
-        with:
-          path: .turbo
-          key: turbo-${{ runner.os }}-${{ github.sha }}
-          restore-keys: turbo-${{ runner.os }}-
-
       - name: Install dependencies
-        run: yarn install --frozen-lockfile
+        run: yarn workspaces focus @noddde/docs
 
       - name: Build
-        run: yarn build
+        run: yarn workspace @noddde/docs build
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

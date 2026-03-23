@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "generate:og": "node scripts/generate-og-image.mjs"
   },
   "dependencies": {
     "fumadocs-core": "^16.6.17",
