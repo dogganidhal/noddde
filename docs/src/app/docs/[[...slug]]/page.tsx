@@ -52,6 +52,14 @@ export async function generateMetadata(props: {
       title: page.data.title,
       description: page.data.description,
       url: `${BASE_URL}${page.url}`,
+      images: [
+        {
+          url: `${BASE_URL}/og-image.png`,
+          width: 1200,
+          height: 630,
+          alt: "noddde — Functional DDD Framework for TypeScript",
+        },
+      ],
     },
   };
 }
