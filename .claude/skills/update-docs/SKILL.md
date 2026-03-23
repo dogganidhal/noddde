@@ -188,7 +188,42 @@ Add the new page to the appropriate category's `meta.json` file at `docs/content
 
 Read the existing `meta.json`, add the new page name (without extension) to the `pages` array in a logical position (usually at the end, unless there's a clear ordering).
 
-## Step 6: Flag API Reference Changes
+## Step 6: Update llms.txt
+
+When documentation pages are **created, deleted, or renamed** in Step 5, update `docs/public/llms.txt` to keep it in sync.
+
+`llms.txt` is a static Markdown file following the [llmstxt.org](https://llmstxt.org) specification that makes the docs discoverable by AI crawlers. It mirrors the documentation structure with one link per page.
+
+### When to update
+
+- **Page created** → Add a link entry under the matching H2 section
+- **Page deleted** → Remove the corresponding link entry
+- **Page renamed/moved** → Update the link URL and title
+- **Page title or description changed** → Update the link text and description
+
+### Format
+
+Each entry follows this pattern:
+```
+- [Page Title](https://noddde.dev/docs/<section>/<slug>): <description from MDX frontmatter>
+```
+
+Entries are grouped under H2 sections that match the docs navigation structure (Getting Started, Core Concepts, Modeling Your Domain, etc.).
+
+### Rules
+
+- **Always** read the current `llms.txt` before editing — do not rewrite the whole file
+- **Only** add/remove/update the specific entries that changed
+- **Preserve** the existing section order and formatting
+- If a new section is needed (new docs category), add the H2 in the same position as in the docs navigation
+
+### Skip conditions
+
+Skip this step when:
+- Only existing page content changed (no structural changes)
+- No pages were created, deleted, or renamed
+
+## Step 7: Flag API Reference Changes
 
 If the spec added new exports, removed exports, or changed existing signatures:
 
@@ -196,7 +231,7 @@ If the spec added new exports, removed exports, or changed existing signatures:
 2. Note these in the report as needing regeneration
 3. **Do NOT manually edit these files** — they are auto-generated
 
-## Step 7: Documentation Update Report
+## Step 8: Documentation Update Report
 
 ```
 📖 Step 6 complete: Documentation updated
@@ -212,6 +247,11 @@ If the spec added new exports, removed exports, or changed existing signatures:
     - <N> auto-generated pages may need regeneration (exports changed: <list>)
     — OR —
     - No API surface changes — auto-generated docs are up to date
+
+  LLM discoverability:
+    - llms.txt updated: added <N> entries, removed <N> entries
+    — OR —
+    - llms.txt: no structural changes needed
 
   Flagged for review: <N>
     - docs/content/docs/<path>.mdx (prose may need updating — <reason>)

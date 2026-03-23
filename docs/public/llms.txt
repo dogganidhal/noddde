@@ -1,0 +1,71 @@
+# noddde
+
+> A TypeScript framework for DDD, CQRS, and Event Sourcing using the functional Decider pattern — no base classes, no decorators, just typed objects and pure functions.
+
+## Getting Started
+
+- [Introduction](https://noddde.dev/docs/getting-started/introduction): What is noddde and why use it
+- [Quick Start](https://noddde.dev/docs/getting-started/quick-start): Install noddde and build your first aggregate
+
+## Core Concepts
+
+- [Messages & Type System](https://noddde.dev/docs/core-concepts/messages-and-types): Typed messages and mapped types for type-safe communication
+- [ID Types](https://noddde.dev/docs/core-concepts/id-types): String, number, and bigint identifiers via the ID type alias
+- [The Decider Pattern](https://noddde.dev/docs/core-concepts/decider-pattern): Pure functions instead of OOP aggregates
+- [CQRS & Event Sourcing](https://noddde.dev/docs/core-concepts/cqrs-and-event-sourcing): Separate write/read models with events as source of truth
+
+## Modeling Your Domain
+
+- [Defining Aggregates](https://noddde.dev/docs/modeling/defining-aggregates): Events, commands, state, AggregateTypes bundle, and defineAggregate
+- [Command Handlers](https://noddde.dev/docs/modeling/command-handlers): Validation, returning events, infrastructure access, and type safety
+- [State Design & Event Application](https://noddde.dev/docs/modeling/state-and-events): Designing state and writing pure apply handlers
+- [Command Routing & Dispatch](https://noddde.dev/docs/modeling/routing-and-dispatch): How commands flow from dispatch through to event publication
+- [Type Inference Helpers](https://noddde.dev/docs/modeling/type-inference): InferAggregateID, InferAggregateState, and other extraction utilities
+
+## Read Model & Queries
+
+- [Projections](https://noddde.dev/docs/read-model/projections): Building read-optimized views from event streams
+- [View Persistence](https://noddde.dev/docs/read-model/view-persistence): ViewStore, auto-persistence, and consistency strategies
+- [Queries](https://noddde.dev/docs/read-model/queries): DefineQueries, query handlers, and the QueryBus
+
+## Process Managers
+
+- [Sagas](https://noddde.dev/docs/process-managers/sagas): Event-driven process managers coordinating workflows across aggregates
+- [Standalone Command Handlers](https://noddde.dev/docs/process-managers/standalone-commands): Commands outside aggregates for orchestration and integrations
+
+## Running Your Domain
+
+- [Domain Configuration](https://noddde.dev/docs/running/domain-configuration): Wiring aggregates, projections, sagas, and infrastructure with configureDomain
+- [Infrastructure](https://noddde.dev/docs/running/infrastructure): Injectable infrastructure for pure domain logic
+- [Persistence](https://noddde.dev/docs/running/persistence): Event-sourced vs state-stored persistence strategies
+- [Idempotent Commands](https://noddde.dev/docs/running/idempotent-commands): Preventing duplicate execution with commandId and IdempotencyStore
+- [ORM Adapters](https://noddde.dev/docs/running/orm-adapters): Production persistence with Drizzle, Prisma, or TypeORM
+
+## Testing
+
+- [Testing Overview](https://noddde.dev/docs/testing/overview): How functional design makes testing natural
+- [Testing Aggregates & Projections](https://noddde.dev/docs/testing/testing-aggregates-and-projections): Given-When-Then testing with testAggregate and testProjection
+- [Testing Sagas](https://noddde.dev/docs/testing/testing-sagas): Given-When-Then saga testing with testSaga
+- [Testing Domains](https://noddde.dev/docs/testing/testing-domains): Zero-boilerplate slice and integration tests with testDomain
+
+## Patterns & Examples
+
+- [The Clock Pattern](https://noddde.dev/docs/patterns/clock-pattern): Injecting time as infrastructure for deterministic handlers
+- [Banking Domain](https://noddde.dev/docs/patterns/banking-domain): Bank account aggregate with transactions, projections, and queries
+- [Auction Domain](https://noddde.dev/docs/patterns/auction-domain): Auction aggregate with time-based validation and the Clock pattern
+- [Order Fulfillment](https://noddde.dev/docs/patterns/order-fulfillment): E-commerce order fulfillment with three aggregates and a saga
+- [Fund Transfer](https://noddde.dev/docs/patterns/fund-transfer): Atomic multi-command operations with domain.withUnitOfWork()
+- [Flash Sale](https://noddde.dev/docs/patterns/flash-sale): Optimistic concurrency control with automatic retry
+- [Seat Reservation](https://noddde.dev/docs/patterns/seat-reservation): Pessimistic locking with advisory locks and timeout handling
+
+## Design Decisions
+
+- [Why the Decider Pattern?](https://noddde.dev/docs/design-decisions/why-decider): Pure functions instead of OOP aggregate classes
+- [Why the AggregateTypes Bundle?](https://noddde.dev/docs/design-decisions/why-aggregate-types): Named type bundle instead of positional generic parameters
+- [Why DefineCommands / DefineEvents?](https://noddde.dev/docs/design-decisions/why-define-commands-events): Mapped type utilities instead of enum + interface declarations
+- [Why Commands Return Events?](https://noddde.dev/docs/design-decisions/why-commands-return-events): Return events instead of calling eventBus.dispatch() directly
+- [Why Is the Aggregate ID Not in State?](https://noddde.dev/docs/design-decisions/why-id-not-in-state): ID on commands rather than in aggregate state
+- [Why Are Apply Handlers Pure?](https://noddde.dev/docs/design-decisions/why-pure-apply-handlers): No infrastructure access in apply handlers
+- [Why Two Persistence Strategies?](https://noddde.dev/docs/design-decisions/why-two-persistence-strategies): Both event sourcing and state storage
+- [Why Injectable Infrastructure?](https://noddde.dev/docs/design-decisions/why-injectable-infrastructure): Function parameter injection instead of DI containers
+- [Why Sagas Return Commands](https://noddde.dev/docs/design-decisions/why-sagas-return-commands): SagaReaction instead of imperative command dispatch
