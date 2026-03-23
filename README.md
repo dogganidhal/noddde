@@ -16,7 +16,12 @@
   <a href="https://noddde.dev/docs/patterns/order-fulfillment">Examples</a>
 </p>
 
----
+> **Status:** Active development, pre-1.0. The API is stabilizing but may have breaking changes. Feedback and contributions welcome.
+
+```bash
+yarn add @noddde/core @noddde/engine
+yarn add --dev @noddde/testing
+```
 
 ## The problem
 
@@ -28,13 +33,13 @@ You want to build a business application in TypeScript using DDD, CQRS, or Event
 - Register handlers in a service bus through imperative configuration
 - Fight the type system instead of leveraging it
 
-Your domain logic — the most important code in your application — ends up buried under framework ceremony. The aggregate becomes a class that inherits behaviors you didn't ask for. The command handler is a method that only works because a decorator registered it at runtime. The tests require mocking a DI container before you can assert anything about business rules.
-
 **This is backwards.** The framework should serve the domain, not the other way around.
 
 ## The idea
 
-noddde implements the [Decider pattern](https://thinkbeforecoding.com/post/2021/12/17/functional-event-sourcing-decider). An aggregate is not a class — it's a value. Three things define it completely:
+So noddde starts from a different premise: **an aggregate is a value, not a class.**
+
+noddde implements the [Decider pattern](https://thinkbeforecoding.com/post/2021/12/17/functional-event-sourcing-decider). Three things define an aggregate completely:
 
 1. **Initial state** — what it looks like before anything happens
 2. **Decide** — given a command and the current state, what events should occur?
@@ -59,7 +64,7 @@ const BankAccount = defineAggregate<BankAccountDef>({
 });
 ```
 
-This is not a simplified example. This is the actual API. No base class. No decorator. No registration. The object you write _is_ the aggregate — `defineAggregate` is an identity function that exists only so TypeScript can infer the types.
+This is not a simplified example. This is the actual API. No base class. No decorator. No registration.
 
 ## What makes this different
 
@@ -68,6 +73,8 @@ This is not a simplified example. This is the actual API. No base class. No deco
 An aggregate in noddde is a plain object literal with `initialState`, `commands`, and `apply`. A projection is a plain object with `reducers` and `queryHandlers`. A saga is a plain object with `handlers` and `associations`. You can spread them, compose them, serialize them, test them with a simple function call.
 
 There are no base classes to extend, no lifecycle hooks to implement, no abstract methods to override. If you can write a function that takes input and returns output, you can write a noddde domain.
+
+The `apply` handlers are pure, synchronous, and have no access to infrastructure — by design. When the framework replays thousands of events to rebuild state, every replay must produce the same result. Constraining apply to pure functions makes event replay a mathematical certainty.
 
 ### The type system does the wiring
 
@@ -96,12 +103,6 @@ PlaceBid: (command, state, { clock }) => {
 
 In production, you provide a `SystemClock`. In tests, you provide a `FixedClock`. No container. No binding syntax. No `@Inject()`. Just a function that receives what it needs.
 
-### Apply handlers are pure — on purpose
-
-The `apply` function takes an event payload and the current state, and returns the new state. It is pure, synchronous, and has no access to infrastructure. This isn't a limitation — it's the core guarantee that makes event sourcing safe.
-
-When the framework replays 10,000 events to rebuild an aggregate's state, every replay must produce the same result. If apply handlers could make API calls or read from a database, replay would be non-deterministic. By constraining apply to pure functions, noddde makes event replay a mathematical certainty.
-
 ### Sagas are return values, not side effects
 
 A saga handler receives an event and returns `{ state, commands }`. It doesn't call `commandBus.dispatch()` — it returns the commands it wants dispatched, and the framework handles execution, ordering, and error propagation.
@@ -120,13 +121,7 @@ handlers: {
 }
 ```
 
-### Persistence is a configuration choice, not an architecture decision
-
-noddde supports event sourcing and state snapshots through the same aggregate definition. The `commands` and `apply` functions are identical — what changes is how the framework stores and hydrates state.
-
-Switch from event sourcing to state snapshots by changing one line in your domain configuration. Your domain code doesn't know and doesn't care.
-
-For production, noddde provides ORM adapter packages that plug into your existing database setup:
+The same aggregate definition works with event sourcing or state snapshots — switch strategies by changing one line in your domain configuration. For production persistence, noddde provides ORM adapter packages:
 
 ```bash
 yarn add @noddde/drizzle drizzle-orm   # Drizzle ORM (SQLite, PostgreSQL, MySQL)
@@ -134,22 +129,9 @@ yarn add @noddde/prisma @prisma/client  # Prisma (any Prisma-supported database)
 yarn add @noddde/typeorm typeorm        # TypeORM (any TypeORM-supported database)
 ```
 
-Each adapter provides all persistence implementations and a database-backed Unit of Work through a single factory function — no custom code required.
-
 ## What it includes
 
-The framework ships with everything you need to build, test, and deploy a domain:
-
-- **Aggregates** with the Decider pattern (decide + evolve)
-- **Projections** that fold events into read models with typed query handlers
-- **Sagas** for cross-aggregate workflow orchestration with typed event correlation
-- **Command Bus, Query Bus, Event Bus** — in-memory implementations included, interfaces for your own
-- **Two persistence strategies** — event sourcing and state snapshots, swappable at configuration time
-- **Unit of Work** — atomic multi-command transactions with deferred event publishing
-- **ORM adapters** — production-ready persistence for [Drizzle](https://noddde.dev/docs/infrastructure/orm-adapters), [Prisma](https://noddde.dev/docs/infrastructure/orm-adapters), and [TypeORM](https://noddde.dev/docs/infrastructure/orm-adapters) with real database transactions
-- **`configureDomain`** — a single function that wires write model, read model, process model, and infrastructure into a running system
-
-The in-memory implementations are designed for development and testing. For production persistence, use one of the ORM adapter packages (`@noddde/drizzle`, `@noddde/prisma`, `@noddde/typeorm`) or implement the interfaces with your own storage backend.
+noddde ships with aggregates, projections, sagas, typed buses (command, query, event), two persistence strategies (event sourcing and state snapshots), unit of work for atomic transactions, and ORM adapters for [Drizzle, Prisma, and TypeORM](https://noddde.dev/docs/infrastructure/orm-adapters). In-memory implementations are included for development and testing.
 
 ## Testing
 
@@ -225,11 +207,14 @@ Head to the [documentation](https://noddde.dev/docs/getting-started) for a walkt
 | [Order Fulfillment](samples/sample-orders) | TypeORM + SQLite | 3 aggregates, saga orchestration, cross-context event correlation |
 | [Fund Transfer](samples/sample-transfers)  | In-memory        | Atomic multi-command transactions with `withUnitOfWork()`         |
 
+```bash
+# Try it now
+cd samples/sample-banking && yarn install && yarn test
+```
+
 ## License
 
 MIT
-
----
 
 <p align="center">
   <sub>Built with TypeScript. Inspired by the <a href="https://thinkbeforecoding.com/post/2021/12/17/functional-event-sourcing-decider">Decider pattern</a>.</sub>
