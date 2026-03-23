@@ -47,7 +47,7 @@ jobs:
           # Set own version for all publishable packages
           for dir in packages/core packages/engine packages/testing packages/adapters/drizzle packages/adapters/prisma packages/adapters/typeorm; do
             cd "$dir"
-            npm version "$VERSION" --no-git-tag-version
+            npm pkg set "version=$VERSION"
             cd "$GITHUB_WORKSPACE"
           done
 
