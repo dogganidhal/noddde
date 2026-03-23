@@ -204,6 +204,7 @@ When documentation pages are **created, deleted, or renamed** in Step 5, update 
 ### Format
 
 Each entry follows this pattern:
+
 ```
 - [Page Title](https://noddde.dev/docs/<section>/<slug>): <description from MDX frontmatter>
 ```
@@ -220,6 +221,7 @@ Entries are grouped under H2 sections that match the docs navigation structure (
 ### Skip conditions
 
 Skip this step when:
+
 - Only existing page content changed (no structural changes)
 - No pages were created, deleted, or renamed
 
