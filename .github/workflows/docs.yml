@@ -30,7 +30,7 @@ jobs:
           cache: yarn
 
       - name: Install dependencies
-        run: yarn workspaces focus @noddde/docs
+        run: yarn install --frozen-lockfile
 
       - name: Build
         run: yarn workspace @noddde/docs build
