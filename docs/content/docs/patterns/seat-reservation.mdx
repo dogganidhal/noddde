@@ -5,6 +5,8 @@ description: Serializing concurrent seat reservations with pessimistic locking, 
 
 A concert venue where customers reserve specific seats. Multiple customers attempt to reserve the same seat concurrently. This sample demonstrates **pessimistic concurrency with advisory locks** — the right strategy when command handlers involve expensive validation and wasted retries are costly.
 
+> **Full source**: [samples/sample-seat-reservation](https://github.com/dogganidhal/noddde/tree/main/samples/sample-seat-reservation) — clone and run locally with `npm start`.
+
 **Stack**: Prisma + MySQL + Testcontainers
 
 ## Why Pessimistic

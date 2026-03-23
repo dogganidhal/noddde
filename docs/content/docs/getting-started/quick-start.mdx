@@ -260,3 +260,11 @@ This example uses optimistic concurrency with no retries (the default). For high
 - [Modeling Your Domain](/docs/modeling/defining-aggregates) — Deep dive into aggregate definitions
 - [Projections](/docs/read-model/projections) — Building read models
 - [Running Your Domain](/docs/running/domain-configuration) — Complete wiring reference
+
+Ready to explore a full working example? The [fund transfer sample](https://github.com/dogganidhal/noddde/tree/main/samples/sample-transfers) is the simplest end-to-end domain — 5 files, in-memory only, no database setup. Clone the repo and run it:
+
+```bash
+git clone https://github.com/dogganidhal/noddde.git
+cd noddde && yarn install
+cd samples/sample-transfers && yarn start
+```
