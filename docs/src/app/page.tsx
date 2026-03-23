@@ -1,18 +1,17 @@
+import Image from "next/image";
 import Link from "next/link";
 
 export default function HomePage() {
   return (
     <main className="fixed inset-0 flex flex-col items-center justify-center px-6">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
+      <Image
         src="/icon-light.png"
         alt="noddde"
         width={56}
         height={40}
         className="logo-light"
       />
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
+      <Image
         src="/icon-dark.png"
         alt="noddde"
         width={56}
