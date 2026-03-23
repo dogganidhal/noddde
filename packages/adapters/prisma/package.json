@@ -1,6 +1,26 @@
 {
   "name": "@noddde/prisma",
   "version": "0.0.0",
+  "description": "Prisma persistence adapter for noddde",
+  "license": "MIT",
+  "author": "Nidhal Dogga",
+  "homepage": "https://noddde.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dogganidhal/noddde",
+    "directory": "packages/adapters/prisma"
+  },
+  "bugs": {
+    "url": "https://github.com/dogganidhal/noddde/issues"
+  },
+  "keywords": [
+    "ddd",
+    "cqrs",
+    "event-sourcing",
+    "prisma",
+    "typescript",
+    "persistence"
+  ],
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [

@@ -1,6 +1,26 @@
 {
   "name": "@noddde/core",
   "version": "0.0.0",
+  "description": "TypeScript types and definitions for DDD, CQRS, and Event Sourcing using the functional Decider pattern",
+  "license": "MIT",
+  "author": "Nidhal Dogga",
+  "homepage": "https://noddde.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dogganidhal/noddde",
+    "directory": "packages/core"
+  },
+  "bugs": {
+    "url": "https://github.com/dogganidhal/noddde/issues"
+  },
+  "keywords": [
+    "ddd",
+    "cqrs",
+    "event-sourcing",
+    "decider",
+    "typescript",
+    "domain-driven-design"
+  ],
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
