@@ -29,9 +29,7 @@ export class SagaExecutor {
     private readonly unitOfWorkFactory: UnitOfWorkFactory,
     private readonly uowStorage: AsyncLocalStorage<UnitOfWork>,
     private readonly metadataStorage: AsyncLocalStorage<MetadataContext>,
-    private readonly onEventsDispatched?: (
-      events: Event[],
-    ) => Promise<void>,
+    private readonly onEventsDispatched?: (events: Event[]) => Promise<void>,
   ) {}
 
   /**

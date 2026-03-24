@@ -519,9 +519,7 @@ export class Domain<
                 const viewStoreInstance = resolvedViewStores.get(_projName)!;
                 for (const event of events) {
                   const reducerFn = (projection.reducers as any)[event.name];
-                  const identityFn = (projection.identity as any)?.[
-                    event.name
-                  ];
+                  const identityFn = (projection.identity as any)?.[event.name];
                   if (reducerFn && identityFn) {
                     const viewId = identityFn(event);
                     const currentView =
@@ -539,8 +537,7 @@ export class Domain<
               const entries: OutboxEntry[] = events.map((event) => ({
                 id: uuidv7(),
                 event,
-                aggregateName:
-                  event.metadata?.aggregateName ?? undefined,
+                aggregateName: event.metadata?.aggregateName ?? undefined,
                 aggregateId:
                   event.metadata?.aggregateId != null
                     ? String(event.metadata.aggregateId)
@@ -554,18 +551,17 @@ export class Domain<
         : undefined;
 
     // Build onEventsDispatched callback (best-effort outbox marking)
-    const onEventsDispatched:
-      | ((events: Event[]) => Promise<void>)
-      | undefined = outboxStore
-      ? async (events) => {
-          const eventIds = events
-            .map((e) => e.metadata?.eventId)
-            .filter((id): id is string => id != null);
-          if (eventIds.length > 0) {
-            await outboxStore.markPublishedByEventIds(eventIds);
+    const onEventsDispatched: ((events: Event[]) => Promise<void>) | undefined =
+      outboxStore
+        ? async (events) => {
+            const eventIds = events
+              .map((e) => e.metadata?.eventId)
+              .filter((id): id is string => id != null);
+            if (eventIds.length > 0) {
+              await outboxStore.markPublishedByEventIds(eventIds);
+            }
           }
-        }
-      : undefined;
+        : undefined;
 
     // Step 5.11: Create command executor
     this._commandExecutor = new CommandLifecycleExecutor(

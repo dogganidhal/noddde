@@ -47,9 +47,7 @@ export class CommandLifecycleExecutor {
       events: Event[],
       uow: UnitOfWork,
     ) => Promise<void>,
-    private readonly onEventsDispatched?: (
-      events: Event[],
-    ) => Promise<void>,
+    private readonly onEventsDispatched?: (events: Event[]) => Promise<void>,
   ) {}
 
   /**
