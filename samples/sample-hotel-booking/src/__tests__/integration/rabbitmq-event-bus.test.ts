@@ -1,18 +1,15 @@
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 
+// Disable Ryuk (TestContainers resource reaper) — it fails with Colima/non-standard Docker setups.
+// Containers are cleaned up manually in afterAll.
+// eslint-disable-next-line turbo/no-undeclared-env-vars
+process.env["TESTCONTAINERS_RYUK_DISABLED"] = "true";
+
 /**
  * RabbitMQ integration test using TestContainers.
- *
- * Requires Docker to be running. This test is designed to be skipped
- * in CI environments without Docker by catching the container startup error.
+ * Requires Docker to be running.
  */
-describe.skip("RabbitMQ EventBus (integration)", () => {
-  // These tests require Docker and are skipped by default.
-  // To run them:
-  //   1. Ensure Docker is running
-  //   2. Remove the .skip from describe
-  //   3. Run: npx vitest run src/__tests__/integration/rabbitmq-event-bus.test.ts
-
+describe("RabbitMQ EventBus (integration)", () => {
   let connectionUrl: string;
   let container: any;
 
