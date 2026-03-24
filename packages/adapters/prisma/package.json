@@ -32,6 +32,7 @@
     "lint": "eslint . --max-warnings 0",
     "prisma:generate": "prisma generate",
     "test": "prisma generate && vitest run",
+    "test:coverage": "prisma generate && vitest run --coverage",
     "test:watch": "vitest"
   },
   "dependencies": {

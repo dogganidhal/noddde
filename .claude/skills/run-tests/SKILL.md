@@ -38,13 +38,13 @@ Report any type errors. Type errors must be fixed before tests can meaningfully 
 **For a specific test file:**
 
 ```bash
-cd packages/core && CODEARTIFACT_AUTH_TOKEN="" npx vitest run --reporter=verbose <test-file-path>
+cd packages/core && npx vitest run --reporter=verbose <test-file-path>
 ```
 
 **For the full suite:**
 
 ```bash
-cd packages/core && CODEARTIFACT_AUTH_TOKEN="" npx vitest run --reporter=verbose
+cd packages/core && npx vitest run --reporter=verbose
 ```
 
 ## Step 4: Analyze Results

@@ -83,7 +83,7 @@ If the test file already exists:
 Run the generated tests:
 
 ```bash
-cd packages/core && CODEARTIFACT_AUTH_TOKEN="" npx vitest run --reporter=verbose <test-file-path>
+cd packages/core && npx vitest run --reporter=verbose <test-file-path>
 ```
 
 **Expected outcomes at this stage:**
