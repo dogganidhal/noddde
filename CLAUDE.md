@@ -4,7 +4,7 @@
 
 noddde is a TypeScript framework for DDD, CQRS, and Event Sourcing using the functional Decider pattern: no base classes, no decorators — just typed objects and pure functions.
 
-**Current state**: API surface complete, in-memory runtime implemented, 3 sample domains as references. See `docs/ARCHITECTURE.md` for design philosophy, anti-goals, and competitive context.
+**Current state**: API surface complete, in-memory runtime implemented, 5 sample domains as references. See `docs/ARCHITECTURE.md` for design philosophy, anti-goals, and competitive context.
 
 ## Spec Authority Principle
 

@@ -7,7 +7,9 @@ title: "StandaloneCommandHandler"
 
 > **StandaloneCommandHandler**\<`TInfrastructure`, `TCommand`\> = (`command`, `infrastructure`) => `void` \| `Promise`\<`void`\>
 
-Defined in: [cqrs/command/command-handler.ts:4](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/cqrs/command/command-handler.ts#L4)
+Defined in: [cqrs/command/command-handler.ts:18](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/cqrs/command/command-handler.ts#L18)
+
+A handler for standalone commands (commands not routed to an aggregate). Receives the full infrastructure merged with CQRS buses.
 
 ## Type Parameters
 

@@ -5,7 +5,9 @@ prev: false
 title: "InMemoryQueryBus"
 ---
 
-Defined in: [engine/implementations/in-memory-query-bus.ts:3](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/engine/implementations/in-memory-query-bus.ts#L3)
+Defined in: [engine/implementations/in-memory-query-bus.ts:17](https://github.com/dogganidhal/noddde/blob/main/packages/engine/src/implementations/in-memory-query-bus.ts#L17)
+
+In-memory `QueryBus` implementation. Queries are routed by their `name` field. Only one handler per query name is allowed.
 
 ## Implements
 
@@ -17,25 +19,49 @@ Defined in: [engine/implementations/in-memory-query-bus.ts:3](https://github.com
 
 > **new InMemoryQueryBus**(): `InMemoryQueryBus`
 
-Defined in: [engine/implementations/in-memory-query-bus.ts:4](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/engine/implementations/in-memory-query-bus.ts#L4)
-
 #### Returns
 
 `InMemoryQueryBus`
 
 ## Methods
 
+### register()
+
+> **register**(`queryName`, `handler`): `void`
+
+Defined in: [engine/implementations/in-memory-query-bus.ts:28](https://github.com/dogganidhal/noddde/blob/main/packages/engine/src/implementations/in-memory-query-bus.ts#L28)
+
+Registers a handler for a given query name. Throws if a handler is already registered.
+
+#### Parameters
+
+##### queryName
+
+`string`
+
+##### handler
+
+(`payload`: `any`) => `any` \| `Promise`\<`any`\>
+
+#### Returns
+
+`void`
+
+---
+
 ### dispatch()
 
 > **dispatch**\<`TQuery`\>(`query`): `Promise`\<[`QueryResult`](/api/type-aliases/queryresult/)\<`TQuery`\>\>
 
-Defined in: [engine/implementations/in-memory-query-bus.ts:6](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/engine/implementations/in-memory-query-bus.ts#L6)
+Defined in: [engine/implementations/in-memory-query-bus.ts:43](https://github.com/dogganidhal/noddde/blob/main/packages/engine/src/implementations/in-memory-query-bus.ts#L43)
+
+Dispatches a query to its registered handler. Throws if no handler is registered.
 
 #### Type Parameters
 
 ##### TQuery
 
-`TQuery` _extends_ [`Query`](/api/interfaces/query/)\<`any`, `string`\>
+`TQuery` _extends_ [`Query`](/api/interfaces/query/)\<`any`\>
 
 #### Parameters
 

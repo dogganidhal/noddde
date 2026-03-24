@@ -2,11 +2,10 @@
   "title": "Patterns & Examples",
   "pages": [
     "clock-pattern",
-    "banking-domain",
     "auction-domain",
-    "order-fulfillment",
-    "fund-transfer",
+    "banking-domain",
     "flash-sale",
-    "seat-reservation"
+    "seat-reservation",
+    "hotel-booking"
   ]
 }

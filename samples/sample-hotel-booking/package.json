@@ -1,0 +1,38 @@
+{
+  "name": "@noddde/sample-hotel-booking",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "lint": "eslint . --max-warnings 0",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run --testPathPattern=unit",
+    "test:slice": "vitest run --testPathPattern=slice",
+    "test:integration": "vitest run --testPathPattern=integration",
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@noddde/core": "0.0.0",
+    "@noddde/engine": "0.0.0",
+    "@noddde/drizzle": "0.0.0",
+    "@noddde/testing": "0.0.0",
+    "drizzle-orm": "^0.30.0",
+    "better-sqlite3": "^11.0.0",
+    "fastify": "^5.0.0",
+    "fastify-plugin": "^5.0.0",
+    "amqplib": "^0.10.0"
+  },
+  "devDependencies": {
+    "@noddde/typescript-config": "0.0.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/amqplib": "^0.10.0",
+    "@types/node": "^20.11.17",
+    "@testcontainers/rabbitmq": "^10.0.0",
+    "testcontainers": "^10.0.0",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3",
+    "vitest": "^4.1.0",
+    "tsx": "^4.21.0"
+  }
+}

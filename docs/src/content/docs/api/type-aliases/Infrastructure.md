@@ -5,6 +5,8 @@ prev: false
 title: "Infrastructure"
 ---
 
-> **Infrastructure** = `object`
+> **Infrastructure** = `{}`
 
-Defined in: [infrastructure/index.ts:4](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/infrastructure/index.ts#L4)
+Defined in: [infrastructure/index.ts:16](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/infrastructure/index.ts#L16)
+
+Base infrastructure type. Extend this interface to declare the external dependencies your domain needs (repositories, clocks, API clients, etc.).

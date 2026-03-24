@@ -5,7 +5,9 @@ prev: false
 title: "CQRSInfrastructure"
 ---
 
-Defined in: [infrastructure/index.ts:6](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/infrastructure/index.ts#L6)
+Defined in: [infrastructure/index.ts:22](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/infrastructure/index.ts#L22)
+
+Infrastructure provided by the framework containing the three CQRS buses. Automatically merged into the infrastructure available to standalone command handlers and saga event handlers.
 
 ## Properties
 
@@ -13,7 +15,7 @@ Defined in: [infrastructure/index.ts:6](https://github.com/dogganidhal/noddde/bl
 
 > **commandBus**: [`CommandBus`](/api/interfaces/commandbus/)
 
-Defined in: [infrastructure/index.ts:7](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/infrastructure/index.ts#L7)
+Bus for dispatching commands to aggregates or standalone command handlers.
 
 ---
 
@@ -21,7 +23,7 @@ Defined in: [infrastructure/index.ts:7](https://github.com/dogganidhal/noddde/bl
 
 > **eventBus**: [`EventBus`](/api/interfaces/eventbus/)
 
-Defined in: [infrastructure/index.ts:8](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/infrastructure/index.ts#L8)
+Bus for publishing domain events to projections and event handlers.
 
 ---
 
@@ -29,4 +31,4 @@ Defined in: [infrastructure/index.ts:8](https://github.com/dogganidhal/noddde/bl
 
 > **queryBus**: [`QueryBus`](/api/interfaces/querybus/)
 
-Defined in: [infrastructure/index.ts:9](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/infrastructure/index.ts#L9)
+Bus for dispatching queries to query handlers.

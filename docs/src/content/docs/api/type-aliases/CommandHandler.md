@@ -7,13 +7,15 @@ title: "CommandHandler"
 
 > **CommandHandler**\<`TCommand`, `TState`, `TEvents`, `TInfrastructure`\> = (`command`, `state`, `infrastructure`) => `TEvents` \| `TEvents`[] \| `Promise`\<`TEvents` \| `TEvents`[]\>
 
-Defined in: [ddd/aggregate-root.ts:22](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/ddd/aggregate-root.ts#L22)
+Defined in: [ddd/aggregate-root.ts:51](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/aggregate-root.ts#L51)
+
+A command handler implements the "decide" phase of the Decider pattern. It receives a command, the current aggregate state, and infrastructure, then returns the event(s) representing what happened.
 
 ## Type Parameters
 
 ### TCommand
 
-`TCommand` _extends_ [`AggregateCommand`](/api/interfaces/aggregatecommand/)
+`TCommand` _extends_ [`AggregateCommand`](/api/interfaces/aggregatecommand/)\<[`ID`](/api/type-aliases/id/)\>
 
 ### TState
 

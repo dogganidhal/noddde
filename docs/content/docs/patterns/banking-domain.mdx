@@ -190,10 +190,10 @@ export const BankAccount = defineAggregate<BankAccountDef>({
 
 ## Step 6: Define Projections
 
-A `ProjectionV2` builds a query-optimized view:
+A projection builds a query-optimized view from events using `defineProjection`. Each event gets its own reducer — no switch statements:
 
 ```ts
-import { ProjectionV2 } from "@noddde/core";
+import { defineProjection, DefineQueries } from "@noddde/core";
 
 type BankAccountView = {
   id: string;
@@ -206,32 +206,48 @@ type BankAccountView = {
   }>;
 };
 
-export const BankAccountV2: ProjectionV2<BankAccountEvent, BankAccountView> = {
-  reducer: (view, event) => {
-    switch (event.name) {
-      case "BankAccountCreated":
-        return { id: event.payload.id, balance: 0, transactions: [] };
-      case "TransactionProcessed":
-        return {
-          ...view,
-          balance: view.balance + event.payload.amount,
-          transactions: [
-            ...view.transactions,
-            {
-              id: event.payload.id,
-              timestamp: event.payload.timestamp,
-              amount: event.payload.amount,
-              status: "processed",
-            },
-          ],
-        };
-      case "TransactionDeclined":
-      case "TransactionAuthorized":
-        return view;
-    }
-  },
+type BankAccountQuery = DefineQueries<{
+  GetBankAccountById: { payload: { id: string }; result: BankAccountView };
+}>;
+
+type BankAccountProjectionDef = {
+  events: BankAccountEvent;
+  queries: BankAccountQuery;
+  view: BankAccountView;
+  infrastructure: BankingInfrastructure;
 };
+
+export const BankAccountProjection = defineProjection<BankAccountProjectionDef>({
+  reducers: {
+    BankAccountCreated: (event) => ({
+      id: event.payload.id,
+      balance: 0,
+      transactions: [],
+    }),
+    TransactionAuthorized: (event, view) => ({
+      ...view,
+      balance: view.balance + event.payload.amount,
+      transactions: [
+        ...view.transactions,
+        {
+          id: event.payload.id,
+          timestamp: event.payload.timestamp,
+          amount: event.payload.amount,
+          status: "processed",
+        },
+      ],
+    }),
+    TransactionProcessed: (_, view) => view,
+    TransactionDeclined: (_, view) => view,
+  },
+  queryHandlers: {
+    GetBankAccountById: async (query, { bankAccountViewRepository }) =>
+      bankAccountViewRepository.getById(query.id),
+  },
+});
 ```
+
+The `reducers` map provides one handler per event name — the framework narrows the event type for each key. Events that don't affect the view return it unchanged (pass-through). Query handlers are co-located with the projection that builds the view they serve.
 
 ## Step 7: Configure and Run
 

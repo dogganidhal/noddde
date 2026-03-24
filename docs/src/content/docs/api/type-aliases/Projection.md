@@ -5,36 +5,76 @@ prev: false
 title: "Projection"
 ---
 
-> **Projection**\<`TInfrastructure`, `TEventNames`, `TQueryNames`\> = `object`
+> **Projection**\<`T`\> = `object`
 
-Defined in: [ddd/projection.ts:19](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/ddd/projection.ts#L19)
+Defined in: [ddd/projection.ts:132](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/projection.ts#L132)
+
+A projection that transforms domain events into a read-optimized view and co-locates query handlers for serving that view. Projections are the read side of CQRS.
+
+Note: `Projection` is declared as an `interface` in source but documented here as a type alias for consistency with the API reference format.
 
 ## Type Parameters
 
-### TInfrastructure
+### T
 
-`TInfrastructure` _extends_ [`Infrastructure`](/api/type-aliases/infrastructure/)
-
-### TEventNames
-
-`TEventNames` _extends_ `string` \| `symbol` = `string` \| `symbol`
-
-### TQueryNames
-
-`TQueryNames` _extends_ `string` \| `symbol` = `string` \| `symbol`
+`T` _extends_ [`ProjectionTypes`](/api/type-aliases/projectiontypes/) = [`ProjectionTypes`](/api/type-aliases/projectiontypes/)
 
 ## Properties
 
-### eventHandlers
+### reducers
 
-> **eventHandlers**: `EventHandlerMap`\<`TInfrastructure`, `TEventNames`\>
+> **reducers**: `ReducerMap`\<`T`\>
 
-Defined in: [ddd/projection.ts:24](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/ddd/projection.ts#L24)
+Defined in: [ddd/projection.ts:137](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/projection.ts#L137)
+
+A map of reducer functions keyed by event name. Each reducer receives the narrowed event type and current view, returning the updated view.
 
 ---
 
 ### queryHandlers
 
-> **queryHandlers**: `QueryHandlerMap`\<`TInfrastructure`, `TQueryNames`\>
+> **queryHandlers**: `QueryHandlerMap`\<`T`\>
 
-Defined in: [ddd/projection.ts:25](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/ddd/projection.ts#L25)
+Defined in: [ddd/projection.ts:146](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/projection.ts#L146)
+
+A map of query handlers keyed by query name. Handlers serve the view built by the reducers. All handlers are optional. When `T` has a `viewStore` field, handlers receive `{ views }` merged into their infrastructure parameter.
+
+---
+
+### initialView?
+
+> `optional` **initialView**: `T`\[`"view"`\]
+
+Defined in: [ddd/projection.ts:153](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/projection.ts#L153)
+
+Optional default view state for new view instances. When `viewStore.load()` returns `undefined`/`null` for a new entity, `initialView` is used as the starting state for the reducer.
+
+---
+
+### identity?
+
+> `optional` **identity**: `IdentityMap`\<`T`\>
+
+Defined in: [ddd/projection.ts:162](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/projection.ts#L162)
+
+Maps each event name to a function that extracts the view instance ID. Enables per-entity auto-persistence. Must be exhaustive when provided.
+
+---
+
+### viewStore?
+
+> `optional` **viewStore**: `ViewStoreFactory`\<`T`\>
+
+Defined in: [ddd/projection.ts:174](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/projection.ts#L174)
+
+Factory that resolves the view store from infrastructure. Synchronous only. Called during `Domain.init()` with the resolved infrastructure.
+
+---
+
+### consistency?
+
+> `optional` **consistency**: `"eventual"` \| `"strong"`
+
+Defined in: [ddd/projection.ts:184](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/projection.ts#L184)
+
+Consistency mode for view persistence. `"eventual"` (default): views updated asynchronously via event bus. `"strong"`: views updated within the same UoW as the originating command.

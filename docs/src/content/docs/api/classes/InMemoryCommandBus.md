@@ -5,7 +5,9 @@ prev: false
 title: "InMemoryCommandBus"
 ---
 
-Defined in: [engine/implementations/in-memory-command-bus.ts:3](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/engine/implementations/in-memory-command-bus.ts#L3)
+Defined in: [engine/implementations/in-memory-command-bus.ts:17](https://github.com/dogganidhal/noddde/blob/main/packages/engine/src/implementations/in-memory-command-bus.ts#L17)
+
+In-memory `CommandBus` implementation. Commands are routed by their `name` field. Only one handler per command name is allowed.
 
 ## Implements
 
@@ -23,11 +25,37 @@ Defined in: [engine/implementations/in-memory-command-bus.ts:3](https://github.c
 
 ## Methods
 
+### register()
+
+> **register**(`commandName`, `handler`): `void`
+
+Defined in: [engine/implementations/in-memory-command-bus.ts:27](https://github.com/dogganidhal/noddde/blob/main/packages/engine/src/implementations/in-memory-command-bus.ts#L27)
+
+Registers a handler for a given command name. Throws if a handler is already registered.
+
+#### Parameters
+
+##### commandName
+
+`string`
+
+##### handler
+
+(`command`: [`Command`](/api/interfaces/command/)) => `void` \| `Promise`\<`void`\>
+
+#### Returns
+
+`void`
+
+---
+
 ### dispatch()
 
 > **dispatch**(`command`): `Promise`\<`void`\>
 
-Defined in: [engine/implementations/in-memory-command-bus.ts:4](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/engine/implementations/in-memory-command-bus.ts#L4)
+Defined in: [engine/implementations/in-memory-command-bus.ts:42](https://github.com/dogganidhal/noddde/blob/main/packages/engine/src/implementations/in-memory-command-bus.ts#L42)
+
+Dispatches a command to its registered handler. Throws if no handler is registered.
 
 #### Parameters
 

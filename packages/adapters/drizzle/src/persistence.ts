@@ -88,22 +88,7 @@ export class DrizzleEventSourcedAggregatePersistence
       )
       .orderBy(asc(eventsTable.sequenceNumber));
 
-    return rows.map((row: any) => {
-      const event: Event = {
-        name: row.eventName,
-        payload: row.payload,
-      };
-      if (row.metadata != null) {
-        const meta =
-          typeof row.metadata === "string"
-            ? JSON.parse(row.metadata)
-            : row.metadata;
-        if (meta != null) {
-          event.metadata = meta;
-        }
-      }
-      return event;
-    });
+    return rows.map((row: any) => deserializeEvent(row));
   }
 
   async loadAfterVersion(
@@ -126,23 +111,27 @@ export class DrizzleEventSourcedAggregatePersistence
       )
       .orderBy(asc(eventsTable.sequenceNumber));
 
-    return rows.map((row: any) => {
-      const event: Event = {
-        name: row.eventName,
-        payload: row.payload,
-      };
-      if (row.metadata != null) {
-        const meta =
-          typeof row.metadata === "string"
-            ? JSON.parse(row.metadata)
-            : row.metadata;
-        if (meta != null) {
-          event.metadata = meta;
-        }
-      }
-      return event;
-    });
+    return rows.map((row: any) => deserializeEvent(row));
   }
+}
+
+/** Deserializes a raw DB row into an Event, parsing JSON payload and metadata. */
+function deserializeEvent(row: any): Event {
+  const event: Event = {
+    name: row.eventName,
+    payload:
+      typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload,
+  };
+  if (row.metadata != null) {
+    const meta =
+      typeof row.metadata === "string"
+        ? JSON.parse(row.metadata)
+        : row.metadata;
+    if (meta != null) {
+      event.metadata = meta;
+    }
+  }
+  return event;
 }
 
 /**

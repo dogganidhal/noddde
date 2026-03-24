@@ -7,7 +7,9 @@ title: "QueryHandler"
 
 > **QueryHandler**\<`TInfrastructure`, `TQuery`\> = (`query`, `infrastructure`) => [`QueryResult`](/api/type-aliases/queryresult/)\<`TQuery`\> \| `Promise`\<[`QueryResult`](/api/type-aliases/queryresult/)\<`TQuery`\>\>
 
-Defined in: [cqrs/query/query-handler.ts:4](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/cqrs/query/query-handler.ts#L4)
+Defined in: [cqrs/query/query-handler.ts:19](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/cqrs/query/query-handler.ts#L19)
+
+A function that handles a query by reading from infrastructure and returning the expected result. Receives the query payload (not the full query object).
 
 ## Type Parameters
 
