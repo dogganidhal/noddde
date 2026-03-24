@@ -55,6 +55,11 @@ import {
 import { MetadataEnricher } from "./executors/metadata-enricher";
 import { CommandLifecycleExecutor } from "./executors/command-lifecycle-executor";
 import { SagaExecutor } from "./executors/saga-executor";
+import {
+  GlobalAggregatePersistenceResolver,
+  PerAggregatePersistenceResolver,
+} from "./aggregate-persistence-resolver";
+import type { AggregatePersistenceResolver } from "./aggregate-persistence-resolver";
 
 type AggregateMap = Record<string | symbol, Aggregate<any>>;
 
@@ -88,6 +93,14 @@ type StandaloneQueryHandlerMap<
 };
 
 /**
+ * Factory function returning a persistence configuration, either synchronously
+ * or as a promise.
+ */
+type PersistenceFactory = () =>
+  | PersistenceConfiguration
+  | Promise<PersistenceConfiguration>;
+
+/**
  * The full configuration object for a domain, wiring together the write model
  * (aggregates + standalone command handlers), the read model (projections +
  * standalone query handlers), and infrastructure factories.
@@ -97,16 +110,18 @@ type StandaloneQueryHandlerMap<
  * @typeParam TInfrastructure - The custom infrastructure type for this domain.
  * @typeParam TStandaloneCommand - Union of standalone command types (inferred).
  * @typeParam TStandaloneQuery - Union of standalone query types (inferred).
+ * @typeParam TAggregates - The aggregate map type (inferred from `writeModel.aggregates`).
  */
 export type DomainConfiguration<
   TInfrastructure extends Infrastructure,
   TStandaloneCommand extends Command = Command,
   TStandaloneQuery extends Query<any> = Query<any>,
+  TAggregates extends AggregateMap = AggregateMap,
 > = {
   /** The write side: aggregates and standalone command handlers. */
   writeModel: {
     /** A map of aggregate definitions keyed by aggregate name. */
-    aggregates: AggregateMap;
+    aggregates: TAggregates;
     /** Optional map of standalone command handlers keyed by command name. */
     standaloneCommandHandlers?: StandaloneCommandHandlerMap<
       TInfrastructure,
@@ -135,13 +150,30 @@ export type DomainConfiguration<
   /** Factory functions for providing infrastructure at startup. */
   infrastructure: {
     /**
-     * Factory for the aggregate persistence strategy.
-     * Return either a {@link StateStoredAggregatePersistence} or
-     * {@link EventSourcedAggregatePersistence}.
+     * Aggregate persistence strategy. Either a single factory function
+     * (domain-wide — all aggregates share one persistence) or a per-aggregate
+     * record mapping each aggregate name to its own factory.
+     *
+     * When using the per-aggregate form, **all** registered aggregate names
+     * must have a corresponding entry. TypeScript enforces this at compile
+     * time via `Record<keyof TAggregates & string, PersistenceFactory>`,
+     * and a runtime validation check runs during `init()`.
+     *
+     * @example
+     * ```ts
+     * // Domain-wide (single factory for all aggregates)
+     * aggregatePersistence: () => drizzleInfra.eventSourcedPersistence
+     *
+     * // Per-aggregate (each aggregate has its own persistence)
+     * aggregatePersistence: {
+     *   Order: () => drizzleInfra.eventSourcedPersistence,
+     *   Inventory: () => drizzleInfra.stateStoredPersistence,
+     * }
+     * ```
      */
-    aggregatePersistence?: () =>
-      | PersistenceConfiguration
-      | Promise<PersistenceConfiguration>;
+    aggregatePersistence?:
+      | PersistenceFactory
+      | Record<keyof TAggregates & string, PersistenceFactory>;
     /**
      * Concurrency control strategy for aggregate persistence.
      *
@@ -320,10 +352,50 @@ export class Domain<
       ...cqrsInfra,
     } as TInfrastructure & CQRSInfrastructure;
 
-    // Step 4: Resolve aggregate persistence
-    const persistence = configuration.infrastructure.aggregatePersistence
-      ? await configuration.infrastructure.aggregatePersistence()
-      : new InMemoryEventSourcedAggregatePersistence();
+    // Step 4: Resolve aggregate persistence → AggregatePersistenceResolver
+    const persistenceConfig = configuration.infrastructure.aggregatePersistence;
+    let persistenceResolver: AggregatePersistenceResolver;
+
+    if (!persistenceConfig) {
+      // Omitted — in-memory default for all
+      persistenceResolver = new GlobalAggregatePersistenceResolver(
+        new InMemoryEventSourcedAggregatePersistence(),
+      );
+    } else if (typeof persistenceConfig === "function") {
+      // Domain-wide factory
+      persistenceResolver = new GlobalAggregatePersistenceResolver(
+        await persistenceConfig(),
+      );
+    } else {
+      // Per-aggregate map — runtime validation
+      const aggregateNames = new Set(
+        Object.keys(configuration.writeModel.aggregates),
+      );
+      const configNames = new Set(Object.keys(persistenceConfig));
+
+      // Check: every aggregate must have a persistence entry
+      const missing = [...aggregateNames].filter((n) => !configNames.has(n));
+      if (missing.length > 0) {
+        throw new Error(
+          `Per-aggregate persistence is missing entries for: ${missing.join(", ")}. ` +
+            `All aggregates must have a persistence factory.`,
+        );
+      }
+      // Check: no unknown aggregate names in persistence config
+      const unknown = [...configNames].filter((n) => !aggregateNames.has(n));
+      if (unknown.length > 0) {
+        throw new Error(
+          `Per-aggregate persistence references unknown aggregates: ${unknown.join(", ")}. ` +
+            `Registered aggregates: ${[...aggregateNames].join(", ")}.`,
+        );
+      }
+
+      const resolved = new Map<string, PersistenceConfiguration>();
+      for (const [name, factory] of Object.entries(persistenceConfig)) {
+        resolved.set(name, await factory());
+      }
+      persistenceResolver = new PerAggregatePersistenceResolver(resolved);
+    }
 
     // Step 4.5: Resolve snapshot store and strategy
     let snapshotStore: SnapshotStore | undefined;
@@ -426,7 +498,7 @@ export class Domain<
 
     // Step 5.11: Create command executor
     this._commandExecutor = new CommandLifecycleExecutor(
-      persistence,
+      persistenceResolver,
       this._infrastructure,
       this._unitOfWorkFactory,
       concurrencyStrategy,
@@ -725,11 +797,13 @@ export const configureDomain = async <
   TInfrastructure extends Infrastructure,
   TStandaloneCommand extends Command = Command,
   TStandaloneQuery extends Query<any> = Query<any>,
+  TAggregates extends AggregateMap = AggregateMap,
 >(
   configuration: DomainConfiguration<
     TInfrastructure,
     TStandaloneCommand,
-    TStandaloneQuery
+    TStandaloneQuery,
+    TAggregates
   >,
 ): Promise<Domain<TInfrastructure, TStandaloneCommand, TStandaloneQuery>> => {
   const domain = new Domain(configuration);

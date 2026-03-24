@@ -137,11 +137,20 @@ cqrsInfrastructure: (customInfra) => ({
 
 ### aggregatePersistence
 
-Provides the persistence strategy for aggregate state. Returns either an `EventSourcedAggregatePersistence` or a `StateStoredAggregatePersistence`. See [Persistence](/docs/running/persistence) for details.
+Provides the persistence strategy for aggregate state. Either a single factory (domain-wide) or a per-aggregate record mapping each aggregate name to its own factory. Each factory returns either an `EventSourcedAggregatePersistence` or a `StateStoredAggregatePersistence`. See [Persistence](/docs/running/persistence) for details.
 
 ```ts
+// Domain-wide: all aggregates use the same persistence
 aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
+
+// Per-aggregate: each aggregate gets its own persistence strategy
+aggregatePersistence: {
+  Order: () => new InMemoryEventSourcedAggregatePersistence(),
+  Inventory: () => new InMemoryStateStoredAggregatePersistence(),
+},
 ```
+
+When using the per-aggregate form, all registered aggregates must have a corresponding entry. TypeScript enforces this at compile time, and a runtime validation check runs during `init()`.
 
 ### unitOfWorkFactory
 
@@ -190,7 +199,7 @@ When `configureDomain` is called:
 
 1. `provideInfrastructure()` is called first to create custom infrastructure
 2. `cqrsInfrastructure(customInfra)` is called with the custom infrastructure
-3. `aggregatePersistence()` is called to set up persistence
+3. `aggregatePersistence` is resolved: if a function, called once; if a per-aggregate record, each factory is called
 4. `snapshotStore()` is called to set up the snapshot store (if configured)
 5. `idempotencyStore()` is called to set up the idempotency store (if configured)
 6. `unitOfWorkFactory()` is called to set up the unit of work factory

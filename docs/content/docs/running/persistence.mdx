@@ -181,7 +181,22 @@ const domain = await configureDomain<BankingInfrastructure>({
 });
 ```
 
-The `aggregatePersistence` factory returns either an `EventSourcedAggregatePersistence` or a `StateStoredAggregatePersistence`. The framework uses it to load and save state for all aggregates in the domain.
+The `aggregatePersistence` field accepts either a single factory (domain-wide) or a per-aggregate record. Each factory returns either an `EventSourcedAggregatePersistence` or a `StateStoredAggregatePersistence`.
+
+For per-aggregate persistence, provide a record mapping each aggregate name to its own factory. All registered aggregates must have an entry:
+
+```ts
+const domain = await configureDomain<MyInfrastructure>({
+  writeModel: { aggregates: { Order, Inventory } },
+  readModel: { projections: {} },
+  infrastructure: {
+    aggregatePersistence: {
+      Order: () => new InMemoryEventSourcedAggregatePersistence(),
+      Inventory: () => new InMemoryStateStoredAggregatePersistence(),
+    },
+  },
+});
+```
 
 ## Concurrency Control
 
@@ -332,7 +347,8 @@ This means you can:
 
 - Start with state storage for simplicity, then migrate to event sourcing without changing your aggregate
 - Use event sourcing in production and state storage in tests
-- Switch strategies by changing only the `aggregatePersistence` factory
+- Switch strategies by changing only the `aggregatePersistence` configuration
+- Mix strategies in the same domain using per-aggregate persistence
 
 The strategy is a configuration choice, not a modeling choice.
 

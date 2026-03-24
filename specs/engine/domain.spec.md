@@ -10,6 +10,7 @@ depends_on:
   - engine/implementations/in-memory-query-bus
   - engine/implementations/in-memory-aggregate-persistence
   - engine/implementations/in-memory-saga-persistence
+  - engine/aggregate-persistence-resolver
   - engine/executors/command-lifecycle-executor
   - engine/executors/saga-executor
   - engine/executors/metadata-enricher
@@ -35,13 +36,18 @@ docs:
 ## Type Contract
 
 ```ts
+type PersistenceFactory = () =>
+  | PersistenceConfiguration
+  | Promise<PersistenceConfiguration>;
+
 type DomainConfiguration<
   TInfrastructure extends Infrastructure,
   TStandaloneCommand extends Command = Command,
   TStandaloneQuery extends Query<any> = Query<any>,
+  TAggregates extends AggregateMap = AggregateMap,
 > = {
   writeModel: {
-    aggregates: AggregateMap;
+    aggregates: TAggregates;
     standaloneCommandHandlers?: StandaloneCommandHandlerMap<
       TInfrastructure,
       TStandaloneCommand
@@ -58,9 +64,9 @@ type DomainConfiguration<
     sagas: SagaMap;
   };
   infrastructure: {
-    aggregatePersistence?: () =>
-      | PersistenceConfiguration
-      | Promise<PersistenceConfiguration>;
+    aggregatePersistence?:
+      | PersistenceFactory
+      | Record<keyof TAggregates & string, PersistenceFactory>;
     aggregateConcurrency?:
       | { strategy?: "optimistic"; maxRetries?: number }
       | {
@@ -94,16 +100,24 @@ class Domain<
   ): Promise<QueryResult<TQuery>>;
 }
 
-const configureDomain: <TInfrastructure, TStandaloneCommand, TStandaloneQuery>(
+const configureDomain: <
+  TInfrastructure,
+  TStandaloneCommand,
+  TStandaloneQuery,
+  TAggregates extends AggregateMap = AggregateMap,
+>(
   configuration: DomainConfiguration<
     TInfrastructure,
     TStandaloneCommand,
-    TStandaloneQuery
+    TStandaloneQuery,
+    TAggregates
   >,
 ) => Promise<Domain<TInfrastructure, TStandaloneCommand, TStandaloneQuery>>;
 ```
 
-- `DomainConfiguration` is fully generic over the infrastructure, standalone command, and standalone query types.
+- `PersistenceFactory` is a helper type alias for aggregate persistence factory functions.
+- `DomainConfiguration` is fully generic over the infrastructure, standalone command, standalone query, and aggregate map types. `TAggregates` defaults to `AggregateMap` for backward compatibility and is inferred by `configureDomain` from the `writeModel.aggregates` object, enabling type-safe per-aggregate persistence keys.
+- `aggregatePersistence` is a union type: a single `PersistenceFactory` (domain-wide, all aggregates share one persistence) or a `Record<keyof TAggregates & string, PersistenceFactory>` (per-aggregate, every aggregate must have an entry). When using the per-aggregate form, TypeScript enforces that all registered aggregate names have a corresponding persistence factory.
 - `Domain` stores the resolved infrastructure as `TInfrastructure & CQRSInfrastructure` -- custom dependencies merged with the CQRS buses.
 - `dispatchCommand` returns the `targetAggregateId` of the handled command, allowing callers to know which aggregate processed it.
 - `dispatchQuery` delegates to the query bus and returns the typed result. It is a convenience method providing API symmetry with `dispatchCommand`.
@@ -118,7 +132,11 @@ The `init()` method must execute the following steps in order:
 1. **Resolve custom infrastructure** -- Call `configuration.infrastructure.provideInfrastructure()` if provided. Store the result. If not provided, use `{}` as the default infrastructure.
 2. **Resolve CQRS infrastructure** -- Call `configuration.infrastructure.cqrsInfrastructure(infrastructure)` if provided, passing the resolved custom infrastructure. Store the `CommandBus`, `EventBus`, and `QueryBus`. If not provided, create default in-memory implementations (`InMemoryCommandBus`, `EventEmitterEventBus`, `InMemoryQueryBus`).
 3. **Merge infrastructure** -- Combine custom infrastructure and CQRS infrastructure into `this._infrastructure` as `TInfrastructure & CQRSInfrastructure`.
-4. **Resolve aggregate persistence** -- Call `configuration.infrastructure.aggregatePersistence()` if provided. Store as `this._persistence`. If not provided, use a default in-memory persistence.
+4. **Resolve aggregate persistence** -- Build an `AggregatePersistenceResolver` (strategy pattern, engine-internal) based on the `aggregatePersistence` configuration:
+   - **Omitted** (`undefined`): Create a `GlobalAggregatePersistenceResolver` wrapping a default `InMemoryEventSourcedAggregatePersistence`.
+   - **Function** (`typeof aggregatePersistence === 'function'`): Call the factory, create a `GlobalAggregatePersistenceResolver` wrapping the result.
+   - **Record** (per-aggregate map): Validate that every aggregate in `writeModel.aggregates` has a corresponding entry and that no unknown aggregate names are present. Throw a descriptive error on mismatch. Resolve each factory. Create a `PerAggregatePersistenceResolver` wrapping a `Map<string, PersistenceConfiguration>`.
+     Pass the resolver to `CommandLifecycleExecutor`, which calls `resolver.resolve(aggregateName)` at each command dispatch to obtain the persistence for the target aggregate.
 5. **Resolve snapshot store** -- Call `configuration.infrastructure.snapshotStore()` if provided. Store as `this._snapshotStore`. Store `configuration.infrastructure.snapshotStrategy` as `this._snapshotStrategy`. Both are optional.
 6. **Resolve saga persistence** -- Call `configuration.infrastructure.sagaPersistence()` if provided. Required if `processModel` is configured.
 7. **Register command handlers** -- For each aggregate in `writeModel.aggregates`, register a command handler on the command bus for each command name defined in `Aggregate.commands`. The registered handler encapsulates the full command lifecycle (load, execute, apply, persist, publish).
@@ -244,7 +262,11 @@ The `dispatchQuery` method delegates query dispatch to the underlying query bus:
 - **No sagas configured** -- `processModel` can be omitted. No saga listeners are registered.
 - **No custom infrastructure** -- `provideInfrastructure` can be omitted. The domain uses `{}` as the custom infrastructure.
 - **No CQRS infrastructure provided** -- `cqrsInfrastructure` can be omitted. The domain creates default in-memory buses.
-- **No persistence provided** -- `aggregatePersistence` can be omitted. The domain uses a default in-memory persistence.
+- **No persistence provided** -- `aggregatePersistence` can be omitted. The domain uses a default in-memory event-sourced persistence for all aggregates via `GlobalAggregatePersistenceResolver`.
+- **Per-aggregate persistence with missing aggregate** -- If the per-aggregate record is missing an entry for a registered aggregate, `init()` throws an error listing the missing aggregate names.
+- **Per-aggregate persistence with unknown aggregate name** -- If the per-aggregate record contains a key that does not match any registered aggregate, `init()` throws an error listing the unknown names.
+- **Per-aggregate persistence with mixed strategies** -- Some aggregates event-sourced, others state-stored. Snapshots only apply to event-sourced aggregates; the existing `isEventSourced` check in `CommandLifecycleExecutor` handles this correctly.
+- **Per-aggregate factory throws during init** -- The error propagates through `configureDomain` and the domain is not usable (same as existing factory error behavior).
 - **Command handler returns a single event** -- Must be normalized to an array before processing.
 - **Command handler returns empty array** -- No events to apply, persist, or publish. The aggregate state remains unchanged.
 - **Saga handler returns no commands** -- `reaction.commands` is `undefined` or empty. Only the saga state is persisted; no commands are dispatched.
@@ -259,7 +281,7 @@ The `dispatchQuery` method delegates query dispatch to the underlying query bus:
 ## Integration Points
 
 - **CQRS buses** -- The domain owns the command bus, query bus, and event bus. They are wired during init and exposed via `domain.infrastructure`.
-- **Persistence** -- The domain resolves aggregate and saga persistence during init from factory functions, passing them to the appropriate executors.
+- **Persistence** -- The domain resolves aggregate persistence during init from factory functions, building an `AggregatePersistenceResolver` (either `GlobalAggregatePersistenceResolver` or `PerAggregatePersistenceResolver`). The resolver is passed to `CommandLifecycleExecutor`. Saga persistence is resolved separately.
 - **CommandLifecycleExecutor** -- Internal executor that handles the full aggregate command lifecycle (load, execute, apply, enrich, persist, publish). Created during `init()` and used by `dispatchCommand()` and command bus handlers.
 - **SagaExecutor** -- Internal executor that handles the saga event handling lifecycle (derive ID, load state, bootstrap/resume, execute handler, dispatch commands atomically). Created during `init()` when `processModel` is configured.
 - **MetadataEnricher** -- Internal helper that enriches raw events with metadata (eventId, timestamp, correlationId, causationId, userId, aggregate context). Used by `CommandLifecycleExecutor`.
@@ -1621,6 +1643,516 @@ describe("Idempotent command processing", () => {
 
     // Idempotency record should NOT have been saved (UoW rolled back)
     expect(await idempotencyStore.exists("cmd-fail")).toBe(false);
+  });
+});
+```
+
+### per-aggregate persistence routes each aggregate to its own persistence
+
+```ts
+import { describe, it, expect } from "vitest";
+import {
+  configureDomain,
+  defineAggregate,
+  EventEmitterEventBus,
+  InMemoryCommandBus,
+  InMemoryQueryBus,
+  InMemoryEventSourcedAggregatePersistence,
+  InMemoryStateStoredAggregatePersistence,
+} from "@noddde/core";
+import type {
+  DefineCommands,
+  DefineEvents,
+  AggregateTypes,
+  Infrastructure,
+} from "@noddde/core";
+
+type CounterState = { count: number };
+type CounterEvent = DefineEvents<{ Incremented: { by: number } }>;
+type CounterCommand = DefineCommands<{ Increment: { by: number } }>;
+type CounterTypes = AggregateTypes & {
+  state: CounterState;
+  events: CounterEvent;
+  commands: CounterCommand;
+  infrastructure: Infrastructure;
+};
+
+const Counter = defineAggregate<CounterTypes>({
+  initialState: { count: 0 },
+  commands: {
+    Increment: (cmd) => ({
+      name: "Incremented",
+      payload: { by: cmd.payload.by },
+    }),
+  },
+  apply: {
+    Incremented: (payload, state) => ({ count: state.count + payload.by }),
+  },
+});
+
+type BalanceState = { balance: number };
+type BalanceEvent = DefineEvents<{ Deposited: { amount: number } }>;
+type BalanceCommand = DefineCommands<{ Deposit: { amount: number } }>;
+type BalanceTypes = AggregateTypes & {
+  state: BalanceState;
+  events: BalanceEvent;
+  commands: BalanceCommand;
+  infrastructure: Infrastructure;
+};
+
+const BankAccount = defineAggregate<BalanceTypes>({
+  initialState: { balance: 0 },
+  commands: {
+    Deposit: (cmd) => ({
+      name: "Deposited",
+      payload: { amount: cmd.payload.amount },
+    }),
+  },
+  apply: {
+    Deposited: (payload, state) => ({
+      balance: state.balance + payload.amount,
+    }),
+  },
+});
+
+describe("Per-aggregate persistence", () => {
+  it("should route each aggregate to its configured persistence", async () => {
+    const esPersistence = new InMemoryEventSourcedAggregatePersistence();
+    const ssPersistence = new InMemoryStateStoredAggregatePersistence();
+
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter, BankAccount } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: {
+          Counter: () => esPersistence,
+          BankAccount: () => ssPersistence,
+        },
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "c-1",
+      payload: { by: 5 },
+    });
+    await domain.dispatchCommand({
+      name: "Deposit",
+      targetAggregateId: "acc-1",
+      payload: { amount: 100 },
+    });
+
+    // Counter uses event-sourced persistence
+    const counterEvents = await esPersistence.load("Counter", "c-1");
+    expect(counterEvents).toHaveLength(1);
+    expect(counterEvents[0]!.name).toBe("Incremented");
+
+    // BankAccount uses state-stored persistence
+    const bankState = await ssPersistence.load("BankAccount", "acc-1");
+    expect(bankState).not.toBeNull();
+    expect(bankState!.state.balance).toBe(100);
+  });
+});
+```
+
+### per-aggregate persistence init throws for missing aggregate entries
+
+```ts
+import { describe, it, expect } from "vitest";
+import {
+  configureDomain,
+  defineAggregate,
+  EventEmitterEventBus,
+  InMemoryCommandBus,
+  InMemoryQueryBus,
+  InMemoryEventSourcedAggregatePersistence,
+} from "@noddde/core";
+import type {
+  DefineCommands,
+  DefineEvents,
+  AggregateTypes,
+  Infrastructure,
+} from "@noddde/core";
+
+type CounterState = { count: number };
+type CounterEvent = DefineEvents<{ Incremented: { by: number } }>;
+type CounterCommand = DefineCommands<{ Increment: { by: number } }>;
+type CounterTypes = AggregateTypes & {
+  state: CounterState;
+  events: CounterEvent;
+  commands: CounterCommand;
+  infrastructure: Infrastructure;
+};
+
+const Counter = defineAggregate<CounterTypes>({
+  initialState: { count: 0 },
+  commands: {
+    Increment: (cmd) => ({
+      name: "Incremented",
+      payload: { by: cmd.payload.by },
+    }),
+  },
+  apply: {
+    Incremented: (payload, state) => ({ count: state.count + payload.by }),
+  },
+});
+
+type BalanceState = { balance: number };
+type BalanceEvent = DefineEvents<{ Deposited: { amount: number } }>;
+type BalanceCommand = DefineCommands<{ Deposit: { amount: number } }>;
+type BalanceTypes = AggregateTypes & {
+  state: BalanceState;
+  events: BalanceEvent;
+  commands: BalanceCommand;
+  infrastructure: Infrastructure;
+};
+
+const BankAccount = defineAggregate<BalanceTypes>({
+  initialState: { balance: 0 },
+  commands: {
+    Deposit: (cmd) => ({
+      name: "Deposited",
+      payload: { amount: cmd.payload.amount },
+    }),
+  },
+  apply: {
+    Deposited: (payload, state) => ({
+      balance: state.balance + payload.amount,
+    }),
+  },
+});
+
+describe("Per-aggregate persistence validation", () => {
+  it("should throw if per-aggregate persistence is missing entries for registered aggregates", async () => {
+    await expect(
+      configureDomain<Infrastructure>({
+        writeModel: { aggregates: { Counter, BankAccount } },
+        readModel: { projections: {} },
+        infrastructure: {
+          // Only Counter has persistence — BankAccount is missing
+          aggregatePersistence: {
+            Counter: () => new InMemoryEventSourcedAggregatePersistence(),
+          } as any,
+          cqrsInfrastructure: () => ({
+            commandBus: new InMemoryCommandBus(),
+            eventBus: new EventEmitterEventBus(),
+            queryBus: new InMemoryQueryBus(),
+          }),
+        },
+      }),
+    ).rejects.toThrow(/missing.*BankAccount/i);
+  });
+
+  it("should throw if per-aggregate persistence references unknown aggregates", async () => {
+    await expect(
+      configureDomain<Infrastructure>({
+        writeModel: { aggregates: { Counter } },
+        readModel: { projections: {} },
+        infrastructure: {
+          aggregatePersistence: {
+            Counter: () => new InMemoryEventSourcedAggregatePersistence(),
+            NonExistent: () => new InMemoryEventSourcedAggregatePersistence(),
+          } as any,
+          cqrsInfrastructure: () => ({
+            commandBus: new InMemoryCommandBus(),
+            eventBus: new EventEmitterEventBus(),
+            queryBus: new InMemoryQueryBus(),
+          }),
+        },
+      }),
+    ).rejects.toThrow(/unknown.*NonExistent/i);
+  });
+});
+```
+
+### domain-wide persistence factory still works as before
+
+```ts
+import { describe, it, expect } from "vitest";
+import {
+  configureDomain,
+  defineAggregate,
+  EventEmitterEventBus,
+  InMemoryCommandBus,
+  InMemoryQueryBus,
+  InMemoryEventSourcedAggregatePersistence,
+} from "@noddde/core";
+import type {
+  DefineCommands,
+  DefineEvents,
+  AggregateTypes,
+  Infrastructure,
+} from "@noddde/core";
+
+type CounterState = { count: number };
+type CounterEvent = DefineEvents<{ Incremented: { by: number } }>;
+type CounterCommand = DefineCommands<{ Increment: { by: number } }>;
+type CounterTypes = AggregateTypes & {
+  state: CounterState;
+  events: CounterEvent;
+  commands: CounterCommand;
+  infrastructure: Infrastructure;
+};
+
+const Counter = defineAggregate<CounterTypes>({
+  initialState: { count: 0 },
+  commands: {
+    Increment: (cmd) => ({
+      name: "Incremented",
+      payload: { by: cmd.payload.by },
+    }),
+  },
+  apply: {
+    Incremented: (payload, state) => ({ count: state.count + payload.by }),
+  },
+});
+
+describe("Domain-wide persistence (backward compatibility)", () => {
+  it("should use a single persistence factory for all aggregates", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: () => persistence,
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "c-1",
+      payload: { by: 3 },
+    });
+
+    const events = await persistence.load("Counter", "c-1");
+    expect(events).toHaveLength(1);
+  });
+});
+```
+
+### per-aggregate async factories are resolved at init time
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import {
+  configureDomain,
+  defineAggregate,
+  EventEmitterEventBus,
+  InMemoryCommandBus,
+  InMemoryQueryBus,
+  InMemoryEventSourcedAggregatePersistence,
+  InMemoryStateStoredAggregatePersistence,
+} from "@noddde/core";
+import type {
+  DefineCommands,
+  DefineEvents,
+  AggregateTypes,
+  Infrastructure,
+} from "@noddde/core";
+
+type CounterState = { count: number };
+type CounterEvent = DefineEvents<{ Incremented: { by: number } }>;
+type CounterCommand = DefineCommands<{ Increment: { by: number } }>;
+type CounterTypes = AggregateTypes & {
+  state: CounterState;
+  events: CounterEvent;
+  commands: CounterCommand;
+  infrastructure: Infrastructure;
+};
+
+const Counter = defineAggregate<CounterTypes>({
+  initialState: { count: 0 },
+  commands: {
+    Increment: (cmd) => ({
+      name: "Incremented",
+      payload: { by: cmd.payload.by },
+    }),
+  },
+  apply: {
+    Incremented: (payload, state) => ({ count: state.count + payload.by }),
+  },
+});
+
+type BalanceState = { balance: number };
+type BalanceEvent = DefineEvents<{ Deposited: { amount: number } }>;
+type BalanceCommand = DefineCommands<{ Deposit: { amount: number } }>;
+type BalanceTypes = AggregateTypes & {
+  state: BalanceState;
+  events: BalanceEvent;
+  commands: BalanceCommand;
+  infrastructure: Infrastructure;
+};
+
+const BankAccount = defineAggregate<BalanceTypes>({
+  initialState: { balance: 0 },
+  commands: {
+    Deposit: (cmd) => ({
+      name: "Deposited",
+      payload: { amount: cmd.payload.amount },
+    }),
+  },
+  apply: {
+    Deposited: (payload, state) => ({
+      balance: state.balance + payload.amount,
+    }),
+  },
+});
+
+describe("Per-aggregate persistence factory resolution", () => {
+  it("should resolve all async per-aggregate factories during init", async () => {
+    const esFactory = vi.fn(
+      async () => new InMemoryEventSourcedAggregatePersistence(),
+    );
+    const ssFactory = vi.fn(
+      async () => new InMemoryStateStoredAggregatePersistence(),
+    );
+
+    await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter, BankAccount } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: {
+          Counter: esFactory,
+          BankAccount: ssFactory,
+        },
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    expect(esFactory).toHaveBeenCalledOnce();
+    expect(ssFactory).toHaveBeenCalledOnce();
+  });
+});
+```
+
+### mixed persistence with snapshots only applies to event-sourced aggregates
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import {
+  configureDomain,
+  defineAggregate,
+  EventEmitterEventBus,
+  InMemoryCommandBus,
+  InMemoryQueryBus,
+  InMemoryEventSourcedAggregatePersistence,
+  InMemoryStateStoredAggregatePersistence,
+  InMemorySnapshotStore,
+  everyNEvents,
+} from "@noddde/core";
+import type {
+  DefineCommands,
+  DefineEvents,
+  AggregateTypes,
+  Infrastructure,
+} from "@noddde/core";
+
+type CounterState = { count: number };
+type CounterEvent = DefineEvents<{ Incremented: { by: number } }>;
+type CounterCommand = DefineCommands<{ Increment: { by: number } }>;
+type CounterTypes = AggregateTypes & {
+  state: CounterState;
+  events: CounterEvent;
+  commands: CounterCommand;
+  infrastructure: Infrastructure;
+};
+
+const Counter = defineAggregate<CounterTypes>({
+  initialState: { count: 0 },
+  commands: {
+    Increment: (cmd) => ({
+      name: "Incremented",
+      payload: { by: cmd.payload.by },
+    }),
+  },
+  apply: {
+    Incremented: (payload, state) => ({ count: state.count + payload.by }),
+  },
+});
+
+type BalanceState = { balance: number };
+type BalanceEvent = DefineEvents<{ Deposited: { amount: number } }>;
+type BalanceCommand = DefineCommands<{ Deposit: { amount: number } }>;
+type BalanceTypes = AggregateTypes & {
+  state: BalanceState;
+  events: BalanceEvent;
+  commands: BalanceCommand;
+  infrastructure: Infrastructure;
+};
+
+const BankAccount = defineAggregate<BalanceTypes>({
+  initialState: { balance: 0 },
+  commands: {
+    Deposit: (cmd) => ({
+      name: "Deposited",
+      payload: { amount: cmd.payload.amount },
+    }),
+  },
+  apply: {
+    Deposited: (payload, state) => ({
+      balance: state.balance + payload.amount,
+    }),
+  },
+});
+
+describe("Mixed persistence with snapshots", () => {
+  it("should only create snapshots for event-sourced aggregates", async () => {
+    const snapshotStore = new InMemorySnapshotStore();
+
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter, BankAccount } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: {
+          Counter: () => new InMemoryEventSourcedAggregatePersistence(),
+          BankAccount: () => new InMemoryStateStoredAggregatePersistence(),
+        },
+        snapshotStore: () => snapshotStore,
+        snapshotStrategy: everyNEvents(1), // snapshot after every event
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    // Dispatch to event-sourced aggregate
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "c-1",
+      payload: { by: 5 },
+    });
+
+    // Dispatch to state-stored aggregate
+    await domain.dispatchCommand({
+      name: "Deposit",
+      targetAggregateId: "acc-1",
+      payload: { amount: 100 },
+    });
+
+    // Snapshot should exist for event-sourced Counter
+    const counterSnapshot = await snapshotStore.load("Counter", "c-1");
+    expect(counterSnapshot).not.toBeNull();
+
+    // No snapshot for state-stored BankAccount
+    const bankSnapshot = await snapshotStore.load("BankAccount", "acc-1");
+    expect(bankSnapshot).toBeNull();
   });
 });
 ```

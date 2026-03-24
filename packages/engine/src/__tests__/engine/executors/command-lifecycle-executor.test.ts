@@ -26,6 +26,7 @@ import {
   OptimisticConcurrencyStrategy,
   type ConcurrencyStrategy,
 } from "../../../concurrency-strategy";
+import { GlobalAggregatePersistenceResolver } from "../../../aggregate-persistence-resolver";
 
 // ============================================================
 // Shared aggregate definitions
@@ -84,7 +85,7 @@ describe("CommandLifecycleExecutor", () => {
     const strategy = new OptimisticConcurrencyStrategy(0);
 
     const executor = new CommandLifecycleExecutor(
-      persistence,
+      new GlobalAggregatePersistenceResolver(persistence),
       infrastructure,
       createInMemoryUnitOfWork,
       strategy,
@@ -152,7 +153,7 @@ describe("CommandLifecycleExecutor", () => {
     const strategy = new OptimisticConcurrencyStrategy(0);
 
     const executor = new CommandLifecycleExecutor(
-      persistence,
+      new GlobalAggregatePersistenceResolver(persistence),
       infrastructure,
       createInMemoryUnitOfWork,
       strategy,
@@ -202,7 +203,7 @@ describe("CommandLifecycleExecutor", () => {
     const strategy = new OptimisticConcurrencyStrategy(0);
 
     const executor = new CommandLifecycleExecutor(
-      persistence,
+      new GlobalAggregatePersistenceResolver(persistence),
       infrastructure,
       createInMemoryUnitOfWork,
       strategy,
@@ -264,7 +265,7 @@ describe("CommandLifecycleExecutor", () => {
     const strategy = new OptimisticConcurrencyStrategy(0);
 
     const executor = new CommandLifecycleExecutor(
-      persistence,
+      new GlobalAggregatePersistenceResolver(persistence),
       infrastructure,
       createInMemoryUnitOfWork,
       strategy,
@@ -345,7 +346,7 @@ describe("CommandLifecycleExecutor", () => {
     const snapshotStrategy = everyNEvents(3);
 
     const executor = new CommandLifecycleExecutor(
-      persistence,
+      new GlobalAggregatePersistenceResolver(persistence),
       infrastructure,
       createInMemoryUnitOfWork,
       strategy,
@@ -429,7 +430,7 @@ describe("CommandLifecycleExecutor", () => {
     vi.spyOn(persistence, "load");
 
     const executor = new CommandLifecycleExecutor(
-      persistence,
+      new GlobalAggregatePersistenceResolver(persistence),
       infrastructure,
       createInMemoryUnitOfWork,
       strategy,
@@ -495,7 +496,7 @@ describe("CommandLifecycleExecutor", () => {
     const strategy = new OptimisticConcurrencyStrategy(0);
 
     const executor = new CommandLifecycleExecutor(
-      persistence,
+      new GlobalAggregatePersistenceResolver(persistence),
       infrastructure,
       createInMemoryUnitOfWork,
       strategy,
@@ -572,7 +573,7 @@ describe("CommandLifecycleExecutor", () => {
     };
 
     const executor = new CommandLifecycleExecutor(
-      persistence,
+      new GlobalAggregatePersistenceResolver(persistence),
       infrastructure,
       createInMemoryUnitOfWork,
       mockStrategy,
