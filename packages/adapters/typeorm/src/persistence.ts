@@ -354,7 +354,10 @@ export class TypeORMOutboxStore implements OutboxStore {
     if (ids.length === 0) return;
     const manager = this.getManager();
     const repo = manager.getRepository(NodddeOutboxEntryEntity);
-    await repo.update({ id: In(ids) }, { publishedAt: new Date().toISOString() });
+    await repo.update(
+      { id: In(ids) },
+      { publishedAt: new Date().toISOString() },
+    );
   }
 
   async markPublishedByEventIds(eventIds: string[]): Promise<void> {

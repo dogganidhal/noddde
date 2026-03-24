@@ -774,14 +774,20 @@ describe("PrismaOutboxStore", () => {
   afterEach(teardownDb);
 
   it("should save and load unpublished entries", async () => {
-    await infra.outboxStore.save([{
-      id: "entry-1",
-      event: { name: "OrderPlaced", payload: { total: 100 }, metadata: { eventId: "evt-1" } },
-      aggregateName: "Order",
-      aggregateId: "order-1",
-      createdAt: "2024-01-01T00:00:00.000Z",
-      publishedAt: null,
-    }]);
+    await infra.outboxStore.save([
+      {
+        id: "entry-1",
+        event: {
+          name: "OrderPlaced",
+          payload: { total: 100 },
+          metadata: { eventId: "evt-1" },
+        },
+        aggregateName: "Order",
+        aggregateId: "order-1",
+        createdAt: "2024-01-01T00:00:00.000Z",
+        publishedAt: null,
+      },
+    ]);
 
     const unpublished = await infra.outboxStore.loadUnpublished();
     expect(unpublished).toHaveLength(1);
@@ -795,12 +801,14 @@ describe("PrismaOutboxStore", () => {
 
 ```ts
 it("should mark entries as published", async () => {
-  await infra.outboxStore.save([{
-    id: "entry-1",
-    event: { name: "OrderPlaced", payload: {} },
-    createdAt: "2024-01-01T00:00:00.000Z",
-    publishedAt: null,
-  }]);
+  await infra.outboxStore.save([
+    {
+      id: "entry-1",
+      event: { name: "OrderPlaced", payload: {} },
+      createdAt: "2024-01-01T00:00:00.000Z",
+      publishedAt: null,
+    },
+  ]);
 
   await infra.outboxStore.markPublished(["entry-1"]);
   const unpublished = await infra.outboxStore.loadUnpublished();
@@ -815,13 +823,21 @@ it("should mark entries as published by event IDs", async () => {
   await infra.outboxStore.save([
     {
       id: "entry-1",
-      event: { name: "OrderPlaced", payload: {}, metadata: { eventId: "evt-1" } },
+      event: {
+        name: "OrderPlaced",
+        payload: {},
+        metadata: { eventId: "evt-1" },
+      },
       createdAt: "2024-01-01T00:00:00.000Z",
       publishedAt: null,
     },
     {
       id: "entry-2",
-      event: { name: "OrderConfirmed", payload: {}, metadata: { eventId: "evt-2" } },
+      event: {
+        name: "OrderConfirmed",
+        payload: {},
+        metadata: { eventId: "evt-2" },
+      },
       createdAt: "2024-01-01T00:00:01.000Z",
       publishedAt: null,
     },
@@ -838,12 +854,14 @@ it("should mark entries as published by event IDs", async () => {
 
 ```ts
 it("should delete only published entries", async () => {
-  await infra.outboxStore.save([{
-    id: "entry-1",
-    event: { name: "OrderPlaced", payload: {} },
-    createdAt: "2024-01-01T00:00:00.000Z",
-    publishedAt: null,
-  }]);
+  await infra.outboxStore.save([
+    {
+      id: "entry-1",
+      event: { name: "OrderPlaced", payload: {} },
+      createdAt: "2024-01-01T00:00:00.000Z",
+      publishedAt: null,
+    },
+  ]);
   await infra.outboxStore.markPublished(["entry-1"]);
 
   await infra.outboxStore.deletePublished();
@@ -858,15 +876,20 @@ it("should delete only published entries", async () => {
 ```ts
 it("should save outbox entries within a UoW transaction", async () => {
   const uow = infra.unitOfWorkFactory();
-  uow.enlist(() => infra.outboxStore.save([{
-    id: "entry-1",
-    event: { name: "OrderPlaced", payload: { total: 50 } },
-    createdAt: "2024-01-01T00:00:00.000Z",
-    publishedAt: null,
-  }]));
+  uow.enlist(() =>
+    infra.outboxStore.save([
+      {
+        id: "entry-1",
+        event: { name: "OrderPlaced", payload: { total: 50 } },
+        createdAt: "2024-01-01T00:00:00.000Z",
+        publishedAt: null,
+      },
+    ]),
+  );
   uow.enlist(() =>
     infra.eventSourcedPersistence.save(
-      "Order", "o-1",
+      "Order",
+      "o-1",
       [{ name: "OrderPlaced", payload: { total: 50 } }],
       0,
     ),

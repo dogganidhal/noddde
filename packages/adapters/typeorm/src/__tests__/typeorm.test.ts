@@ -553,7 +553,9 @@ describe("TypeORMOutboxStore", () => {
   beforeEach(setupDb);
   afterEach(teardownDb);
 
-  function makeEntry(overrides: Partial<OutboxEntry> & { id: string }): OutboxEntry {
+  function makeEntry(
+    overrides: Partial<OutboxEntry> & { id: string },
+  ): OutboxEntry {
     return {
       event: { name: "TestEvent", payload: { value: 1 } },
       aggregateName: "TestAggregate",
@@ -573,7 +575,10 @@ describe("TypeORMOutboxStore", () => {
     const loaded = await infra.outboxStore.loadUnpublished();
     expect(loaded).toHaveLength(2);
     expect(loaded[0]!.id).toBe("entry-1");
-    expect(loaded[0]!.event).toEqual({ name: "TestEvent", payload: { value: 1 } });
+    expect(loaded[0]!.event).toEqual({
+      name: "TestEvent",
+      payload: { value: 1 },
+    });
     expect(loaded[0]!.aggregateName).toBe("TestAggregate");
     expect(loaded[0]!.aggregateId).toBe("agg-1");
     expect(loaded[0]!.publishedAt).toBeNull();

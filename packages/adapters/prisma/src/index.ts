@@ -13,7 +13,11 @@ export {
 export type { PrismaTransactionStore } from "./unit-of-work";
 
 import type { PrismaClient } from "@prisma/client";
-import type { UnitOfWorkFactory, SnapshotStore, OutboxStore } from "@noddde/core";
+import type {
+  UnitOfWorkFactory,
+  SnapshotStore,
+  OutboxStore,
+} from "@noddde/core";
 import type {
   EventSourcedAggregatePersistence,
   StateStoredAggregatePersistence,

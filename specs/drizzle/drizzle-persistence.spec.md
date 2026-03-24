@@ -67,7 +67,7 @@ export interface DrizzleNodddeSchema {
   aggregateStates: any;
   sagaStates: any;
   snapshots?: any; // Optional — only needed if using snapshot store
-  outbox?: any;    // Optional — only needed if using outbox store
+  outbox?: any; // Optional — only needed if using outbox store
 }
 
 /**
@@ -79,7 +79,7 @@ export interface DrizzlePersistenceInfrastructure {
   sagaPersistence: SagaPersistence;
   unitOfWorkFactory: UnitOfWorkFactory;
   snapshotStore?: SnapshotStore; // Present only when schema.snapshots is provided
-  outboxStore?: OutboxStore;  // Present only when schema.outbox is provided
+  outboxStore?: OutboxStore; // Present only when schema.outbox is provided
 }
 
 /**
@@ -317,7 +317,13 @@ import { describe, it, expect } from "vitest";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { createDrizzlePersistence } from "@noddde/drizzle";
-import { events, aggregateStates, sagaStates, snapshots, outbox } from "@noddde/drizzle/sqlite";
+import {
+  events,
+  aggregateStates,
+  sagaStates,
+  snapshots,
+  outbox,
+} from "@noddde/drizzle/sqlite";
 
 function createTestDb() {
   const sqlite = new Database(":memory:");
@@ -797,19 +803,28 @@ it("loadAfterVersion: returns empty array when afterVersion >= stream length", a
 it("outbox store: save and load unpublished entries", async () => {
   const db = createTestDb();
   const infra = createDrizzlePersistence(db, {
-    events, aggregateStates, sagaStates, outbox,
+    events,
+    aggregateStates,
+    sagaStates,
+    outbox,
   });
   expect(infra.outboxStore).toBeDefined();
   const store = infra.outboxStore!;
 
-  await store.save([{
-    id: "entry-1",
-    event: { name: "OrderPlaced", payload: { total: 100 }, metadata: { eventId: "evt-1" } },
-    aggregateName: "Order",
-    aggregateId: "order-1",
-    createdAt: "2024-01-01T00:00:00.000Z",
-    publishedAt: null,
-  }]);
+  await store.save([
+    {
+      id: "entry-1",
+      event: {
+        name: "OrderPlaced",
+        payload: { total: 100 },
+        metadata: { eventId: "evt-1" },
+      },
+      aggregateName: "Order",
+      aggregateId: "order-1",
+      createdAt: "2024-01-01T00:00:00.000Z",
+      publishedAt: null,
+    },
+  ]);
 
   const unpublished = await store.loadUnpublished();
   expect(unpublished).toHaveLength(1);
@@ -824,16 +839,21 @@ it("outbox store: save and load unpublished entries", async () => {
 it("outbox store: markPublished sets publishedAt", async () => {
   const db = createTestDb();
   const infra = createDrizzlePersistence(db, {
-    events, aggregateStates, sagaStates, outbox,
+    events,
+    aggregateStates,
+    sagaStates,
+    outbox,
   });
   const store = infra.outboxStore!;
 
-  await store.save([{
-    id: "entry-1",
-    event: { name: "OrderPlaced", payload: {} },
-    createdAt: "2024-01-01T00:00:00.000Z",
-    publishedAt: null,
-  }]);
+  await store.save([
+    {
+      id: "entry-1",
+      event: { name: "OrderPlaced", payload: {} },
+      createdAt: "2024-01-01T00:00:00.000Z",
+      publishedAt: null,
+    },
+  ]);
 
   await store.markPublished(["entry-1"]);
   const unpublished = await store.loadUnpublished();
@@ -847,20 +867,31 @@ it("outbox store: markPublished sets publishedAt", async () => {
 it("outbox store: markPublishedByEventIds matches on event metadata", async () => {
   const db = createTestDb();
   const infra = createDrizzlePersistence(db, {
-    events, aggregateStates, sagaStates, outbox,
+    events,
+    aggregateStates,
+    sagaStates,
+    outbox,
   });
   const store = infra.outboxStore!;
 
   await store.save([
     {
       id: "entry-1",
-      event: { name: "OrderPlaced", payload: {}, metadata: { eventId: "evt-1" } },
+      event: {
+        name: "OrderPlaced",
+        payload: {},
+        metadata: { eventId: "evt-1" },
+      },
       createdAt: "2024-01-01T00:00:00.000Z",
       publishedAt: null,
     },
     {
       id: "entry-2",
-      event: { name: "OrderConfirmed", payload: {}, metadata: { eventId: "evt-2" } },
+      event: {
+        name: "OrderConfirmed",
+        payload: {},
+        metadata: { eventId: "evt-2" },
+      },
       createdAt: "2024-01-01T00:00:01.000Z",
       publishedAt: null,
     },
@@ -879,7 +910,10 @@ it("outbox store: markPublishedByEventIds matches on event metadata", async () =
 it("outbox store: deletePublished removes only published entries", async () => {
   const db = createTestDb();
   const infra = createDrizzlePersistence(db, {
-    events, aggregateStates, sagaStates, outbox,
+    events,
+    aggregateStates,
+    sagaStates,
+    outbox,
   });
   const store = infra.outboxStore!;
 
@@ -905,7 +939,9 @@ it("outbox store: deletePublished removes only published entries", async () => {
 it("outbox store: not present when schema.outbox not provided", () => {
   const db = createTestDb();
   const infra = createDrizzlePersistence(db, {
-    events, aggregateStates, sagaStates,
+    events,
+    aggregateStates,
+    sagaStates,
   });
   expect(infra.outboxStore).toBeUndefined();
 });
