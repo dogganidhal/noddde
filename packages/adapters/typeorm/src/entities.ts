@@ -84,3 +84,27 @@ export class NodddeSnapshotEntity {
   @Column({ type: "int" })
   version!: number;
 }
+
+/**
+ * TypeORM entity for the transactional outbox.
+ */
+@Entity("noddde_outbox")
+export class NodddeOutboxEntryEntity {
+  @PrimaryColumn()
+  id!: string;
+
+  @Column({ type: "text" })
+  event!: string;
+
+  @Column({ name: "aggregate_name", type: "varchar", nullable: true })
+  aggregateName!: string | null;
+
+  @Column({ name: "aggregate_id", type: "varchar", nullable: true })
+  aggregateId!: string | null;
+
+  @Column({ name: "created_at" })
+  createdAt!: string;
+
+  @Column({ name: "published_at", type: "varchar", nullable: true })
+  publishedAt!: string | null;
+}

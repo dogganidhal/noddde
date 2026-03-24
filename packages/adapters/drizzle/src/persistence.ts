@@ -1,5 +1,5 @@
 /* eslint-disable no-unused-vars */
-import { eq, and, asc, gt } from "drizzle-orm";
+import { eq, and, asc, gt, isNull, isNotNull, inArray, lt } from "drizzle-orm";
 import {
   ConcurrencyError,
   type Event,
@@ -9,6 +9,8 @@ import {
   type SnapshotStore,
   type StateStoredAggregatePersistence,
   type SagaPersistence,
+  type OutboxStore,
+  type OutboxEntry,
 } from "@noddde/core";
 import type { DrizzleTransactionStore, DrizzleNodddeSchema } from "./index";
 
@@ -376,5 +378,93 @@ export class DrizzleSnapshotStore implements SnapshotStore {
         version: snapshot.version,
       });
     }
+  }
+}
+
+/**
+ * Drizzle-backed outbox store for the transactional outbox pattern.
+ * Stores domain events pending publication and supports polling,
+ * marking published, and cleanup. Dialect-agnostic.
+ */
+export class DrizzleOutboxStore implements OutboxStore {
+  constructor(
+    private readonly db: any,
+    private readonly txStore: DrizzleTransactionStore,
+    private readonly schema: DrizzleNodddeSchema,
+  ) {}
+
+  private getExecutor() {
+    return this.txStore.current ?? this.db;
+  }
+
+  async save(entries: OutboxEntry[]): Promise<void> {
+    if (entries.length === 0) return;
+    const executor = this.getExecutor();
+    await executor.insert(this.schema.outbox).values(
+      entries.map((e) => ({
+        id: e.id,
+        event: JSON.stringify(e.event),
+        aggregateName: e.aggregateName ?? null,
+        aggregateId: e.aggregateId ?? null,
+        createdAt: e.createdAt,
+        publishedAt: e.publishedAt,
+      })),
+    );
+  }
+
+  async loadUnpublished(batchSize = 100): Promise<OutboxEntry[]> {
+    const executor = this.getExecutor();
+    const rows = await executor
+      .select()
+      .from(this.schema.outbox)
+      .where(isNull(this.schema.outbox.publishedAt))
+      .orderBy(asc(this.schema.outbox.createdAt))
+      .limit(batchSize);
+    return rows.map((row: any) => ({
+      id: row.id,
+      event: typeof row.event === "string" ? JSON.parse(row.event) : row.event,
+      aggregateName: row.aggregateName ?? undefined,
+      aggregateId: row.aggregateId ?? undefined,
+      createdAt: row.createdAt,
+      publishedAt: row.publishedAt,
+    }));
+  }
+
+  async markPublished(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    const executor = this.getExecutor();
+    await executor
+      .update(this.schema.outbox)
+      .set({ publishedAt: new Date().toISOString() })
+      .where(inArray(this.schema.outbox.id, ids));
+  }
+
+  async markPublishedByEventIds(eventIds: string[]): Promise<void> {
+    if (eventIds.length === 0) return;
+    // Load all unpublished, filter by eventId in deserialized event metadata
+    const unpublished = await this.loadUnpublished(10000);
+    const eventIdSet = new Set(eventIds);
+    const matchingIds = unpublished
+      .filter(
+        (e) =>
+          e.event?.metadata?.eventId &&
+          eventIdSet.has(e.event.metadata.eventId),
+      )
+      .map((e) => e.id);
+    if (matchingIds.length > 0) {
+      await this.markPublished(matchingIds);
+    }
+  }
+
+  async deletePublished(olderThan?: Date): Promise<void> {
+    const executor = this.getExecutor();
+    let condition = isNotNull(this.schema.outbox.publishedAt);
+    if (olderThan) {
+      condition = and(
+        condition,
+        lt(this.schema.outbox.createdAt, olderThan.toISOString()),
+      )!;
+    }
+    await executor.delete(this.schema.outbox).where(condition);
   }
 }

@@ -8,6 +8,8 @@ import type {
   PartialEventLoad,
   Snapshot,
   SnapshotStore,
+  OutboxStore,
+  OutboxEntry,
 } from "@noddde/core";
 import { ConcurrencyError } from "@noddde/core";
 import type { PrismaTransactionStore } from "./unit-of-work";
@@ -296,5 +298,85 @@ export class PrismaSnapshotStore implements SnapshotStore {
         },
       });
     }
+  }
+}
+
+/**
+ * Prisma-backed outbox store for the transactional outbox pattern.
+ */
+export class PrismaOutboxStore implements OutboxStore {
+  constructor(
+    private readonly prisma: PrismaClient,
+    private readonly txStore: PrismaTransactionStore,
+  ) {}
+
+  private getExecutor(): PrismaExecutor {
+    return (this.txStore.current ?? this.prisma) as PrismaExecutor;
+  }
+
+  async save(entries: OutboxEntry[]): Promise<void> {
+    if (entries.length === 0) return;
+    const executor = this.getExecutor();
+    await (executor as any).nodddeOutboxEntry.createMany({
+      data: entries.map((e) => ({
+        id: e.id,
+        event: JSON.stringify(e.event),
+        aggregateName: e.aggregateName ?? null,
+        aggregateId: e.aggregateId ?? null,
+        createdAt: e.createdAt,
+        publishedAt: e.publishedAt,
+      })),
+    });
+  }
+
+  async loadUnpublished(batchSize = 100): Promise<OutboxEntry[]> {
+    const executor = this.getExecutor();
+    const rows = await (executor as any).nodddeOutboxEntry.findMany({
+      where: { publishedAt: null },
+      orderBy: { createdAt: "asc" },
+      take: batchSize,
+    });
+    return rows.map((row: any) => ({
+      id: row.id,
+      event: JSON.parse(row.event),
+      aggregateName: row.aggregateName ?? undefined,
+      aggregateId: row.aggregateId ?? undefined,
+      createdAt: row.createdAt,
+      publishedAt: row.publishedAt,
+    }));
+  }
+
+  async markPublished(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    const executor = this.getExecutor();
+    await (executor as any).nodddeOutboxEntry.updateMany({
+      where: { id: { in: ids } },
+      data: { publishedAt: new Date().toISOString() },
+    });
+  }
+
+  async markPublishedByEventIds(eventIds: string[]): Promise<void> {
+    if (eventIds.length === 0) return;
+    const unpublished = await this.loadUnpublished(10000);
+    const eventIdSet = new Set(eventIds);
+    const matchingIds = unpublished
+      .filter(
+        (e) =>
+          e.event?.metadata?.eventId &&
+          eventIdSet.has(e.event.metadata.eventId),
+      )
+      .map((e) => e.id);
+    if (matchingIds.length > 0) {
+      await this.markPublished(matchingIds);
+    }
+  }
+
+  async deletePublished(olderThan?: Date): Promise<void> {
+    const executor = this.getExecutor();
+    const where: any = { publishedAt: { not: null } };
+    if (olderThan) {
+      where.createdAt = { lt: olderThan.toISOString() };
+    }
+    await (executor as any).nodddeOutboxEntry.deleteMany({ where });
   }
 }

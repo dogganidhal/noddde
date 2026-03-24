@@ -13,10 +13,12 @@ exports:
   - PrismaAdvisoryLocker
   - PrismaUnitOfWork
   - PrismaTransactionStore
+  - PrismaOutboxStore
 depends_on:
   - core/persistence/persistence
   - core/persistence/unit-of-work
   - core/persistence/snapshot
+  - core/persistence/outbox
 docs:
   - running/orm-adapters.mdx
 ---
@@ -38,6 +40,8 @@ import type {
   SnapshotStore,
   Snapshot,
   PartialEventLoad,
+  OutboxStore,
+  OutboxEntry,
 } from "@noddde/core";
 
 /**
@@ -57,6 +61,7 @@ export interface PrismaPersistenceInfrastructure {
   sagaPersistence: SagaPersistence;
   snapshotStore: SnapshotStore;
   unitOfWorkFactory: UnitOfWorkFactory;
+  outboxStore: OutboxStore;
 }
 
 /**
@@ -159,6 +164,18 @@ export class PrismaSnapshotStore implements SnapshotStore {
     snapshot: Snapshot,
   ): Promise<void>;
 }
+
+/**
+ * Prisma-backed outbox store for transactional outbox pattern.
+ */
+export class PrismaOutboxStore implements OutboxStore {
+  constructor(prisma: PrismaClient, txStore: PrismaTransactionStore);
+  save(entries: OutboxEntry[]): Promise<void>;
+  loadUnpublished(batchSize?: number): Promise<OutboxEntry[]>;
+  markPublished(ids: string[]): Promise<void>;
+  markPublishedByEventIds(eventIds: string[]): Promise<void>;
+  deletePublished(olderThan?: Date): Promise<void>;
+}
 ```
 
 ## Behavioral Requirements
@@ -217,6 +234,16 @@ export class PrismaSnapshotStore implements SnapshotStore {
 29. `PrismaEventSourcedAggregatePersistence.loadAfterVersion()` loads events with `sequenceNumber: { gt: afterVersion }` ordered by `sequenceNumber: "asc"`.
 30. Snapshot operations route through `txStore.current` like all other persistence operations.
 
+### Outbox Store
+
+31. `PrismaOutboxStore.save()` inserts entries with `JSON.stringify(entry.event)` for the event column via `createMany`. Runs inside active transaction via `txStore.current`.
+32. `PrismaOutboxStore.loadUnpublished()` returns entries where `publishedAt: null` ordered by `createdAt: "asc"`, limited by `take: batchSize` (default 100). Deserializes event from JSON.
+33. `PrismaOutboxStore.markPublished()` updates `publishedAt` to current ISO timestamp for entries matching the given IDs via `updateMany`.
+34. `PrismaOutboxStore.markPublishedByEventIds()` loads unpublished entries, filters by deserialized `event.metadata.eventId`, and marks matching entries as published.
+35. `PrismaOutboxStore.deletePublished()` deletes rows where `publishedAt` is not null and optionally `createdAt < olderThan` via `deleteMany`.
+36. Factory always includes `outboxStore` in returned infrastructure (same as `snapshotStore`).
+37. Outbox operations route through `txStore.current` like all other persistence operations.
+
 ## Invariants
 
 - [ ] Events saved and loaded maintain FIFO order (sequenceNumber ordering).
@@ -233,6 +260,8 @@ export class PrismaSnapshotStore implements SnapshotStore {
 - **Multiple saves to same aggregate (event-sourced)**: Events append with incrementing sequence numbers. Each save must use the correct `expectedVersion`.
 - **Multiple saves to same aggregate (state-stored)**: State is overwritten; version increments from `expectedVersion` to `expectedVersion + 1`.
 - **Empty event array on save**: No-op, no database call.
+- **Outbox save with empty entries array**: No-op, no database call.
+- **markPublishedByEventIds with no matches**: No-op, no error.
 - **Commit with no enlisted operations**: Succeeds via `$transaction`, returns deferred events (if any).
 - **Operation failure mid-commit**: Prisma transaction rolls back automatically, error propagates.
 - **Double commit/rollback**: Throws `"UnitOfWork already completed"`.
@@ -247,6 +276,7 @@ export class PrismaSnapshotStore implements SnapshotStore {
 - Factory return type matches the infrastructure shape expected by `configureDomain()`.
 - Snapshot store satisfies `SnapshotStore` from `@noddde/core`.
 - Event-sourced persistence also satisfies `PartialEventLoad` from `@noddde/core`.
+- Outbox store satisfies `OutboxStore` from `@noddde/core`.
 - Requires a Prisma schema with `NodddeEvent`, `NodddeAggregateState`, `NodddeSagaState`, and `NodddeSnapshot` models.
 
 ## Storage Schema (Prisma)
@@ -291,6 +321,17 @@ model NodddeSnapshot {
 
   @@id([aggregateName, aggregateId])
   @@map("noddde_snapshots")
+}
+
+model NodddeOutboxEntry {
+  id            String  @id
+  event         String
+  aggregateName String? @map("aggregate_name")
+  aggregateId   String? @map("aggregate_id")
+  createdAt     String  @map("created_at")
+  publishedAt   String? @map("published_at")
+
+  @@map("noddde_outbox")
 }
 ```
 
@@ -722,5 +763,143 @@ it("should return all events when afterVersion is 0", async () => {
     0,
   );
   expect(events).toHaveLength(2);
+});
+```
+
+### Outbox store: save and load unpublished entries
+
+```ts
+describe("PrismaOutboxStore", () => {
+  beforeEach(setupDb);
+  afterEach(teardownDb);
+
+  it("should save and load unpublished entries", async () => {
+    await infra.outboxStore.save([
+      {
+        id: "entry-1",
+        event: {
+          name: "OrderPlaced",
+          payload: { total: 100 },
+          metadata: { eventId: "evt-1" },
+        },
+        aggregateName: "Order",
+        aggregateId: "order-1",
+        createdAt: "2024-01-01T00:00:00.000Z",
+        publishedAt: null,
+      },
+    ]);
+
+    const unpublished = await infra.outboxStore.loadUnpublished();
+    expect(unpublished).toHaveLength(1);
+    expect(unpublished[0]!.event.name).toBe("OrderPlaced");
+    expect(unpublished[0]!.publishedAt).toBeNull();
+  });
+});
+```
+
+### Outbox store: markPublished sets publishedAt
+
+```ts
+it("should mark entries as published", async () => {
+  await infra.outboxStore.save([
+    {
+      id: "entry-1",
+      event: { name: "OrderPlaced", payload: {} },
+      createdAt: "2024-01-01T00:00:00.000Z",
+      publishedAt: null,
+    },
+  ]);
+
+  await infra.outboxStore.markPublished(["entry-1"]);
+  const unpublished = await infra.outboxStore.loadUnpublished();
+  expect(unpublished).toHaveLength(0);
+});
+```
+
+### Outbox store: markPublishedByEventIds matches on event metadata
+
+```ts
+it("should mark entries as published by event IDs", async () => {
+  await infra.outboxStore.save([
+    {
+      id: "entry-1",
+      event: {
+        name: "OrderPlaced",
+        payload: {},
+        metadata: { eventId: "evt-1" },
+      },
+      createdAt: "2024-01-01T00:00:00.000Z",
+      publishedAt: null,
+    },
+    {
+      id: "entry-2",
+      event: {
+        name: "OrderConfirmed",
+        payload: {},
+        metadata: { eventId: "evt-2" },
+      },
+      createdAt: "2024-01-01T00:00:01.000Z",
+      publishedAt: null,
+    },
+  ]);
+
+  await infra.outboxStore.markPublishedByEventIds(["evt-1"]);
+  const unpublished = await infra.outboxStore.loadUnpublished();
+  expect(unpublished).toHaveLength(1);
+  expect(unpublished[0]!.id).toBe("entry-2");
+});
+```
+
+### Outbox store: deletePublished removes only published entries
+
+```ts
+it("should delete only published entries", async () => {
+  await infra.outboxStore.save([
+    {
+      id: "entry-1",
+      event: { name: "OrderPlaced", payload: {} },
+      createdAt: "2024-01-01T00:00:00.000Z",
+      publishedAt: null,
+    },
+  ]);
+  await infra.outboxStore.markPublished(["entry-1"]);
+
+  await infra.outboxStore.deletePublished();
+  // Can't load published entries directly, but loading unpublished returns 0
+  const unpublished = await infra.outboxStore.loadUnpublished();
+  expect(unpublished).toHaveLength(0);
+});
+```
+
+### Outbox store: save within UoW transaction
+
+```ts
+it("should save outbox entries within a UoW transaction", async () => {
+  const uow = infra.unitOfWorkFactory();
+  uow.enlist(() =>
+    infra.outboxStore.save([
+      {
+        id: "entry-1",
+        event: { name: "OrderPlaced", payload: { total: 50 } },
+        createdAt: "2024-01-01T00:00:00.000Z",
+        publishedAt: null,
+      },
+    ]),
+  );
+  uow.enlist(() =>
+    infra.eventSourcedPersistence.save(
+      "Order",
+      "o-1",
+      [{ name: "OrderPlaced", payload: { total: 50 } }],
+      0,
+    ),
+  );
+
+  await uow.commit();
+
+  const unpublished = await infra.outboxStore.loadUnpublished();
+  expect(unpublished).toHaveLength(1);
+  const events = await infra.eventSourcedPersistence.load("Order", "o-1");
+  expect(events).toHaveLength(1);
 });
 ```

@@ -29,6 +29,7 @@ export class SagaExecutor {
     private readonly unitOfWorkFactory: UnitOfWorkFactory,
     private readonly uowStorage: AsyncLocalStorage<UnitOfWork>,
     private readonly metadataStorage: AsyncLocalStorage<MetadataContext>,
+    private readonly onEventsDispatched?: (events: Event[]) => Promise<void>,
   ) {}
 
   /**
@@ -109,6 +110,15 @@ export class SagaExecutor {
           // Step 9: Publish all deferred events
           for (const deferredEvent of events) {
             await this.infrastructure.eventBus.dispatch(deferredEvent);
+          }
+
+          // Best-effort post-dispatch callback (e.g., mark outbox entries published)
+          if (this.onEventsDispatched && events.length > 0) {
+            try {
+              await this.onEventsDispatched(events);
+            } catch {
+              // Best-effort: relay will catch unpublished entries
+            }
           }
         } catch (error) {
           try {

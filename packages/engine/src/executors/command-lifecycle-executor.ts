@@ -48,6 +48,7 @@ export class CommandLifecycleExecutor {
       events: Event[],
       uow: UnitOfWork,
     ) => Promise<void>,
+    private readonly onEventsDispatched?: (events: Event[]) => Promise<void>,
   ) {}
 
   /**
@@ -138,6 +139,15 @@ export class CommandLifecycleExecutor {
 
       for (const event of events) {
         await eventBus.dispatch(event);
+      }
+
+      // Best-effort post-dispatch callback (e.g., mark outbox entries published)
+      if (this.onEventsDispatched && events.length > 0) {
+        try {
+          await this.onEventsDispatched(events);
+        } catch {
+          // Best-effort: relay will catch unpublished entries
+        }
       }
     } else {
       // Explicit UoW — strategy wraps just the lifecycle (for pessimistic locking)

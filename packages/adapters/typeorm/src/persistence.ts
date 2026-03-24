@@ -1,6 +1,6 @@
 /* eslint-disable no-unused-vars */
 import type { DataSource, EntityManager } from "typeorm";
-import { MoreThan } from "typeorm";
+import { MoreThan, IsNull, In, Not, LessThan } from "typeorm";
 import type {
   Event,
   EventMetadata,
@@ -10,6 +10,8 @@ import type {
   SnapshotStore,
   StateStoredAggregatePersistence,
   SagaPersistence,
+  OutboxStore,
+  OutboxEntry,
 } from "@noddde/core";
 import { ConcurrencyError } from "@noddde/core";
 import {
@@ -17,6 +19,7 @@ import {
   NodddeAggregateStateEntity,
   NodddeSagaStateEntity,
   NodddeSnapshotEntity,
+  NodddeOutboxEntryEntity,
 } from "./entities";
 import type { TypeORMTransactionStore } from "./unit-of-work";
 
@@ -295,6 +298,94 @@ export class TypeORMSnapshotStore implements SnapshotStore {
       entity.state = serialized;
       entity.version = snapshot.version;
       await repo.save(entity);
+    }
+  }
+}
+
+/**
+ * TypeORM-backed outbox store for the transactional outbox pattern.
+ */
+export class TypeORMOutboxStore implements OutboxStore {
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly txStore: TypeORMTransactionStore,
+  ) {}
+
+  private getManager(): EntityManager {
+    return this.txStore.current ?? this.dataSource.manager;
+  }
+
+  async save(entries: OutboxEntry[]): Promise<void> {
+    if (entries.length === 0) return;
+    const manager = this.getManager();
+    const repo = manager.getRepository(NodddeOutboxEntryEntity);
+    const entities = entries.map((e) => {
+      const entity = new NodddeOutboxEntryEntity();
+      entity.id = e.id;
+      entity.event = JSON.stringify(e.event);
+      entity.aggregateName = e.aggregateName ?? null;
+      entity.aggregateId = e.aggregateId ?? null;
+      entity.createdAt = e.createdAt;
+      entity.publishedAt = e.publishedAt;
+      return entity;
+    });
+    await repo.save(entities);
+  }
+
+  async loadUnpublished(batchSize = 100): Promise<OutboxEntry[]> {
+    const manager = this.getManager();
+    const repo = manager.getRepository(NodddeOutboxEntryEntity);
+    const rows = await repo.find({
+      where: { publishedAt: IsNull() },
+      order: { createdAt: "ASC" },
+      take: batchSize,
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      event: JSON.parse(row.event),
+      aggregateName: row.aggregateName ?? undefined,
+      aggregateId: row.aggregateId ?? undefined,
+      createdAt: row.createdAt,
+      publishedAt: row.publishedAt,
+    }));
+  }
+
+  async markPublished(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    const manager = this.getManager();
+    const repo = manager.getRepository(NodddeOutboxEntryEntity);
+    await repo.update(
+      { id: In(ids) },
+      { publishedAt: new Date().toISOString() },
+    );
+  }
+
+  async markPublishedByEventIds(eventIds: string[]): Promise<void> {
+    if (eventIds.length === 0) return;
+    const unpublished = await this.loadUnpublished(10000);
+    const eventIdSet = new Set(eventIds);
+    const matchingIds = unpublished
+      .filter(
+        (e) =>
+          e.event?.metadata?.eventId &&
+          eventIdSet.has(e.event.metadata.eventId),
+      )
+      .map((e) => e.id);
+    if (matchingIds.length > 0) {
+      await this.markPublished(matchingIds);
+    }
+  }
+
+  async deletePublished(olderThan?: Date): Promise<void> {
+    const manager = this.getManager();
+    const repo = manager.getRepository(NodddeOutboxEntryEntity);
+    if (olderThan) {
+      await repo.delete({
+        publishedAt: Not(IsNull()),
+        createdAt: LessThan(olderThan.toISOString()),
+      });
+    } else {
+      await repo.delete({ publishedAt: Not(IsNull()) });
     }
   }
 }

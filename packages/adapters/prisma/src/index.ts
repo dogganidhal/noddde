@@ -3,6 +3,7 @@ export {
   PrismaStateStoredAggregatePersistence,
   PrismaSagaPersistence,
   PrismaSnapshotStore,
+  PrismaOutboxStore,
 } from "./persistence";
 export { PrismaAdvisoryLocker } from "./advisory-locker";
 export {
@@ -12,7 +13,11 @@ export {
 export type { PrismaTransactionStore } from "./unit-of-work";
 
 import type { PrismaClient } from "@prisma/client";
-import type { UnitOfWorkFactory, SnapshotStore } from "@noddde/core";
+import type {
+  UnitOfWorkFactory,
+  SnapshotStore,
+  OutboxStore,
+} from "@noddde/core";
 import type {
   EventSourcedAggregatePersistence,
   StateStoredAggregatePersistence,
@@ -23,6 +28,7 @@ import {
   PrismaStateStoredAggregatePersistence,
   PrismaSagaPersistence,
   PrismaSnapshotStore,
+  PrismaOutboxStore,
 } from "./persistence";
 import { createPrismaUnitOfWorkFactory } from "./unit-of-work";
 import type { PrismaTransactionStore } from "./unit-of-work";
@@ -35,6 +41,7 @@ export interface PrismaPersistenceInfrastructure {
   stateStoredPersistence: StateStoredAggregatePersistence;
   sagaPersistence: SagaPersistence;
   snapshotStore: SnapshotStore;
+  outboxStore: OutboxStore;
   unitOfWorkFactory: UnitOfWorkFactory;
 }
 
@@ -79,6 +86,7 @@ export function createPrismaPersistence(
     ),
     sagaPersistence: new PrismaSagaPersistence(prisma, txStore),
     snapshotStore: new PrismaSnapshotStore(prisma, txStore),
+    outboxStore: new PrismaOutboxStore(prisma, txStore),
     unitOfWorkFactory: createPrismaUnitOfWorkFactory(prisma, txStore),
   };
 }

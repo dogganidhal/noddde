@@ -52,3 +52,15 @@ model NodddeSnapshot {
   @@id([aggregateName, aggregateId])
   @@map("noddde_snapshots")
 }
+
+/// Outbox table for the transactional outbox pattern.
+model NodddeOutboxEntry {
+  id            String  @id
+  event         String
+  aggregateName String? @map("aggregate_name")
+  aggregateId   String? @map("aggregate_id")
+  createdAt     String  @map("created_at")
+  publishedAt   String? @map("published_at")
+
+  @@map("noddde_outbox")
+}

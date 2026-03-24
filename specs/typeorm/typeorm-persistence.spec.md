@@ -17,10 +17,13 @@ exports:
   - NodddeAggregateStateEntity
   - NodddeSagaStateEntity
   - NodddeSnapshotEntity
+  - TypeORMOutboxStore
+  - NodddeOutboxEntryEntity
 depends_on:
   - core/persistence/persistence
   - core/persistence/unit-of-work
   - core/persistence/snapshot
+  - core/persistence/outbox
 docs:
   - running/orm-adapters.mdx
 ---
@@ -61,6 +64,7 @@ export interface TypeORMPersistenceInfrastructure {
   sagaPersistence: SagaPersistence;
   snapshotStore: SnapshotStore;
   unitOfWorkFactory: UnitOfWorkFactory;
+  outboxStore: OutboxStore;
 }
 
 /**
@@ -91,6 +95,18 @@ export class TypeORMEventSourcedAggregatePersistence
     aggregateId: string,
     afterVersion: number,
   ): Promise<Event[]>;
+}
+
+/**
+ * TypeORM-backed outbox store for transactional outbox pattern.
+ */
+export class TypeORMOutboxStore implements OutboxStore {
+  constructor(dataSource: DataSource, txStore: TypeORMTransactionStore);
+  save(entries: OutboxEntry[]): Promise<void>;
+  loadUnpublished(batchSize?: number): Promise<OutboxEntry[]>;
+  markPublished(ids: string[]): Promise<void>;
+  markPublishedByEventIds(eventIds: string[]): Promise<void>;
+  deletePublished(olderThan?: Date): Promise<void>;
 }
 
 /**
@@ -249,6 +265,30 @@ export class NodddeSnapshotEntity {
   @Column({ type: "int" })
   version!: number;
 }
+
+/**
+ * TypeORM entity for transactional outbox.
+ */
+@Entity("noddde_outbox")
+export class NodddeOutboxEntryEntity {
+  @PrimaryColumn()
+  id!: string;
+
+  @Column({ type: "text" })
+  event!: string;
+
+  @Column({ name: "aggregate_name", nullable: true })
+  aggregateName!: string | null;
+
+  @Column({ name: "aggregate_id", nullable: true })
+  aggregateId!: string | null;
+
+  @Column({ name: "created_at" })
+  createdAt!: string;
+
+  @Column({ name: "published_at", nullable: true })
+  publishedAt!: string | null;
+}
 ```
 
 ## Behavioral Requirements
@@ -316,6 +356,17 @@ export class NodddeSnapshotEntity {
 35. `NodddeSnapshotEntity` maps to table `noddde_snapshots` with `@PrimaryColumn` composite key on `[aggregateName, aggregateId]`.
 36. Snapshot operations route through `txStore.current` like all other persistence operations.
 
+### Outbox Store
+
+37. `TypeORMOutboxStore.save()` creates `NodddeOutboxEntryEntity` instances with `JSON.stringify(entry.event)` for the event column and saves them via the repository. Runs inside active transaction via `txStore.current`.
+38. `TypeORMOutboxStore.loadUnpublished()` returns entries where `publishedAt IS NULL` ordered by `createdAt ASC`, limited by `take: batchSize` (default 100). Deserializes event from JSON.
+39. `TypeORMOutboxStore.markPublished()` updates `publishedAt` to current ISO timestamp for entries matching the given IDs.
+40. `TypeORMOutboxStore.markPublishedByEventIds()` loads unpublished entries, filters by deserialized `event.metadata.eventId`, and marks matching entries as published.
+41. `TypeORMOutboxStore.deletePublished()` removes rows where `publishedAt IS NOT NULL` and optionally `createdAt < olderThan`.
+42. Factory always includes `outboxStore` in returned infrastructure.
+43. `NodddeOutboxEntryEntity` maps to table `noddde_outbox` with a string `@PrimaryColumn()` id, `text` event column, nullable `aggregate_name` and `aggregate_id`, and `created_at`/`published_at` (nullable) columns.
+44. Outbox operations route through `txStore.current` like all other persistence operations.
+
 ## Invariants
 
 - [ ] Events saved and loaded maintain FIFO order (sequenceNumber ordering).
@@ -342,6 +393,8 @@ export class NodddeSnapshotEntity {
 - **Unsupported database type for advisory locker**: Constructor throws immediately with a descriptive error message.
 - **MSSQL deadlock victim**: `sp_getapplock` returns `-3` (deadlock victim), treated as `LockTimeoutError`.
 - **MSSQL release of unheld lock**: `sp_releaseapplock` raises error 1223; silently caught for idempotency.
+- **Outbox save with empty entries array**: No-op, no database call.
+- **markPublishedByEventIds with no matches**: No-op, no error.
 
 ## Integration Points
 
@@ -350,6 +403,8 @@ export class NodddeSnapshotEntity {
 - Advisory locker satisfies `AggregateLocker` from `@noddde/core`.
 - Factory return type matches the infrastructure shape expected by `configureDomain()`.
 - Entity classes must be registered in `DataSource.options.entities` for TypeORM to create/manage the tables.
+- Outbox store satisfies `OutboxStore` from `@noddde/core`.
+- `NodddeOutboxEntryEntity` must be registered in `DataSource.options.entities`.
 
 ## Storage Schema (TypeORM Entities)
 
@@ -379,6 +434,14 @@ noddde_snapshots
 ├── aggregate_id     (string, PK part 2, @PrimaryColumn)
 ├── state            (text, NOT NULL)
 └── version          (int, NOT NULL)
+
+noddde_outbox
+├── id               (string, PK, @PrimaryColumn)
+├── event            (text, NOT NULL)
+├── aggregate_name   (string, nullable)
+├── aggregate_id     (string, nullable)
+├── created_at       (string, NOT NULL)
+└── published_at     (string, nullable)
 ```
 
 ## Test Scenarios
@@ -395,6 +458,7 @@ import {
   NodddeEventEntity,
   NodddeAggregateStateEntity,
   NodddeSagaStateEntity,
+  NodddeOutboxEntryEntity,
 } from "@noddde/typeorm";
 
 let dataSource: DataSource;
@@ -408,6 +472,7 @@ async function setupDb() {
       NodddeEventEntity,
       NodddeAggregateStateEntity,
       NodddeSagaStateEntity,
+      NodddeOutboxEntryEntity,
     ],
     synchronize: true,
   });
@@ -823,5 +888,144 @@ it("should return empty array when afterVersion >= stream length", async () => {
     infra.eventSourcedPersistence as TypeORMEventSourcedAggregatePersistence;
   const events = await persistence.loadAfterVersion("Account", "acc-1", 10);
   expect(events).toEqual([]);
+});
+```
+
+### Outbox store: save and load unpublished entries
+
+```ts
+import { NodddeOutboxEntryEntity } from "@noddde/typeorm";
+// Note: NodddeOutboxEntryEntity must be added to the setupDb entities array.
+
+describe("TypeORMOutboxStore", () => {
+  beforeEach(setupDb);
+  afterEach(teardownDb);
+
+  it("should save and load unpublished entries", async () => {
+    await infra.outboxStore.save([
+      {
+        id: "entry-1",
+        event: {
+          name: "OrderPlaced",
+          payload: { total: 100 },
+          metadata: { eventId: "evt-1" },
+        },
+        aggregateName: "Order",
+        aggregateId: "order-1",
+        createdAt: "2024-01-01T00:00:00.000Z",
+        publishedAt: null,
+      },
+    ]);
+
+    const unpublished = await infra.outboxStore.loadUnpublished();
+    expect(unpublished).toHaveLength(1);
+    expect(unpublished[0]!.event.name).toBe("OrderPlaced");
+    expect(unpublished[0]!.publishedAt).toBeNull();
+  });
+});
+```
+
+### Outbox store: markPublished sets publishedAt
+
+```ts
+it("should mark entries as published", async () => {
+  await infra.outboxStore.save([
+    {
+      id: "entry-1",
+      event: { name: "OrderPlaced", payload: {} },
+      createdAt: "2024-01-01T00:00:00.000Z",
+      publishedAt: null,
+    },
+  ]);
+
+  await infra.outboxStore.markPublished(["entry-1"]);
+  const unpublished = await infra.outboxStore.loadUnpublished();
+  expect(unpublished).toHaveLength(0);
+});
+```
+
+### Outbox store: markPublishedByEventIds matches on event metadata
+
+```ts
+it("should mark entries as published by event IDs", async () => {
+  await infra.outboxStore.save([
+    {
+      id: "entry-1",
+      event: {
+        name: "OrderPlaced",
+        payload: {},
+        metadata: { eventId: "evt-1" },
+      },
+      createdAt: "2024-01-01T00:00:00.000Z",
+      publishedAt: null,
+    },
+    {
+      id: "entry-2",
+      event: {
+        name: "OrderConfirmed",
+        payload: {},
+        metadata: { eventId: "evt-2" },
+      },
+      createdAt: "2024-01-01T00:00:01.000Z",
+      publishedAt: null,
+    },
+  ]);
+
+  await infra.outboxStore.markPublishedByEventIds(["evt-1"]);
+  const unpublished = await infra.outboxStore.loadUnpublished();
+  expect(unpublished).toHaveLength(1);
+  expect(unpublished[0]!.id).toBe("entry-2");
+});
+```
+
+### Outbox store: deletePublished removes only published entries
+
+```ts
+it("should delete only published entries", async () => {
+  await infra.outboxStore.save([
+    {
+      id: "entry-1",
+      event: { name: "OrderPlaced", payload: {} },
+      createdAt: "2024-01-01T00:00:00.000Z",
+      publishedAt: null,
+    },
+  ]);
+  await infra.outboxStore.markPublished(["entry-1"]);
+  await infra.outboxStore.deletePublished();
+  const unpublished = await infra.outboxStore.loadUnpublished();
+  expect(unpublished).toHaveLength(0);
+});
+```
+
+### Outbox store: save within UoW transaction
+
+```ts
+it("should save outbox entries within a UoW transaction", async () => {
+  const uow = infra.unitOfWorkFactory();
+  uow.enlist(() =>
+    infra.outboxStore.save([
+      {
+        id: "entry-1",
+        event: { name: "OrderPlaced", payload: { total: 50 } },
+        createdAt: "2024-01-01T00:00:00.000Z",
+        publishedAt: null,
+      },
+    ]),
+  );
+  uow.enlist(() =>
+    infra.eventSourcedPersistence.save(
+      "Order",
+      "o-1",
+      [{ name: "OrderPlaced", payload: { total: 50 } }],
+      0,
+    ),
+  );
+
+  await uow.commit();
+
+  const unpublished = await infra.outboxStore.loadUnpublished();
+  expect(unpublished).toHaveLength(1);
+  const events = await infra.eventSourcedPersistence.load("Order", "o-1");
+  expect(events).toHaveLength(1);
 });
 ```

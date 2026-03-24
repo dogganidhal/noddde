@@ -1,0 +1,87 @@
+/* eslint-disable no-unused-vars */
+import type { OutboxStore, EventBus } from "@noddde/core";
+
+/**
+ * Configuration options for the OutboxRelay.
+ */
+export interface OutboxRelayOptions {
+  /** Polling interval in milliseconds. Defaults to 1000. */
+  pollIntervalMs?: number;
+  /** Maximum entries to process per batch. Defaults to 100. */
+  batchSize?: number;
+}
+
+/**
+ * Background process that polls the {@link OutboxStore} for unpublished
+ * entries and dispatches them via the {@link EventBus}. Provides
+ * at-least-once delivery guarantees for domain events.
+ *
+ * If the node crashes after database commit but before event publishing,
+ * the relay picks up unpublished entries on restart.
+ *
+ * Created and managed by the Domain. Not exported to consumers directly
+ * (but exported from `@noddde/engine` for testing).
+ */
+export class OutboxRelay {
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private processing = false;
+
+  constructor(
+    private readonly outboxStore: OutboxStore,
+    private readonly eventBus: EventBus,
+    private readonly options: OutboxRelayOptions = {},
+  ) {}
+
+  /**
+   * Start polling for unpublished entries.
+   * Idempotent: calling start() when already running is a no-op.
+   */
+  start(): void {
+    if (this.timer !== null) return;
+    const interval = this.options.pollIntervalMs ?? 1000;
+    this.timer = setInterval(() => {
+      void this.processOnce();
+    }, interval);
+  }
+
+  /**
+   * Stop polling.
+   * Idempotent: calling stop() when not running is a no-op.
+   */
+  stop(): void {
+    if (this.timer !== null) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+  }
+
+  /**
+   * Process one batch of unpublished entries.
+   * Loads entries, dispatches each via EventBus, marks each published.
+   * Returns the number of entries successfully dispatched.
+   */
+  async processOnce(): Promise<number> {
+    if (this.processing) return 0;
+    this.processing = true;
+
+    try {
+      const batchSize = this.options.batchSize ?? 100;
+      const entries = await this.outboxStore.loadUnpublished(batchSize);
+      if (entries.length === 0) return 0;
+
+      let dispatched = 0;
+      for (const entry of entries) {
+        try {
+          await this.eventBus.dispatch(entry.event);
+          await this.outboxStore.markPublished([entry.id]);
+          dispatched++;
+        } catch {
+          // Skip failed entries — they'll be retried on next poll
+        }
+      }
+      return dispatched;
+    } finally {
+      this.processing = false;
+    }
+  }
+}
