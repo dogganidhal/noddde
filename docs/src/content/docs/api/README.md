@@ -44,7 +44,6 @@ title: "@noddde/core"
 - [InferAggregateState](/api/type-aliases/inferaggregatestate/)
 - [Infrastructure](/api/type-aliases/infrastructure/)
 - [Projection](/api/type-aliases/projection/)
-- [ProjectionV2](/api/type-aliases/projectionv2/)
 - [QueryHandler](/api/type-aliases/queryhandler/)
 - [QueryResult](/api/type-aliases/queryresult/)
 - [StandaloneCommand](/api/type-aliases/standalonecommand/)
