@@ -18,6 +18,7 @@ import type {
   UnitOfWork,
   UnitOfWorkFactory,
 } from "@noddde/core";
+import { upcastEvents, currentEventVersion } from "@noddde/core";
 import type { AggregatePersistenceResolver } from "../aggregate-persistence-resolver";
 import type { ConcurrencyStrategy } from "../concurrency-strategy";
 import type { MetadataEnricher } from "./metadata-enricher";
@@ -201,7 +202,10 @@ export class CommandLifecycleExecutor {
         events = (allEvents as Event[]).slice(snapshot.version);
       }
       version = snapshot.version + events.length;
-      currentState = events.reduce((state: any, event: Event) => {
+      const upcastedEvents = aggregate.upcasters
+        ? upcastEvents(events, aggregate.upcasters)
+        : events;
+      currentState = upcastedEvents.reduce((state: any, event: Event) => {
         const applyHandler = aggregate.apply[event.name];
         return applyHandler ? applyHandler(event.payload, state) : state;
       }, snapshot.state);
@@ -217,7 +221,10 @@ export class CommandLifecycleExecutor {
         // Event-sourced: replay events to rebuild state; version = stream length
         const events = loaded as Event[];
         version = events.length;
-        currentState = events.reduce((state: any, event: Event) => {
+        const upcastedEvents = aggregate.upcasters
+          ? upcastEvents(events, aggregate.upcasters)
+          : events;
+        currentState = upcastedEvents.reduce((state: any, event: Event) => {
           const applyHandler = aggregate.apply[event.name];
           return applyHandler ? applyHandler(event.payload, state) : state;
         }, aggregate.initialState);
@@ -253,13 +260,17 @@ export class CommandLifecycleExecutor {
       }
     }
 
-    // Step 4.5: Enrich events with metadata
+    // Step 4.5: Enrich events with metadata (including schema version if upcasters are configured)
+    const eventVersionResolver = aggregate.upcasters
+      ? (name: string) => currentEventVersion(name, aggregate.upcasters!)
+      : undefined;
     const enrichedEvents = this.metadataEnricher.enrich(
       newEvents,
       aggregateName,
       command.targetAggregateId,
       version,
       command.name,
+      eventVersionResolver,
     );
 
     // Step 5: Enlist persistence in UoW with version (deferred until commit)

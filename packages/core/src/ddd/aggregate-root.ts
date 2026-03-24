@@ -2,6 +2,7 @@
 import type { ID } from "../id";
 import { Event } from "../edd/event";
 import { ApplyHandler } from "../edd/event-sourcing-handler";
+import type { UpcasterMap } from "../edd/upcaster";
 import { AggregateCommand } from "../cqrs/command/command";
 import { Infrastructure } from "../infrastructure";
 
@@ -99,6 +100,15 @@ export interface Aggregate<T extends AggregateTypes = AggregateTypes> {
    * the "evolve" phase: `(payload, state) => newState`. Must be pure.
    */
   apply: ApplyHandlerMap<T>;
+  /**
+   * Optional map of upcaster chains keyed by event name. Each chain
+   * transforms historical event payloads from older schema versions
+   * to the current version during event replay. Only events that have
+   * undergone schema changes need entries.
+   *
+   * @see {@link UpcasterMap}
+   */
+  upcasters?: UpcasterMap<T["events"]>;
 }
 
 /**
