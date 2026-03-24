@@ -1,0 +1,49 @@
+{
+  "name": "@noddde/cli",
+  "version": "0.0.0",
+  "description": "CLI tool for scaffolding noddde DDD aggregates, projections, and sagas",
+  "license": "MIT",
+  "author": "Nidhal Dogga",
+  "homepage": "https://noddde.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dogganidhal/noddde",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/dogganidhal/noddde/issues"
+  },
+  "keywords": [
+    "ddd",
+    "cqrs",
+    "event-sourcing",
+    "cli",
+    "generator",
+    "scaffold",
+    "typescript"
+  ],
+  "bin": {
+    "noddde": "./dist/index.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "lint": "eslint . --max-warnings 0",
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "commander": "^13.0.0"
+  },
+  "devDependencies": {
+    "@noddde/typescript-config": "0.0.0",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3",
+    "vitest": "^4.1.0"
+  }
+}
