@@ -13,20 +13,24 @@ exports:
   - aggregateStates (sqliteTable)
   - sagaStates (sqliteTable)
   - snapshots (sqliteTable)
+  - outbox (sqliteTable)
   # @noddde/drizzle/pg
   - events (pgTable)
   - aggregateStates (pgTable)
   - sagaStates (pgTable)
   - snapshots (pgTable)
+  - outbox (pgTable)
   # @noddde/drizzle/mysql
   - events (mysqlTable)
   - aggregateStates (mysqlTable)
   - sagaStates (mysqlTable)
   - snapshots (mysqlTable)
+  - outbox (mysqlTable)
 depends_on:
   - core/persistence/persistence
   - core/persistence/unit-of-work
   - core/persistence/snapshot
+  - core/persistence/outbox
 docs:
   - docs/content/docs/infrastructure/orm-adapters.mdx
   - docs/content/docs/domain-configuration/unit-of-work.mdx
@@ -50,6 +54,8 @@ import type {
   Snapshot,
   PartialEventLoad,
   Event,
+  OutboxStore,
+  OutboxEntry,
 } from "@noddde/core";
 
 /**
@@ -61,6 +67,7 @@ export interface DrizzleNodddeSchema {
   aggregateStates: any;
   sagaStates: any;
   snapshots?: any; // Optional — only needed if using snapshot store
+  outbox?: any;    // Optional — only needed if using outbox store
 }
 
 /**
@@ -72,6 +79,7 @@ export interface DrizzlePersistenceInfrastructure {
   sagaPersistence: SagaPersistence;
   unitOfWorkFactory: UnitOfWorkFactory;
   snapshotStore?: SnapshotStore; // Present only when schema.snapshots is provided
+  outboxStore?: OutboxStore;  // Present only when schema.outbox is provided
 }
 
 /**
@@ -89,6 +97,22 @@ export class DrizzleSnapshotStore implements SnapshotStore {
     aggregateId: string,
     snapshot: Snapshot,
   ): Promise<void>;
+}
+
+/**
+ * Drizzle-backed outbox store for transactional outbox pattern.
+ */
+export class DrizzleOutboxStore implements OutboxStore {
+  constructor(
+    db: any,
+    txStore: DrizzleTransactionStore,
+    schema: DrizzleNodddeSchema,
+  );
+  save(entries: OutboxEntry[]): Promise<void>;
+  loadUnpublished(batchSize?: number): Promise<OutboxEntry[]>;
+  markPublished(ids: string[]): Promise<void>;
+  markPublishedByEventIds(eventIds: string[]): Promise<void>;
+  deletePublished(olderThan?: Date): Promise<void>;
 }
 
 /**
@@ -130,6 +154,7 @@ export const events: SQLiteTableWithColumns<...>;
 export const aggregateStates: SQLiteTableWithColumns<...>;
 export const sagaStates: SQLiteTableWithColumns<...>;
 export const snapshots: SQLiteTableWithColumns<...>;
+export const outbox: SQLiteTableWithColumns<...>;
 ```
 
 **`@noddde/drizzle/pg`**
@@ -141,6 +166,7 @@ export const events: PgTableWithColumns<...>;       // serial PK, jsonb payload
 export const aggregateStates: PgTableWithColumns<...>;
 export const sagaStates: PgTableWithColumns<...>;
 export const snapshots: PgTableWithColumns<...>;     // jsonb state
+export const outbox: PgTableWithColumns<...>;
 ```
 
 **`@noddde/drizzle/mysql`**
@@ -152,6 +178,7 @@ export const events: MySqlTableWithColumns<...>;     // auto-increment int PK, j
 export const aggregateStates: MySqlTableWithColumns<...>;
 export const sagaStates: MySqlTableWithColumns<...>;
 export const snapshots: MySqlTableWithColumns<...>;
+export const outbox: MySqlTableWithColumns<...>;
 ```
 
 All three dialects define the same logical schema with the same table names (`noddde_events`, `noddde_aggregate_states`, `noddde_saga_states`) and column names.
@@ -189,7 +216,7 @@ All three dialects define the same logical schema with the same table names (`no
 
 ### Schema exports
 
-21. Each dialect sub-path (`/sqlite`, `/pg`, `/mysql`) exports `events`, `aggregateStates`, `sagaStates` as Drizzle table definitions using the dialect's native types and column builders.
+21. Each dialect sub-path (`/sqlite`, `/pg`, `/mysql`) exports `events`, `aggregateStates`, `sagaStates`, `snapshots`, and `outbox` as Drizzle table definitions using the dialect's native types and column builders.
 22. All three dialects use the same table names: `noddde_events`, `noddde_aggregate_states`, `noddde_saga_states`.
 23. All three dialects use the same column names (snake_case).
 24. PostgreSQL schema uses `serial` for auto-increment PK and `jsonb` for payload/state columns.
@@ -203,6 +230,16 @@ All three dialects define the same logical schema with the same table names (`no
 29. `DrizzleEventSourcedAggregatePersistence.loadAfterVersion()` loads events with `sequence_number > afterVersion` ordered by `sequence_number ASC`.
 30. `snapshotStore` is only included in the factory return when `schema.snapshots` is provided.
 31. Snapshot operations route through `txStore.current` like all other persistence operations.
+
+### Outbox Store
+
+32. `DrizzleOutboxStore.save()` inserts entries with `JSON.stringify(entry.event)` for the event column. Runs inside active transaction via `txStore.current`.
+33. `DrizzleOutboxStore.loadUnpublished()` returns entries where `published_at IS NULL` ordered by `created_at ASC`, limited by `batchSize` (default 100). Deserializes event from JSON.
+34. `DrizzleOutboxStore.markPublished()` updates `published_at` to current ISO timestamp for matching entry IDs.
+35. `DrizzleOutboxStore.markPublishedByEventIds()` loads unpublished entries, filters by deserialized `event.metadata.eventId`, and marks matching entries as published.
+36. `DrizzleOutboxStore.deletePublished()` removes rows where `published_at IS NOT NULL` and optionally `created_at < olderThan`.
+37. `outboxStore` is only included in the factory return when `schema.outbox` is provided (same pattern as `snapshotStore`).
+38. Outbox operations route through `txStore.current` like all other persistence operations.
 
 ## Invariants
 
@@ -222,6 +259,8 @@ All three dialects define the same logical schema with the same table names (`no
 - **Operation failure mid-commit**: Transaction rolls back, error propagates, no events returned.
 - **Double commit/rollback**: Throws `"UnitOfWork already completed"`.
 - **Transaction store cleared after commit/rollback**: `txStore.current` is always reset to `null`.
+- **Outbox save with empty entries array**: No-op, no database call.
+- **markPublishedByEventIds with no matches**: No-op, no error.
 
 ## Integration Points
 
@@ -229,6 +268,7 @@ All three dialects define the same logical schema with the same table names (`no
 - UoW satisfies `UnitOfWork` from `@noddde/core`.
 - Factory return type matches the infrastructure shape expected by `configureDomain()`.
 - Schema exports are convenience-only — developers can define their own tables matching the expected column structure.
+- Outbox store satisfies `OutboxStore` from `@noddde/core`.
 
 ## Storage Schema
 
@@ -258,6 +298,14 @@ noddde_snapshots
 ├── aggregate_id     (string, PK part 2)
 ├── state            (JSON string, NOT NULL)
 └── version          (integer, NOT NULL)
+
+noddde_outbox
+├── id               (string, PK)
+├── event            (JSON string, NOT NULL)
+├── aggregate_name   (string, nullable)
+├── aggregate_id     (string, nullable)
+├── created_at       (string, NOT NULL)
+└── published_at     (string, nullable)
 ```
 
 ## Test Scenarios
@@ -269,7 +317,7 @@ import { describe, it, expect } from "vitest";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { createDrizzlePersistence } from "@noddde/drizzle";
-import { events, aggregateStates, sagaStates } from "@noddde/drizzle/sqlite";
+import { events, aggregateStates, sagaStates, snapshots, outbox } from "@noddde/drizzle/sqlite";
 
 function createTestDb() {
   const sqlite = new Database(":memory:");
@@ -293,6 +341,21 @@ function createTestDb() {
       saga_id TEXT NOT NULL,
       state TEXT NOT NULL,
       PRIMARY KEY (saga_name, saga_id)
+    );
+    CREATE TABLE noddde_snapshots (
+      aggregate_name TEXT NOT NULL,
+      aggregate_id TEXT NOT NULL,
+      state TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      PRIMARY KEY (aggregate_name, aggregate_id)
+    );
+    CREATE TABLE noddde_outbox (
+      id TEXT PRIMARY KEY,
+      event TEXT NOT NULL,
+      aggregate_name TEXT,
+      aggregate_id TEXT,
+      created_at TEXT NOT NULL,
+      published_at TEXT
     );
   `);
   return drizzle(sqlite);
@@ -725,5 +788,125 @@ it("loadAfterVersion: returns empty array when afterVersion >= stream length", a
 
   const afterV10 = await persistence.loadAfterVersion("Order", "order-1", 10);
   expect(afterV10).toEqual([]);
+});
+```
+
+### Outbox store: save and load unpublished entries
+
+```ts
+it("outbox store: save and load unpublished entries", async () => {
+  const db = createTestDb();
+  const infra = createDrizzlePersistence(db, {
+    events, aggregateStates, sagaStates, outbox,
+  });
+  expect(infra.outboxStore).toBeDefined();
+  const store = infra.outboxStore!;
+
+  await store.save([{
+    id: "entry-1",
+    event: { name: "OrderPlaced", payload: { total: 100 }, metadata: { eventId: "evt-1" } },
+    aggregateName: "Order",
+    aggregateId: "order-1",
+    createdAt: "2024-01-01T00:00:00.000Z",
+    publishedAt: null,
+  }]);
+
+  const unpublished = await store.loadUnpublished();
+  expect(unpublished).toHaveLength(1);
+  expect(unpublished[0]!.event.name).toBe("OrderPlaced");
+  expect(unpublished[0]!.publishedAt).toBeNull();
+});
+```
+
+### Outbox store: markPublished sets publishedAt
+
+```ts
+it("outbox store: markPublished sets publishedAt", async () => {
+  const db = createTestDb();
+  const infra = createDrizzlePersistence(db, {
+    events, aggregateStates, sagaStates, outbox,
+  });
+  const store = infra.outboxStore!;
+
+  await store.save([{
+    id: "entry-1",
+    event: { name: "OrderPlaced", payload: {} },
+    createdAt: "2024-01-01T00:00:00.000Z",
+    publishedAt: null,
+  }]);
+
+  await store.markPublished(["entry-1"]);
+  const unpublished = await store.loadUnpublished();
+  expect(unpublished).toHaveLength(0);
+});
+```
+
+### Outbox store: markPublishedByEventIds matches on event metadata
+
+```ts
+it("outbox store: markPublishedByEventIds matches on event metadata", async () => {
+  const db = createTestDb();
+  const infra = createDrizzlePersistence(db, {
+    events, aggregateStates, sagaStates, outbox,
+  });
+  const store = infra.outboxStore!;
+
+  await store.save([
+    {
+      id: "entry-1",
+      event: { name: "OrderPlaced", payload: {}, metadata: { eventId: "evt-1" } },
+      createdAt: "2024-01-01T00:00:00.000Z",
+      publishedAt: null,
+    },
+    {
+      id: "entry-2",
+      event: { name: "OrderConfirmed", payload: {}, metadata: { eventId: "evt-2" } },
+      createdAt: "2024-01-01T00:00:01.000Z",
+      publishedAt: null,
+    },
+  ]);
+
+  await store.markPublishedByEventIds(["evt-1"]);
+  const unpublished = await store.loadUnpublished();
+  expect(unpublished).toHaveLength(1);
+  expect(unpublished[0]!.id).toBe("entry-2");
+});
+```
+
+### Outbox store: deletePublished removes only published entries
+
+```ts
+it("outbox store: deletePublished removes only published entries", async () => {
+  const db = createTestDb();
+  const infra = createDrizzlePersistence(db, {
+    events, aggregateStates, sagaStates, outbox,
+  });
+  const store = infra.outboxStore!;
+
+  await store.save([
+    {
+      id: "entry-1",
+      event: { name: "OrderPlaced", payload: {} },
+      createdAt: "2024-01-01T00:00:00.000Z",
+      publishedAt: null,
+    },
+  ]);
+  await store.markPublished(["entry-1"]);
+
+  await store.deletePublished();
+  const unpublished = await store.loadUnpublished();
+  expect(unpublished).toHaveLength(0);
+});
+```
+
+### Outbox store: not present when schema.outbox not provided
+
+```ts
+it("outbox store: not present when schema.outbox not provided", () => {
+  const db = createTestDb();
+  const infra = createDrizzlePersistence(db, {
+    events, aggregateStates, sagaStates,
+  });
+  expect(infra.outboxStore).toBeUndefined();
 });
 ```

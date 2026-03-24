@@ -65,3 +65,17 @@ export const snapshots = mysqlTable("noddde_snapshots", {
   state: text("state").notNull(),
   version: int("version").notNull(),
 });
+
+/**
+ * MySQL table definition for the transactional outbox.
+ * Stores domain events pending publication.
+ * Uses `json` for native JSON storage of the event payload.
+ */
+export const outbox = mysqlTable("noddde_outbox", {
+  id: varchar("id", { length: 255 }).primaryKey(),
+  event: json("event").notNull(),
+  aggregateName: varchar("aggregate_name", { length: 255 }),
+  aggregateId: varchar("aggregate_id", { length: 255 }),
+  createdAt: varchar("created_at", { length: 255 }).notNull(),
+  publishedAt: varchar("published_at", { length: 255 }),
+});

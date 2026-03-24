@@ -9,6 +9,7 @@ import type {
   EventSourcedAggregatePersistence,
 } from "@noddde/core";
 import { createPrismaPersistence, PrismaAdvisoryLocker } from "../index";
+import type { OutboxEntry } from "@noddde/core";
 
 const TEST_DB = path.resolve(__dirname, "../../prisma/test.db");
 const DATABASE_URL = `file:${TEST_DB}`;
@@ -452,5 +453,128 @@ describe("PrismaAdvisoryLocker", () => {
     const sql = (client.$queryRawUnsafe as unknown as ReturnType<typeof vi.fn>)
       .mock.calls[0]![0] as string;
     expect(sql).toContain("RELEASE_LOCK");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Outbox Store
+// ═══════════════════════════════════════════════════════════════════
+
+describe("PrismaOutboxStore", () => {
+  beforeEach(setupDb);
+  afterEach(teardownDb);
+
+  function makeEntry(overrides: Partial<OutboxEntry> = {}): OutboxEntry {
+    return {
+      id: overrides.id ?? crypto.randomUUID(),
+      event: overrides.event ?? {
+        name: "TestEvent",
+        payload: { value: 42 },
+      },
+      aggregateName: overrides.aggregateName,
+      aggregateId: overrides.aggregateId,
+      createdAt: overrides.createdAt ?? new Date().toISOString(),
+      publishedAt: overrides.publishedAt ?? null,
+    };
+  }
+
+  it("should save and load unpublished entries", async () => {
+    const entry1 = makeEntry({
+      id: "entry-1",
+      aggregateName: "Account",
+      aggregateId: "acc-1",
+    });
+    const entry2 = makeEntry({
+      id: "entry-2",
+      aggregateName: "Order",
+      aggregateId: "ord-1",
+    });
+
+    await infra.outboxStore.save([entry1, entry2]);
+    const loaded = await infra.outboxStore.loadUnpublished();
+
+    expect(loaded).toHaveLength(2);
+    expect(loaded[0]!.id).toBe("entry-1");
+    expect(loaded[0]!.event).toEqual({
+      name: "TestEvent",
+      payload: { value: 42 },
+    });
+    expect(loaded[0]!.aggregateName).toBe("Account");
+    expect(loaded[0]!.aggregateId).toBe("acc-1");
+    expect(loaded[0]!.publishedAt).toBeNull();
+    expect(loaded[1]!.id).toBe("entry-2");
+  });
+
+  it("should mark entries as published via markPublished", async () => {
+    const entry = makeEntry({ id: "entry-pub" });
+    await infra.outboxStore.save([entry]);
+
+    await infra.outboxStore.markPublished(["entry-pub"]);
+
+    const unpublished = await infra.outboxStore.loadUnpublished();
+    expect(unpublished).toHaveLength(0);
+  });
+
+  it("should mark entries as published by event metadata eventId", async () => {
+    const entry = makeEntry({
+      id: "entry-meta",
+      event: {
+        name: "AccountCreated",
+        payload: { owner: "Alice" },
+        metadata: {
+          eventId: "evt-123",
+          timestamp: new Date().toISOString(),
+          correlationId: "corr-1",
+          causationId: "cause-1",
+        },
+      },
+    });
+    await infra.outboxStore.save([entry]);
+
+    await infra.outboxStore.markPublishedByEventIds(["evt-123"]);
+
+    const unpublished = await infra.outboxStore.loadUnpublished();
+    expect(unpublished).toHaveLength(0);
+  });
+
+  it("should delete only published entries via deletePublished", async () => {
+    const published = makeEntry({ id: "entry-done" });
+    const unpub = makeEntry({ id: "entry-pending" });
+    await infra.outboxStore.save([published, unpub]);
+
+    // Mark one as published
+    await infra.outboxStore.markPublished(["entry-done"]);
+
+    // Delete published entries
+    await infra.outboxStore.deletePublished();
+
+    // Only unpublished entry should remain
+    const remaining = await infra.outboxStore.loadUnpublished();
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]!.id).toBe("entry-pending");
+  });
+
+  it("should save within a UoW transaction", async () => {
+    const uow = infra.unitOfWorkFactory();
+    const entry = makeEntry({ id: "entry-uow" });
+
+    uow.enlist(() => infra.outboxStore.save([entry]));
+    uow.enlist(() =>
+      infra.eventSourcedPersistence.save(
+        "Account",
+        "acc-1",
+        [{ name: "AccountCreated", payload: { owner: "Alice" } }],
+        0,
+      ),
+    );
+
+    await uow.commit();
+
+    const loaded = await infra.outboxStore.loadUnpublished();
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0]!.id).toBe("entry-uow");
+
+    const events = await infra.eventSourcedPersistence.load("Account", "acc-1");
+    expect(events).toHaveLength(1);
   });
 });

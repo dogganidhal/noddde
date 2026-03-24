@@ -61,3 +61,16 @@ export const snapshots = sqliteTable("noddde_snapshots", {
   state: text("state").notNull(),
   version: integer("version").notNull(),
 });
+
+/**
+ * SQLite table definition for the transactional outbox.
+ * Stores domain events pending publication.
+ */
+export const outbox = sqliteTable("noddde_outbox", {
+  id: text("id").primaryKey(),
+  event: text("event").notNull(),
+  aggregateName: text("aggregate_name"),
+  aggregateId: text("aggregate_id"),
+  createdAt: text("created_at").notNull(),
+  publishedAt: text("published_at"),
+});

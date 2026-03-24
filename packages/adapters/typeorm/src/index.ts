@@ -3,12 +3,14 @@ export {
   NodddeAggregateStateEntity,
   NodddeSagaStateEntity,
   NodddeSnapshotEntity,
+  NodddeOutboxEntryEntity,
 } from "./entities";
 export {
   TypeORMEventSourcedAggregatePersistence,
   TypeORMStateStoredAggregatePersistence,
   TypeORMSagaPersistence,
   TypeORMSnapshotStore,
+  TypeORMOutboxStore,
 } from "./persistence";
 export { TypeORMAdvisoryLocker } from "./advisory-locker";
 export {
@@ -24,12 +26,14 @@ import type {
   StateStoredAggregatePersistence,
   SagaPersistence,
   SnapshotStore,
+  OutboxStore,
 } from "@noddde/core";
 import {
   TypeORMEventSourcedAggregatePersistence,
   TypeORMStateStoredAggregatePersistence,
   TypeORMSagaPersistence,
   TypeORMSnapshotStore,
+  TypeORMOutboxStore,
 } from "./persistence";
 import { createTypeORMUnitOfWorkFactory } from "./unit-of-work";
 import type { TypeORMTransactionStore } from "./unit-of-work";
@@ -42,6 +46,7 @@ export interface TypeORMPersistenceInfrastructure {
   stateStoredPersistence: StateStoredAggregatePersistence;
   sagaPersistence: SagaPersistence;
   snapshotStore: SnapshotStore;
+  outboxStore: OutboxStore;
   unitOfWorkFactory: UnitOfWorkFactory;
 }
 
@@ -99,6 +104,7 @@ export function createTypeORMPersistence(
     ),
     sagaPersistence: new TypeORMSagaPersistence(dataSource, txStore),
     snapshotStore: new TypeORMSnapshotStore(dataSource, txStore),
+    outboxStore: new TypeORMOutboxStore(dataSource, txStore),
     unitOfWorkFactory: createTypeORMUnitOfWorkFactory(dataSource, txStore),
   };
 }

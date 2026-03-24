@@ -6,16 +6,18 @@ import type {
   StateStoredAggregatePersistence,
   SagaPersistence,
   SnapshotStore,
+  OutboxStore,
 } from "@noddde/core";
 import {
   DrizzleEventSourcedAggregatePersistence,
   DrizzleStateStoredAggregatePersistence,
   DrizzleSagaPersistence,
   DrizzleSnapshotStore,
+  DrizzleOutboxStore,
 } from "./persistence";
 import { createDrizzleUnitOfWorkFactory } from "./unit-of-work";
 
-export { DrizzleSnapshotStore } from "./persistence";
+export { DrizzleSnapshotStore, DrizzleOutboxStore } from "./persistence";
 
 /**
  * Schema tables the developer passes to the factory.
@@ -37,6 +39,8 @@ export interface DrizzleNodddeSchema {
   sagaStates: any;
   /** Snapshots table with columns: aggregateName, aggregateId, state, version. Optional — only needed if using snapshot store. */
   snapshots?: any;
+  /** Outbox table with columns: id, event, aggregateName, aggregateId, createdAt, publishedAt. Optional — only needed if using outbox store. */
+  outbox?: any;
 }
 
 /**
@@ -65,6 +69,8 @@ export interface DrizzlePersistenceInfrastructure {
   unitOfWorkFactory: UnitOfWorkFactory;
   /** Snapshot store for event-sourced aggregates. Present only when schema.snapshots is provided. */
   snapshotStore?: SnapshotStore;
+  /** Outbox store for the transactional outbox pattern. Present only when schema.outbox is provided. */
+  outboxStore?: OutboxStore;
 }
 
 /**
@@ -125,6 +131,10 @@ export function createDrizzlePersistence(
 
   if (schema.snapshots) {
     result.snapshotStore = new DrizzleSnapshotStore(db, txStore, schema);
+  }
+
+  if (schema.outbox) {
+    result.outboxStore = new DrizzleOutboxStore(db, txStore, schema);
   }
 
   return result;

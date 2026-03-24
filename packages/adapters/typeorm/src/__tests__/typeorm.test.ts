@@ -2,12 +2,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import "reflect-metadata";
 import { DataSource } from "typeorm";
 import { ConcurrencyError, LockTimeoutError } from "@noddde/core";
+import type { OutboxEntry } from "@noddde/core";
 import { createTypeORMPersistence, TypeORMAdvisoryLocker } from "../index";
 import {
   NodddeEventEntity,
   NodddeAggregateStateEntity,
   NodddeSagaStateEntity,
   NodddeSnapshotEntity,
+  NodddeOutboxEntryEntity,
 } from "../entities";
 import { TypeORMEventSourcedAggregatePersistence } from "../persistence";
 
@@ -23,6 +25,7 @@ async function setupDb() {
       NodddeAggregateStateEntity,
       NodddeSagaStateEntity,
       NodddeSnapshotEntity,
+      NodddeOutboxEntryEntity,
     ],
     synchronize: true,
   });
@@ -539,5 +542,105 @@ describe("TypeORMAdvisoryLocker", () => {
     const locker = new TypeORMAdvisoryLocker(ds);
 
     await expect(locker.release("Order", "o-1")).resolves.toBeUndefined();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Outbox Store
+// ═══════════════════════════════════════════════════════════════════
+
+describe("TypeORMOutboxStore", () => {
+  beforeEach(setupDb);
+  afterEach(teardownDb);
+
+  function makeEntry(overrides: Partial<OutboxEntry> & { id: string }): OutboxEntry {
+    return {
+      event: { name: "TestEvent", payload: { value: 1 } },
+      aggregateName: "TestAggregate",
+      aggregateId: "agg-1",
+      createdAt: new Date().toISOString(),
+      publishedAt: null,
+      ...overrides,
+    };
+  }
+
+  it("should save and load unpublished entries", async () => {
+    const entry1 = makeEntry({ id: "entry-1" });
+    const entry2 = makeEntry({ id: "entry-2" });
+
+    await infra.outboxStore.save([entry1, entry2]);
+
+    const loaded = await infra.outboxStore.loadUnpublished();
+    expect(loaded).toHaveLength(2);
+    expect(loaded[0]!.id).toBe("entry-1");
+    expect(loaded[0]!.event).toEqual({ name: "TestEvent", payload: { value: 1 } });
+    expect(loaded[0]!.aggregateName).toBe("TestAggregate");
+    expect(loaded[0]!.aggregateId).toBe("agg-1");
+    expect(loaded[0]!.publishedAt).toBeNull();
+    expect(loaded[1]!.id).toBe("entry-2");
+  });
+
+  it("should mark entries as published", async () => {
+    const entry = makeEntry({ id: "entry-pub" });
+    await infra.outboxStore.save([entry]);
+
+    await infra.outboxStore.markPublished(["entry-pub"]);
+
+    const unpublished = await infra.outboxStore.loadUnpublished();
+    expect(unpublished).toHaveLength(0);
+  });
+
+  it("should mark entries as published by event metadata eventId", async () => {
+    const entry = makeEntry({
+      id: "entry-eid",
+      event: {
+        name: "TestEvent",
+        payload: { value: 1 },
+        metadata: {
+          eventId: "evt-123",
+          timestamp: new Date().toISOString(),
+          correlationId: "corr-1",
+          causationId: "cause-1",
+        },
+      },
+    });
+    await infra.outboxStore.save([entry]);
+
+    await infra.outboxStore.markPublishedByEventIds(["evt-123"]);
+
+    const unpublished = await infra.outboxStore.loadUnpublished();
+    expect(unpublished).toHaveLength(0);
+  });
+
+  it("should delete only published entries", async () => {
+    const entry1 = makeEntry({ id: "entry-del-1" });
+    const entry2 = makeEntry({ id: "entry-del-2" });
+    await infra.outboxStore.save([entry1, entry2]);
+
+    // Publish only entry-del-1
+    await infra.outboxStore.markPublished(["entry-del-1"]);
+
+    // Delete all published
+    await infra.outboxStore.deletePublished();
+
+    // entry-del-2 should still be unpublished
+    const remaining = await infra.outboxStore.loadUnpublished();
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]!.id).toBe("entry-del-2");
+  });
+
+  it("should save within a UoW transaction", async () => {
+    const uow = infra.unitOfWorkFactory();
+    const entry = makeEntry({ id: "entry-uow" });
+
+    uow.enlist(() => infra.outboxStore.save([entry]));
+    uow.deferPublish({ name: "TestEvent", payload: { value: 1 } });
+
+    const events = await uow.commit();
+    expect(events).toHaveLength(1);
+
+    const loaded = await infra.outboxStore.loadUnpublished();
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0]!.id).toBe("entry-uow");
   });
 });

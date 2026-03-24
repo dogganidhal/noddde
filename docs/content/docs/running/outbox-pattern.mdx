@@ -82,7 +82,19 @@ infrastructure: {
 }
 ```
 
-For production, use a database-backed `OutboxStore` implementation (e.g., from an ORM adapter package) that participates in the same database transaction as your aggregate persistence.
+For production, all three [ORM adapter packages](/docs/running/orm-adapters) (`@noddde/drizzle`, `@noddde/prisma`, `@noddde/typeorm`) include a database-backed `OutboxStore` that participates in the same database transaction as your aggregate persistence:
+
+```ts
+// Drizzle (outbox schema table required)
+import { outbox } from "@noddde/drizzle/pg";
+const infra = createDrizzlePersistence(db, { events, aggregateStates, sagaStates, outbox });
+// infra.outboxStore is now available
+
+// Prisma / TypeORM (always included)
+const infra = createPrismaPersistence(prisma);
+// or: createTypeORMPersistence(dataSource)
+// infra.outboxStore is always available
+```
 
 ## Relay Lifecycle
 

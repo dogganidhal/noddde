@@ -9,6 +9,7 @@ import {
   aggregateStates,
   sagaStates,
   snapshots,
+  outbox,
 } from "../sqlite/schema";
 
 function createTestDb() {
@@ -44,6 +45,14 @@ function createTestDb() {
       state TEXT NOT NULL,
       version INTEGER NOT NULL,
       PRIMARY KEY (aggregate_name, aggregate_id)
+    );
+    CREATE TABLE noddde_outbox (
+      id TEXT PRIMARY KEY,
+      event TEXT NOT NULL,
+      aggregate_name TEXT,
+      aggregate_id TEXT,
+      created_at TEXT NOT NULL,
+      published_at TEXT
     );
   `);
   return drizzle(sqlite);
@@ -537,5 +546,176 @@ describe("Drizzle Multi-Dialect Persistence", () => {
     expect(all).toHaveLength(2);
     expect(all[0]!.name).toBe("OrderPlaced");
     expect(all[1]!.name).toBe("OrderConfirmed");
+  });
+
+  describe("DrizzleOutboxStore", () => {
+    it("saves and loads unpublished entries", async () => {
+      const db = createTestDb();
+      const infra = createDrizzlePersistence(db, {
+        events,
+        aggregateStates,
+        sagaStates,
+        outbox,
+      });
+
+      expect(infra.outboxStore).toBeDefined();
+      const store = infra.outboxStore!;
+
+      await store.save([
+        {
+          id: "entry-1",
+          event: { name: "OrderPlaced", payload: { total: 100 } },
+          aggregateName: "Order",
+          aggregateId: "order-1",
+          createdAt: "2024-01-01T00:00:00Z",
+          publishedAt: null,
+        },
+        {
+          id: "entry-2",
+          event: { name: "OrderConfirmed", payload: {} },
+          aggregateName: "Order",
+          aggregateId: "order-1",
+          createdAt: "2024-01-01T00:00:01Z",
+          publishedAt: null,
+        },
+      ]);
+
+      const unpublished = await store.loadUnpublished();
+      expect(unpublished).toHaveLength(2);
+      expect(unpublished[0]!.id).toBe("entry-1");
+      expect(unpublished[0]!.event).toEqual({
+        name: "OrderPlaced",
+        payload: { total: 100 },
+      });
+      expect(unpublished[1]!.id).toBe("entry-2");
+    });
+
+    it("markPublished sets publishedAt and excludes from loadUnpublished", async () => {
+      const db = createTestDb();
+      const infra = createDrizzlePersistence(db, {
+        events,
+        aggregateStates,
+        sagaStates,
+        outbox,
+      });
+      const store = infra.outboxStore!;
+
+      await store.save([
+        {
+          id: "entry-1",
+          event: { name: "OrderPlaced", payload: {} },
+          createdAt: "2024-01-01T00:00:00Z",
+          publishedAt: null,
+        },
+        {
+          id: "entry-2",
+          event: { name: "OrderConfirmed", payload: {} },
+          createdAt: "2024-01-01T00:00:01Z",
+          publishedAt: null,
+        },
+      ]);
+
+      await store.markPublished(["entry-1"]);
+
+      const unpublished = await store.loadUnpublished();
+      expect(unpublished).toHaveLength(1);
+      expect(unpublished[0]!.id).toBe("entry-2");
+    });
+
+    it("markPublishedByEventIds matches on event metadata eventId", async () => {
+      const db = createTestDb();
+      const infra = createDrizzlePersistence(db, {
+        events,
+        aggregateStates,
+        sagaStates,
+        outbox,
+      });
+      const store = infra.outboxStore!;
+
+      await store.save([
+        {
+          id: "entry-1",
+          event: {
+            name: "OrderPlaced",
+            payload: {},
+            metadata: {
+              eventId: "evt-abc",
+              timestamp: "2024-01-01T00:00:00Z",
+              correlationId: "corr-1",
+              causationId: "cmd-1",
+            },
+          },
+          createdAt: "2024-01-01T00:00:00Z",
+          publishedAt: null,
+        },
+        {
+          id: "entry-2",
+          event: {
+            name: "OrderConfirmed",
+            payload: {},
+            metadata: {
+              eventId: "evt-def",
+              timestamp: "2024-01-01T00:00:01Z",
+              correlationId: "corr-1",
+              causationId: "cmd-2",
+            },
+          },
+          createdAt: "2024-01-01T00:00:01Z",
+          publishedAt: null,
+        },
+      ]);
+
+      await store.markPublishedByEventIds(["evt-abc"]);
+
+      const unpublished = await store.loadUnpublished();
+      expect(unpublished).toHaveLength(1);
+      expect(unpublished[0]!.id).toBe("entry-2");
+    });
+
+    it("deletePublished removes published entries", async () => {
+      const db = createTestDb();
+      const infra = createDrizzlePersistence(db, {
+        events,
+        aggregateStates,
+        sagaStates,
+        outbox,
+      });
+      const store = infra.outboxStore!;
+
+      await store.save([
+        {
+          id: "entry-1",
+          event: { name: "OrderPlaced", payload: {} },
+          createdAt: "2024-01-01T00:00:00Z",
+          publishedAt: null,
+        },
+        {
+          id: "entry-2",
+          event: { name: "OrderConfirmed", payload: {} },
+          createdAt: "2024-01-01T00:00:01Z",
+          publishedAt: null,
+        },
+      ]);
+
+      await store.markPublished(["entry-1"]);
+      await store.deletePublished();
+
+      // entry-1 was published and should be deleted
+      // entry-2 is still unpublished and should remain
+      const unpublished = await store.loadUnpublished();
+      expect(unpublished).toHaveLength(1);
+      expect(unpublished[0]!.id).toBe("entry-2");
+    });
+
+    it("outboxStore is not present when schema.outbox is not provided", () => {
+      const db = createTestDb();
+      const infra = createDrizzlePersistence(db, {
+        events,
+        aggregateStates,
+        sagaStates,
+      });
+
+      expect(infra.outboxStore).toBeUndefined();
+    });
   });
 });

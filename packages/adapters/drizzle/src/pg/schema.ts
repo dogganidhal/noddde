@@ -67,3 +67,17 @@ export const snapshots = pgTable("noddde_snapshots", {
   state: jsonb("state").notNull(),
   version: integer("version").notNull(),
 });
+
+/**
+ * PostgreSQL table definition for the transactional outbox.
+ * Stores domain events pending publication.
+ * Uses `jsonb` for native JSON storage of the event payload.
+ */
+export const outbox = pgTable("noddde_outbox", {
+  id: text("id").primaryKey(),
+  event: jsonb("event").notNull(),
+  aggregateName: text("aggregate_name"),
+  aggregateId: text("aggregate_id"),
+  createdAt: text("created_at").notNull(),
+  publishedAt: text("published_at"),
+});

@@ -15,7 +15,7 @@ noddde provides three ORM adapter packages that implement all persistence interf
 
 ### Dialect Support Matrix
 
-Persistence (event store, state store, saga store, snapshot store) and [concurrency control](/docs/running/persistence#concurrency-control) work with **every dialect** supported by your ORM. The only dialect restriction applies to **pessimistic locking**, which requires database-level advisory locks:
+Persistence (event store, state store, saga store, snapshot store, [outbox store](/docs/running/outbox-pattern)) and [concurrency control](/docs/running/persistence#concurrency-control) work with **every dialect** supported by your ORM. The only dialect restriction applies to **pessimistic locking**, which requires database-level advisory locks:
 
 | Dialect    | Persistence | No concurrency / Optimistic | Pessimistic locking  |
 | ---------- | ----------- | --------------------------- | -------------------- |
@@ -50,6 +50,7 @@ const infra = createDrizzlePersistence(db, {
 // infra.stateStoredPersistence   -- StateStoredAggregatePersistence
 // infra.sagaPersistence          -- SagaPersistence
 // infra.snapshotStore            -- SnapshotStore (Drizzle: only when snapshots schema provided)
+// infra.outboxStore              -- OutboxStore (Drizzle: only when outbox schema provided)
 // infra.unitOfWorkFactory        -- UnitOfWorkFactory (real DB transactions)
 ```
 
@@ -340,6 +341,7 @@ All three adapters use the same logical schema:
 | `noddde_aggregate_states` | State snapshots         | Composite (`aggregate_name`, `aggregate_id`) | `state` (JSON), `version` (integer, default 0)                                                                                                                                            |
 | `noddde_saga_states`      | Saga state              | Composite (`saga_name`, `saga_id`)           | `state` (JSON)                                                                                                                                                                            |
 | `noddde_snapshots`        | Event-sourced snapshots | Composite (`aggregate_name`, `aggregate_id`) | `state` (JSON), `version` (integer, default 0)                                                                                                                                            |
+| `noddde_outbox`           | Transactional outbox    | `id` (string)                                | `event` (JSON), `aggregate_name` (nullable), `aggregate_id` (nullable), `created_at`, `published_at` (nullable)                                                                           |
 
 States and event payloads are serialized as JSON strings, making the schema database-agnostic.
 
