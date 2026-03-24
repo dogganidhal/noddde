@@ -1,0 +1,145 @@
+---
+title: Event Versioning & Upcasters
+description: Evolving event schemas over time with type-safe upcaster chains that transform historical payloads to current versions during aggregate replay.
+---
+
+Event schemas inevitably change as your domain evolves. A field gets added, a type gets refined, a payload gets restructured. In an event-sourced system, old events are immutable — they're already persisted. Upcasters bridge the gap by transforming historical event payloads to the current schema version during aggregate replay.
+
+## The Problem
+
+Consider a `BankAccountCreated` event that originally had this payload:
+
+```typescript
+// Version 1 (original)
+{
+  id: string;
+  owner: string;
+}
+```
+
+Later, you add a `status` field:
+
+```typescript
+// Version 2 (current)
+{
+  id: string;
+  owner: string;
+  status: "active" | "closed";
+}
+```
+
+Without upcasting, replaying version 1 events through apply handlers that expect version 2 payloads will produce incorrect state — the `status` field will be `undefined`.
+
+## Defining Upcaster Chains
+
+An upcaster chain declares all historical payload versions as a tuple and provides transform functions between consecutive versions.
+
+```typescript
+import {
+  defineEventUpcasterChain,
+  defineUpcasters,
+  DefineEvents,
+} from "@noddde/core";
+
+// Current event types
+type BankAccountEvent = DefineEvents<{
+  BankAccountCreated: {
+    id: string;
+    owner: string;
+    status: "active" | "closed";
+  };
+  DepositMade: { amount: number; currency: string };
+}>;
+
+// Declare historical payload types
+type BankAccountCreatedV1 = { id: string; owner: string };
+
+// Build the upcaster map
+const bankAccountUpcasters = defineUpcasters<BankAccountEvent>({
+  BankAccountCreated: defineEventUpcasterChain<
+    [
+      BankAccountCreatedV1,
+      { id: string; owner: string; status: "active" | "closed" },
+    ]
+  >((v1) => ({ ...v1, status: "active" as const })),
+});
+```
+
+### Multi-Version Chains
+
+Events can go through many versions. Each step in the chain transforms from one version to the next:
+
+```typescript
+type CreatedV1 = { id: string };
+type CreatedV2 = { id: string; status: "active" | "closed" };
+type CreatedV3 = { id: string; status: "active" | "closed"; createdAt: string };
+
+const upcasters = defineUpcasters<MyEvent>({
+  Created: defineEventUpcasterChain<[CreatedV1, CreatedV2, CreatedV3]>(
+    (v1) => ({ ...v1, status: "active" as const }), // v1 -> v2
+    (v2) => ({ ...v2, createdAt: new Date(0).toISOString() }), // v2 -> v3
+  ),
+});
+```
+
+The version tuple `[V1, V2, V3]` declares all shapes upfront. Step parameters and return types are derived from the tuple — no manual type annotations needed after the first version.
+
+## Registering Upcasters on an Aggregate
+
+Pass the upcaster map to `defineAggregate` via the optional `upcasters` field:
+
+```typescript
+const BankAccount = defineAggregate<BankAccountTypes>({
+  initialState: { balance: 0, status: "active" },
+  commands: {
+    /* ... */
+  },
+  apply: {
+    // Apply handlers always receive the CURRENT version payload.
+    // Upcasting happens before apply handlers are called.
+    BankAccountCreated: (payload, state) => ({
+      ...state,
+      id: payload.id,
+      owner: payload.owner,
+      status: payload.status, // Always present after upcasting
+    }),
+  },
+  upcasters: bankAccountUpcasters,
+});
+```
+
+## How It Works
+
+During aggregate rehydration (loading events from persistence to rebuild state), the engine applies the upcaster chain to each loaded event before passing it to the apply handler:
+
+1. **Load events** from the event store
+2. **Determine stored version** from `event.metadata.version` (defaults to 1 if absent)
+3. **Apply upcaster steps** from the stored version to the current version
+4. **Pass upcasted payload** to the apply handler
+
+New events produced by command handlers automatically get `metadata.version` set to the current version for their event name.
+
+## Type Safety
+
+The upcaster API provides compile-time safety at multiple levels:
+
+- **Step continuity**: Each step's input type is derived from the previous version in the tuple. If you return the wrong shape, TypeScript catches it.
+- **Output validation**: The chain's final output must match the current event payload type. A mismatch is a compile error.
+- **Event name validation**: `UpcasterMap` only allows keys that exist in your event union.
+- **No arbitrary types**: All payload shapes are declared upfront in the version tuple — no ad-hoc annotations.
+
+## Constraints
+
+Upcaster steps follow the same constraints as apply handlers:
+
+- **Pure**: No side effects, no I/O, no infrastructure access.
+- **Synchronous**: No `async`/`await`.
+- **Deterministic**: Same input always produces the same output.
+
+These constraints ensure that replaying events always produces the same state, regardless of when the replay happens.
+
+## Snapshot Considerations
+
+If you use snapshots with event-sourced aggregates, be aware that adding or modifying upcasters may make existing snapshots stale. The snapshot state was computed under the old schema, and post-snapshot events will be upcasted but the snapshot state itself won't be.
+
+**Recommendation**: Invalidate or clear snapshots when you change event schemas. A simple approach is to increment the snapshot version or clear the snapshot store during deployment.

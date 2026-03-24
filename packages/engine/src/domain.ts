@@ -520,6 +520,25 @@ export class Domain<
       );
     }
 
+    // Step 5.12: Validate upcaster chains
+    for (const [aggregateName, aggregate] of Object.entries(
+      configuration.writeModel.aggregates,
+    )) {
+      if (aggregate.upcasters) {
+        for (const [eventName, chain] of Object.entries(aggregate.upcasters)) {
+          if (
+            !Array.isArray(chain) ||
+            chain.some((step) => typeof step !== "function")
+          ) {
+            throw new Error(
+              `Invalid upcaster chain for event "${eventName}" on aggregate "${aggregateName}": ` +
+                `chain must be an array of functions.`,
+            );
+          }
+        }
+      }
+    }
+
     const { commandBus, eventBus, queryBus } = this._infrastructure;
 
     // Step 6: Register aggregate command handlers on the command bus

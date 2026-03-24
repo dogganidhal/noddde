@@ -5,6 +5,7 @@
     "command-handlers",
     "state-and-events",
     "routing-and-dispatch",
-    "type-inference"
+    "type-inference",
+    "event-versioning"
   ]
 }

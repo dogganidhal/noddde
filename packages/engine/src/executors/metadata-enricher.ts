@@ -30,6 +30,8 @@ export class MetadataEnricher {
    * @param aggregateId - The aggregate instance that produced these events.
    * @param version - The aggregate version before these events (used for sequenceNumber).
    * @param causationFallback - Fallback causationId (typically the command name).
+   * @param eventVersionResolver - Optional function that returns the current schema
+   *   version for an event name. When provided, sets `metadata.version` on each event.
    * @returns New event objects with metadata attached.
    */
   enrich(
@@ -38,6 +40,7 @@ export class MetadataEnricher {
     aggregateId: ID,
     version: number,
     causationFallback: string,
+    eventVersionResolver?: (eventName: string) => number,
   ): Event[] {
     const providerCtx = this.metadataProvider?.() ?? {};
     const overrideCtx = this.metadataStorage.getStore() ?? {};
@@ -55,6 +58,7 @@ export class MetadataEnricher {
         correlationId,
         causationId,
         userId: mergedCtx.userId,
+        version: eventVersionResolver?.(event.name),
         aggregateName,
         aggregateId,
         sequenceNumber: version + index + 1,
