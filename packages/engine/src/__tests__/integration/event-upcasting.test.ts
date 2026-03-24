@@ -48,7 +48,10 @@ type DepositMadeV1 = { amount: number };
 
 const accountUpcasters = defineUpcasters<AccountEvent>({
   AccountCreated: defineEventUpcasterChain<
-    [AccountCreatedV1, { id: string; owner: string; status: "active" | "closed" }]
+    [
+      AccountCreatedV1,
+      { id: string; owner: string; status: "active" | "closed" },
+    ]
   >((v1) => ({ ...v1, status: "active" as const })),
   DepositMade: defineEventUpcasterChain<
     [DepositMadeV1, { amount: number; currency: string }]
@@ -453,7 +456,11 @@ describe("Event upcasting integration", () => {
         commands: {
           CreateTag: (command) => ({
             name: "TagCreated",
-            payload: { label: command.payload.label, color: "gray", priority: 0 },
+            payload: {
+              label: command.payload.label,
+              color: "gray",
+              priority: 0,
+            },
           }),
         },
         apply: {
