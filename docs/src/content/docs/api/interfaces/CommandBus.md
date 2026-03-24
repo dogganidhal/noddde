@@ -5,7 +5,9 @@ prev: false
 title: "CommandBus"
 ---
 
-Defined in: [cqrs/command/command-bus.ts:3](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/cqrs/command/command-bus.ts#L3)
+Defined in: [cqrs/command/command-bus.ts:11](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/cqrs/command/command-bus.ts#L11)
+
+Dispatches commands to their registered handlers. Routes aggregate commands to the appropriate aggregate and standalone commands to standalone command handlers.
 
 ## Methods
 
@@ -13,7 +15,9 @@ Defined in: [cqrs/command/command-bus.ts:3](https://github.com/dogganidhal/noddd
 
 > **dispatch**(`command`): `Promise`\<`void`\>
 
-Defined in: [cqrs/command/command-bus.ts:4](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/cqrs/command/command-bus.ts#L4)
+Defined in: [cqrs/command/command-bus.ts:13](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/cqrs/command/command-bus.ts#L13)
+
+Dispatches a command for processing.
 
 #### Parameters
 

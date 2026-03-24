@@ -7,7 +7,9 @@ title: "EventHandler"
 
 > **EventHandler**\<`TEvent`, `TInfrastructure`\> = (`event`, `infrastructure`) => `void` \| `Promise`\<`void`\>
 
-Defined in: [edd/event-handler.ts:4](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/edd/event-handler.ts#L4)
+Defined in: [edd/event-handler.ts:21](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/edd/event-handler.ts#L21)
+
+An impure, async-capable handler that reacts to domain events. Receives the full event object (including optional metadata).
 
 ## Type Parameters
 
@@ -23,7 +25,7 @@ Defined in: [edd/event-handler.ts:4](https://github.com/dogganidhal/noddde/blob/
 
 ### event
 
-`TEvent`\[`"payload"`\]
+`TEvent`
 
 ### infrastructure
 

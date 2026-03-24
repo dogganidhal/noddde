@@ -5,7 +5,9 @@ prev: false
 title: "Query"
 ---
 
-Defined in: [cqrs/query/query.ts:1](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/cqrs/query/query.ts#L1)
+Defined in: [cqrs/query/query.ts:24](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/cqrs/query/query.ts#L24)
+
+Base interface for all queries. Queries represent questions asked to the read model and carry a phantom `TResult` type via a branded symbol property.
 
 ## Type Parameters
 
@@ -23,7 +25,9 @@ Defined in: [cqrs/query/query.ts:1](https://github.com/dogganidhal/noddde/blob/7
 
 > **name**: `TQueryNames`
 
-Defined in: [cqrs/query/query.ts:2](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/cqrs/query/query.ts#L2)
+Defined in: [cqrs/query/query.ts:26](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/cqrs/query/query.ts#L26)
+
+Discriminant field used to identify the query type.
 
 ---
 
@@ -31,4 +35,6 @@ Defined in: [cqrs/query/query.ts:2](https://github.com/dogganidhal/noddde/blob/7
 
 > `optional` **payload**: `any`
 
-Defined in: [cqrs/query/query.ts:3](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/cqrs/query/query.ts#L3)
+Defined in: [cqrs/query/query.ts:28](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/cqrs/query/query.ts#L28)
+
+Optional data carried by the query (filters, IDs, etc.).

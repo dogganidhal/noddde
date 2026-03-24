@@ -7,7 +7,9 @@ title: "InferAggregateID"
 
 > **InferAggregateID**\<`T`\> = `T`\[`"commands"`\]\[`"targetAggregateId"`\]
 
-Defined in: [ddd/aggregate-root.ts:71](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/ddd/aggregate-root.ts#L71)
+Defined in: [ddd/aggregate-root.ts:141](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/aggregate-root.ts#L141)
+
+Extracts the aggregate ID type from an AggregateTypes bundle.
 
 ## Type Parameters
 

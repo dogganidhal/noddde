@@ -5,7 +5,9 @@ prev: false
 title: "EventBus"
 ---
 
-Defined in: [edd/event-bus.ts:3](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/edd/event-bus.ts#L3)
+Defined in: [edd/event-bus.ts:10](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/edd/event-bus.ts#L10)
+
+Publishes domain events to all registered listeners (projections, event handlers). The event bus is the backbone of the read-side update mechanism in CQRS.
 
 ## Methods
 
@@ -13,7 +15,9 @@ Defined in: [edd/event-bus.ts:3](https://github.com/dogganidhal/noddde/blob/7fcd
 
 > **dispatch**\<`TEvent`\>(`event`): `Promise`\<`void`\>
 
-Defined in: [edd/event-bus.ts:4](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/edd/event-bus.ts#L4)
+Defined in: [edd/event-bus.ts:12](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/edd/event-bus.ts#L12)
+
+Publishes a single domain event to all subscribers.
 
 #### Type Parameters
 

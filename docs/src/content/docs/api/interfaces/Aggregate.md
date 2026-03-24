@@ -5,7 +5,9 @@ prev: false
 title: "Aggregate"
 ---
 
-Defined in: [ddd/aggregate-root.ts:55](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/ddd/aggregate-root.ts#L55)
+Defined in: [ddd/aggregate-root.ts:89](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/aggregate-root.ts#L89)
+
+An aggregate definition following the Decider pattern: initial state, command handlers (decide), and apply handlers (evolve). No base classes, no decorators.
 
 ## Type Parameters
 
@@ -15,11 +17,13 @@ Defined in: [ddd/aggregate-root.ts:55](https://github.com/dogganidhal/noddde/blo
 
 ## Properties
 
-### apply
+### initialState
 
-> **apply**: `ApplyHandlerMap`\<`T`\>
+> **initialState**: `T`\[`"state"`\]
 
-Defined in: [ddd/aggregate-root.ts:58](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/ddd/aggregate-root.ts#L58)
+Defined in: [ddd/aggregate-root.ts:91](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/aggregate-root.ts#L91)
+
+The zero-value state used when no events have been applied yet.
 
 ---
 
@@ -27,12 +31,16 @@ Defined in: [ddd/aggregate-root.ts:58](https://github.com/dogganidhal/noddde/blo
 
 > **commands**: `CommandHandlerMap`\<`T`\>
 
-Defined in: [ddd/aggregate-root.ts:57](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/ddd/aggregate-root.ts#L57)
+Defined in: [ddd/aggregate-root.ts:96](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/aggregate-root.ts#L96)
+
+A map of command handlers keyed by command name. Each handler implements the "decide" phase.
 
 ---
 
-### initialState
+### apply
 
-> **initialState**: `T`\[`"state"`\]
+> **apply**: `ApplyHandlerMap`\<`T`\>
 
-Defined in: [ddd/aggregate-root.ts:56](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/ddd/aggregate-root.ts#L56)
+Defined in: [ddd/aggregate-root.ts:101](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/aggregate-root.ts#L101)
+
+A map of apply handlers keyed by event name. Each handler implements the "evolve" phase. Must be pure.

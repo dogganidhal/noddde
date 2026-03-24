@@ -5,15 +5,19 @@ prev: false
 title: "StateStoredAggregatePersistence"
 ---
 
-Defined in: [engine/domain.ts:15](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/engine/domain.ts#L15)
+Defined in: [persistence/index.ts:28](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/persistence/index.ts#L28)
+
+Persistence strategy that stores the current aggregate state directly. On load, the latest snapshot and version are returned. On save, the full state is overwritten after an optimistic concurrency check.
 
 ## Methods
 
 ### load()
 
-> **load**(`aggregateName`, `aggregateId`): `Promise`\<`any`\>
+> **load**(`aggregateName`, `aggregateId`): `Promise`\<\{ `state`: `any`; `version`: `number` \} \| `null`\>
 
-Defined in: [engine/domain.ts:17](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/engine/domain.ts#L17)
+Defined in: [persistence/index.ts:54](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/persistence/index.ts#L54)
+
+Loads the latest state snapshot and version for an aggregate instance. Returns `null` if the aggregate does not exist.
 
 #### Parameters
 
@@ -23,19 +27,21 @@ Defined in: [engine/domain.ts:17](https://github.com/dogganidhal/noddde/blob/7fc
 
 ##### aggregateId
 
-`string`
+[`ID`](/api/type-aliases/id/)
 
 #### Returns
 
-`Promise`\<`any`\>
+`Promise`\<\{ `state`: `any`; `version`: `number` \} \| `null`\>
 
 ---
 
 ### save()
 
-> **save**(`aggregateName`, `aggregateId`, `state`): `Promise`\<`void`\>
+> **save**(`aggregateName`, `aggregateId`, `state`, `expectedVersion`): `Promise`\<`void`\>
 
-Defined in: [engine/domain.ts:16](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/engine/domain.ts#L16)
+Defined in: [persistence/index.ts:40](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/persistence/index.ts#L40)
+
+Persists the current state snapshot for an aggregate instance. Throws `ConcurrencyError` if `expectedVersion` does not match the current stored version.
 
 #### Parameters
 
@@ -45,11 +51,15 @@ Defined in: [engine/domain.ts:16](https://github.com/dogganidhal/noddde/blob/7fc
 
 ##### aggregateId
 
-`string`
+[`ID`](/api/type-aliases/id/)
 
 ##### state
 
 `any`
+
+##### expectedVersion
+
+`number`
 
 #### Returns
 

@@ -7,7 +7,9 @@ title: "DefineCommands"
 
 > **DefineCommands**\<`TPayloads`, `TID`\> = `{ [K in keyof TPayloads & string]: TPayloads[K] extends void ? { name: K; targetAggregateId: TID } : { name: K; payload: TPayloads[K]; targetAggregateId: TID } }`\[keyof `TPayloads` & `string`\]
 
-Defined in: [cqrs/command/command.ts:20](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/cqrs/command/command.ts#L20)
+Defined in: [cqrs/command/command.ts:65](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/cqrs/command/command.ts#L65)
+
+Builds a discriminated union of aggregate command types from a payload map. Each key becomes a command `name`, and the value becomes its `payload` type. Use `void` for commands that carry no payload.
 
 ## Type Parameters
 
@@ -17,4 +19,4 @@ Defined in: [cqrs/command/command.ts:20](https://github.com/dogganidhal/noddde/b
 
 ### TID
 
-`TID` = `string`
+`TID` _extends_ [`ID`](/api/type-aliases/id/) = `string`

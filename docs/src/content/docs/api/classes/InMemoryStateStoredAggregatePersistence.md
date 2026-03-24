@@ -5,7 +5,9 @@ prev: false
 title: "InMemoryStateStoredAggregatePersistence"
 ---
 
-Defined in: [engine/implementations/in-memory-aggregate-persistence.ts:22](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/engine/implementations/in-memory-aggregate-persistence.ts#L22)
+Defined in: [engine/implementations/in-memory-aggregate-persistence.ts:109](https://github.com/dogganidhal/noddde/blob/main/packages/engine/src/implementations/in-memory-aggregate-persistence.ts#L109)
+
+In-memory `StateStoredAggregatePersistence` implementation that stores state snapshots in a `Map`.
 
 ## Implements
 
@@ -25,9 +27,11 @@ Defined in: [engine/implementations/in-memory-aggregate-persistence.ts:22](https
 
 ### load()
 
-> **load**(`aggregateName`, `aggregateId`): `Promise`\<`any`\>
+> **load**(`aggregateName`, `aggregateId`): `Promise`\<\{ `state`: `any`; `version`: `number` \} \| `null`\>
 
-Defined in: [engine/implementations/in-memory-aggregate-persistence.ts:25](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/engine/implementations/in-memory-aggregate-persistence.ts#L25)
+Defined in: [engine/implementations/in-memory-aggregate-persistence.ts:122](https://github.com/dogganidhal/noddde/blob/main/packages/engine/src/implementations/in-memory-aggregate-persistence.ts#L122)
+
+Loads the latest state snapshot and version. Returns `null` if no state exists.
 
 #### Parameters
 
@@ -37,11 +41,11 @@ Defined in: [engine/implementations/in-memory-aggregate-persistence.ts:25](https
 
 ##### aggregateId
 
-`any`
+[`ID`](/api/type-aliases/id/)
 
 #### Returns
 
-`Promise`\<`any`\>
+`Promise`\<\{ `state`: `any`; `version`: `number` \} \| `null`\>
 
 #### Implementation of
 
@@ -51,9 +55,11 @@ Defined in: [engine/implementations/in-memory-aggregate-persistence.ts:25](https
 
 ### save()
 
-> **save**(`aggregateName`, `aggregateId`, `state`): `Promise`\<`void`\>
+> **save**(`aggregateName`, `aggregateId`, `state`, `expectedVersion`): `Promise`\<`void`\>
 
-Defined in: [engine/implementations/in-memory-aggregate-persistence.ts:28](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/engine/implementations/in-memory-aggregate-persistence.ts#L28)
+Defined in: [engine/implementations/in-memory-aggregate-persistence.ts:140](https://github.com/dogganidhal/noddde/blob/main/packages/engine/src/implementations/in-memory-aggregate-persistence.ts#L140)
+
+Persists the current state snapshot. Throws `ConcurrencyError` if `expectedVersion` does not match.
 
 #### Parameters
 
@@ -63,11 +69,15 @@ Defined in: [engine/implementations/in-memory-aggregate-persistence.ts:28](https
 
 ##### aggregateId
 
-`string`
+[`ID`](/api/type-aliases/id/)
 
 ##### state
 
 `any`
+
+##### expectedVersion
+
+`number`
 
 #### Returns
 

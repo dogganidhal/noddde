@@ -7,15 +7,17 @@ title: "AggregateTypes"
 
 > **AggregateTypes** = `object`
 
-Defined in: [ddd/aggregate-root.ts:10](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/ddd/aggregate-root.ts#L10)
+Defined in: [ddd/aggregate-root.ts:23](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/aggregate-root.ts#L23)
+
+A bundle of the four type parameters that define an aggregate's type universe. Instead of threading 4+ positional generics through every type, users declare a single named `AggregateTypes`.
 
 ## Properties
 
-### commands
+### state
 
-> **commands**: [`AggregateCommand`](/api/interfaces/aggregatecommand/)
+> **state**: `any`
 
-Defined in: [ddd/aggregate-root.ts:13](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/ddd/aggregate-root.ts#L13)
+The aggregate's state shape.
 
 ---
 
@@ -23,7 +25,15 @@ Defined in: [ddd/aggregate-root.ts:13](https://github.com/dogganidhal/noddde/blo
 
 > **events**: [`Event`](/api/interfaces/event/)
 
-Defined in: [ddd/aggregate-root.ts:12](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/ddd/aggregate-root.ts#L12)
+The discriminated union of all events this aggregate can emit.
+
+---
+
+### commands
+
+> **commands**: [`AggregateCommand`](/api/interfaces/aggregatecommand/)\<[`ID`](/api/type-aliases/id/)\>
+
+The discriminated union of all commands this aggregate can handle.
 
 ---
 
@@ -31,12 +41,4 @@ Defined in: [ddd/aggregate-root.ts:12](https://github.com/dogganidhal/noddde/blo
 
 > **infrastructure**: [`Infrastructure`](/api/type-aliases/infrastructure/)
 
-Defined in: [ddd/aggregate-root.ts:14](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/ddd/aggregate-root.ts#L14)
-
----
-
-### state
-
-> **state**: `any`
-
-Defined in: [ddd/aggregate-root.ts:11](https://github.com/dogganidhal/noddde/blob/7fcd7bfd4ed5309e2c0f01d9a6cc64eda9457151/packages/core/src/ddd/aggregate-root.ts#L11)
+The external dependencies available to command handlers.
