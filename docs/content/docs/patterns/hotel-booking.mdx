@@ -1,0 +1,456 @@
+---
+title: Hotel Booking Domain
+description: A full-stack hotel booking example with three aggregates, three sagas, projections, Fastify HTTP, and Drizzle persistence.
+---
+
+This example walks through the hotel booking sample — the most complete demonstration in the repository. It covers three aggregates, a three-saga process chain, projections with custom view store interfaces, per-aggregate persistence strategies, unit-of-work transactions, and a Fastify HTTP layer backed by Drizzle + SQLite.
+
+> **Full source**: [samples/sample-hotel-booking](https://github.com/dogganidhal/noddde/tree/main/samples/sample-hotel-booking) — clone and run locally with `npm start`.
+
+## Domain Overview
+
+The domain models a hotel's reservation workflow from booking creation through check-in and checkout. Three sagas form an automated chain that runs entirely without human intervention after a guest submits a booking request.
+
+```
+Guest creates booking
+        │
+        ▼
+ BookingFulfillmentSaga   ←── starts on BookingCreated
+        │
+        │  dispatches RequestPayment
+        ▼
+ PaymentProcessingSaga    ←── starts on PaymentRequested
+        │
+        │  calls paymentGateway.charge()
+        │  dispatches CompletePayment | FailPayment
+        ▼
+ BookingFulfillmentSaga   ←── resumes on PaymentCompleted | PaymentFailed
+        │
+        │  queries for available room
+        │  dispatches ConfirmBooking + ReserveRoom  (success path)
+        │  dispatches CancelBooking                  (no room / payment failed)
+        ▼
+ CheckoutReminderSaga     ←── starts on GuestCheckedIn
+        │
+        │  sends SMS on check-in and check-out
+        ▼
+      (end)
+```
+
+Three aggregates support the write model:
+
+| Aggregate   | Responsibility                          | Persistence     |
+| ----------- | --------------------------------------- | --------------- |
+| `Booking`   | Payment state machine for one booking   | Event-sourced   |
+| `Room`      | Physical room lifecycle (reserve → occupy) | Event-sourced |
+| `Inventory` | Aggregate availability counts by type   | State-stored    |
+
+## Write Model
+
+### Booking aggregate — payment state machine
+
+The `Booking` aggregate is the most instructive of the three. Its status field is a strict state machine: every payment command validates the current status before emitting an event.
+
+```ts
+// domain/write-model/booking/aggregate.ts
+export const Booking = defineAggregate<BookingDef>({
+  initialState: {
+    guestId: null,
+    status: "pending",   // pending → awaiting_payment → confirmed | cancelled
+    paymentId: null,
+    transactionId: null,
+    // ...
+  },
+
+  commands: {
+    // Transition: pending → awaiting_payment
+    RequestPayment: (command, state) => {
+      if (state.status !== "pending") {
+        throw new Error(`Cannot request payment in ${state.status} status`);
+      }
+      return {
+        name: "PaymentRequested",
+        payload: {
+          bookingId: command.targetAggregateId,
+          guestId: state.guestId!,
+          paymentId: command.payload.paymentId,
+          amount: command.payload.amount,
+        },
+      };
+    },
+
+    // Transition: awaiting_payment → (status unchanged, transactionId recorded)
+    CompletePayment: (command, state, { clock }) => {
+      if (state.status !== "awaiting_payment") {
+        throw new Error(`Cannot complete payment in ${state.status} status`);
+      }
+      return {
+        name: "PaymentCompleted",
+        payload: {
+          bookingId: command.targetAggregateId,
+          paymentId: command.payload.paymentId,
+          transactionId: command.payload.transactionId,
+          amount: command.payload.amount,
+          completedAt: clock.now().toISOString(),
+        },
+      };
+    },
+
+    // Transition: awaiting_payment → pending (payment can be retried)
+    FailPayment: (command, state) => {
+      if (state.status !== "awaiting_payment") {
+        throw new Error(`Cannot fail payment in ${state.status} status`);
+      }
+      return { name: "PaymentFailed", payload: { /* ... */ } };
+    },
+
+    // Transition: confirmed → refund if a transactionId exists
+    RefundPayment: (command, state, { clock }) => {
+      if (state.transactionId === null) {
+        throw new Error("No payment to refund");
+      }
+      return { name: "PaymentRefunded", payload: { /* ... */ } };
+    },
+  },
+
+  apply: {
+    PaymentRequested: (event, state) => ({
+      ...state,
+      status: "awaiting_payment" as const,
+      paymentId: event.paymentId,
+    }),
+
+    PaymentCompleted: (event, state) => ({
+      ...state,
+      transactionId: event.transactionId,
+      // status stays awaiting_payment until ConfirmBooking is dispatched
+    }),
+
+    PaymentFailed: (_event, state) => ({
+      ...state,
+      status: "pending" as const,  // reset: payment can be reattempted
+      paymentId: null,
+    }),
+  },
+});
+```
+
+Notice that `PaymentFailed` resets status back to `"pending"` rather than `"cancelled"`. This lets the guest retry payment without creating a new booking.
+
+### Room and Inventory aggregates
+
+**Room** (`event-sourced`) tracks the physical lifecycle of a single room: `created → available → reserved → occupied → available`. It emits `RoomReserved`, `GuestCheckedIn`, and `GuestCheckedOut` events that the `CheckoutReminderSaga` and projections consume.
+
+**Inventory** (`state-stored`) maintains aggregate counts of available rooms by type (`single`, `double`, `suite`). Because only the current totals matter — not the full history — state-stored persistence is the right choice here. See [Why Two Persistence Strategies](/docs/design-decisions/why-two-persistence-strategies) for the trade-off.
+
+## Saga Chain
+
+Sagas are the main teaching content of this sample. Three independent sagas collaborate through the event bus to implement the full booking lifecycle without any direct coupling between them.
+
+### BookingFulfillmentSaga
+
+This saga orchestrates the top-level booking flow. It starts on `BookingCreated`, waits for payment to complete, then queries for an available room and dispatches commands to two different aggregates atomically.
+
+```ts
+// domain/process-model/booking-fulfillment.ts
+export const BookingFulfillmentSaga = defineSaga<BookingFulfillmentDef>({
+  startedBy: ["BookingCreated"],
+
+  handlers: {
+    // Step 1: booking created → ask Booking aggregate to request payment
+    BookingCreated: (event) => {
+      const paymentId = randomUUID();
+      return {
+        state: { /* ... bookingId, guestId, roomType, status: "awaiting_payment" */ },
+        commands: {
+          name: "RequestPayment",
+          targetAggregateId: event.payload.bookingId,
+          payload: { paymentId, amount: event.payload.totalAmount },
+        },
+      };
+    },
+
+    // Step 3: payment confirmed → find a room, dispatch two commands atomically
+    PaymentCompleted: async (event, state, infrastructure) => {
+      const availableRooms = (await infrastructure.queryBus.dispatch({
+        name: "SearchAvailableRooms",
+        payload: { type: state.roomType },
+      })) as any[];
+
+      const room = availableRooms?.[0];
+
+      // Compensation: no room available → cancel the booking
+      if (!room) {
+        return {
+          state: { ...state, status: "cancelled" as const },
+          commands: {
+            name: "CancelBooking",
+            targetAggregateId: state.bookingId,
+            payload: { reason: "No available room of requested type" },
+          },
+        };
+      }
+
+      // Success path: multi-command dispatch across two aggregates
+      return {
+        state: { ...state, status: "confirmed" as const, roomId: room.roomId },
+        commands: [
+          {
+            name: "ConfirmBooking",
+            targetAggregateId: state.bookingId,
+            payload: { roomId: room.roomId },
+          },
+          {
+            name: "ReserveRoom",
+            targetAggregateId: room.roomId,
+            payload: { bookingId: state.bookingId, /* checkIn, checkOut, guestId */ },
+          },
+        ],
+      };
+    },
+
+    // Compensation: payment failed → cancel booking
+    PaymentFailed: (event, state) => ({
+      state: { ...state, status: "cancelled" as const },
+      commands: {
+        name: "CancelBooking",
+        targetAggregateId: state.bookingId,
+        payload: { reason: `Payment failed: ${event.payload.reason}` },
+      },
+    }),
+
+    // Conditional compensation: refund only if payment was previously completed
+    BookingCancelled: (_event, state) => ({
+      state: { ...state, status: "cancelled" as const },
+      commands:
+        state.status === "confirmed" && state.paymentId
+          ? {
+              name: "RefundPayment" as const,
+              targetAggregateId: state.bookingId,
+              payload: { paymentId: state.paymentId, amount: state.totalAmount },
+            }
+          : undefined,  // no refund if payment never completed
+    }),
+  },
+});
+```
+
+Two patterns to note here:
+
+- **Multi-command dispatch**: returning an array from a handler dispatches both commands before the saga persists its updated state. `ConfirmBooking` and `ReserveRoom` target different aggregates.
+- **Conditional compensation**: the `BookingCancelled` handler checks `state.status === "confirmed"` before issuing a refund. If payment never completed, the command is `undefined` and nothing is dispatched.
+
+### PaymentProcessingSaga
+
+This saga bridges the `RequestPayment` command (dispatched by `BookingFulfillmentSaga`) and the external payment gateway. It starts on `PaymentRequested`, calls the gateway synchronously, and closes the loop by dispatching `CompletePayment` or `FailPayment` back to the `Booking` aggregate.
+
+```ts
+// domain/process-model/payment-processing.ts
+export const PaymentProcessingSaga = defineSaga<PaymentProcessingDef>({
+  startedBy: ["PaymentRequested"],
+
+  handlers: {
+    PaymentRequested: async (event, _state, { paymentGateway }) => {
+      try {
+        const { transactionId } = await paymentGateway.charge(
+          event.payload.guestId,
+          event.payload.amount,
+        );
+
+        return {
+          state: { /* ..., status: "charging" */ },
+          commands: {
+            name: "CompletePayment" as const,
+            targetAggregateId: event.payload.bookingId,
+            payload: {
+              paymentId: event.payload.paymentId,
+              transactionId,
+              amount: event.payload.amount,
+            },
+          },
+        };
+      } catch (error: any) {
+        return {
+          state: { /* ..., status: "failed" */ },
+          commands: {
+            name: "FailPayment" as const,
+            targetAggregateId: event.payload.bookingId,
+            payload: {
+              paymentId: event.payload.paymentId,
+              reason: error.message ?? "Payment gateway error",
+            },
+          },
+        };
+      }
+    },
+
+    // Observe terminal states for saga record-keeping
+    PaymentCompleted: (_event, state) => ({ state: { ...state, status: "completed" as const } }),
+    PaymentFailed: (_event, state) => ({ state: { ...state, status: "failed" as const } }),
+  },
+});
+```
+
+The saga's event type is narrowed with `Extract` to only the three payment lifecycle events — `PaymentRequested`, `PaymentCompleted`, and `PaymentFailed`. This keeps the saga focused and prevents accidental coupling to unrelated booking events.
+
+In production, the `paymentGateway.charge()` call would be replaced by an async provider integration (for example, a Stripe webhook). The saga's persisted state would correlate the callback to the correct booking. See [Sagas](/docs/process-managers/sagas) for how saga state is persisted and correlated.
+
+### CheckoutReminderSaga
+
+The third saga is simpler: it starts on `GuestCheckedIn`, sends a welcome SMS via `smsService`, and sends a farewell SMS on `GuestCheckedOut`. It demonstrates infrastructure side effects from a saga without dispatching any commands.
+
+## Read Model
+
+### Custom ViewStore interface
+
+The `RoomAvailabilityViewStore` extends the built-in `ViewStore` interface with a domain-specific `findAvailable` method. This pushes filtering to the database rather than loading all views into memory.
+
+```ts
+// domain/read-model/queries.ts
+export interface RoomAvailabilityViewStore
+  extends ViewStore<RoomAvailabilityView> {
+  /** Finds available rooms, optionally filtered by room type. */
+  findAvailable(type?: RoomType): Promise<RoomAvailabilityView[]>;
+}
+```
+
+The Drizzle implementation (`DrizzleRoomAvailabilityViewStore`) translates this into a SQL `WHERE status = 'available'` clause. The in-memory fallback would load all views and filter in JavaScript — both are valid implementations behind the same interface.
+
+### Strong vs eventual consistency
+
+The sample shows both consistency modes side by side:
+
+- **`RoomAvailabilityProjection`** is registered as a domain projection. The engine runs it synchronously during command dispatch, so the view is always up to date before the command handler returns. Queries against it reflect the current write-model state.
+- **`GuestHistoryProjection`** and **`RevenueProjection`** are also registered projections but use `InMemoryViewStore` — illustrating that consistency level is a persistence choice, not a projection design choice.
+
+### Standalone query handler
+
+`SearchAvailableRoomsHandler` is registered as a standalone query handler rather than a projection-backed query. It reads directly from `roomAvailabilityViewStore` via infrastructure injection:
+
+```ts
+// domain/read-model/query-handlers.ts
+export const SearchAvailableRoomsHandler: QueryHandler<
+  HotelInfrastructure,
+  Extract<SearchQuery, { name: "SearchAvailableRooms" }>
+> = async (query, infrastructure) =>
+  infrastructure.roomAvailabilityViewStore.findAvailable(query.type);
+```
+
+The handler is then consumed inside `BookingFulfillmentSaga` via `infrastructure.queryBus.dispatch(...)` — the same query bus that HTTP clients use. This is how the saga finds an available room after payment completes.
+
+See [Queries](/docs/read-model/queries) for the full standalone query handler pattern.
+
+## Domain Configuration
+
+The `configureDomain` call wires all the pieces together. Two type parameters beyond `HotelInfrastructure` are required: `RunNightlyAuditCommand` (a standalone command handler) and `SearchQuery` (a standalone query handler).
+
+```ts
+// src/main.ts
+const domain = await configureDomain<
+  HotelInfrastructure,
+  RunNightlyAuditCommand,  // standalone command type
+  SearchQuery              // standalone query type
+>({
+  writeModel: {
+    aggregates: { Room, Booking, Inventory },
+    standaloneCommandHandlers: { RunNightlyAudit: RunNightlyAuditHandler },
+  },
+
+  readModel: {
+    projections: {
+      RoomAvailability: RoomAvailabilityProjection,
+      GuestHistory: GuestHistoryProjection,
+      Revenue: RevenueProjection,
+    },
+    standaloneQueryHandlers: {
+      SearchAvailableRooms: SearchAvailableRoomsHandler,
+    },
+  },
+
+  processModel: {
+    sagas: {
+      BookingFulfillment: BookingFulfillmentSaga,
+      CheckoutReminder: CheckoutReminderSaga,
+      PaymentProcessing: PaymentProcessingSaga,
+    },
+  },
+
+  infrastructure: {
+    // Per-aggregate persistence: Room + Booking → event-sourced, Inventory → state-stored
+    aggregatePersistence: {
+      Room: () => drizzleInfra.eventSourcedPersistence,
+      Booking: () => drizzleInfra.eventSourcedPersistence,
+      Inventory: () => drizzleInfra.stateStoredPersistence,
+    } as any, // TypeScript cannot discriminate function vs Record in the union
+
+    aggregateConcurrency: { maxRetries: 3 },
+    sagaPersistence: () => drizzleInfra.sagaPersistence,
+    snapshotStore: () => drizzleInfra.snapshotStore!,
+    snapshotStrategy: everyNEvents(50), // snapshot Room every 50 events
+    idempotencyStore: () => new InMemoryIdempotencyStore(),
+    unitOfWorkFactory: () => drizzleInfra.unitOfWorkFactory,
+
+    provideInfrastructure: (): HotelInfrastructure => ({
+      clock: new SystemClock(),
+      paymentGateway: new FakePaymentGateway(),
+      roomAvailabilityViewStore: new DrizzleRoomAvailabilityViewStore(db),
+      // ...emailService, smsService, guestHistoryViewStore, revenueViewStore
+    }),
+
+    cqrsInfrastructure: () => ({
+      commandBus: new InMemoryCommandBus(),
+      eventBus: new EventEmitterEventBus(),
+      queryBus: new InMemoryQueryBus(),
+    }),
+  },
+
+  metadataProvider: () => requestMetadataStorage.getStore() ?? {},
+});
+```
+
+The `as any` on `aggregatePersistence` is a deliberate workaround: the engine accepts either a single factory function (applies to all aggregates) or a `Record<AggregateName, factory>` (per-aggregate), but TypeScript's union discrimination cannot distinguish between the two at the call site when the record values are themselves functions.
+
+## Unit of Work
+
+The group booking endpoint demonstrates `domain.withUnitOfWork()`. All commands dispatched inside the callback share a single database transaction — either all commit or all roll back.
+
+```ts
+// infrastructure/http/routes/bookings.ts
+fastify.post("/bookings/group", async (request, reply) => {
+  const { guestId, rooms } = request.body;
+  const bookingIds: string[] = [];
+
+  await domain.withUnitOfWork(async () => {
+    for (const room of rooms) {
+      const bookingId = randomUUID();
+      bookingIds.push(bookingId);
+
+      // CreateBooking and ReserveRoom for each room in one transaction
+      await domain.dispatchCommand({
+        name: "CreateBooking",
+        targetAggregateId: bookingId,
+        payload: { guestId, roomType: room.roomType, /* checkIn, checkOut, totalAmount */ },
+      });
+      await domain.dispatchCommand({
+        name: "ReserveRoom",
+        targetAggregateId: room.roomId,
+        payload: { bookingId, guestId, /* checkIn, checkOut */ },
+      });
+    }
+  });
+
+  return reply.status(201).send({ bookingIds });
+});
+```
+
+If any command fails — for example, because a room is already reserved — the entire unit of work rolls back and no bookings are created. This gives group bookings all-or-nothing semantics at the database level.
+
+## See Also
+
+- [Sagas](/docs/process-managers/sagas) — how saga state is persisted and how the engine correlates events to saga instances
+- [Why Sagas Return Commands](/docs/design-decisions/why-sagas-return-commands) — the design rationale for command-returning sagas instead of side-effectful handlers
+- [Why Two Persistence Strategies](/docs/design-decisions/why-two-persistence-strategies) — when to choose event-sourced vs state-stored
+- [Queries](/docs/read-model/queries) — standalone query handlers and how they differ from projection-backed queries
+- [ORM Adapters](/docs/running/orm-adapters) — the `@noddde/drizzle` adapter used in this sample
+- [The Clock Pattern](/docs/patterns/clock-pattern) — deterministic time in command handlers
+- [Example: Auction Domain](/docs/patterns/auction-domain) — a simpler single-aggregate example with rejection events and the Clock pattern

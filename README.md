@@ -200,16 +200,17 @@ yarn add --dev @noddde/testing
 
 Head to the [documentation](https://noddde.dev/docs/getting-started) for a walkthrough that builds a complete domain from scratch, or explore the [sample domains](samples/) for real-world patterns:
 
-| Sample                                     | Persistence      | What it shows                                                     |
-| ------------------------------------------ | ---------------- | ----------------------------------------------------------------- |
-| [Auction](samples/sample-auction)          | Drizzle + SQLite | Commands, events, business rules, infrastructure injection        |
-| [Banking](samples/sample-banking)          | Prisma + SQLite  | Event sourcing, projections, queries, repositories                |
-| [Order Fulfillment](samples/sample-orders) | TypeORM + SQLite | 3 aggregates, saga orchestration, cross-context event correlation |
-| [Fund Transfer](samples/sample-transfers)  | In-memory        | Atomic multi-command transactions with `withUnitOfWork()`         |
+| Sample                                                    | Persistence        | What it shows                                                                              |
+| --------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------ |
+| [Hotel Booking](samples/sample-hotel-booking)             | Drizzle + SQLite   | Full-stack: 3 aggregates, 3 sagas, 3 projections, Fastify HTTP, per-aggregate persistence  |
+| [Auction](samples/sample-auction)                         | Drizzle + SQLite   | Single aggregate baseline, rejection events, time-based business rules                     |
+| [Banking](samples/sample-banking)                         | Prisma + SQLite    | Projections, queries, view stores, logger infrastructure                                   |
+| [Flash Sale](samples/sample-flash-sale)                   | Drizzle + Postgres | Optimistic concurrency control under contention (8 concurrent buyers)                      |
+| [Seat Reservation](samples/sample-seat-reservation)       | Prisma + MySQL     | Pessimistic locking with advisory locks                                                    |
 
 ```bash
-# Try it now
-cd samples/sample-banking && yarn install && yarn test
+# Try it now — the hotel booking sample exercises >90% of framework features
+cd samples/sample-hotel-booking && yarn install && yarn test
 ```
 
 ## License

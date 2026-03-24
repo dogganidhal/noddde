@@ -261,10 +261,10 @@ This example uses optimistic concurrency with no retries (the default). For high
 - [Projections](/docs/read-model/projections) — Building read models
 - [Running Your Domain](/docs/running/domain-configuration) — Complete wiring reference
 
-Ready to explore a full working example? The [fund transfer sample](https://github.com/dogganidhal/noddde/tree/main/samples/sample-transfers) is the simplest end-to-end domain — 5 files, in-memory only, no database setup. Clone the repo and run it:
+Ready to explore a full working example? The [hotel booking sample](https://github.com/dogganidhal/noddde/tree/main/samples/sample-hotel-booking) exercises >90% of framework features — 3 aggregates, 3 sagas, 3 projections, Fastify HTTP, and Drizzle/SQLite persistence. Clone the repo and run its tests:
 
 ```bash
 git clone https://github.com/dogganidhal/noddde.git
 cd noddde && yarn install
-cd samples/sample-transfers && yarn start
+cd samples/sample-hotel-booking && yarn test
 ```

@@ -201,11 +201,11 @@ Standalone query handlers are useful for cross-projection queries, system health
 The `processModel` section registers [sagas](/docs/process-managers/overview) that coordinate workflows across multiple aggregates:
 
 ```ts
-import { OrderFulfillmentSaga } from "./saga/order-fulfillment";
+import { BookingFulfillmentSaga } from "./process-model/booking-fulfillment";
 
 processModel: {
   sagas: {
-    OrderFulfillment: OrderFulfillmentSaga,
+    BookingFulfillment: BookingFulfillmentSaga,
   },
 },
 ```
