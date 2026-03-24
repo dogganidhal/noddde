@@ -50,6 +50,8 @@ class CommandLifecycleExecutor {
     snapshotStore?: SnapshotStore,
     snapshotStrategy?: SnapshotStrategy,
     idempotencyStore?: IdempotencyStore,
+    onEventsProduced?: (events: Event[], uow: UnitOfWork) => Promise<void>,
+    onEventsDispatched?: (events: Event[]) => Promise<void>,
   );
 
   execute(
@@ -153,6 +155,8 @@ class CommandLifecycleExecutor {
 14. **Snapshot save is best-effort** -- After implicit UoW commit, if a pending snapshot exists and a `SnapshotStore` is configured, the snapshot is saved. If the save fails, the error is silently swallowed. Snapshot failure does not affect the command result.
 
 15. **Event publishing after implicit commit** -- After implicit UoW commit, all committed events are dispatched sequentially via `eventBus.dispatch(event)`.
+
+16. **Post-dispatch callback (best-effort)** -- After dispatching all events in the implicit UoW path, if `onEventsDispatched` is provided, call `onEventsDispatched(events)`. Errors from this callback are silently swallowed. This enables the Domain to mark outbox entries as published after successful dispatch.
 
 ## Invariants
 

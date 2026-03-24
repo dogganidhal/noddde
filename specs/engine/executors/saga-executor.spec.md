@@ -40,6 +40,7 @@ class SagaExecutor {
     unitOfWorkFactory: UnitOfWorkFactory,
     uowStorage: AsyncLocalStorage<UnitOfWork>,
     metadataStorage: AsyncLocalStorage<MetadataContext>,
+    onEventsDispatched?: (events: Event[]) => Promise<void>,
   );
 
   execute(sagaName: string, saga: Saga<any, any>, event: Event): Promise<void>;
@@ -104,6 +105,8 @@ class SagaExecutor {
 ### Publish Deferred Events
 
 12. **Publish events after commit** -- After successful commit, iterate over the returned events and dispatch each via `infrastructure.eventBus.dispatch(event)`. This triggers downstream projections and sagas.
+
+12b. **Post-dispatch callback (best-effort)** -- After dispatching all events, if `onEventsDispatched` is provided, call `onEventsDispatched(events)`. Errors from this callback are silently swallowed. This enables the Domain to mark outbox entries as published.
 
 ### Rollback on Error
 

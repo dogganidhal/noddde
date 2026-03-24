@@ -5,6 +5,7 @@
     "infrastructure",
     "persistence",
     "idempotent-commands",
+    "outbox-pattern",
     "orm-adapters"
   ]
 }

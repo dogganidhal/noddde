@@ -15,6 +15,7 @@ export type {
 } from "./snapshot";
 export type { IdempotencyRecord, IdempotencyStore } from "./idempotency";
 export type { ViewStore } from "./view-store";
+export type { OutboxEntry, OutboxStore } from "./outbox";
 
 /**
  * Persistence strategy that stores the current aggregate state directly.

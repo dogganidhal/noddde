@@ -23,8 +23,13 @@ import type {
   UnitOfWorkFactory,
   IdempotencyStore,
   ViewStore,
+  OutboxStore,
+  OutboxEntry,
 } from "@noddde/core";
 import type { AggregateLocker } from "@noddde/core";
+import { OutboxRelay } from "./outbox-relay";
+import type { OutboxRelayOptions } from "./outbox-relay";
+import { uuidv7 } from "./uuid";
 
 /**
  * Context for metadata propagation. Values from `withMetadataContext`
@@ -269,6 +274,26 @@ export type DomainConfiguration<
      * If not provided, defaults to {@link createInMemoryUnitOfWork}.
      */
     unitOfWorkFactory?: () => UnitOfWorkFactory | Promise<UnitOfWorkFactory>;
+    /**
+     * Transactional outbox configuration. When configured, domain events
+     * are written to the outbox store atomically with aggregate persistence,
+     * providing at-least-once delivery guarantees. A background relay
+     * polls for unpublished entries and dispatches them via the EventBus.
+     *
+     * @example
+     * ```ts
+     * outbox: {
+     *   store: () => new InMemoryOutboxStore(),
+     *   relayOptions: { pollIntervalMs: 1000, batchSize: 100 },
+     * }
+     * ```
+     */
+    outbox?: {
+      /** Factory for the outbox store. */
+      store: () => OutboxStore | Promise<OutboxStore>;
+      /** Options for the outbox relay background process. */
+      relayOptions?: OutboxRelayOptions;
+    };
   };
   /**
    * Optional metadata provider called on every command dispatch.
@@ -310,6 +335,8 @@ export class Domain<
   private readonly _metadataStorage = new AsyncLocalStorage<MetadataContext>();
   private _commandExecutor!: CommandLifecycleExecutor;
   private _sagaExecutor?: SagaExecutor;
+  private _outboxStore?: OutboxStore;
+  private _outboxRelay?: OutboxRelay;
   /** The fully resolved infrastructure (custom + CQRS buses). */
   public get infrastructure(): TInfrastructure & CQRSInfrastructure {
     return this._infrastructure;
@@ -466,6 +493,11 @@ export class Domain<
       }
     }
 
+    // Step 5.8b: Resolve outbox store
+    if (configuration.infrastructure.outbox) {
+      this._outboxStore = await configuration.infrastructure.outbox.store();
+    }
+
     // Step 5.10: Build strong-consistency callback for projections
     const strongProjections = Object.entries(
       configuration.readModel.projections,
@@ -473,28 +505,67 @@ export class Domain<
       ([_, p]) => p.consistency === "strong" && p.identity && p.viewStore,
     );
 
+    // Compose onEventsProduced: strong-consistency projections + outbox writes
+    const outboxStore = this._outboxStore;
+    const hasStrongProjections = strongProjections.length > 0;
     const onEventsProduced:
       | ((events: Event[], uow: UnitOfWork) => Promise<void>)
       | undefined =
-      strongProjections.length > 0
+      hasStrongProjections || outboxStore
         ? async (events, uow) => {
-            for (const [_projName, projection] of strongProjections) {
-              const viewStoreInstance = resolvedViewStores.get(_projName)!;
-              for (const event of events) {
-                const reducerFn = (projection.reducers as any)[event.name];
-                const identityFn = (projection.identity as any)?.[event.name];
-                if (reducerFn && identityFn) {
-                  const viewId = identityFn(event);
-                  const currentView =
-                    (await viewStoreInstance.load(viewId)) ??
-                    projection.initialView;
-                  const newView = await reducerFn(event, currentView);
-                  uow.enlist(() => viewStoreInstance.save(viewId, newView));
+            // Strong-consistency projection updates
+            if (hasStrongProjections) {
+              for (const [_projName, projection] of strongProjections) {
+                const viewStoreInstance = resolvedViewStores.get(_projName)!;
+                for (const event of events) {
+                  const reducerFn = (projection.reducers as any)[event.name];
+                  const identityFn = (projection.identity as any)?.[
+                    event.name
+                  ];
+                  if (reducerFn && identityFn) {
+                    const viewId = identityFn(event);
+                    const currentView =
+                      (await viewStoreInstance.load(viewId)) ??
+                      projection.initialView;
+                    const newView = await reducerFn(event, currentView);
+                    uow.enlist(() => viewStoreInstance.save(viewId, newView));
+                  }
                 }
               }
             }
+
+            // Outbox writes (atomically within the same UoW)
+            if (outboxStore && events.length > 0) {
+              const entries: OutboxEntry[] = events.map((event) => ({
+                id: uuidv7(),
+                event,
+                aggregateName:
+                  event.metadata?.aggregateName ?? undefined,
+                aggregateId:
+                  event.metadata?.aggregateId != null
+                    ? String(event.metadata.aggregateId)
+                    : undefined,
+                createdAt: new Date().toISOString(),
+                publishedAt: null,
+              }));
+              uow.enlist(() => outboxStore.save(entries));
+            }
           }
         : undefined;
+
+    // Build onEventsDispatched callback (best-effort outbox marking)
+    const onEventsDispatched:
+      | ((events: Event[]) => Promise<void>)
+      | undefined = outboxStore
+      ? async (events) => {
+          const eventIds = events
+            .map((e) => e.metadata?.eventId)
+            .filter((id): id is string => id != null);
+          if (eventIds.length > 0) {
+            await outboxStore.markPublishedByEventIds(eventIds);
+          }
+        }
+      : undefined;
 
     // Step 5.11: Create command executor
     this._commandExecutor = new CommandLifecycleExecutor(
@@ -508,6 +579,7 @@ export class Domain<
       snapshotStrategy,
       idempotencyStore,
       onEventsProduced,
+      onEventsDispatched,
     );
 
     if (sagaPersistence) {
@@ -517,6 +589,16 @@ export class Domain<
         this._unitOfWorkFactory,
         this._uowStorage,
         this._metadataStorage,
+        onEventsDispatched,
+      );
+    }
+
+    // Create outbox relay (do not start it)
+    if (this._outboxStore) {
+      this._outboxRelay = new OutboxRelay(
+        this._outboxStore,
+        this._infrastructure.eventBus,
+        configuration.infrastructure.outbox?.relayOptions,
       );
     }
 
@@ -686,6 +768,21 @@ export class Domain<
         for (const event of events) {
           await this._infrastructure.eventBus.dispatch(event);
         }
+
+        // Best-effort post-dispatch outbox marking
+        if (this._outboxStore && events.length > 0) {
+          try {
+            const eventIds = events
+              .map((e) => e.metadata?.eventId)
+              .filter((id): id is string => id != null);
+            if (eventIds.length > 0) {
+              await this._outboxStore.markPublishedByEventIds(eventIds);
+            }
+          } catch {
+            // Best-effort: relay will catch unpublished entries
+          }
+        }
+
         return result;
       } catch (error) {
         try {
@@ -724,6 +821,33 @@ export class Domain<
     fn: () => Promise<T>,
   ): Promise<T> {
     return this._metadataStorage.run(context, fn);
+  }
+
+  /**
+   * Starts the outbox relay background polling loop.
+   * No-op if no outbox is configured or if already started.
+   */
+  public startOutboxRelay(): void {
+    this._outboxRelay?.start();
+  }
+
+  /**
+   * Stops the outbox relay background polling loop.
+   * No-op if no outbox is configured or if not running.
+   */
+  public stopOutboxRelay(): void {
+    this._outboxRelay?.stop();
+  }
+
+  /**
+   * Processes a single batch of unpublished outbox entries.
+   * Useful for testing — call this instead of starting the relay.
+   *
+   * @returns The number of entries dispatched, or 0 if no outbox is configured.
+   */
+  public async processOutboxOnce(): Promise<number> {
+    if (!this._outboxRelay) return 0;
+    return this._outboxRelay.processOnce();
   }
 
   /**

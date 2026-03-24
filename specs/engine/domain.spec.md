@@ -14,6 +14,7 @@ depends_on:
   - engine/executors/command-lifecycle-executor
   - engine/executors/saga-executor
   - engine/executors/metadata-enricher
+  - engine/outbox-relay
   - ddd/aggregate-root
   - ddd/projection
   - ddd/saga
@@ -22,6 +23,7 @@ depends_on:
   - edd/event
   - infrastructure
   - persistence/idempotency
+  - persistence/outbox
 docs:
   - domain-configuration/overview.mdx
   - domain-configuration/write-model.mdx
@@ -78,10 +80,23 @@ type DomainConfiguration<
     snapshotStore?: () => SnapshotStore | Promise<SnapshotStore>;
     snapshotStrategy?: SnapshotStrategy;
     idempotencyStore?: () => IdempotencyStore | Promise<IdempotencyStore>;
+    /**
+     * Transactional outbox configuration. When configured, domain events
+     * are written to the outbox store atomically with aggregate persistence,
+     * providing at-least-once delivery guarantees. A background relay
+     * polls for unpublished entries and dispatches them via the EventBus.
+     */
+    outbox?: {
+      /** Factory for the outbox store. */
+      store: () => OutboxStore | Promise<OutboxStore>;
+      /** Options for the outbox relay background process. */
+      relayOptions?: OutboxRelayOptions;
+    };
     provideInfrastructure?: () => Promise<TInfrastructure> | TInfrastructure;
     cqrsInfrastructure?: (
       infrastructure: TInfrastructure,
     ) => CQRSInfrastructure | Promise<CQRSInfrastructure>;
+    unitOfWorkFactory?: () => UnitOfWorkFactory | Promise<UnitOfWorkFactory>;
   };
 };
 
@@ -98,6 +113,12 @@ class Domain<
   dispatchQuery<TQuery extends Query<any>>(
     query: TQuery,
   ): Promise<QueryResult<TQuery>>;
+  /** Starts the outbox relay background polling. Requires outbox configuration. */
+  startOutboxRelay(): void;
+  /** Stops the outbox relay background polling. */
+  stopOutboxRelay(): void;
+  /** Processes a single batch of unpublished outbox entries. For testing and manual recovery. */
+  processOutboxOnce(): Promise<number>;
 }
 
 const configureDomain: <
@@ -139,6 +160,7 @@ The `init()` method must execute the following steps in order:
      Pass the resolver to `CommandLifecycleExecutor`, which calls `resolver.resolve(aggregateName)` at each command dispatch to obtain the persistence for the target aggregate.
 5. **Resolve snapshot store** -- Call `configuration.infrastructure.snapshotStore()` if provided. Store as `this._snapshotStore`. Store `configuration.infrastructure.snapshotStrategy` as `this._snapshotStrategy`. Both are optional.
 6. **Resolve saga persistence** -- Call `configuration.infrastructure.sagaPersistence()` if provided. Required if `processModel` is configured.
+6b. **Resolve outbox store** -- If `configuration.infrastructure.outbox` is provided, call `outbox.store()` to resolve the `OutboxStore`. Create an `OutboxRelay` instance (but do not start it). The outbox store is used to compose the `onEventsProduced` callback (enlisting outbox writes in the UoW) and the `onEventsDispatched` callback (marking entries published by event ID after dispatch).
 7. **Register command handlers** -- For each aggregate in `writeModel.aggregates`, register a command handler on the command bus for each command name defined in `Aggregate.commands`. The registered handler encapsulates the full command lifecycle (load, execute, apply, persist, publish).
 8. **Register standalone command handlers** -- For each handler in `writeModel.standaloneCommandHandlers`, register it on the command bus, wrapping it to receive the merged infrastructure.
 9. **Register query handlers** -- For each projection in `readModel.projections`, register each query handler from `Projection.queryHandlers` on the query bus.
@@ -237,6 +259,18 @@ The `dispatchQuery` method delegates query dispatch to the underlying query bus:
 
 `dispatchQuery` is a thin convenience wrapper. It performs no validation, error wrapping, or routing logic beyond delegation. Error propagation, handler lookup, and routing are the responsibility of the query bus implementation.
 
+### Domain.startOutboxRelay() / stopOutboxRelay() / processOutboxOnce() -- Outbox Lifecycle
+
+When `infrastructure.outbox` is configured:
+
+1. **startOutboxRelay()** -- Starts the `OutboxRelay` background polling. Throws `Error("Outbox relay requires outbox configuration")` if outbox is not configured.
+2. **stopOutboxRelay()** -- Stops the relay polling. No-op if outbox is not configured or relay is not running.
+3. **processOutboxOnce()** -- Delegates to `OutboxRelay.processOnce()`. Returns the number of entries dispatched. Throws if outbox is not configured.
+
+### Domain.withUnitOfWork() -- Outbox Post-Dispatch Marking
+
+When outbox is configured, after the explicit UoW commits and events are dispatched, call `outboxStore.markPublishedByEventIds(eventIds)` (best-effort, errors swallowed). This marks the outbox entries written during the UoW as published, preventing the relay from re-dispatching them.
+
 ### configureDomain() -- Factory Function
 
 1. Create a new `Domain` instance with the given configuration.
@@ -272,6 +306,9 @@ The `dispatchQuery` method delegates query dispatch to the underlying query bus:
 - **Saga handler returns no commands** -- `reaction.commands` is `undefined` or empty. Only the saga state is persisted; no commands are dispatched.
 - **init() factory throws** -- The error propagates through `configureDomain` and the domain is not usable.
 - **Circular saga-command loops** -- A saga dispatches a command that produces an event that triggers the same saga. The framework does not prevent infinite loops; the saga handler must include termination logic (e.g., checking state to avoid re-dispatching).
+- **No outbox configured** -- `startOutboxRelay()` and `processOutboxOnce()` throw. `stopOutboxRelay()` is a no-op. No outbox entries are created during command dispatch.
+- **Outbox configured but relay not started** -- Outbox entries are still written atomically during command dispatch. They accumulate until the relay is started or `processOutboxOnce()` is called manually.
+- **markPublishedByEventIds fails after dispatch** -- Error is swallowed (best-effort). The relay will eventually mark the entries as published on its next poll cycle.
 - **dispatchQuery with no handler registered** -- The error from the query bus (e.g., "No handler registered for query: \<name\>") propagates unchanged through `dispatchQuery`.
 - **dispatchQuery handler throws** -- The handler error propagates through `dispatchQuery` unchanged.
 - **Command with `commandId` but no `idempotencyStore` configured** -- Processed normally, `commandId` is ignored.

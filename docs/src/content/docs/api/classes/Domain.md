@@ -178,3 +178,41 @@ Executes a function within a metadata context that overrides the configured Meta
 #### Returns
 
 `Promise`\<`T`\>
+
+---
+
+### startOutboxRelay()
+
+> **startOutboxRelay**(): `void`
+
+Starts the outbox relay background polling loop. No-op if no outbox is configured or if already started.
+
+#### Returns
+
+`void`
+
+---
+
+### stopOutboxRelay()
+
+> **stopOutboxRelay**(): `void`
+
+Stops the outbox relay background polling loop. No-op if no outbox is configured or if not running.
+
+#### Returns
+
+`void`
+
+---
+
+### processOutboxOnce()
+
+> **processOutboxOnce**(): `Promise`\<`number`\>
+
+Processes a single batch of unpublished outbox entries. Useful for testing — call this instead of starting the relay.
+
+#### Returns
+
+`Promise`\<`number`\>
+
+The number of entries dispatched, or 0 if no outbox is configured.
