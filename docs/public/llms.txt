@@ -51,11 +51,11 @@
 ## Patterns & Examples
 
 - [The Clock Pattern](https://noddde.dev/docs/patterns/clock-pattern): Injecting time as infrastructure for deterministic handlers
-- [Hotel Booking](https://noddde.dev/docs/patterns/hotel-booking): Full-stack example with three aggregates, three sagas, projections, Fastify HTTP, and Drizzle persistence
-- [Banking Domain](https://noddde.dev/docs/patterns/banking-domain): Bank account aggregate with transactions, projections, and queries
 - [Auction Domain](https://noddde.dev/docs/patterns/auction-domain): Auction aggregate with time-based validation and the Clock pattern
+- [Banking Domain](https://noddde.dev/docs/patterns/banking-domain): Bank account aggregate with transactions, projections, and queries
 - [Flash Sale](https://noddde.dev/docs/patterns/flash-sale): Optimistic concurrency control with automatic retry
 - [Seat Reservation](https://noddde.dev/docs/patterns/seat-reservation): Pessimistic locking with advisory locks and timeout handling
+- [Hotel Booking](https://noddde.dev/docs/patterns/hotel-booking): Full-stack example with three aggregates, three sagas, projections, Fastify HTTP, and Drizzle persistence
 
 ## Design Decisions
 
