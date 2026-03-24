@@ -18,6 +18,7 @@ import type {
   UnitOfWork,
   UnitOfWorkFactory,
 } from "@noddde/core";
+import type { AggregatePersistenceResolver } from "../aggregate-persistence-resolver";
 import type { ConcurrencyStrategy } from "../concurrency-strategy";
 import type { MetadataEnricher } from "./metadata-enricher";
 
@@ -33,7 +34,7 @@ import type { MetadataEnricher } from "./metadata-enricher";
  */
 export class CommandLifecycleExecutor {
   constructor(
-    private readonly persistence: PersistenceConfiguration,
+    private readonly persistenceResolver: AggregatePersistenceResolver,
     private readonly infrastructure: Infrastructure & CQRSInfrastructure,
     private readonly unitOfWorkFactory: UnitOfWorkFactory,
     private readonly concurrencyStrategy: ConcurrencyStrategy,
@@ -75,7 +76,8 @@ export class CommandLifecycleExecutor {
       }
     }
 
-    const { persistence, infrastructure } = this;
+    const persistence = this.persistenceResolver.resolve(aggregateName);
+    const { infrastructure } = this;
     const eventBus = infrastructure.eventBus;
 
     const existingUow = this.uowStorage.getStore();

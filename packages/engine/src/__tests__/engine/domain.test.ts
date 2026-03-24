@@ -22,8 +22,10 @@ import {
   InMemoryIdempotencyStore,
   InMemoryQueryBus,
   InMemorySagaPersistence,
+  InMemorySnapshotStore,
   InMemoryStateStoredAggregatePersistence,
 } from "@noddde/engine";
+import { everyNEvents } from "@noddde/core";
 
 // ============================================================
 // configureDomain creates and initializes a domain
@@ -1314,5 +1316,200 @@ describe("Idempotent command processing", () => {
 
     // Idempotency record should NOT have been saved (UoW rolled back)
     expect(await idempotencyStore.exists("cmd-fail")).toBe(false);
+  });
+});
+
+// ============================================================
+// Per-aggregate persistence
+// ============================================================
+
+// Reuse BankAccount aggregate defined above (Balance types with Deposit/DepositMade)
+
+describe("Per-aggregate persistence", () => {
+  it("should route each aggregate to its configured persistence", async () => {
+    const esPersistence = new InMemoryEventSourcedAggregatePersistence();
+    const ssPersistence = new InMemoryStateStoredAggregatePersistence();
+
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter, BankAccount } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: {
+          Counter: () => esPersistence,
+          BankAccount: () => ssPersistence,
+        },
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "c-1",
+      payload: { by: 5 },
+    });
+    await domain.dispatchCommand({
+      name: "Deposit",
+      targetAggregateId: "acc-1",
+      payload: { amount: 100 },
+    });
+
+    // Counter uses event-sourced persistence
+    const counterEvents = await esPersistence.load("Counter", "c-1");
+    expect(counterEvents).toHaveLength(1);
+    expect(counterEvents[0]!.name).toBe("Incremented");
+
+    // BankAccount uses state-stored persistence
+    const bankState = await ssPersistence.load("BankAccount", "acc-1");
+    expect(bankState).not.toBeNull();
+    expect(bankState!.state.balance).toBe(100);
+  });
+});
+
+describe("Per-aggregate persistence validation", () => {
+  it("should throw if per-aggregate persistence is missing entries for registered aggregates", async () => {
+    await expect(
+      configureDomain<Infrastructure>({
+        writeModel: { aggregates: { Counter, BankAccount } },
+        readModel: { projections: {} },
+        infrastructure: {
+          aggregatePersistence: {
+            Counter: () => new InMemoryEventSourcedAggregatePersistence(),
+          } as any,
+          cqrsInfrastructure: () => ({
+            commandBus: new InMemoryCommandBus(),
+            eventBus: new EventEmitterEventBus(),
+            queryBus: new InMemoryQueryBus(),
+          }),
+        },
+      }),
+    ).rejects.toThrow(/missing.*BankAccount/i);
+  });
+
+  it("should throw if per-aggregate persistence references unknown aggregates", async () => {
+    await expect(
+      configureDomain<Infrastructure>({
+        writeModel: { aggregates: { Counter } },
+        readModel: { projections: {} },
+        infrastructure: {
+          aggregatePersistence: {
+            Counter: () => new InMemoryEventSourcedAggregatePersistence(),
+            NonExistent: () => new InMemoryEventSourcedAggregatePersistence(),
+          } as any,
+          cqrsInfrastructure: () => ({
+            commandBus: new InMemoryCommandBus(),
+            eventBus: new EventEmitterEventBus(),
+            queryBus: new InMemoryQueryBus(),
+          }),
+        },
+      }),
+    ).rejects.toThrow(/unknown.*NonExistent/i);
+  });
+});
+
+describe("Domain-wide persistence (backward compatibility)", () => {
+  it("should use a single persistence factory for all aggregates", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: () => persistence,
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "c-1",
+      payload: { by: 3 },
+    });
+
+    const events = await persistence.load("Counter", "c-1");
+    expect(events).toHaveLength(1);
+  });
+});
+
+describe("Per-aggregate persistence factory resolution", () => {
+  it("should resolve all async per-aggregate factories during init", async () => {
+    const esFactory = vi.fn(
+      async () => new InMemoryEventSourcedAggregatePersistence(),
+    );
+    const ssFactory = vi.fn(
+      async () => new InMemoryStateStoredAggregatePersistence(),
+    );
+
+    await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter, BankAccount } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: {
+          Counter: esFactory,
+          BankAccount: ssFactory,
+        },
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    expect(esFactory).toHaveBeenCalledOnce();
+    expect(ssFactory).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Mixed persistence with snapshots", () => {
+  it("should only create snapshots for event-sourced aggregates", async () => {
+    const snapshotStore = new InMemorySnapshotStore();
+
+    const domain = await configureDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter, BankAccount } },
+      readModel: { projections: {} },
+      infrastructure: {
+        aggregatePersistence: {
+          Counter: () => new InMemoryEventSourcedAggregatePersistence(),
+          BankAccount: () => new InMemoryStateStoredAggregatePersistence(),
+        },
+        snapshotStore: () => snapshotStore,
+        snapshotStrategy: everyNEvents(1),
+        cqrsInfrastructure: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
+      },
+    });
+
+    // Dispatch to event-sourced aggregate
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "c-1",
+      payload: { by: 5 },
+    });
+
+    // Dispatch to state-stored aggregate
+    await domain.dispatchCommand({
+      name: "Deposit",
+      targetAggregateId: "acc-1",
+      payload: { amount: 100 },
+    });
+
+    // Snapshot should exist for event-sourced Counter
+    const counterSnapshot = await snapshotStore.load("Counter", "c-1");
+    expect(counterSnapshot).not.toBeNull();
+
+    // No snapshot for state-stored BankAccount
+    const bankSnapshot = await snapshotStore.load("BankAccount", "acc-1");
+    expect(bankSnapshot).toBeNull();
   });
 });

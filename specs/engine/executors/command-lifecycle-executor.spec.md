@@ -6,6 +6,7 @@ status: implemented
 exports: []
 depends_on:
   - engine/executors/metadata-enricher
+  - engine/aggregate-persistence-resolver
   - edd/event
   - edd/event-metadata
   - ddd/aggregate-root
@@ -29,18 +30,18 @@ import type {
   CQRSInfrastructure,
   IdempotencyStore,
   Infrastructure,
-  PersistenceConfiguration,
   SnapshotStore,
   SnapshotStrategy,
   UnitOfWork,
   UnitOfWorkFactory,
 } from "@noddde/core";
+import type { AggregatePersistenceResolver } from "../aggregate-persistence-resolver";
 import type { ConcurrencyStrategy } from "../concurrency-strategy";
 import type { MetadataEnricher } from "./metadata-enricher";
 
 class CommandLifecycleExecutor {
   constructor(
-    persistence: PersistenceConfiguration,
+    persistenceResolver: AggregatePersistenceResolver,
     infrastructure: Infrastructure & CQRSInfrastructure,
     unitOfWorkFactory: UnitOfWorkFactory,
     concurrencyStrategy: ConcurrencyStrategy,
@@ -59,7 +60,7 @@ class CommandLifecycleExecutor {
 }
 ```
 
-- `CommandLifecycleExecutor` is constructed with all dependencies needed for the lifecycle: persistence, infrastructure (including CQRS buses), UoW factory, concurrency strategy, UoW storage (for detecting explicit UoW), metadata enricher, and optional snapshot store/strategy.
+- `CommandLifecycleExecutor` is constructed with all dependencies needed for the lifecycle: an `AggregatePersistenceResolver` (which resolves the correct persistence for each aggregate by name), infrastructure (including CQRS buses), UoW factory, concurrency strategy, UoW storage (for detecting explicit UoW), metadata enricher, and optional snapshot store/strategy.
 - `execute` is the single public method. It runs the full lifecycle for a given aggregate command, handling UoW creation/ownership and concurrency delegation internally.
 
 ## Behavioral Requirements
@@ -186,7 +187,7 @@ class CommandLifecycleExecutor {
 - **ConcurrencyStrategy** -- Wraps the attempt for retry (optimistic) or locking (pessimistic).
 - **UnitOfWork** -- Persistence and event publishing are enlisted/deferred on the UoW for atomic commit.
 - **AsyncLocalStorage<UnitOfWork>** -- Checked to determine implicit vs. explicit UoW ownership.
-- **PersistenceConfiguration** -- Either `EventSourcedAggregatePersistence` or `StateStoredAggregatePersistence`. The executor detects the type by checking whether `load` returns an array.
+- **AggregatePersistenceResolver** -- Resolves the correct `PersistenceConfiguration` for each aggregate by name. The executor calls `persistenceResolver.resolve(aggregateName)` at the start of `execute()` to obtain the persistence instance. The resolved persistence is either `EventSourcedAggregatePersistence` or `StateStoredAggregatePersistence`; the executor detects the type by checking whether `load` returns an array.
 - **SnapshotStore / SnapshotStrategy** -- Optional. Used for snapshot-aware loading and post-command snapshot evaluation.
 - **EventBus** -- Events are dispatched after implicit UoW commit.
 - **Domain** -- Constructs the executor during `init()` and calls `execute` for each aggregate command dispatch.
