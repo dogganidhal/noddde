@@ -1,44 +1,77 @@
 # noddde Roadmap
 
-Where noddde is headed — what's shipped, what's next, and what's further out.
+Where noddde is headed: what is shipped, what is required for v1.0, and our vision for distributed TypeScript domains.
 
-## Shipped
+**Current Status:** Pre-1.0. The core Decider pattern and type-inference engine are stable. We are currently focused on production hardening, fault tolerance, and developer guardrails ahead of our v1.0 Release Candidate.
 
-- [x] **Optimistic concurrency control** — version checks, `ConcurrencyError`, automatic retries
-- [x] **Pessimistic concurrency** — advisory locks for PostgreSQL, MySQL, MSSQL
-- [x] **Event metadata envelope** — eventId, timestamp, correlationId, causationId, userId, sequenceNumber
-- [x] **Correlation propagation** — correlationId flows automatically through saga command chains
-- [x] **State snapshotting** — configurable strategies (`everyNEvents`), partial event loading
-- [x] **Idempotent command processing** — `commandId` deduplication with TTL-based cleanup
-- [x] **Unit of Work** — implicit per-command, explicit multi-command (`withUnitOfWork`)
-- [x] **ORM adapters** — Drizzle, Prisma, TypeORM with transaction support and advisory locks
-- [x] **Testing toolkit** — `testAggregate`, `testProjection`, `testSaga`, `testDomain` harnesses
+---
 
-## Next: Production Hardening
+## Shipped (Core Architecture Complete)
 
-- [ ] **Projection rebuild** — replay all events through a projection to rebuild or repair read models
-- [ ] **Event handler error isolation** — per-handler error catching so one failing handler doesn't block others
-- [ ] **Event store global stream** — cross-aggregate ordering with `loadGlobalStream()` for projections and external feeds
-- [ ] **Event schema evolution** — upcaster registry for version-based event transforms during replay
-- [ ] **Observability hooks** — command latency, event counts, projection lag, OpenTelemetry integration points
+- [x] **The Decider Engine:** Pure functional aggregates, projections, and sagas.
+- [x] **Event Metadata Envelope** — Structured eventId, timestamp, correlationId, causationId, userId, and sequenceNumber on every event.
+- [x] **Correlation & Causation Propagation** — correlationId flows automatically through saga command chains; causationId links each event to its triggering command or event.
+- [x] **Unit of Work** — Implicit per-command and explicit multi-command (`withUnitOfWork`) atomic commits across stores.
+- [x] **Optimistic & Pessimistic Concurrency:** Version checks and advisory locks (PG/MySQL).
+- [x] **Event Versioning (Upcasters):** Type-safe historical payload transformations.
+- [x] **Transactional Outbox Pattern:** At-least-once delivery tied to Unit of Work.
+- [x] **Idempotent Command Processing:** Command deduplication with TTL cleanup.
+- [x] **State Snapshotting:** Configurable strategies (e.g., every N events).
+- [x] **ORM Adapters:** Drizzle, Prisma, and TypeORM with UoW transaction support.
+- [x] **Testing Toolkit:** Type-safe Given-When-Then test harnesses (`@noddde/testing`).
 
-## Later: Distributed Systems
+---
 
-- [ ] **Outbox pattern** — persist events to an outbox table within the DB transaction for at-least-once delivery
-- [ ] **Distributed event bus** — Kafka or NATS adapter with consumer groups and ordered delivery
-- [ ] **Saga timeouts** — configurable timeout with compensation hooks (`onTimeout` handler)
-- [ ] **Distributed saga coordination** — instance-level locking to prevent concurrent saga processing
-- [ ] **Command audit log** — persist every command with result, duration, and user attribution
+## Next: The v1.0 Release Candidate (Reliability & DX)
 
-## Future
+_These items must be completed to guarantee state consistency and developer ergonomics before we stamp v1.0._
 
-- [ ] **Aggregate caching** — in-memory cache with TTL and write-through invalidation
-- [ ] **Async/parallel event dispatch** — configurable parallel handler execution with `Promise.allSettled`
-- [ ] **Graceful shutdown** — drain in-flight commands, stop accepting new ones, close connections
-- [ ] **Typed persistence interfaces** — eliminate `any` in persistence layer for compile-time safety
+- [ ] **Graceful Shutdown & Connection Draining**
+  - Implement SIGTERM handlers to drain in-flight commands, wait for active Sagas/Outbox relays to finish, and safely close database connections.
+- [ ] **Projection & Handler Error Isolation**
+  - Granular error boundaries so a single failing read-model reducer does not crash the event bus or block other successful projections.
+- [ ] **The CLI & "Golden Path" Scaffolding**
+  - `npx noddde generate aggregate <Name>` to generate opinionated, scalable folder structures, preventing massive files as domains grow.
+- [ ] **Type System Stress Testing**
+  - Formal benchmarks for the type inference bundles to ensure IDE performance and TS compilation remain instant even with large domains.
+- [ ] **Projection Rebuild API**
+  - A standardized utility to truncate a read-model and safely replay the entire event store through a specific projection.
+
+---
+
+## Later: Distributed Systems & Scale (v1.x)
+
+_Features required for deploying noddde across multi-node, high-throughput microservice environments._
+
+- [ ] **Observability & OpenTelemetry (OTel)**
+  - Native OTel trace context propagation spanning the full asynchronous lifecycle: API -> Command Bus -> Aggregate -> Event Bus -> Saga -> Read Model.
+- [ ] **Distributed Event Bus Adapters**
+  - Official adapters for Kafka, NATS, or RabbitMQ with consumer group support, ensuring events are routed safely across multiple instances.
+- [ ] **Advanced Outbox Management**
+  - Add poison pill detection, exponential backoff, and Dead Letter Queues (DLQ) to the Outbox Relay to handle downstream event bus outages.
+  - Optimize ORM outbox polling with `SKIP LOCKED` to prevent contention in multi-node deployments.
+- [ ] **Saga Timeouts & Compensation Hooks**
+  - Native timeout handlers for process managers to trigger compensating commands if a distributed workflow stalls.
+- [ ] **Global Event Stream**
+  - Cross-aggregate ordering support, enabling global feeds and third-party data lake ingestion.
+
+---
+
+## Future: Ecosystem Integrations
+
+- [ ] **Framework Integrations**
+  - Optional `@noddde/nestjs` and `@noddde/fastify` plugins to drastically reduce setup boilerplate in existing web applications.
+- [ ] **Aggregate Write-Through Caching**
+  - In-memory/Redis caching layers with automatic invalidation to bypass database rehydration for high-throughput aggregates.
+- [ ] **Command Audit Log**
+  - Standardized persistence of every command, its execution duration, and the user/correlation IDs that triggered it.
+
+---
 
 ## Contributing
 
-Items marked with `[ ]` are open for contribution. Each item will have a corresponding spec in `specs/` before implementation begins — see [specs/README.md](specs/README.md) for the spec format and the `/spec` workflow.
+We build `noddde` using a strict spec-driven development pipeline.
 
-If you're interested in picking something up, open an issue to discuss the approach first.
+Items marked with `[ ]` are open for contribution. Each item must have a corresponding spec in the `specs/` directory before implementation begins. See [specs/README.md](./specs/README.md) and our [CLAUDE.md](./CLAUDE.md) for details on our workflow.
+
+If you are interested in picking something up, please open an issue to discuss the architectural approach first.

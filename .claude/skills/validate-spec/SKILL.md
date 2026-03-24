@@ -99,7 +99,7 @@ Any `Not implemented` stubs are a hard failure.
 Run the tests one final time to confirm:
 
 ```bash
-cd packages/core && CODEARTIFACT_AUTH_TOKEN="" npx vitest run --reporter=verbose <test-file>
+cd packages/core && npx vitest run --reporter=verbose <test-file>
 ```
 
 ```bash

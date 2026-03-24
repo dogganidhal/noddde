@@ -44,5 +44,12 @@ jobs:
       - name: Build
         run: yarn build
 
-      - name: Test
-        run: yarn test
+      - name: Test with coverage
+        run: yarn test:coverage
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: packages/core/coverage/coverage-final.json,packages/engine/coverage/coverage-final.json,packages/testing/coverage/coverage-final.json,packages/adapters/drizzle/coverage/coverage-final.json,packages/adapters/prisma/coverage/coverage-final.json,packages/adapters/typeorm/coverage/coverage-final.json
+          fail_ci_if_error: false

@@ -189,7 +189,7 @@ Wait for developer choice, then:
 4. Run the tests:
 
    ```bash
-   cd packages/core && CODEARTIFACT_AUTH_TOKEN="" npx vitest run --reporter=verbose <test-file>
+   cd packages/core && npx vitest run --reporter=verbose <test-file>
    ```
 
 5. **Expect RED.** Categorize results:
@@ -242,7 +242,7 @@ Wait for developer choice, then:
 1. Run tests:
 
    ```bash
-   cd packages/core && CODEARTIFACT_AUTH_TOKEN="" npx vitest run --reporter=verbose <test-file>
+   cd packages/core && npx vitest run --reporter=verbose <test-file>
    ```
 
 2. **If ALL GREEN**: proceed to step 5.
