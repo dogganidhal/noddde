@@ -1,0 +1,69 @@
+name: Feature Request
+description: Propose a new feature or enhancement for noddde
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Motivation
+      description: What problem does this feature solve? Why is it needed?
+      placeholder: Describe the pain point or use case that motivates this feature.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the approach, API surface, or behavior you envision.
+      placeholder: |
+        Describe the solution you'd like. Include code snippets or API examples if helpful.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      description: What must be true for this feature to be considered done?
+      placeholder: |
+        - [ ] Criterion 1
+        - [ ] Criterion 2
+    validations:
+      required: true
+
+  - type: textarea
+    id: implementation-hints
+    attributes:
+      label: Implementation Hints
+      description: Key files, patterns, or architectural considerations.
+      placeholder: |
+        - Key files: `packages/engine/src/domain.ts`
+        - Reuse existing pattern X from Y
+    validations:
+      required: false
+
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of Scope
+      description: What this feature explicitly does NOT include.
+      placeholder: List anything that should be deferred to a follow-up issue.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: package
+    attributes:
+      label: Package
+      description: Which package does this feature primarily affect?
+      options:
+        - "@noddde/core"
+        - "@noddde/engine"
+        - "@noddde/testing"
+        - "@noddde/cli"
+        - "@noddde/adapters (Drizzle/Prisma/TypeORM)"
+        - Multiple packages
+        - Other
+    validations:
+      required: true
