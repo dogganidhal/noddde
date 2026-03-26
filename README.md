@@ -26,18 +26,18 @@ Based on the functional [Decider pattern](https://thinkbeforecoding.com/post/202
 
 Most TypeScript frameworks force you into a corner: either drown in OOP boilerplate (classes, decorators, and DI containers) or commit your entire database to an append-only Event Store. `noddde` offers a pragmatic, functional escape hatch.
 
-* **DDD Without the OOP Boilerplate:** Say goodbye to extending `AggregateRoot` or fighting with `@CommandHandler()` decorators. `noddde` is based entirely on the functional Decider pattern. Aggregates and Sagas are just pure functions, making your core domain incredibly easy to reason about and test.
-* **Pragmatic Hybrid Persistence:** Not every entity needs a historical audit trail. `noddde` lets you mix **State-Stored** aggregates (for simple CRUD entities) and **Event-Sourced** aggregates (for high-value business logic) in the exact same domain, interacting over the same command bus.
-* **The "Dual-Write" Problem, Solved:** Saving to a database and publishing an event usually leads to dropped messages if the server crashes. `noddde` solves this natively with a built-in **Transactional Outbox** and **Unit of Work**, ensuring your aggregate state and outgoing events commit in a single ACID transaction.
-* **Bring Your Own ORM:** No need to migrate to a niche database. `noddde` provides production-ready adapters for the tools you already use: **Drizzle, Prisma, and TypeORM** on top of standard Postgres, MySQL, or SQLite.
-* **Fearless Refactoring:** Zero runtime reflection. Because `noddde` relies entirely on strict TypeScript inference, if you change a command payload or an event schema, your IDE instantly highlights the exact projections, sagas, and tests that need updating.
+- **DDD Without the OOP Boilerplate:** Say goodbye to extending `AggregateRoot` or fighting with `@CommandHandler()` decorators. `noddde` is based entirely on the functional Decider pattern. Aggregates and Sagas are just pure functions, making your core domain incredibly easy to reason about and test.
+- **Pragmatic Hybrid Persistence:** Not every entity needs a historical audit trail. `noddde` lets you mix **State-Stored** aggregates (for simple CRUD entities) and **Event-Sourced** aggregates (for high-value business logic) in the exact same domain, interacting over the same command bus.
+- **The "Dual-Write" Problem, Solved:** Saving to a database and publishing an event usually leads to dropped messages if the server crashes. `noddde` solves this natively with a built-in **Transactional Outbox** and **Unit of Work**, ensuring your aggregate state and outgoing events commit in a single ACID transaction.
+- **Bring Your Own ORM:** No need to migrate to a niche database. `noddde` provides production-ready adapters for the tools you already use: **Drizzle, Prisma, and TypeORM** on top of standard Postgres, MySQL, or SQLite.
+- **Fearless Refactoring:** Zero runtime reflection. Because `noddde` relies entirely on strict TypeScript inference, if you change a command payload or an event schema, your IDE instantly highlights the exact projections, sagas, and tests that need updating.
 
 ## How does noddde compare to the alternatives?
 
 The TypeScript ecosystem generally forces you to choose between heavyweight OOP boilerplate (like NestJS) or committing your entire architecture to Event Sourcing. **noddde is built for the pragmatic middle ground.** We give you the clean, functional modeling of the Decider pattern, but let you keep your relational database and choose your persistence strategy on a per-aggregate basis.
 
 | Feature / Philosophy     | NestJS CQRS                                                       | Emmett                                             | noddde                                                                          |
-|:-------------------------|:------------------------------------------------------------------|:---------------------------------------------------|:--------------------------------------------------------------------------------|
+| :----------------------- | :---------------------------------------------------------------- | :------------------------------------------------- | :------------------------------------------------------------------------------ |
 | **Primary Focus**        | Full application framework modularity.                            | Event Sourcing and Event-Driven systems.           | **Functional DDD & CQRS.**                                                      |
 | **Domain Paradigm**      | Heavy OOP, Base Classes, and `@Decorators`.                       | Pure Functions and Structural Typing.              | **Pure Functions and Structural Typing.**                                       |
 | **Persistence Strategy** | Typically State-Stored (ORMs). ES requires custom implementation. | Event-Sourced by default (EventStoreDB / Streams). | **Hybrid:** Choose State-Stored OR Event-Sourced per aggregate.                 |
@@ -46,7 +46,6 @@ The TypeScript ecosystem generally forces you to choose between heavyweight OOP 
 | **Testing Experience**   | Requires complex DI setup and heavy mocking.                      | Simple `Given / When / Then` BDD testing.          | **Simple `Given / When / Then` BDD testing.**                                   |
 | **Sagas / Workflows**    | Stateful classes listening to event buses.                        | Process Managers reacting to streams.              | **Pure functions** returning commands, executed in a strict Unit of Work.       |
 
-
 ### State-Stored or Event-Sourced: You Decide
 
 Not every aggregate requires an audit log. With `noddde`, you can mix and match. A `User` profile might just be state-stored (overwriting rows in Postgres), while a `Wallet` aggregate in the same domain uses full Event Sourcing.
@@ -54,28 +53,29 @@ Not every aggregate requires an audit log. With `noddde`, you can mix and match.
 ```typescript
 // 1. A State-Stored Aggregate (Just update the state, no events to replay)
 const UserProfile = defineAggregate<UserDef>({
-    // ...
+  // ...
 });
 
 // 2. An Event-Sourced Aggregate (Emit events, replay history)
 const Wallet = defineEventSourcedAggregate<WalletDef>({
-    // ...
+  // ...
 });
 
 // 3. Wire up the right persistence strategy for each aggregate
 const db = drizzle(sqlite);
-const { stateStoredPersistence, eventSourcedPersistence } = createDrizzlePersistence(db);
+const { stateStoredPersistence, eventSourcedPersistence } =
+  createDrizzlePersistence(db);
 
 const engine = defineDomain({
-    writeModel: {
-        aggregates: { UserProfile, Wallet }
+  writeModel: {
+    aggregates: { UserProfile, Wallet },
+  },
+  infrastructure: {
+    aggregatePersistence: {
+      UserProfile: () => stateStoredPersistence,
+      Wallet: () => eventSourcedPersistence,
     },
-    infrastructure: {
-        aggregatePersistence: {
-            UserProfile: () => stateStoredPersistence,
-            Wallet: () => eventSourcedPersistence,
-        }
-    }
+  },
 });
 ```
 
