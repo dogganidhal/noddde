@@ -1,0 +1,55 @@
+name: Spec Proposal
+description: Propose a new behavioral spec for discussion before implementation
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One-paragraph description of the proposed behavior.
+      placeholder: Describe what this spec covers and why it is needed.
+    validations:
+      required: true
+
+  - type: textarea
+    id: requirements
+    attributes:
+      label: Behavioral Requirements
+      description: Numbered list of requirements this spec must enforce.
+      placeholder: |
+        1. The system MUST ...
+        2. When X happens, the system MUST ...
+        3. The system MUST NOT ...
+    validations:
+      required: true
+
+  - type: input
+    id: spec-path
+    attributes:
+      label: Spec Path
+      description: Target path in the `specs/` directory following the mirror convention.
+      placeholder: "specs/engine/domain-shutdown.spec.md"
+    validations:
+      required: true
+
+  - type: textarea
+    id: related-specs
+    attributes:
+      label: Related Specs
+      description: Links to existing specs this interacts with or depends on.
+      placeholder: |
+        - `specs/engine/outbox-relay.spec.md`
+        - `specs/core/persistence/unit-of-work.spec.md`
+    validations:
+      required: false
+
+  - type: textarea
+    id: test-scenarios
+    attributes:
+      label: Test Scenarios
+      description: Initial test ideas or Given-When-Then scenarios.
+      placeholder: |
+        - Given a running domain, when SIGTERM is received, then in-flight commands complete before shutdown
+        - Given an idle domain, when shutdown() is called twice, then the second call is a no-op
+    validations:
+      required: false

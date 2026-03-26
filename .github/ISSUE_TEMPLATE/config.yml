@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & Discussion
+    url: https://github.com/dogganidhal/noddde/discussions
+    about: Ask questions or start a discussion about noddde
+  - name: Spec System
+    url: https://github.com/dogganidhal/noddde/tree/main/specs
+    about: Browse existing behavioral specs before proposing new ones
