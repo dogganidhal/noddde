@@ -273,7 +273,7 @@ export class PrismaOutboxStore implements OutboxStore {
 - Persistence implementations satisfy `EventSourcedAggregatePersistence`, `StateStoredAggregatePersistence`, and `SagaPersistence` from `@noddde/core`.
 - UoW satisfies `UnitOfWork` from `@noddde/core`.
 - Advisory locker satisfies `AggregateLocker` from `@noddde/core`.
-- Factory return type matches the infrastructure shape expected by `configureDomain()`.
+- Factory return type matches the infrastructure shape expected by `DomainWiring`.
 - Snapshot store satisfies `SnapshotStore` from `@noddde/core`.
 - Event-sourced persistence also satisfies `PartialEventLoad` from `@noddde/core`.
 - Outbox store satisfies `OutboxStore` from `@noddde/core`.

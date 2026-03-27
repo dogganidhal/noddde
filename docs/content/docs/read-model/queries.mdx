@@ -206,7 +206,7 @@ Standalone handlers are useful for computed or derived data that does not justif
 Standalone handlers are registered separately in the domain configuration under `readModel.standaloneQueryHandlers`:
 
 ```ts
-const domain = await configureDomain({
+const myDomain = defineDomain({
   writeModel: { aggregates: { BankAccount } },
   readModel: {
     projections: {
@@ -216,10 +216,9 @@ const domain = await configureDomain({
       CalculateInterest: calculateInterestHandler,
     },
   },
-  infrastructure: {
-    /* ... */
-  },
 });
+
+const domain = await wireDomain(myDomain, { /* wiring */ });
 ```
 
 ## The QueryBus Interface

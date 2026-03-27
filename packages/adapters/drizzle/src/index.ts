@@ -79,7 +79,7 @@ export interface DrizzlePersistenceInfrastructure {
  * (SQLite, PostgreSQL, MySQL) — the dialect is determined by the `db`
  * instance and `schema` tables you provide.
  *
- * Pass the returned objects directly to `configureDomain()`.
+ * Pass the returned objects to {@link wireDomain} alongside a {@link defineDomain} definition.
  *
  * @param db - A Drizzle database instance (any dialect).
  * @param schema - Table definitions matching the expected column structure.
@@ -93,18 +93,24 @@ export interface DrizzlePersistenceInfrastructure {
  * import Database from "better-sqlite3";
  * import { createDrizzlePersistence } from "@noddde/drizzle";
  * import { events, aggregateStates, sagaStates } from "@noddde/drizzle/sqlite";
+ * import { defineDomain, wireDomain } from "@noddde/engine";
  *
  * const db = drizzle(new Database("app.db"));
  * const infra = createDrizzlePersistence(db, { events, aggregateStates, sagaStates });
  *
- * const domain = await configureDomain({
+ * const definition = defineDomain({
  *   writeModel: { aggregates: { MyAggregate } },
  *   readModel: { projections: {} },
- *   infrastructure: {
- *     aggregatePersistence: () => infra.eventSourcedPersistence,
- *     sagaPersistence: () => infra.sagaPersistence,
- *     unitOfWorkFactory: () => infra.unitOfWorkFactory,
+ * });
+ *
+ * const domain = await wireDomain(definition, {
+ *   aggregates: {
+ *     persistence: () => infra.eventSourcedPersistence,
  *   },
+ *   sagas: {
+ *     persistence: () => infra.sagaPersistence,
+ *   },
+ *   unitOfWork: () => infra.unitOfWorkFactory,
  * });
  * ```
  */

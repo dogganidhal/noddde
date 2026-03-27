@@ -98,16 +98,25 @@ const OrderFulfillmentSaga = defineSaga<OrderFulfillmentSagaDef>({
 
 ### Domain Configuration
 
-`configureDomain` wires aggregates, projections, sagas, and infrastructure into a running domain:
+`defineDomain` captures the domain structure and `wireDomain` connects it to infrastructure to create a running domain:
 
 ```ts
-const domain = await configureDomain<MyInfrastructure>({
+import { defineDomain, wireDomain } from "@noddde/engine";
+
+const myDomain = defineDomain<MyInfrastructure>({
   writeModel: { aggregates: { BankAccount } },
   readModel: { projections: { BankAccount: BankAccountProjection } },
   processModel: { sagas: { OrderFulfillment: OrderFulfillmentSaga } },
-  infrastructure: {
-    /* persistence, buses, custom infra */
-  },
+});
+
+const domain = await wireDomain(myDomain, {
+  infrastructure: () => ({ /* custom infra */ }),
+  aggregates: { persistence: () => new InMemoryEventSourcedAggregatePersistence() },
+  buses: () => ({
+    commandBus: new InMemoryCommandBus(),
+    eventBus: new EventEmitterEventBus(),
+    queryBus: new InMemoryQueryBus(),
+  }),
 });
 ```
 

@@ -36,18 +36,24 @@ export const BankAccount = defineAggregate<BankAccountDef>({
 });
 ```
 
-The choice is made at configuration time:
+The choice is made at wiring time:
 
 ```ts
+import { wireDomain } from "@noddde/engine";
+
 // Event sourcing — store events, replay on load
-infrastructure: {
-  aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
-},
+await wireDomain(myDomain, {
+  aggregates: {
+    persistence: () => new InMemoryEventSourcedAggregatePersistence(),
+  },
+});
 
 // OR state storage — store final state, load directly
-infrastructure: {
-  aggregatePersistence: () => new InMemoryStateStoredAggregatePersistence(),
-},
+await wireDomain(myDomain, {
+  aggregates: {
+    persistence: () => new InMemoryStateStoredAggregatePersistence(),
+  },
+});
 ```
 
 Benefits:
@@ -76,19 +82,23 @@ Benefits:
 ## Example
 
 ```ts
+import { defineDomain, wireDomain } from "@noddde/engine";
+
+const myDomain = defineDomain<MyInfra>({
+  /* writeModel and readModel */
+});
+
 // Development: in-memory event sourcing for debugging
-const devDomain = await configureDomain<MyInfra>({
-  /* same writeModel and readModel */
-  infrastructure: {
-    aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
+const devDomain = await wireDomain(myDomain, {
+  aggregates: {
+    persistence: () => new InMemoryEventSourcedAggregatePersistence(),
   },
 });
 
 // Production: PostgreSQL event store for full audit trail
-const prodDomain = await configureDomain<MyInfra>({
-  /* same writeModel and readModel */
-  infrastructure: {
-    aggregatePersistence: () => new PostgresEventStore(connectionString),
+const prodDomain = await wireDomain(myDomain, {
+  aggregates: {
+    persistence: () => new PostgresEventStore(connectionString),
   },
 });
 ```

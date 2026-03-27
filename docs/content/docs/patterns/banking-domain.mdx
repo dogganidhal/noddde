@@ -252,11 +252,12 @@ export const BankAccountProjection = defineProjection<BankAccountProjectionDef>(
 
 The `on` map provides one handler per event — the framework narrows the event type for each key. Only events that affect the view need entries; `TransactionProcessed` and `TransactionDeclined` are omitted since they don't change this view. Query handlers are co-located with the projection that builds the view they serve.
 
-## Step 7: Configure and Run
+## Step 7: Define, Wire, and Run
 
 ```ts
 import {
-  configureDomain,
+  defineDomain,
+  wireDomain,
   InMemoryEventSourcedAggregatePersistence,
   InMemoryCommandBus,
   EventEmitterEventBus,
@@ -264,22 +265,25 @@ import {
 } from "@noddde/engine";
 import { randomUUID } from "crypto";
 
-const domain = await configureDomain<BankingInfrastructure>({
+const bankingDomain = defineDomain<BankingInfrastructure>({
   writeModel: { aggregates: { BankAccount } },
   readModel: { projections: { BankAccount: BankAccountProjection } },
-  infrastructure: {
-    aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
-    provideInfrastructure: () => ({
-      logger: new ConsoleLogger(),
-      bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
-      transactionViewRepository: new InMemoryTransactionViewRepository(),
-    }),
-    cqrsInfrastructure: () => ({
-      commandBus: new InMemoryCommandBus(),
-      eventBus: new EventEmitterEventBus(),
-      queryBus: new InMemoryQueryBus(),
-    }),
+});
+
+const domain = await wireDomain(bankingDomain, {
+  infrastructure: () => ({
+    logger: new ConsoleLogger(),
+    bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
+    transactionViewRepository: new InMemoryTransactionViewRepository(),
+  }),
+  aggregates: {
+    persistence: () => new InMemoryEventSourcedAggregatePersistence(),
   },
+  buses: () => ({
+    commandBus: new InMemoryCommandBus(),
+    eventBus: new EventEmitterEventBus(),
+    queryBus: new InMemoryQueryBus(),
+  }),
 });
 
 const accountId = randomUUID();

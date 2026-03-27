@@ -137,16 +137,20 @@ describe("PlaceBid", () => {
 
 ## Production Configuration
 
-In production, provide `SystemClock`:
+In production, provide `SystemClock` via the `infrastructure` field in `wireDomain`:
 
 ```ts
-const domain = await configureDomain<AuctionInfrastructure>({
-  // ...
-  infrastructure: {
-    provideInfrastructure: () => ({
-      clock: new SystemClock(),
-    }),
-  },
+import { defineDomain, wireDomain } from "@noddde/engine";
+
+const auctionDomain = defineDomain<AuctionInfrastructure>({
+  writeModel: { aggregates: { Auction } },
+  readModel: { projections: {} },
+});
+
+const domain = await wireDomain(auctionDomain, {
+  infrastructure: () => ({
+    clock: new SystemClock(),
+  }),
 });
 ```
 

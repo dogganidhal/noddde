@@ -37,8 +37,8 @@ export type ProjectionTypes = {
   /**
    * Optional typed view store for this projection. When present, enables
    * typed `{ views }` injection into query handlers via `ProjectionQueryInfra<T>`.
-   * This is a type-level hint only — the actual view store is provided in the
-   * domain configuration, not in the projection definition.
+   * This is a type-level hint only — the actual view store is provided via
+   * `DomainWiring.projections` in {@link wireDomain}.
    */
   viewStore?: ViewStore;
 };
@@ -117,10 +117,10 @@ type QueryHandlerMap<T extends ProjectionTypes> = {
  * events the projection cares about need entries — unhandled events are
  * silently ignored.
  *
- * View store configuration has moved to the domain runtime wiring
- * (`DomainConfiguration.readModel.projections`). The `viewStore` field
- * in `ProjectionTypes` is a type-level hint only — it enables typed
- * `{ views }` injection into query handlers.
+ * View store configuration lives in `DomainWiring.projections` via
+ * {@link wireDomain}. The `viewStore` field in `ProjectionTypes` is a
+ * type-level hint only — it enables typed `{ views }` injection into
+ * query handlers.
  *
  * Use {@link defineProjection} to create a projection with full type inference.
  *

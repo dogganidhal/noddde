@@ -387,12 +387,12 @@ Event ──> Association Map ──> Load State ──> Handler ──> SagaRea
 
 ## Registering Sagas
 
-Sagas are registered in the `processModel` section of `configureDomain` -- a dedicated top-level key separate from `writeModel` and `readModel`:
+Sagas are registered in the `processModel` section of `defineDomain` -- a dedicated top-level key separate from `writeModel` and `readModel`:
 
 ```ts
-import { configureDomain, InMemorySagaPersistence } from "@noddde/engine";
+import { defineDomain, wireDomain, InMemorySagaPersistence } from "@noddde/engine";
 
-const domain = await configureDomain<EcommerceInfrastructure>({
+const ecommerceDomain = defineDomain<EcommerceInfrastructure>({
   writeModel: {
     aggregates: { Order, Payment, Shipping },
   },
@@ -404,16 +404,17 @@ const domain = await configureDomain<EcommerceInfrastructure>({
       OrderFulfillment: OrderFulfillmentSaga,
     },
   },
-  infrastructure: {
-    aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
-    sagaPersistence: () => new InMemorySagaPersistence(),
-    provideInfrastructure: () => ({
-      /* ... */
-    }),
-    cqrsInfrastructure: () => ({
-      /* ... */
-    }),
+});
+
+const domain = await wireDomain(ecommerceDomain, {
+  infrastructure: () => ({ /* ... */ }),
+  aggregates: {
+    persistence: () => new InMemoryEventSourcedAggregatePersistence(),
   },
+  sagas: {
+    persistence: () => new InMemorySagaPersistence(),
+  },
+  buses: () => ({ /* ... */ }),
 });
 ```
 

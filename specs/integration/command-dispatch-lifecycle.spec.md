@@ -28,7 +28,7 @@ docs:
 - **`Aggregate`** -- provides `initialState`, `commands` (decide), and `apply` (evolve).
 - **`EventSourcedAggregatePersistence` / `StateStoredAggregatePersistence`** -- load prior state/events, persist after command.
 - **`EventBus`** -- publishes events produced by the command handler.
-- **`configureDomain`** -- factory that wires everything together and calls `init()`.
+- **`defineDomain` + `wireDomain`** -- definition and wiring functions that create and initialize the domain.
 
 ## Behavioral Requirements
 
@@ -77,7 +77,8 @@ docs:
 import { describe, it, expect, vi } from "vitest";
 import {
   defineAggregate,
-  configureDomain,
+  defineDomain,
+  wireDomain,
   InMemoryEventSourcedAggregatePersistence,
   InMemoryCommandBus,
   InMemoryQueryBus,
@@ -131,18 +132,20 @@ describe("Command dispatch lifecycle (event-sourced)", () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const eventBus = new EventEmitterEventBus();
 
-    const domain = await configureDomain({
-      writeModel: { aggregates: { Counter } },
-      readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        cqrsInfrastructure: () => ({
+    const domain = await wireDomain(
+      defineDomain({
+        writeModel: { aggregates: { Counter } },
+        readModel: { projections: {} },
+      }),
+      {
+        aggregates: { persistence: () => persistence },
+        buses: () => ({
           commandBus: new InMemoryCommandBus(),
           eventBus,
           queryBus: new InMemoryQueryBus(),
         }),
       },
-    });
+    );
 
     const aggregateId = await domain.dispatchCommand({
       name: "Increment",
@@ -165,18 +168,20 @@ describe("Command dispatch lifecycle (event-sourced)", () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const eventBus = new EventEmitterEventBus();
 
-    const domain = await configureDomain({
-      writeModel: { aggregates: { Counter } },
-      readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        cqrsInfrastructure: () => ({
+    const domain = await wireDomain(
+      defineDomain({
+        writeModel: { aggregates: { Counter } },
+        readModel: { projections: {} },
+      }),
+      {
+        aggregates: { persistence: () => persistence },
+        buses: () => ({
           commandBus: new InMemoryCommandBus(),
           eventBus,
           queryBus: new InMemoryQueryBus(),
         }),
       },
-    });
+    );
 
     await domain.dispatchCommand({
       name: "Increment",
@@ -202,18 +207,20 @@ describe("Command dispatch lifecycle (event-sourced)", () => {
     const eventBus = new EventEmitterEventBus();
     const dispatchSpy = vi.spyOn(eventBus, "dispatch");
 
-    const domain = await configureDomain({
-      writeModel: { aggregates: { Counter } },
-      readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        cqrsInfrastructure: () => ({
+    const domain = await wireDomain(
+      defineDomain({
+        writeModel: { aggregates: { Counter } },
+        readModel: { projections: {} },
+      }),
+      {
+        aggregates: { persistence: () => persistence },
+        buses: () => ({
           commandBus: new InMemoryCommandBus(),
           eventBus,
           queryBus: new InMemoryQueryBus(),
         }),
       },
-    });
+    );
 
     await domain.dispatchCommand({
       name: "Increment",
@@ -235,7 +242,8 @@ describe("Command dispatch lifecycle (event-sourced)", () => {
 import { describe, it, expect } from "vitest";
 import {
   defineAggregate,
-  configureDomain,
+  defineDomain,
+  wireDomain,
   InMemoryStateStoredAggregatePersistence,
   InMemoryCommandBus,
   InMemoryQueryBus,
@@ -249,18 +257,20 @@ describe("First command with state-stored persistence", () => {
   it("should use initialState when no prior state exists", async () => {
     const persistence = new InMemoryStateStoredAggregatePersistence();
 
-    const domain = await configureDomain({
-      writeModel: { aggregates: { Counter } },
-      readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        cqrsInfrastructure: () => ({
+    const domain = await wireDomain(
+      defineDomain({
+        writeModel: { aggregates: { Counter } },
+        readModel: { projections: {} },
+      }),
+      {
+        aggregates: { persistence: () => persistence },
+        buses: () => ({
           commandBus: new InMemoryCommandBus(),
           eventBus: new EventEmitterEventBus(),
           queryBus: new InMemoryQueryBus(),
         }),
       },
-    });
+    );
 
     await domain.dispatchCommand({
       name: "Increment",
@@ -276,18 +286,20 @@ describe("First command with state-stored persistence", () => {
   it("should accumulate state across multiple commands", async () => {
     const persistence = new InMemoryStateStoredAggregatePersistence();
 
-    const domain = await configureDomain({
-      writeModel: { aggregates: { Counter } },
-      readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        cqrsInfrastructure: () => ({
+    const domain = await wireDomain(
+      defineDomain({
+        writeModel: { aggregates: { Counter } },
+        readModel: { projections: {} },
+      }),
+      {
+        aggregates: { persistence: () => persistence },
+        buses: () => ({
           commandBus: new InMemoryCommandBus(),
           eventBus: new EventEmitterEventBus(),
           queryBus: new InMemoryQueryBus(),
         }),
       },
-    });
+    );
 
     await domain.dispatchCommand({
       name: "Increment",
@@ -313,7 +325,8 @@ describe("First command with state-stored persistence", () => {
 import { describe, it, expect, vi } from "vitest";
 import {
   defineAggregate,
-  configureDomain,
+  defineDomain,
+  wireDomain,
   InMemoryEventSourcedAggregatePersistence,
   InMemoryCommandBus,
   InMemoryQueryBus,
@@ -355,18 +368,20 @@ describe("Multiple events from one command", () => {
     const eventBus = new EventEmitterEventBus();
     const dispatchSpy = vi.spyOn(eventBus, "dispatch");
 
-    const domain = await configureDomain({
-      writeModel: { aggregates: { BatchCounter } },
-      readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        cqrsInfrastructure: () => ({
+    const domain = await wireDomain(
+      defineDomain({
+        writeModel: { aggregates: { BatchCounter } },
+        readModel: { projections: {} },
+      }),
+      {
+        aggregates: { persistence: () => persistence },
+        buses: () => ({
           commandBus: new InMemoryCommandBus(),
           eventBus,
           queryBus: new InMemoryQueryBus(),
         }),
       },
-    });
+    );
 
     await domain.dispatchCommand({
       name: "IncrementTwice",
@@ -390,7 +405,8 @@ describe("Multiple events from one command", () => {
 import { describe, it, expect } from "vitest";
 import {
   defineAggregate,
-  configureDomain,
+  defineDomain,
+  wireDomain,
   InMemoryEventSourcedAggregatePersistence,
   InMemoryCommandBus,
   InMemoryQueryBus,
@@ -434,18 +450,20 @@ describe("Async command handler", () => {
   it("should await the command handler and process the result", async () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
 
-    const domain = await configureDomain({
-      writeModel: { aggregates: { AsyncAggregate } },
-      readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        cqrsInfrastructure: () => ({
+    const domain = await wireDomain(
+      defineDomain({
+        writeModel: { aggregates: { AsyncAggregate } },
+        readModel: { projections: {} },
+      }),
+      {
+        aggregates: { persistence: () => persistence },
+        buses: () => ({
           commandBus: new InMemoryCommandBus(),
           eventBus: new EventEmitterEventBus(),
           queryBus: new InMemoryQueryBus(),
         }),
       },
-    });
+    );
 
     const id = await domain.dispatchCommand({
       name: "DoAsync",
@@ -468,7 +486,8 @@ describe("Async command handler", () => {
 import { describe, it, expect, vi } from "vitest";
 import {
   defineAggregate,
-  configureDomain,
+  defineDomain,
+  wireDomain,
   InMemoryEventSourcedAggregatePersistence,
   InMemorySnapshotStore,
   InMemoryCommandBus,
@@ -514,20 +533,23 @@ describe("Snapshot-aware command dispatch", () => {
     const snapshotStore = new InMemorySnapshotStore();
     const eventBus = new EventEmitterEventBus();
 
-    const domain = await configureDomain({
-      writeModel: { aggregates: { Counter } },
-      readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        snapshotStore: () => snapshotStore,
-        snapshotStrategy: everyNEvents(3),
-        cqrsInfrastructure: () => ({
+    const domain = await wireDomain(
+      defineDomain({
+        writeModel: { aggregates: { Counter } },
+        readModel: { projections: {} },
+      }),
+      {
+        aggregates: {
+          persistence: () => persistence,
+          snapshots: { store: () => snapshotStore, strategy: everyNEvents(3) },
+        },
+        buses: () => ({
           commandBus: new InMemoryCommandBus(),
           eventBus,
           queryBus: new InMemoryQueryBus(),
         }),
       },
-    });
+    );
 
     // Dispatch 3 commands — snapshot should trigger after the 3rd
     await domain.dispatchCommand({
@@ -574,20 +596,23 @@ describe("Snapshot-aware command dispatch", () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const snapshotStore = new InMemorySnapshotStore();
 
-    const domain = await configureDomain({
-      writeModel: { aggregates: { Counter } },
-      readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        snapshotStore: () => snapshotStore,
-        snapshotStrategy: everyNEvents(2),
-        cqrsInfrastructure: () => ({
+    const domain = await wireDomain(
+      defineDomain({
+        writeModel: { aggregates: { Counter } },
+        readModel: { projections: {} },
+      }),
+      {
+        aggregates: {
+          persistence: () => persistence,
+          snapshots: { store: () => snapshotStore, strategy: everyNEvents(2) },
+        },
+        buses: () => ({
           commandBus: new InMemoryCommandBus(),
           eventBus: new EventEmitterEventBus(),
           queryBus: new InMemoryQueryBus(),
         }),
       },
-    });
+    );
 
     // Dispatch 5 commands: snapshots at version 2 and 4
     for (let i = 1; i <= 5; i++) {
@@ -619,7 +644,8 @@ describe("Snapshot-aware command dispatch", () => {
 import { describe, it, expect } from "vitest";
 import {
   defineAggregate,
-  configureDomain,
+  defineDomain,
+  wireDomain,
   InMemoryEventSourcedAggregatePersistence,
   InMemoryCommandBus,
   InMemoryQueryBus,
@@ -633,19 +659,21 @@ describe("Command dispatch without snapshot (regression check)", () => {
   it("should work identically without snapshot store configured", async () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
 
-    const domain = await configureDomain({
-      writeModel: { aggregates: { Counter } },
-      readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        // No snapshotStore, no snapshotStrategy
-        cqrsInfrastructure: () => ({
+    const domain = await wireDomain(
+      defineDomain({
+        writeModel: { aggregates: { Counter } },
+        readModel: { projections: {} },
+      }),
+      {
+        aggregates: { persistence: () => persistence },
+        // No snapshots configured
+        buses: () => ({
           commandBus: new InMemoryCommandBus(),
           eventBus: new EventEmitterEventBus(),
           queryBus: new InMemoryQueryBus(),
         }),
       },
-    });
+    );
 
     await domain.dispatchCommand({
       name: "Increment",

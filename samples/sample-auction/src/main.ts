@@ -5,7 +5,8 @@
  * A simple auction domain with a single aggregate.
  */
 import {
-  configureDomain,
+  defineDomain,
+  wireDomain,
   EventEmitterEventBus,
   InMemoryCommandBus,
   InMemoryQueryBus,
@@ -50,26 +51,30 @@ const main = async () => {
     sagaStates,
   });
 
-  // ── Configure the domain with Drizzle persistence ────────────
-  const domain = await configureDomain<AuctionInfrastructure>({
+  // ── Define the domain structure (pure, sync) ────────────────
+  const auctionDomain = defineDomain<AuctionInfrastructure>({
     writeModel: {
       aggregates: { Auction },
     },
     readModel: {
       projections: {},
     },
-    infrastructure: {
-      aggregatePersistence: () => drizzleInfra.eventSourcedPersistence,
-      unitOfWorkFactory: () => drizzleInfra.unitOfWorkFactory,
-      provideInfrastructure: () => ({
-        clock: new SystemClock(),
-      }),
-      cqrsInfrastructure: () => ({
-        commandBus: new InMemoryCommandBus(),
-        eventBus: new EventEmitterEventBus(),
-        queryBus: new InMemoryQueryBus(),
-      }),
+  });
+
+  // ── Wire with infrastructure (async) ───────────────────────
+  const domain = await wireDomain(auctionDomain, {
+    infrastructure: () => ({
+      clock: new SystemClock(),
+    }),
+    aggregates: {
+      persistence: () => drizzleInfra.eventSourcedPersistence,
     },
+    buses: () => ({
+      commandBus: new InMemoryCommandBus(),
+      eventBus: new EventEmitterEventBus(),
+      queryBus: new InMemoryQueryBus(),
+    }),
+    unitOfWork: () => drizzleInfra.unitOfWorkFactory,
   });
 
   // ── Run the auction scenario ─────────────────────────────────

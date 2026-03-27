@@ -5,7 +5,8 @@
  * A bank account domain with projections and queries.
  */
 import {
-  configureDomain,
+  defineDomain,
+  wireDomain,
   EventEmitterEventBus,
   InMemoryCommandBus,
   InMemoryQueryBus,
@@ -28,8 +29,8 @@ const main = async () => {
   const prisma = new PrismaClient();
   const prismaInfra = createPrismaPersistence(prisma);
 
-  // ── Configure the domain with Prisma persistence ─────────────
-  const domain = await configureDomain<BankingInfrastructure>({
+  // ── Define the domain structure (pure, sync) ─────────────────
+  const bankingDomain = defineDomain<BankingInfrastructure>({
     writeModel: {
       aggregates: {
         BankAccount,
@@ -40,21 +41,25 @@ const main = async () => {
         BankAccount: BankAccountProjection,
       },
     },
-    infrastructure: {
-      aggregatePersistence: () => prismaInfra.eventSourcedPersistence,
-      unitOfWorkFactory: () => prismaInfra.unitOfWorkFactory,
-      provideInfrastructure: () => ({
-        clock: new SystemClock(),
-        logger: new ConsoleLogger(),
-        bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
-        transactionViewRepository: new InMemoryTransactionViewRepository(),
-      }),
-      cqrsInfrastructure: () => ({
-        commandBus: new InMemoryCommandBus(),
-        eventBus: new EventEmitterEventBus(),
-        queryBus: new InMemoryQueryBus(),
-      }),
+  });
+
+  // ── Wire with infrastructure (async) ────────────────────────
+  const domain = await wireDomain(bankingDomain, {
+    infrastructure: () => ({
+      clock: new SystemClock(),
+      logger: new ConsoleLogger(),
+      bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
+      transactionViewRepository: new InMemoryTransactionViewRepository(),
+    }),
+    aggregates: {
+      persistence: () => prismaInfra.eventSourcedPersistence,
     },
+    buses: () => ({
+      commandBus: new InMemoryCommandBus(),
+      eventBus: new EventEmitterEventBus(),
+      queryBus: new InMemoryQueryBus(),
+    }),
+    unitOfWork: () => prismaInfra.unitOfWorkFactory,
   });
 
   // ── Run the banking scenario ─────────────────────────────────

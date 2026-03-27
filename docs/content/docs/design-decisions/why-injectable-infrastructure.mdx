@@ -96,13 +96,11 @@ const result = BankAccount.commands.AuthorizeTransaction(command, state, {
 Infrastructure is created once in the domain configuration and injected everywhere:
 
 ```ts
-infrastructure: {
-  provideInfrastructure: () => ({
-    clock: new SystemClock(),        // Production: real clock
-    // OR
-    clock: new FixedClock(testTime), // Testing: deterministic clock
-  }),
-},
+infrastructure: () => ({
+  clock: new SystemClock(),        // Production: real clock
+  // OR
+  clock: new FixedClock(testTime), // Testing: deterministic clock
+}),
 ```
 
 This is the [Factory pattern](/docs/running/infrastructure) — create once, inject everywhere.
@@ -133,8 +131,8 @@ commands: {
   },
 },
 
-// Provide it in configuration
-provideInfrastructure: () => ({
+// Provide it in wiring
+infrastructure: () => ({
   logger: new ConsoleLogger(),
   bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
   transactionViewRepository: new InMemoryTransactionViewRepository(),

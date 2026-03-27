@@ -8,7 +8,8 @@
 import { MySqlContainer } from "@testcontainers/mysql";
 import { execSync } from "child_process";
 import {
-  configureDomain,
+  defineDomain,
+  wireDomain,
   EventEmitterEventBus,
   InMemoryCommandBus,
   InMemoryQueryBus,
@@ -62,27 +63,31 @@ async function main() {
     const prismaInfra = createPrismaPersistence(prisma);
     const locker = new PrismaAdvisoryLocker(prisma, "mysql");
 
-    // Step 4: Configure domain with pessimistic concurrency
-    const domain = await configureDomain<VenueInfrastructure>({
+    // Step 4: Define domain structure (pure, sync)
+    const venueDomain = defineDomain<VenueInfrastructure>({
       writeModel: { aggregates: { Venue } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => prismaInfra.eventSourcedPersistence,
-        unitOfWorkFactory: () => prismaInfra.unitOfWorkFactory,
-        aggregateConcurrency: {
+    });
+
+    // Wire with infrastructure (async)
+    const domain = await wireDomain(venueDomain, {
+      infrastructure: () => ({
+        clock: new SystemClock(),
+      }),
+      aggregates: {
+        persistence: () => prismaInfra.eventSourcedPersistence,
+        concurrency: {
           strategy: "pessimistic",
           locker,
           lockTimeoutMs: 5000,
         },
-        provideInfrastructure: () => ({
-          clock: new SystemClock(),
-        }),
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
       },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+      unitOfWork: () => prismaInfra.unitOfWorkFactory,
     });
     console.log(
       "Domain configured: pessimistic concurrency with MySQL GET_LOCK (timeout: 5s)\n",

@@ -135,7 +135,7 @@ export class [BusName] implements [BusInterface] {
 
 ## Integration Points
 
-- This bus is provided via `DomainConfiguration.infrastructure.cqrsInfrastructure()`.
+- This bus is provided via `DomainWiring.buses()`.
 - EventBus: consumed by projection wiring and saga wiring in `Domain.init()`.
 - CommandBus: consumed by `Domain.dispatchCommand()` and saga command dispatch.
 - QueryBus: consumed by projection query handlers and direct query dispatch.

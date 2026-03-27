@@ -212,18 +212,23 @@ The aggregate records that the bid happened (as an event) but the state remains 
 ## Running the Example
 
 ```ts
-const domain = await configureDomain<AuctionInfrastructure>({
+import { defineDomain, wireDomain } from "@noddde/engine";
+
+const auctionDomain = defineDomain<AuctionInfrastructure>({
   writeModel: { aggregates: { Auction } },
   readModel: { projections: {} },
-  infrastructure: {
-    aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
-    provideInfrastructure: () => ({ clock: new SystemClock() }),
-    cqrsInfrastructure: () => ({
-      commandBus: new InMemoryCommandBus(),
-      eventBus: new EventEmitterEventBus(),
-      queryBus: new InMemoryQueryBus(),
-    }),
+});
+
+const domain = await wireDomain(auctionDomain, {
+  infrastructure: () => ({ clock: new SystemClock() }),
+  aggregates: {
+    persistence: () => new InMemoryEventSourcedAggregatePersistence(),
   },
+  buses: () => ({
+    commandBus: new InMemoryCommandBus(),
+    eventBus: new EventEmitterEventBus(),
+    queryBus: new InMemoryQueryBus(),
+  }),
 });
 
 const auctionId = randomUUID();

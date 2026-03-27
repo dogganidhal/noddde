@@ -58,7 +58,7 @@ export class InMemoryUnitOfWork implements UnitOfWork {
 /**
  * Factory function that creates a new {@link InMemoryUnitOfWork} instance.
  * Matches the {@link UnitOfWorkFactory} type and can be used as the
- * default value for `DomainConfiguration.infrastructure.unitOfWorkFactory`.
+ * default value for `DomainWiring.unitOfWork`.
  */
 export const createInMemoryUnitOfWork: UnitOfWorkFactory = () =>
   new InMemoryUnitOfWork();

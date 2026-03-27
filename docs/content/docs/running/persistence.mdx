@@ -383,7 +383,7 @@ This means you can:
 
 - Start with state storage for simplicity, then migrate to event sourcing without changing your aggregate
 - Use event sourcing in production and state storage in tests
-- Switch strategies by changing only the `aggregatePersistence` configuration
+- Switch strategies by changing only the `aggregates.persistence` wiring
 - Mix strategies in the same domain using per-aggregate persistence
 
 The strategy is a configuration choice, not a modeling choice.

@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { DefineCommands, DefineEvents, DefineQueries } from "@noddde/core";
 import { defineAggregate, defineProjection } from "@noddde/core";
 import {
-  configureDomain,
+  defineDomain,
+  wireDomain,
   EventEmitterEventBus,
   InMemoryCommandBus,
   InMemoryEventSourcedAggregatePersistence,
@@ -102,24 +103,21 @@ describe("Event-to-projection flow", () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const eventBus = new EventEmitterEventBus();
 
-    const domain = await configureDomain({
+    const definition = defineDomain({
       writeModel: { aggregates: { Todo } },
-      readModel: {
-        projections: {
-          TodoProjection: {
-            projection: TodoProjection,
-            viewStore: () => todoViewStore,
-          },
-        },
+      readModel: { projections: { TodoProjection } },
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: { persistence: () => persistence },
+      projections: {
+        TodoProjection: { viewStore: () => todoViewStore },
       },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus,
-          queryBus: new InMemoryQueryBus(),
-        }),
-      },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus,
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     await domain.dispatchCommand({
@@ -241,7 +239,7 @@ describe("Multiple projections for same event", () => {
   it("should invoke both projection reducers when the event is published", async () => {
     const eventBus = new EventEmitterEventBus();
 
-    const domain = await configureDomain({
+    const definition = defineDomain({
       writeModel: { aggregates: { Item } },
       readModel: {
         projections: {
@@ -255,15 +253,21 @@ describe("Multiple projections for same event", () => {
           },
         },
       },
-      infrastructure: {
-        aggregatePersistence: () =>
-          new InMemoryEventSourcedAggregatePersistence(),
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus,
-          queryBus: new InMemoryQueryBus(),
-        }),
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => new InMemoryEventSourcedAggregatePersistence(),
       },
+      projections: {
+        CatalogProjection: { viewStore: () => catalogViewStore },
+        PriceIndexProjection: { viewStore: () => priceViewStore },
+      },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus,
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     await domain.dispatchCommand({
@@ -336,25 +340,23 @@ describe("Async projection reducer", () => {
   });
 
   it("should await the async reducer before completing event dispatch", async () => {
-    const domain = await configureDomain({
+    const definition = defineDomain({
       writeModel: { aggregates: { Logger } },
-      readModel: {
-        projections: {
-          AsyncLogProjection: {
-            projection: AsyncLogProjection,
-            viewStore: () => asyncLogViewStore,
-          },
-        },
+      readModel: { projections: { AsyncLogProjection } },
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => new InMemoryEventSourcedAggregatePersistence(),
       },
-      infrastructure: {
-        aggregatePersistence: () =>
-          new InMemoryEventSourcedAggregatePersistence(),
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
+      projections: {
+        AsyncLogProjection: { viewStore: () => asyncLogViewStore },
       },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     await domain.dispatchCommand({
@@ -441,25 +443,23 @@ describe("Sequential events produce cumulative view", () => {
   });
 
   it("should accumulate view state across multiple event dispatches", async () => {
-    const domain = await configureDomain({
+    const definition = defineDomain({
       writeModel: { aggregates: { Account } },
-      readModel: {
-        projections: {
-          BalanceProjection: {
-            projection: BalanceProjection,
-            viewStore: () => balanceViewStore,
-          },
-        },
+      readModel: { projections: { BalanceProjection } },
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => new InMemoryEventSourcedAggregatePersistence(),
       },
-      infrastructure: {
-        aggregatePersistence: () =>
-          new InMemoryEventSourcedAggregatePersistence(),
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
+      projections: {
+        BalanceProjection: { viewStore: () => balanceViewStore },
       },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     await domain.dispatchCommand({

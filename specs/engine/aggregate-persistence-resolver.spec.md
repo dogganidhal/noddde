@@ -10,7 +10,7 @@ depends_on:
 
 # AggregatePersistenceResolver
 
-> `AggregatePersistenceResolver` is the strategy interface for resolving the correct aggregate persistence at command dispatch time. It follows the same strategy pattern as `ConcurrencyStrategy`. Two implementations are provided: `GlobalAggregatePersistenceResolver` (all aggregates share one persistence) and `PerAggregatePersistenceResolver` (each aggregate has its own persistence). Both are engine-internal — users configure persistence via `DomainConfiguration.infrastructure.aggregatePersistence`.
+> `AggregatePersistenceResolver` is the strategy interface for resolving the correct aggregate persistence at command dispatch time. It follows the same strategy pattern as `ConcurrencyStrategy`. Two implementations are provided: `GlobalAggregatePersistenceResolver` (all aggregates share one persistence) and `PerAggregatePersistenceResolver` (each aggregate has its own persistence). Both are engine-internal — users configure persistence via `DomainWiring.aggregates.persistence`.
 
 ## Type Contract
 

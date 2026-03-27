@@ -173,7 +173,7 @@ The framework should define a clear discrimination mechanism so that custom pers
 - All persistence operations are async. Even in-memory implementations wrap results in Promises for interface consistency.
 - Persistence implementations must be stateless across different `(name, id)` pairs -- there is no cross-aggregate or cross-saga transactional guarantee at the interface level.
 - The persistence layer does not enforce business rules. It stores and retrieves data as-is. Validation is the domain's responsibility.
-- Persistence is configured via factory functions in `DomainConfiguration.infrastructure`. The factory is called once during `Domain.init()`.
+- Persistence is configured via factory functions in `DomainWiring`. The factory is called once during `Domain.init()`.
 - `save()` must throw `ConcurrencyError` if `actualVersion !== expectedVersion`. This is a hard invariant for all implementations.
 - For event-sourced persistence, the version is always equal to the number of stored events (stream length). `expectedVersion` on `save()` must equal the current stream length.
 - For state-stored persistence, the version starts at 0 for new aggregates and increments by 1 on each successful `save()`.
@@ -189,8 +189,8 @@ The framework should define a clear discrimination mechanism so that custom pers
 
 ## Integration Points
 
-- **DomainConfiguration.infrastructure.aggregatePersistence** -- Factory function returning a `PersistenceConfiguration` (either state-stored or event-sourced).
-- **DomainConfiguration.infrastructure.sagaPersistence** -- Factory function returning a `SagaPersistence`.
+- **DomainWiring.aggregates.persistence** -- Factory function returning a `PersistenceConfiguration` (either state-stored or event-sourced).
+- **DomainWiring.sagas.persistence** -- Factory function returning a `SagaPersistence`.
 - **Domain.init()** -- Calls both factories and stores the results for use during command dispatch and saga handling.
 - **Domain.dispatchCommand()** -- Uses `PersistenceConfiguration` to load/save aggregate state or events.
 - **Saga event handling** -- Uses `SagaPersistence` to load/save saga instance state.

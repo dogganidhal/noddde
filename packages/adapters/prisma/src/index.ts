@@ -55,18 +55,24 @@ export interface PrismaPersistenceInfrastructure {
  * ```ts
  * import { PrismaClient } from "@prisma/client";
  * import { createPrismaPersistence } from "@noddde/prisma";
+ * import { defineDomain, wireDomain } from "@noddde/engine";
  *
  * const prisma = new PrismaClient();
  * const infra = createPrismaPersistence(prisma);
  *
- * const domain = await configureDomain({
+ * const definition = defineDomain({
  *   writeModel: { aggregates: { MyAggregate } },
  *   readModel: { projections: {} },
- *   infrastructure: {
- *     aggregatePersistence: () => infra.eventSourcedPersistence,
- *     sagaPersistence: () => infra.sagaPersistence,
- *     unitOfWorkFactory: () => infra.unitOfWorkFactory,
+ * });
+ *
+ * const domain = await wireDomain(definition, {
+ *   aggregates: {
+ *     persistence: () => infra.eventSourcedPersistence,
  *   },
+ *   sagas: {
+ *     persistence: () => infra.sagaPersistence,
+ *   },
+ *   unitOfWork: () => infra.unitOfWorkFactory,
  * });
  * ```
  */

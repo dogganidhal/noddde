@@ -19,15 +19,15 @@ import { MSSQLLocker } from "./mssql/advisory-locker";
  * ```ts
  * import { DataSource } from "typeorm";
  * import { TypeORMAdvisoryLocker } from "@noddde/typeorm";
+ * import { wireDomain } from "@noddde/engine";
  *
  * const dataSource = new DataSource({ type: "postgres", ... });
  * await dataSource.initialize();
  * const locker = new TypeORMAdvisoryLocker(dataSource);
  *
- * const domain = await configureDomain({
- *   // ...
- *   infrastructure: {
- *     aggregateConcurrency: {
+ * const domain = await wireDomain(definition, {
+ *   aggregates: {
+ *     concurrency: {
  *       strategy: "pessimistic",
  *       locker,
  *       lockTimeoutMs: 5000,

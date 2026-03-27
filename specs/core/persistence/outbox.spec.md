@@ -132,7 +132,7 @@ interface OutboxStore {
 - **CommandLifecycleExecutor** -- The Domain's `onEventsProduced` callback creates `OutboxEntry` objects from enriched events and enlists `save()` on the UoW.
 - **OutboxRelay** -- Polls `loadUnpublished()`, dispatches events via `EventBus`, then calls `markPublished()`.
 - **Domain post-dispatch** -- After dispatching events in the happy path, calls `markPublishedByEventIds()` (best-effort) so the relay doesn't re-dispatch them.
-- **DomainConfiguration** -- Configured via `infrastructure.outbox.store` factory.
+- **DomainWiring** -- Configured via `outbox` factory.
 
 ## Test Scenarios
 

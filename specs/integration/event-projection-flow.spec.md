@@ -18,13 +18,13 @@ docs:
 
 # Event-to-Projection Flow
 
-> Validates the end-to-end flow from event publication to projection view update: when an event is published on the EventBus, all registered projection `on` map handlers for that event name are invoked with the full event object and the current view, producing an updated view. Subsequently, query handlers serve the updated view. This spec verifies that `configureDomain` correctly wires projection subscriptions and that the `projection.on` entries / query contract holds.
+> Validates the end-to-end flow from event publication to projection view update: when an event is published on the EventBus, all registered projection `on` map handlers for that event name are invoked with the full event object and the current view, producing an updated view. Subsequently, query handlers serve the updated view. This spec verifies that `wireDomain` correctly wires projection subscriptions and that the `projection.on` entries / query contract holds.
 
 ## Involved Components
 
 - **`EventBus`** (`EventEmitterEventBus`) -- publishes domain events; projections subscribe via event name.
 - **`Projection`** -- defines `on` map (event name -> `{ id?, reduce }` entry) and `queryHandlers` (query name -> read function).
-- **`Domain` / `configureDomain`** -- wires `projection.on` entries as EventBus subscribers during `init()`.
+- **`Domain` / `defineDomain` + `wireDomain`** -- wires `projection.on` entries as EventBus subscribers during `init()`.
 - **`QueryBus`** (`InMemoryQueryBus`) -- routes queries to the projection's query handlers.
 
 ## Behavioral Requirements
@@ -66,7 +66,8 @@ import { describe, it, expect } from "vitest";
 import {
   defineAggregate,
   defineProjection,
-  configureDomain,
+  defineDomain,
+  wireDomain,
   InMemoryEventSourcedAggregatePersistence,
   InMemoryCommandBus,
   InMemoryQueryBus,
@@ -163,18 +164,20 @@ describe("Event-to-projection flow", () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const eventBus = new EventEmitterEventBus();
 
-    const domain = await configureDomain({
-      writeModel: { aggregates: { Todo } },
-      readModel: { projections: { TodoProjection } },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        cqrsInfrastructure: () => ({
+    const domain = await wireDomain(
+      defineDomain({
+        writeModel: { aggregates: { Todo } },
+        readModel: { projections: { TodoProjection } },
+      }),
+      {
+        aggregates: { persistence: () => persistence },
+        buses: () => ({
           commandBus: new InMemoryCommandBus(),
           eventBus,
           queryBus: new InMemoryQueryBus(),
         }),
       },
-    });
+    );
 
     await domain.dispatchCommand({
       name: "AddTodo",
@@ -206,7 +209,8 @@ describe("Event-to-projection flow", () => {
 import { describe, it, expect, vi } from "vitest";
 import {
   defineProjection,
-  configureDomain,
+  defineDomain,
+  wireDomain,
   InMemoryEventSourcedAggregatePersistence,
   InMemoryCommandBus,
   InMemoryQueryBus,
@@ -291,21 +295,24 @@ describe("Multiple projections for same event", () => {
   it("should invoke both projection reduce handlers when the event is published", async () => {
     const eventBus = new EventEmitterEventBus();
 
-    const domain = await configureDomain({
-      writeModel: { aggregates: { Item } },
-      readModel: {
-        projections: { CatalogProjection, PriceIndexProjection },
-      },
-      infrastructure: {
-        aggregatePersistence: () =>
-          new InMemoryEventSourcedAggregatePersistence(),
-        cqrsInfrastructure: () => ({
+    const domain = await wireDomain(
+      defineDomain({
+        writeModel: { aggregates: { Item } },
+        readModel: {
+          projections: { CatalogProjection, PriceIndexProjection },
+        },
+      }),
+      {
+        aggregates: {
+          persistence: () => new InMemoryEventSourcedAggregatePersistence(),
+        },
+        buses: () => ({
           commandBus: new InMemoryCommandBus(),
           eventBus,
           queryBus: new InMemoryQueryBus(),
         }),
       },
-    });
+    );
 
     await domain.dispatchCommand({
       name: "CreateItem",
@@ -326,7 +333,8 @@ describe("Multiple projections for same event", () => {
 import { describe, it, expect } from "vitest";
 import {
   defineProjection,
-  configureDomain,
+  defineDomain,
+  wireDomain,
   InMemoryEventSourcedAggregatePersistence,
   InMemoryCommandBus,
   InMemoryQueryBus,
@@ -383,19 +391,22 @@ const AsyncLogProjection = defineProjection<{
 
 describe("Async projection reduce handler", () => {
   it("should await the async reduce handler before completing event dispatch", async () => {
-    const domain = await configureDomain({
-      writeModel: { aggregates: { Logger } },
-      readModel: { projections: { AsyncLogProjection } },
-      infrastructure: {
-        aggregatePersistence: () =>
-          new InMemoryEventSourcedAggregatePersistence(),
-        cqrsInfrastructure: () => ({
+    const domain = await wireDomain(
+      defineDomain({
+        writeModel: { aggregates: { Logger } },
+        readModel: { projections: { AsyncLogProjection } },
+      }),
+      {
+        aggregates: {
+          persistence: () => new InMemoryEventSourcedAggregatePersistence(),
+        },
+        buses: () => ({
           commandBus: new InMemoryCommandBus(),
           eventBus: new EventEmitterEventBus(),
           queryBus: new InMemoryQueryBus(),
         }),
       },
-    });
+    );
 
     await domain.dispatchCommand({
       name: "LogEntry",
@@ -416,7 +427,8 @@ import { describe, it, expect } from "vitest";
 import {
   defineAggregate,
   defineProjection,
-  configureDomain,
+  defineDomain,
+  wireDomain,
   InMemoryEventSourcedAggregatePersistence,
   InMemoryCommandBus,
   InMemoryQueryBus,
@@ -486,19 +498,22 @@ const BalanceProjection = defineProjection<{
 
 describe("Sequential events produce cumulative view", () => {
   it("should accumulate view state across multiple event dispatches", async () => {
-    const domain = await configureDomain({
-      writeModel: { aggregates: { Account } },
-      readModel: { projections: { BalanceProjection } },
-      infrastructure: {
-        aggregatePersistence: () =>
-          new InMemoryEventSourcedAggregatePersistence(),
-        cqrsInfrastructure: () => ({
+    const domain = await wireDomain(
+      defineDomain({
+        writeModel: { aggregates: { Account } },
+        readModel: { projections: { BalanceProjection } },
+      }),
+      {
+        aggregates: {
+          persistence: () => new InMemoryEventSourcedAggregatePersistence(),
+        },
+        buses: () => ({
           commandBus: new InMemoryCommandBus(),
           eventBus: new EventEmitterEventBus(),
           queryBus: new InMemoryQueryBus(),
         }),
       },
-    });
+    );
 
     await domain.dispatchCommand({
       name: "Deposit",

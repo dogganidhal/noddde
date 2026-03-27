@@ -266,7 +266,7 @@ All three dialects define the same logical schema with the same table names (`no
 
 - Persistence implementations satisfy `EventSourcedAggregatePersistence`, `StateStoredAggregatePersistence`, and `SagaPersistence` from `@noddde/core`.
 - UoW satisfies `UnitOfWork` from `@noddde/core`.
-- Factory return type matches the infrastructure shape expected by `configureDomain()`.
+- Factory return type matches the infrastructure shape expected by `DomainWiring`.
 - Schema exports are convenience-only — developers can define their own tables matching the expected column structure.
 - Outbox store satisfies `OutboxStore` from `@noddde/core`.
 

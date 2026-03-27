@@ -144,7 +144,7 @@ export class [PersistenceName] implements [PersistenceInterface] {
 
 ## Integration Points
 
-- This persistence is provided via `DomainConfiguration.infrastructure.aggregatePersistence()` or `sagaPersistence()`.
+- This persistence is provided via `DomainWiring.aggregates.persistence()` or `DomainWiring.sagas.persistence()`.
 - Used by `Domain.dispatchCommand()` to load/save aggregate state.
 - Used by saga wiring to load/save saga instance state.
 

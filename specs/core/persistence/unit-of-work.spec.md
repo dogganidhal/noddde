@@ -86,7 +86,7 @@ interface UnitOfWork {
  * Called once per unit of work boundary (per command dispatch, saga reaction,
  * or explicit `domain.withUnitOfWork()` call).
  *
- * Configured via `DomainConfiguration.infrastructure.unitOfWorkFactory`.
+ * Configured via `DomainWiring.unitOfWork`.
  */
 type UnitOfWorkFactory = () => UnitOfWork;
 ```
@@ -125,7 +125,7 @@ type UnitOfWorkFactory = () => UnitOfWork;
 
 ## Integration Points
 
-- **DomainConfiguration.infrastructure.unitOfWorkFactory** — Optional factory function. If not provided, the Domain defaults to `createInMemoryUnitOfWork` from `@noddde/engine`.
+- **DomainWiring.unitOfWork** — Optional factory function. If not provided, the Domain defaults to `createInMemoryUnitOfWork` from `@noddde/engine`.
 - **Domain.executeAggregateCommand()** — Creates or reuses a UoW for each command execution. Enlists persistence operations and defers events.
 - **Domain.executeSagaHandler()** — Creates a UoW that spans saga state persistence + all commands dispatched by the saga reaction.
 - **Domain.withUnitOfWork()** — Creates a UoW for explicit multi-command units of work. All commands dispatched within the callback share the same UoW.

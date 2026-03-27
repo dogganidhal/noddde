@@ -12,7 +12,6 @@ import type {
 } from "@noddde/core";
 import { defineAggregate, defineProjection, defineSaga } from "@noddde/core";
 import {
-  configureDomain,
   defineDomain,
   wireDomain,
   createInMemoryUnitOfWork,
@@ -31,21 +30,22 @@ import {
 import { everyNEvents } from "@noddde/core";
 
 // ============================================================
-// configureDomain creates and initializes a domain
+// wireDomain creates and initializes a domain
 // ============================================================
 
-describe("configureDomain", () => {
+describe("wireDomain", () => {
   it("should return an initialized Domain instance", async () => {
-    const domain = await configureDomain<Infrastructure>({
+    const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: {} },
       readModel: { projections: {} },
-      infrastructure: {
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
-      },
+    });
+
+    const domain = await wireDomain(definition, {
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     expect(domain).toBeInstanceOf(Domain);
@@ -67,19 +67,20 @@ describe("Domain.init", () => {
   it("should merge custom infrastructure with CQRS infrastructure", async () => {
     const fixedDate = new Date("2025-01-01T00:00:00Z");
 
-    const domain = await configureDomain<TestInfrastructure>({
+    const definition = defineDomain<TestInfrastructure>({
       writeModel: { aggregates: {} },
       readModel: { projections: {} },
-      infrastructure: {
-        provideInfrastructure: () => ({
-          clock: { now: () => fixedDate },
-        }),
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
-      },
+    });
+
+    const domain = await wireDomain(definition, {
+      infrastructure: () => ({
+        clock: { now: () => fixedDate },
+      }),
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     expect(domain.infrastructure.clock.now()).toBe(fixedDate);
@@ -143,19 +144,22 @@ describe("Domain.dispatchCommand", () => {
       publishedEvents.push(event);
     });
 
-    const domain = await configureDomain<Infrastructure>({
+    const definition = defineDomain<Infrastructure>({
       writeModel: {
         aggregates: { Counter },
       },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus,
-          queryBus: new InMemoryQueryBus(),
-        }),
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => persistence,
       },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus,
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     // Create the counter
@@ -245,17 +249,20 @@ describe("Domain.dispatchCommand", () => {
   it("should replay events to rebuild state before executing a command", async () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
 
-    const domain = await configureDomain<Infrastructure>({
+    const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: { BankAccount } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => persistence,
       },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     await domain.dispatchCommand({
@@ -330,16 +337,17 @@ const ItemProjection = defineProjection<ItemProjectionTypes>({
 
 describe("Domain.init - projection query handler registration", () => {
   it("should wire projection query handlers to the query bus", async () => {
-    const domain = await configureDomain<Infrastructure>({
+    const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: {} },
       readModel: { projections: { ItemProjection } },
-      infrastructure: {
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
-      },
+    });
+
+    const domain = await wireDomain(definition, {
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     const result = await domain.infrastructure.queryBus.dispatch({
@@ -432,19 +440,24 @@ describe("Domain - saga integration", () => {
     const sagaPersistence = new InMemorySagaPersistence();
     const aggregatePersistence = new InMemoryEventSourcedAggregatePersistence();
 
-    const domain = await configureDomain<Infrastructure>({
+    const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: { OrderAggregate } },
       readModel: { projections: {} },
       processModel: { sagas: { OrderFulfillmentSaga } },
-      infrastructure: {
-        aggregatePersistence: () => aggregatePersistence,
-        sagaPersistence: () => sagaPersistence,
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => aggregatePersistence,
       },
+      sagas: {
+        persistence: () => sagaPersistence,
+      },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     // Place an order -- should trigger the saga
@@ -474,16 +487,17 @@ describe("Domain - saga integration", () => {
 // init throws when a factory function fails
 // ============================================================
 
-describe("configureDomain - error handling", () => {
+describe("wireDomain - error handling", () => {
   it("should propagate errors from infrastructure factories", async () => {
+    const definition = defineDomain<Infrastructure>({
+      writeModel: { aggregates: {} },
+      readModel: { projections: {} },
+    });
+
     await expect(
-      configureDomain<Infrastructure>({
-        writeModel: { aggregates: {} },
-        readModel: { projections: {} },
-        infrastructure: {
-          provideInfrastructure: () => {
-            throw new Error("Database connection failed");
-          },
+      wireDomain(definition, {
+        infrastructure: () => {
+          throw new Error("Database connection failed");
         },
       }),
     ).rejects.toThrow("Database connection failed");
@@ -527,17 +541,20 @@ describe("Domain - state-stored persistence", () => {
   it("should use state-stored persistence to save aggregate snapshots", async () => {
     const persistence = new InMemoryStateStoredAggregatePersistence();
 
-    const domain = await configureDomain<Infrastructure>({
+    const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: { TodoList } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => persistence,
       },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     await domain.dispatchCommand({
@@ -576,7 +593,7 @@ describe("Domain - standalone command handlers", () => {
   it("should invoke standalone handler with merged infrastructure", async () => {
     const sendSpy = vi.fn();
 
-    const domain = await configureDomain<
+    const definition = defineDomain<
       NotificationInfrastructure,
       NotifyCommand
     >({
@@ -589,16 +606,17 @@ describe("Domain - standalone command handlers", () => {
         },
       },
       readModel: { projections: {} },
-      infrastructure: {
-        provideInfrastructure: () => ({
-          notifier: { send: sendSpy },
-        }),
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
-      },
+    });
+
+    const domain = await wireDomain(definition, {
+      infrastructure: () => ({
+        notifier: { send: sendSpy },
+      }),
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     await domain.infrastructure.commandBus.dispatch({
@@ -651,17 +669,20 @@ describe("Domain - persistence failure", () => {
       },
     };
 
-    const domain = await configureDomain<Infrastructure>({
+    const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: { SimpleAggregate } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => failingPersistence,
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus,
-          queryBus: new InMemoryQueryBus(),
-        }),
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => failingPersistence,
       },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus,
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     await expect(
@@ -718,16 +739,17 @@ const ProductProjection = defineProjection<ProductProjectionTypes>({
 
 describe("Domain.dispatchQuery", () => {
   it("should delegate to the query bus and return the handler result", async () => {
-    const domain = await configureDomain<Infrastructure>({
+    const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: {} },
       readModel: { projections: { ProductProjection } },
-      infrastructure: {
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
-      },
+    });
+
+    const domain = await wireDomain(definition, {
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     const result = await domain.dispatchQuery({
@@ -752,16 +774,17 @@ describe("Domain.dispatchQuery", () => {
 
 describe("Domain.dispatchQuery - error propagation", () => {
   it("should propagate query bus errors when no handler is registered", async () => {
-    const domain = await configureDomain<Infrastructure>({
+    const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: {} },
       readModel: { projections: {} },
-      infrastructure: {
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
-      },
+    });
+
+    const domain = await wireDomain(definition, {
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     await expect(
@@ -790,17 +813,20 @@ describe("Domain.withUnitOfWork", () => {
       publishedEvents.push(event);
     });
 
-    const domain = await configureDomain<Infrastructure>({
+    const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus,
-          queryBus: new InMemoryQueryBus(),
-        }),
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => persistence,
       },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus,
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     await domain.withUnitOfWork(async () => {
@@ -840,17 +866,20 @@ describe("Domain.withUnitOfWork", () => {
       timeline.push("publish:CounterCreated");
     });
 
-    const domain = await configureDomain<Infrastructure>({
+    const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus,
-          queryBus: new InMemoryQueryBus(),
-        }),
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => persistence,
       },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus,
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     await domain.withUnitOfWork(async () => {
@@ -900,17 +929,20 @@ describe("Domain.withUnitOfWork", () => {
       },
     });
 
-    const domain = await configureDomain<Infrastructure>({
+    const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: { BrokenCounter } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus,
-          queryBus: new InMemoryQueryBus(),
-        }),
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => persistence,
       },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus,
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     await expect(
@@ -933,16 +965,17 @@ describe("Domain.withUnitOfWork", () => {
   });
 
   it("should throw on nested units of work", async () => {
-    const domain = await configureDomain<Infrastructure>({
+    const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: {} },
       readModel: { projections: {} },
-      infrastructure: {
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
-      },
+    });
+
+    const domain = await wireDomain(definition, {
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     await expect(
@@ -955,18 +988,20 @@ describe("Domain.withUnitOfWork", () => {
   });
 
   it("should return the value from the unit of work function", async () => {
-    const domain = await configureDomain<Infrastructure>({
+    const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () =>
-          new InMemoryEventSourcedAggregatePersistence(),
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => new InMemoryEventSourcedAggregatePersistence(),
       },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     const result = await domain.withUnitOfWork(async () => {
@@ -990,25 +1025,27 @@ describe("Domain - custom unitOfWorkFactory", () => {
     const factoryCalls: number[] = [];
     let callCount = 0;
 
-    const domain = await configureDomain<Infrastructure>({
+    const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () =>
-          new InMemoryEventSourcedAggregatePersistence(),
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
-        unitOfWorkFactory: () => {
-          // Return a factory that tracks calls
-          return () => {
-            callCount++;
-            factoryCalls.push(callCount);
-            return createInMemoryUnitOfWork();
-          };
-        },
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => new InMemoryEventSourcedAggregatePersistence(),
+      },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+      unitOfWork: () => {
+        // Return a factory that tracks calls
+        return () => {
+          callCount++;
+          factoryCalls.push(callCount);
+          return createInMemoryUnitOfWork();
+        };
       },
     });
 
@@ -1031,21 +1068,24 @@ describe("Domain - pessimistic concurrency", () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const locker = new InMemoryAggregateLocker();
 
-    const domain = await configureDomain<Infrastructure>({
+    const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        aggregateConcurrency: {
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => persistence,
+        concurrency: {
           strategy: "pessimistic",
           locker,
         },
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
       },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     await domain.dispatchCommand({
@@ -1082,21 +1122,24 @@ describe("Domain - pessimistic concurrency", () => {
       },
     });
 
-    const domain = await configureDomain<Infrastructure>({
+    const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: { FailingCounter } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        aggregateConcurrency: {
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => persistence,
+        concurrency: {
           strategy: "pessimistic",
           locker,
         },
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
       },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     // First command succeeds (create)
@@ -1129,21 +1172,24 @@ describe("Domain - pessimistic concurrency", () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const locker = new InMemoryAggregateLocker();
 
-    const domain = await configureDomain<Infrastructure>({
+    const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        aggregateConcurrency: {
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => persistence,
+        concurrency: {
           strategy: "pessimistic",
           locker,
         },
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
       },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     // Create the aggregate first
@@ -1188,18 +1234,21 @@ describe("Idempotent command processing", () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const idempotencyStore = new InMemoryIdempotencyStore();
 
-    const domain = await configureDomain<Infrastructure>({
+    const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        idempotencyStore: () => idempotencyStore,
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => persistence,
       },
+      idempotency: () => idempotencyStore,
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     // First dispatch — should process normally
@@ -1225,17 +1274,18 @@ describe("Idempotent command processing", () => {
   it("should process first command with commandId and record it", async () => {
     const idempotencyStore = new InMemoryIdempotencyStore();
 
-    const domain = await configureDomain<Infrastructure>({
+    const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
-      infrastructure: {
-        idempotencyStore: () => idempotencyStore,
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
-      },
+    });
+
+    const domain = await wireDomain(definition, {
+      idempotency: () => idempotencyStore,
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     await domain.dispatchCommand({
@@ -1252,18 +1302,21 @@ describe("Idempotent command processing", () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const idempotencyStore = new InMemoryIdempotencyStore();
 
-    const domain = await configureDomain<Infrastructure>({
+    const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        idempotencyStore: () => idempotencyStore,
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => persistence,
       },
+      idempotency: () => idempotencyStore,
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     // Dispatch twice without commandId — both should process
@@ -1297,18 +1350,21 @@ describe("Idempotent command processing", () => {
       },
     };
 
-    const domain = await configureDomain<Infrastructure>({
+    const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => failingPersistence as any,
-        idempotencyStore: () => idempotencyStore,
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => failingPersistence as any,
       },
+      idempotency: () => idempotencyStore,
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     // Command should fail due to persistence failure
@@ -1337,20 +1393,25 @@ describe("Per-aggregate persistence", () => {
     const esPersistence = new InMemoryEventSourcedAggregatePersistence();
     const ssPersistence = new InMemoryStateStoredAggregatePersistence();
 
-    const domain = await configureDomain<Infrastructure>({
+    const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: { Counter, BankAccount } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: {
-          Counter: () => esPersistence,
-          BankAccount: () => ssPersistence,
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        Counter: {
+          persistence: () => esPersistence,
         },
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
+        BankAccount: {
+          persistence: () => ssPersistence,
+        },
       },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     await domain.dispatchCommand({
@@ -1376,62 +1437,68 @@ describe("Per-aggregate persistence", () => {
   });
 });
 
-describe("Per-aggregate persistence validation", () => {
-  it("should throw if per-aggregate persistence is missing entries for registered aggregates", async () => {
-    await expect(
-      configureDomain<Infrastructure>({
-        writeModel: { aggregates: { Counter, BankAccount } },
-        readModel: { projections: {} },
-        infrastructure: {
-          aggregatePersistence: {
-            Counter: () => new InMemoryEventSourcedAggregatePersistence(),
-          } as any,
-          cqrsInfrastructure: () => ({
-            commandBus: new InMemoryCommandBus(),
-            eventBus: new EventEmitterEventBus(),
-            queryBus: new InMemoryQueryBus(),
-          }),
-        },
-      }),
-    ).rejects.toThrow(/missing.*BankAccount/i);
-  });
+describe("Per-aggregate persistence via wireDomain", () => {
+  it("should fill in-memory defaults for aggregates without explicit persistence", async () => {
+    const esPersistence = new InMemoryEventSourcedAggregatePersistence();
 
-  it("should throw if per-aggregate persistence references unknown aggregates", async () => {
-    await expect(
-      configureDomain<Infrastructure>({
-        writeModel: { aggregates: { Counter } },
-        readModel: { projections: {} },
-        infrastructure: {
-          aggregatePersistence: {
-            Counter: () => new InMemoryEventSourcedAggregatePersistence(),
-            NonExistent: () => new InMemoryEventSourcedAggregatePersistence(),
-          } as any,
-          cqrsInfrastructure: () => ({
-            commandBus: new InMemoryCommandBus(),
-            eventBus: new EventEmitterEventBus(),
-            queryBus: new InMemoryQueryBus(),
-          }),
+    const definition = defineDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter, BankAccount } },
+      readModel: { projections: {} },
+    });
+
+    // Only provide persistence for Counter — BankAccount should get in-memory default
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        Counter: {
+          persistence: () => esPersistence,
         },
+        BankAccount: {},
+      },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
       }),
-    ).rejects.toThrow(/unknown.*NonExistent/i);
+    });
+
+    // Counter uses the provided persistence
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "c-1",
+      payload: { by: 5 },
+    });
+    const counterEvents = await esPersistence.load("Counter", "c-1");
+    expect(counterEvents).toHaveLength(1);
+
+    // BankAccount works with in-memory default
+    await domain.dispatchCommand({
+      name: "Deposit",
+      targetAggregateId: "acc-1",
+      payload: { amount: 100 },
+    });
+
+    expect(domain).toBeInstanceOf(Domain);
   });
 });
 
-describe("Domain-wide persistence (backward compatibility)", () => {
+describe("Domain-wide persistence", () => {
   it("should use a single persistence factory for all aggregates", async () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
 
-    const domain = await configureDomain<Infrastructure>({
+    const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => persistence,
       },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     await domain.dispatchCommand({
@@ -1454,20 +1521,25 @@ describe("Per-aggregate persistence factory resolution", () => {
       async () => new InMemoryStateStoredAggregatePersistence(),
     );
 
-    await configureDomain<Infrastructure>({
+    const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: { Counter, BankAccount } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: {
-          Counter: esFactory,
-          BankAccount: ssFactory,
+    });
+
+    await wireDomain(definition, {
+      aggregates: {
+        Counter: {
+          persistence: esFactory,
         },
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
+        BankAccount: {
+          persistence: ssFactory,
+        },
       },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     expect(esFactory).toHaveBeenCalledOnce();
@@ -1479,22 +1551,29 @@ describe("Mixed persistence with snapshots", () => {
   it("should only create snapshots for event-sourced aggregates", async () => {
     const snapshotStore = new InMemorySnapshotStore();
 
-    const domain = await configureDomain<Infrastructure>({
+    const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: { Counter, BankAccount } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: {
-          Counter: () => new InMemoryEventSourcedAggregatePersistence(),
-          BankAccount: () => new InMemoryStateStoredAggregatePersistence(),
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        Counter: {
+          persistence: () => new InMemoryEventSourcedAggregatePersistence(),
+          snapshots: {
+            store: () => snapshotStore,
+            strategy: everyNEvents(1),
+          },
         },
-        snapshotStore: () => snapshotStore,
-        snapshotStrategy: everyNEvents(1),
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
+        BankAccount: {
+          persistence: () => new InMemoryStateStoredAggregatePersistence(),
+        },
       },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     // Dispatch to event-sourced aggregate

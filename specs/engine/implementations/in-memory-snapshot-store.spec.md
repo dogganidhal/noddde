@@ -53,7 +53,7 @@ class InMemorySnapshotStore implements SnapshotStore {
 
 ## Integration Points
 
-- **DomainConfiguration.infrastructure.snapshotStore** -- Factory function that creates and returns an `InMemorySnapshotStore`.
+- **DomainWiring.aggregates.snapshots** -- Factory function that creates and returns an `InMemorySnapshotStore`.
 - **Domain.executeCommandLifecycle()** -- The domain loads the snapshot before loading events, and saves a new snapshot after successful commit if the strategy triggers.
 
 ## Test Scenarios

@@ -283,9 +283,9 @@ This is useful for building views that span multiple domain concepts, such as an
 Projections are registered in the `readModel.projections` map of the domain configuration:
 
 ```ts
-import { configureDomain } from "@noddde/engine";
+import { defineDomain, wireDomain } from "@noddde/engine";
 
-const domain = await configureDomain<BankingInfrastructure>({
+const bankingDomain = defineDomain<BankingInfrastructure>({
   writeModel: {
     aggregates: { BankAccount },
   },
@@ -300,10 +300,9 @@ const domain = await configureDomain<BankingInfrastructure>({
       TransactionHistory: TransactionHistoryProjection,
     },
   },
-  infrastructure: {
-    /* ... */
-  },
 });
+
+const domain = await wireDomain(bankingDomain, { /* wiring */ });
 ```
 
 The key in the projections map (e.g., `"AccountBalance"`) is the projection's name. It does not need to match the aggregate name. Passing `{ projection, viewStore }` connects the projection to a view store from your infrastructure, enabling automatic view persistence and `{ views }` injection into query handlers.

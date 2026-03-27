@@ -61,7 +61,7 @@ class InMemoryIdempotencyStore implements IdempotencyStore {
 ## Integration Points
 
 - Implements `IdempotencyStore` from `@noddde/core`.
-- Used by `Domain` when configured via `DomainConfiguration.infrastructure.idempotencyStore`.
+- Used by `Domain` when configured via `DomainWiring.idempotency`.
 - Follows the same `Map<string, T>` + composite key pattern as `InMemorySnapshotStore`, `InMemorySagaPersistence`, etc.
 
 ## Test Scenarios

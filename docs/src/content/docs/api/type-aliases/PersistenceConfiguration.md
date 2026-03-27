@@ -9,4 +9,4 @@ title: "PersistenceConfiguration"
 
 Defined in: [persistence/index.ts:102](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/persistence/index.ts#L102)
 
-Union of the two aggregate persistence strategies. Used in `DomainConfiguration` to allow either approach.
+Union of the two aggregate persistence strategies. Used in `DomainWiring` to allow either approach.

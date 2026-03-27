@@ -8,7 +8,8 @@ import {
   snapshots,
 } from "@noddde/drizzle/sqlite";
 import {
-  configureDomain,
+  defineDomain,
+  wireDomain,
   EventEmitterEventBus,
   InMemoryCommandBus,
   InMemoryQueryBus,
@@ -101,7 +102,8 @@ export async function createTestEnvironment() {
   const guestHistoryViewStore = new InMemoryViewStore<GuestHistoryView>();
   const revenueViewStore = new InMemoryViewStore<RevenueView>();
 
-  const domain = await configureDomain<
+  // Define the domain structure (pure, sync)
+  const hotelDomain = defineDomain<
     HotelInfrastructure,
     Command,
     SearchQuery
@@ -126,33 +128,57 @@ export async function createTestEnvironment() {
         PaymentProcessing: PaymentProcessingSaga,
       },
     },
-    infrastructure: {
-      aggregatePersistence: {
-        Room: () => drizzleInfra.eventSourcedPersistence,
-        Booking: () => drizzleInfra.eventSourcedPersistence,
-        Inventory: () => drizzleInfra.stateStoredPersistence,
-      } as any,
-      aggregateConcurrency: { maxRetries: 3 },
-      sagaPersistence: () => drizzleInfra.sagaPersistence,
-      snapshotStore: () => drizzleInfra.snapshotStore!,
-      snapshotStrategy: everyNEvents(50),
-      idempotencyStore: () => new InMemoryIdempotencyStore(),
-      unitOfWorkFactory: () => drizzleInfra.unitOfWorkFactory,
-      provideInfrastructure: (): HotelInfrastructure => ({
-        clock: new FixedClock(new Date("2026-04-01T10:00:00Z")),
-        emailService,
-        smsService,
-        paymentGateway,
-        roomAvailabilityViewStore,
-        guestHistoryViewStore,
-        revenueViewStore,
-      }),
-      cqrsInfrastructure: () => ({
-        commandBus: new InMemoryCommandBus(),
-        eventBus: new EventEmitterEventBus(),
-        queryBus: new InMemoryQueryBus(),
-      }),
+  });
+
+  // Wire with infrastructure (async)
+  const domain = await wireDomain(hotelDomain, {
+    infrastructure: (): HotelInfrastructure => ({
+      clock: new FixedClock(new Date("2026-04-01T10:00:00Z")),
+      emailService,
+      smsService,
+      paymentGateway,
+      roomAvailabilityViewStore,
+      guestHistoryViewStore,
+      revenueViewStore,
+    }),
+    aggregates: {
+      Room: {
+        persistence: () => drizzleInfra.eventSourcedPersistence,
+        concurrency: { maxRetries: 3 },
+        snapshots: {
+          store: () => drizzleInfra.snapshotStore!,
+          strategy: everyNEvents(50),
+        },
+      },
+      Booking: {
+        persistence: () => drizzleInfra.eventSourcedPersistence,
+        concurrency: { maxRetries: 3 },
+      },
+      Inventory: {
+        persistence: () => drizzleInfra.stateStoredPersistence,
+      },
     },
+    projections: {
+      RoomAvailability: {
+        viewStore: () => roomAvailabilityViewStore,
+      },
+      GuestHistory: {
+        viewStore: () => guestHistoryViewStore,
+      },
+      Revenue: {
+        viewStore: () => revenueViewStore,
+      },
+    },
+    sagas: {
+      persistence: () => drizzleInfra.sagaPersistence,
+    },
+    buses: () => ({
+      commandBus: new InMemoryCommandBus(),
+      eventBus: new EventEmitterEventBus(),
+      queryBus: new InMemoryQueryBus(),
+    }),
+    unitOfWork: () => drizzleInfra.unitOfWorkFactory,
+    idempotency: () => new InMemoryIdempotencyStore(),
   });
 
   const app = createApp(domain);

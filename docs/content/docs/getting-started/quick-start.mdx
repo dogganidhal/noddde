@@ -9,7 +9,7 @@ description: Install noddde and build your first aggregate — a bank account wi
 npm install @noddde/core @noddde/engine
 ```
 
-`@noddde/core` provides the type definitions, identity functions, and interfaces for defining your domain. `@noddde/engine` provides the runtime — `configureDomain`, in-memory buses, and persistence.
+`@noddde/core` provides the type definitions, identity functions, and interfaces for defining your domain. `@noddde/engine` provides the runtime — `defineDomain`, `wireDomain`, in-memory buses, and persistence.
 
 **Requirements**: Node.js >= 18, TypeScript >= 5.3 with strict mode enabled:
 
@@ -187,37 +187,28 @@ export const BankAccount = defineAggregate<BankAccountDef>({
 });
 ```
 
-## Step 6: Configure the Domain
+## Step 6: Define and Wire the Domain
 
-Wire the aggregate into a running domain with in-memory infrastructure:
+Define the domain structure, then wire it with in-memory infrastructure:
 
 ```ts
-import {
-  configureDomain,
-  InMemoryCommandBus,
-  EventEmitterEventBus,
-  InMemoryQueryBus,
-  InMemoryEventSourcedAggregatePersistence,
-} from "@noddde/engine";
+import { defineDomain, wireDomain } from "@noddde/engine";
 
-const domain = await configureDomain({
+// Define the domain structure (pure, sync)
+const bankingDomain = defineDomain({
   writeModel: {
     aggregates: { BankAccount },
   },
   readModel: {
     projections: {},
   },
-  infrastructure: {
-    aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
-    provideInfrastructure: () => ({}),
-    cqrsInfrastructure: () => ({
-      commandBus: new InMemoryCommandBus(),
-      eventBus: new EventEmitterEventBus(),
-      queryBus: new InMemoryQueryBus(),
-    }),
-  },
 });
+
+// Wire with infrastructure and get a running Domain instance
+const domain = await wireDomain(bankingDomain);
 ```
+
+That is it -- `wireDomain` with no second argument uses in-memory defaults for everything: persistence, buses, and infrastructure. This is the fastest path to a working domain.
 
 ## Step 7: Dispatch Commands
 

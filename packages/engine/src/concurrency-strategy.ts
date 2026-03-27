@@ -7,7 +7,7 @@ import { ConcurrencyError } from "@noddde/core";
  * The Domain delegates to a strategy instance during command dispatch.
  *
  * @internal Not exported — users configure concurrency via
- * `DomainConfiguration.infrastructure.aggregateConcurrency`.
+ * {@link AggregateWiring.concurrency} in {@link DomainWiring}.
  */
 export interface ConcurrencyStrategy {
   /**

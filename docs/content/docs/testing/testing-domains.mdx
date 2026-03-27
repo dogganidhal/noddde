@@ -3,7 +3,7 @@ title: Testing Domains
 description: Using testDomain for zero-boilerplate slice and integration tests with built-in spies.
 ---
 
-The `testDomain` harness from `@noddde/testing` creates a fully wired domain with in-memory implementations and spy instrumentation. It eliminates the 15-20 lines of `configureDomain` boilerplate that every integration test otherwise requires.
+The `testDomain` harness from `@noddde/testing` creates a fully wired domain with in-memory implementations and spy instrumentation. It eliminates the boilerplate of `defineDomain` + `wireDomain` that every integration test otherwise requires.
 
 ## testDomain
 
@@ -207,18 +207,18 @@ const summary = await orderSummaryViewStore.load("o-1");
 expect(summary?.status).toBe("confirmed");
 ```
 
-## When to Use testDomain vs. configureDomain
+## When to Use testDomain vs. defineDomain + wireDomain
 
-| Scenario                             | Use                                           |
-| ------------------------------------ | --------------------------------------------- |
-| Testing handler logic in isolation   | `testAggregate`, `testProjection`, `testSaga` |
-| Testing multiple components together | `testDomain`                                  |
-| Custom persistence strategies        | `configureDomain` from `@noddde/engine`       |
-| Custom bus implementations           | `configureDomain` from `@noddde/engine`       |
-| Production-like environment tests    | `configureDomain` from `@noddde/engine`       |
+| Scenario                             | Use                                                       |
+| ------------------------------------ | --------------------------------------------------------- |
+| Testing handler logic in isolation   | `testAggregate`, `testProjection`, `testSaga`             |
+| Testing multiple components together | `testDomain`                                              |
+| Custom persistence strategies        | `defineDomain` + `wireDomain` from `@noddde/engine`      |
+| Custom bus implementations           | `defineDomain` + `wireDomain` from `@noddde/engine`      |
+| Production-like environment tests    | `defineDomain` + `wireDomain` from `@noddde/engine`      |
 
 ## Next Steps
 
 - [Testing Aggregates and Projections](/docs/testing/testing-aggregates-and-projections) -- Unit-level aggregate and projection testing
 - [Testing Sagas](/docs/testing/testing-sagas) -- Unit-level saga testing
-- [Domain Configuration](/docs/running/domain-configuration) -- Full `configureDomain` reference
+- [Domain Configuration](/docs/running/domain-configuration) -- Full `defineDomain` + `wireDomain` reference

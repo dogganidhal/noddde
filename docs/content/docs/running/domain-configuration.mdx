@@ -478,26 +478,6 @@ const account = await domain.dispatchQuery({
 });
 ```
 
-## Migrating from `configureDomain`
-
-`configureDomain` is deprecated but still works. To migrate:
-
-1. Extract the `writeModel`, `readModel`, and `processModel` into a `defineDomain` call
-2. Map `infrastructure.*` fields to the `DomainWiring` shape:
-
-| Old (`DomainConfiguration.infrastructure.*`) | New (`DomainWiring.*`) |
-| --- | --- |
-| `provideInfrastructure` | `infrastructure` |
-| `aggregatePersistence` | `aggregates.persistence` or `aggregates.{name}.persistence` |
-| `aggregateConcurrency` | `aggregates.concurrency` or `aggregates.{name}.concurrency` |
-| `snapshotStore` + `snapshotStrategy` | `aggregates.snapshots` or `aggregates.{name}.snapshots` |
-| `cqrsInfrastructure` | `buses` |
-| `sagaPersistence` | `sagas.persistence` |
-| `unitOfWorkFactory` | `unitOfWork` |
-| `idempotencyStore` | `idempotency` |
-| `outbox` | `outbox` |
-| `metadataProvider` (top-level) | `metadataProvider` |
-
 ## Next Steps
 
 - [Infrastructure](/docs/running/infrastructure) -- The infrastructure providers in detail

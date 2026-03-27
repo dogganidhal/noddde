@@ -194,20 +194,18 @@ All providers are factory functions (not raw values). This is intentional:
 - **Clean isolation** -- Each test can create fresh infrastructure
 
 ```ts
-infrastructure: {
-  provideInfrastructure: async () => {
-    const dbConnection = await connectToDatabase();
-    return {
-      logger: new ConsoleLogger(),
-      bankAccountRepo: new PostgresBankAccountRepository(dbConnection),
-    };
-  },
-  cqrsInfrastructure: async (infra) => ({
-    commandBus: await createRabbitMQCommandBus(),
-    eventBus: await createKafkaEventBus(),
-    queryBus: new InMemoryQueryBus(),
-  }),
+infrastructure: async () => {
+  const dbConnection = await connectToDatabase();
+  return {
+    logger: new ConsoleLogger(),
+    bankAccountRepo: new PostgresBankAccountRepository(dbConnection),
+  };
 },
+buses: async () => ({
+  commandBus: await createRabbitMQCommandBus(),
+  eventBus: await createKafkaEventBus(),
+  queryBus: new InMemoryQueryBus(),
+}),
 ```
 
 ## Provider Execution Order
@@ -246,15 +244,15 @@ class LoggingCommandBus implements CommandBus {
   }
 }
 
-// In the provider:
-cqrsInfrastructure: (infra) => ({
+// In the wiring:
+buses: (infra) => ({
   commandBus: new LoggingCommandBus(new InMemoryCommandBus(), infra.logger),
   eventBus: new EventEmitterEventBus(),
   queryBus: new InMemoryQueryBus(),
 }),
 ```
 
-Notice how `cqrsInfrastructure` receives the custom infrastructure as a parameter. This allows the logging bus to use the same logger that command handlers use.
+Notice how `buses` receives the custom infrastructure as a parameter. This allows the logging bus to use the same logger that command handlers use.
 
 ## Testing with Different Infrastructure
 
