@@ -560,8 +560,11 @@ export class Domain<
       resolvedProjections.set(name, projection);
       const wiringViewStore = wiring.projections?.[name];
 
-      if (wiringViewStore) {
-        const storeInstance = wiringViewStore.viewStore(this._infrastructure);
+      const viewStoreFactory = wiringViewStore
+        ? wiringViewStore.viewStore
+        : projection.viewStore;
+      if (viewStoreFactory) {
+        const storeInstance = viewStoreFactory(this._infrastructure);
         resolvedViewStores.set(name, storeInstance);
         // Validate: every on entry must have id when viewStore is present
         for (const [eventName, handler] of Object.entries(projection.on)) {

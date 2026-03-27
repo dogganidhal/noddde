@@ -104,6 +104,18 @@ type QueryHandlerMap<T extends ProjectionTypes> = {
   >;
 };
 
+/**
+ * Factory function that resolves a view store from user infrastructure.
+ * When `T` has a typed `viewStore` field in its `ProjectionTypes`, the
+ * factory returns that specific view store type. Otherwise, it returns
+ * a generic `ViewStore<T["view"]>`.
+ */
+type ViewStoreFactory<T extends ProjectionTypes> = T extends {
+  viewStore: infer VS extends ViewStore;
+}
+  ? (infrastructure: T["infrastructure"]) => VS
+  : (infrastructure: T["infrastructure"]) => ViewStore<T["view"]>;
+
 // ---- Projection definition ----
 
 /**
@@ -171,6 +183,13 @@ export interface Projection<T extends ProjectionTypes = ProjectionTypes> {
    * `initialView` is used as the starting state for the reducer.
    */
   initialView?: T["view"];
+
+  /**
+   * Optional factory that resolves the view store from user infrastructure.
+   * Can be provided here for convenience, or via `DomainWiring.projections`
+   * in {@link wireDomain} (which takes priority if both are set).
+   */
+  viewStore?: ViewStoreFactory<T>;
 
   /**
    * Consistency mode for view persistence:
