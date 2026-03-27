@@ -195,7 +195,12 @@ const defineDomain: <
     TStandaloneQuery,
     TAggregates
   >,
-) => DomainDefinition<TInfrastructure, TStandaloneCommand, TStandaloneQuery, TAggregates>;
+) => DomainDefinition<
+  TInfrastructure,
+  TStandaloneCommand,
+  TStandaloneQuery,
+  TAggregates
+>;
 
 /**
  * Per-aggregate runtime configuration. Groups persistence, concurrency,
@@ -220,11 +225,10 @@ type AggregateWiring = {
  * Per-projection runtime configuration. Extracts view store wiring from
  * the projection definition into the wiring layer.
  */
-type ProjectionWiring<
-  TInfrastructure extends Infrastructure = Infrastructure,
-> = {
-  viewStore: (infrastructure: TInfrastructure) => ViewStore;
-};
+type ProjectionWiring<TInfrastructure extends Infrastructure = Infrastructure> =
+  {
+    viewStore: (infrastructure: TInfrastructure) => ViewStore;
+  };
 
 /**
  * Runtime infrastructure wiring. Connects a DomainDefinition to persistence,
@@ -237,7 +241,9 @@ type DomainWiring<
   /** Factory for user-provided infrastructure services. */
   infrastructure?: () => TInfrastructure | Promise<TInfrastructure>;
   /** Aggregate runtime — global AggregateWiring OR per-aggregate record. */
-  aggregates?: AggregateWiring | Record<keyof TAggregates & string, AggregateWiring>;
+  aggregates?:
+    | AggregateWiring
+    | Record<keyof TAggregates & string, AggregateWiring>;
   /** Projection runtime — per-projection view store wiring. */
   projections?: Record<string, ProjectionWiring<TInfrastructure>>;
   /** Saga runtime. Required if processModel has sagas. */
@@ -461,6 +467,7 @@ Warnings are logged for:
 3. **Saga persistence** — When `processModel` has sagas and `sagaPersistence` is omitted (default `InMemorySagaPersistence`).
 
 Warnings are **not** logged for:
+
 - Optional components that are simply not configured (snapshots, idempotency, outbox, unit of work) — omitting these is a valid production choice.
 - User-provided infrastructure (`provideInfrastructure` / `infrastructure`) — `{}` is a valid default when aggregates don't need external services.
 - Components where the user explicitly provides a factory that happens to return an in-memory implementation — the framework only warns when **it** supplies the default.
@@ -2453,7 +2460,10 @@ type CounterTypes = AggregateTypes & {
 const Counter = defineAggregate<CounterTypes>({
   initialState: { count: 0 },
   commands: {
-    Increment: (cmd) => ({ name: "Incremented", payload: { by: cmd.payload.by } }),
+    Increment: (cmd) => ({
+      name: "Incremented",
+      payload: { by: cmd.payload.by },
+    }),
   },
   apply: {
     Incremented: (payload, state) => ({ count: state.count + payload.by }),
@@ -2759,16 +2769,12 @@ describe("wireDomain hello world", () => {
     await wireDomain(definition);
 
     // Should warn about in-memory persistence
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("[noddde]"),
-    );
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("[noddde]"));
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining("aggregate persistence"),
     );
     // Should warn about in-memory buses
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("buses"),
-    );
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("buses"));
 
     warnSpy.mockRestore();
   });
@@ -2781,7 +2787,12 @@ describe("wireDomain hello world", () => {
       readModel: { projections: {} },
     });
 
-    const { InMemoryEventSourcedAggregatePersistence, InMemoryCommandBus, EventEmitterEventBus, InMemoryQueryBus } = await import("@noddde/engine");
+    const {
+      InMemoryEventSourcedAggregatePersistence,
+      InMemoryCommandBus,
+      EventEmitterEventBus,
+      InMemoryQueryBus,
+    } = await import("@noddde/engine");
 
     await wireDomain(definition, {
       aggregates: {

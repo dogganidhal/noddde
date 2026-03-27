@@ -217,7 +217,9 @@ export type DomainWiring<
   /** Factory for user-provided infrastructure services. */
   infrastructure?: () => TInfrastructure | Promise<TInfrastructure>;
   /** Aggregate runtime config — global {@link AggregateWiring} OR per-aggregate record. */
-  aggregates?: AggregateWiring | Record<keyof TAggregates & string, AggregateWiring>;
+  aggregates?:
+    | AggregateWiring
+    | Record<keyof TAggregates & string, AggregateWiring>;
   /** Projection runtime config — per-projection view store wiring. */
   projections?: Record<string, ProjectionWiring<TInfrastructure>>;
   /** Saga runtime config. Required if processModel has sagas. */
@@ -259,7 +261,12 @@ export function defineDomain<
     TStandaloneQuery,
     TAggregates
   >,
-): DomainDefinition<TInfrastructure, TStandaloneCommand, TStandaloneQuery, TAggregates> {
+): DomainDefinition<
+  TInfrastructure,
+  TStandaloneCommand,
+  TStandaloneQuery,
+  TAggregates
+> {
   return definition;
 }
 
@@ -481,7 +488,10 @@ export type DomainConfiguration<
  */
 interface WiringContext<TInfrastructure extends Infrastructure> {
   perAggregateWirings?: Map<string, AggregateWiring>;
-  projectionViewStoreOverrides?: Record<string, ProjectionWiring<TInfrastructure>>;
+  projectionViewStoreOverrides?: Record<
+    string,
+    ProjectionWiring<TInfrastructure>
+  >;
 }
 
 /**
@@ -536,9 +546,12 @@ export class Domain<
     // Step 2: Resolve CQRS infrastructure
     let cqrsInfra: CQRSInfrastructure;
     if (configuration.infrastructure.cqrsInfrastructure) {
-      cqrsInfra = await configuration.infrastructure.cqrsInfrastructure(customInfra);
+      cqrsInfra =
+        await configuration.infrastructure.cqrsInfrastructure(customInfra);
     } else {
-      console.warn("[noddde] Using in-memory CQRS buses. This is not suitable for production.");
+      console.warn(
+        "[noddde] Using in-memory CQRS buses. This is not suitable for production.",
+      );
       cqrsInfra = {
         commandBus: new InMemoryCommandBus(),
         eventBus: new EventEmitterEventBus(),
@@ -558,7 +571,9 @@ export class Domain<
 
     if (!persistenceConfig) {
       // Omitted — in-memory default for all
-      console.warn("[noddde] Using in-memory aggregate persistence. This is not suitable for production.");
+      console.warn(
+        "[noddde] Using in-memory aggregate persistence. This is not suitable for production.",
+      );
       persistenceResolver = new GlobalAggregatePersistenceResolver(
         new InMemoryEventSourcedAggregatePersistence(),
       );
@@ -599,19 +614,30 @@ export class Domain<
     }
 
     // Step 4.5: Resolve snapshot configuration
-    let snapshotResolver: ((aggregateName: string) => { store: SnapshotStore; strategy: SnapshotStrategy } | undefined) | undefined;
+    let snapshotResolver:
+      | ((
+          aggregateName: string,
+        ) => { store: SnapshotStore; strategy: SnapshotStrategy } | undefined)
+      | undefined;
 
     if (this._wiringContext?.perAggregateWirings) {
       // Per-aggregate snapshots from wireDomain
-      const resolvedSnapshots = new Map<string, { store: SnapshotStore; strategy: SnapshotStrategy }>();
+      const resolvedSnapshots = new Map<
+        string,
+        { store: SnapshotStore; strategy: SnapshotStrategy }
+      >();
       for (const [name, aw] of this._wiringContext.perAggregateWirings) {
         if (aw.snapshots) {
           const store = await aw.snapshots.store();
-          resolvedSnapshots.set(name, { store, strategy: aw.snapshots.strategy });
+          resolvedSnapshots.set(name, {
+            store,
+            strategy: aw.snapshots.strategy,
+          });
         }
       }
       if (resolvedSnapshots.size > 0) {
-        snapshotResolver = (aggregateName) => resolvedSnapshots.get(aggregateName);
+        snapshotResolver = (aggregateName) =>
+          resolvedSnapshots.get(aggregateName);
       }
     } else {
       // Global snapshots from DomainConfiguration (legacy path)
@@ -621,10 +647,16 @@ export class Domain<
       }
       const snapshotStrategy = configuration.infrastructure.snapshotStrategy;
       if (snapshotStore && snapshotStrategy) {
-        snapshotResolver = () => ({ store: snapshotStore!, strategy: snapshotStrategy });
+        snapshotResolver = () => ({
+          store: snapshotStore!,
+          strategy: snapshotStrategy,
+        });
       } else if (snapshotStore) {
         // Store without strategy — still need for loading
-        snapshotResolver = () => ({ store: snapshotStore!, strategy: () => false });
+        snapshotResolver = () => ({
+          store: snapshotStore!,
+          strategy: () => false,
+        });
       }
     }
 
@@ -634,7 +666,9 @@ export class Domain<
       if (configuration.infrastructure.sagaPersistence) {
         sagaPersistence = await configuration.infrastructure.sagaPersistence();
       } else {
-        console.warn("[noddde] Using in-memory saga persistence. This is not suitable for production.");
+        console.warn(
+          "[noddde] Using in-memory saga persistence. This is not suitable for production.",
+        );
         sagaPersistence = new InMemorySagaPersistence();
       }
     }
@@ -652,22 +686,32 @@ export class Domain<
       const strategies = new Map<string, ConcurrencyStrategy>();
       for (const [name, aw] of this._wiringContext.perAggregateWirings) {
         if (aw.concurrency) {
-          if ("strategy" in aw.concurrency && aw.concurrency.strategy === "pessimistic") {
-            strategies.set(name, new PessimisticConcurrencyStrategy(
-              aw.concurrency.locker,
-              aw.concurrency.lockTimeoutMs,
-            ));
+          if (
+            "strategy" in aw.concurrency &&
+            aw.concurrency.strategy === "pessimistic"
+          ) {
+            strategies.set(
+              name,
+              new PessimisticConcurrencyStrategy(
+                aw.concurrency.locker,
+                aw.concurrency.lockTimeoutMs,
+              ),
+            );
           } else {
-            strategies.set(name, new OptimisticConcurrencyStrategy(
-              (aw.concurrency as { maxRetries?: number })?.maxRetries ?? 0,
-            ));
+            strategies.set(
+              name,
+              new OptimisticConcurrencyStrategy(
+                (aw.concurrency as { maxRetries?: number })?.maxRetries ?? 0,
+              ),
+            );
           }
         }
       }
       const defaultStrategy = new OptimisticConcurrencyStrategy(0);
-      concurrencyStrategy = strategies.size > 0
-        ? new PerAggregateConcurrencyStrategy(strategies, defaultStrategy)
-        : defaultStrategy;
+      concurrencyStrategy =
+        strategies.size > 0
+          ? new PerAggregateConcurrencyStrategy(strategies, defaultStrategy)
+          : defaultStrategy;
     } else {
       // Global concurrency from DomainConfiguration (legacy path)
       const concurrency = configuration.infrastructure.aggregateConcurrency;
@@ -709,7 +753,8 @@ export class Domain<
         resolveProjectionEntry(entry);
       resolvedProjections.set(name, projection);
       // Check wiring overrides first (from wireDomain), then inline viewStore from config
-      const wiringViewStore = this._wiringContext?.projectionViewStoreOverrides?.[name];
+      const wiringViewStore =
+        this._wiringContext?.projectionViewStoreOverrides?.[name];
       const viewStoreFactory = wiringViewStore
         ? wiringViewStore.viewStore
         : inlineViewStoreFactory;
@@ -1160,7 +1205,10 @@ export const wireDomain = async <
     TStandaloneQuery,
     TAggregates
   >,
-  wiring: DomainWiring<TInfrastructure, TAggregates> = {} as DomainWiring<TInfrastructure, TAggregates>,
+  wiring: DomainWiring<TInfrastructure, TAggregates> = {} as DomainWiring<
+    TInfrastructure,
+    TAggregates
+  >,
 ): Promise<Domain<TInfrastructure, TStandaloneCommand, TStandaloneQuery>> => {
   // Map DomainWiring → DomainConfiguration for the Domain constructor
   const isGlobalAggregateWiring = (
@@ -1176,9 +1224,21 @@ export const wireDomain = async <
   };
 
   const aggregatesConfig = wiring.aggregates;
-  let aggregatePersistence: DomainConfiguration<TInfrastructure, TStandaloneCommand, TStandaloneQuery, TAggregates>["infrastructure"]["aggregatePersistence"];
-  let aggregateConcurrency: DomainConfiguration<TInfrastructure, TStandaloneCommand, TStandaloneQuery, TAggregates>["infrastructure"]["aggregateConcurrency"];
-  let snapshotStoreFactory: (() => SnapshotStore | Promise<SnapshotStore>) | undefined;
+  let aggregatePersistence: DomainConfiguration<
+    TInfrastructure,
+    TStandaloneCommand,
+    TStandaloneQuery,
+    TAggregates
+  >["infrastructure"]["aggregatePersistence"];
+  let aggregateConcurrency: DomainConfiguration<
+    TInfrastructure,
+    TStandaloneCommand,
+    TStandaloneQuery,
+    TAggregates
+  >["infrastructure"]["aggregateConcurrency"];
+  let snapshotStoreFactory:
+    | (() => SnapshotStore | Promise<SnapshotStore>)
+    | undefined;
   let snapshotStrategy: SnapshotStrategy | undefined;
   let perAggregateWirings: Map<string, AggregateWiring> | undefined;
 
@@ -1207,7 +1267,8 @@ export const wireDomain = async <
       // Fill in defaults for aggregates that didn't specify persistence
       for (const name of Object.keys(definition.writeModel.aggregates)) {
         if (!(name in persistenceRecord)) {
-          persistenceRecord[name] = () => new InMemoryEventSourcedAggregatePersistence();
+          persistenceRecord[name] = () =>
+            new InMemoryEventSourcedAggregatePersistence();
         }
       }
       aggregatePersistence = persistenceRecord as any;

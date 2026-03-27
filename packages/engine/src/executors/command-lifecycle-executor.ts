@@ -41,7 +41,9 @@ export class CommandLifecycleExecutor {
     private readonly concurrencyStrategy: ConcurrencyStrategy,
     private readonly uowStorage: AsyncLocalStorage<UnitOfWork>,
     private readonly metadataEnricher: MetadataEnricher,
-    private readonly snapshotResolver?: (aggregateName: string) => { store: SnapshotStore; strategy: SnapshotStrategy } | undefined,
+    private readonly snapshotResolver?: (
+      aggregateName: string,
+    ) => { store: SnapshotStore; strategy: SnapshotStrategy } | undefined,
     private readonly idempotencyStore?: IdempotencyStore,
     private readonly onEventsProduced?: (
       events: Event[],

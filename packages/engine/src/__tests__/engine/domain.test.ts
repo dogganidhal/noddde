@@ -2005,16 +2005,12 @@ describe("wireDomain hello world", () => {
     await wireDomain(definition);
 
     // Should warn about in-memory persistence
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("[noddde]"),
-    );
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("[noddde]"));
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining("aggregate persistence"),
     );
     // Should warn about in-memory buses
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("buses"),
-    );
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("buses"));
 
     warnSpy.mockRestore();
   });
