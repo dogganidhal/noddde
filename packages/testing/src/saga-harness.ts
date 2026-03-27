@@ -124,7 +124,7 @@ export function testSaga<T extends SagaTypes, TSagaId extends ID = string>(
       const state = currentState ?? saga.initialState;
 
       try {
-        const handler = (saga.handlers as Record<string, any>)[event!.name];
+        const handler = (saga.on as Record<string, any>)[event!.name]?.handle;
 
         const noopCqrs = createNoopCQRSInfrastructure();
         const mergedInfra = {

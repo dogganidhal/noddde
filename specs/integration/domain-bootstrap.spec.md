@@ -41,7 +41,7 @@ docs:
    - `wiring.sagas.persistence()` -- resolve saga persistence (only if `processModel` is provided).
 2. **Infrastructure merging**: The `domain.infrastructure` property must return the custom infrastructure merged with `CQRSInfrastructure` (commandBus, eventBus, queryBus).
 3. **Projection wiring**: For each projection in `readModel.projections`, for each event name in its `on` map, a subscription is registered on the EventBus.
-4. **Saga wiring**: For each saga in `processModel.sagas`, for each event name in its `handlers`, a subscription is registered on the EventBus.
+4. **Saga wiring**: For each saga in `processModel.sagas`, for each event name in its `on` map, a subscription is registered on the EventBus.
 5. **Query handler registration**: For each projection with `queryHandlers`, and for each standalone query handler, the handler must be registered on the QueryBus.
 6. **Standalone command handler registration**: For each entry in `writeModel.standaloneCommandHandlers`, the handler must be registered on the CommandBus.
 7. **Async factories**: All factories may return Promises; `init()` must await them.
@@ -351,25 +351,27 @@ const TicketNotificationSaga = defineSaga<{
 }>({
   initialState: { notified: false },
   startedBy: ["TicketCreated"],
-  associations: {
-    TicketCreated: (event) => event.payload.id,
-    TicketResolved: (event) => event.payload.id,
-  },
-  handlers: {
-    TicketCreated: (event, state) => ({
-      state: { notified: true },
-      commands: {
-        name: "SendNotification",
-        targetAggregateId: event.payload.id,
-        payload: {
-          ticketId: event.payload.id,
-          message: `New ticket: ${event.payload.title}`,
+  on: {
+    TicketCreated: {
+      id: (event) => event.payload.id,
+      handle: (event, state) => ({
+        state: { notified: true },
+        commands: {
+          name: "SendNotification",
+          targetAggregateId: event.payload.id,
+          payload: {
+            ticketId: event.payload.id,
+            message: `New ticket: ${event.payload.title}`,
+          },
         },
-      },
-    }),
-    TicketResolved: (event, state) => ({
-      state,
-    }),
+      }),
+    },
+    TicketResolved: {
+      id: (event) => event.payload.id,
+      handle: (event, state) => ({
+        state,
+      }),
+    },
   },
 });
 

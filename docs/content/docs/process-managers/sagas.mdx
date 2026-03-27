@@ -159,157 +159,166 @@ export const OrderFulfillmentSaga = defineSaga<OrderFulfillmentSagaDef>({
 
   startedBy: ["OrderPlaced"],
 
-  associations: {
-    // Order aggregate — uses "orderId"
-    OrderPlaced: (event) => event.payload.orderId,
-    OrderConfirmed: (event) => event.payload.orderId,
-    OrderCancelled: (event) => event.payload.orderId,
-    // Payment aggregate — uses "referenceId"
-    PaymentCompleted: (event) => event.payload.referenceId,
-    PaymentFailed: (event) => event.payload.referenceId,
-    // Shipping aggregate — uses "customerReference"
-    ShipmentDispatched: (event) => event.payload.customerReference,
-    ShipmentDelivered: (event) => event.payload.customerReference,
-  },
-
-  handlers: {
+  on: {
     // Order placed → request payment
-    OrderPlaced: (event, state) => ({
-      state: {
-        ...state,
-        orderId: event.payload.orderId,
-        customerId: event.payload.customerId,
-        total: event.payload.total,
-        items: event.payload.items,
-        status: "awaiting_payment" as const,
-        paymentId: "payment-" + event.payload.orderId,
-      },
-      commands: {
-        name: "RequestPayment",
-        targetAggregateId: "payment-" + event.payload.orderId,
-        payload: {
-          referenceId: event.payload.orderId,
-          amount: event.payload.total,
+    OrderPlaced: {
+      id: (event) => event.payload.orderId,
+      handle: (event, state) => ({
+        state: {
+          ...state,
+          orderId: event.payload.orderId,
+          customerId: event.payload.customerId,
+          total: event.payload.total,
+          items: event.payload.items,
+          status: "awaiting_payment" as const,
+          paymentId: "payment-" + event.payload.orderId,
         },
-      },
-    }),
-
-    // Payment completed → confirm order + arrange shipment
-    PaymentCompleted: (event, state) => ({
-      state: { ...state, status: "awaiting_shipment" as const },
-      commands: [
-        {
-          name: "ConfirmOrder",
-          targetAggregateId: state.orderId!,
-        },
-        {
-          name: "ArrangeShipment",
-          targetAggregateId: "ship-" + event.payload.referenceId,
+        commands: {
+          name: "RequestPayment",
+          targetAggregateId: "payment-" + event.payload.orderId,
           payload: {
-            customerReference: event.payload.referenceId,
-            itemCount: state.items.reduce((sum, i) => sum + i.quantity, 0),
+            referenceId: event.payload.orderId,
+            amount: event.payload.total,
           },
         },
-      ],
-    }),
+      }),
+    },
+
+    // Payment completed → confirm order + arrange shipment
+    PaymentCompleted: {
+      id: (event) => event.payload.referenceId,
+      handle: (event, state) => ({
+        state: { ...state, status: "awaiting_shipment" as const },
+        commands: [
+          {
+            name: "ConfirmOrder",
+            targetAggregateId: state.orderId!,
+          },
+          {
+            name: "ArrangeShipment",
+            targetAggregateId: "ship-" + event.payload.referenceId,
+            payload: {
+              customerReference: event.payload.referenceId,
+              itemCount: state.items.reduce((sum, i) => sum + i.quantity, 0),
+            },
+          },
+        ],
+      }),
+    },
 
     // Payment failed → cancel the order
-    PaymentFailed: (event, state) => ({
-      state: { ...state, status: "payment_failed" as const },
-      commands: {
-        name: "CancelOrder",
-        targetAggregateId: state.orderId!,
-        payload: { reason: `Payment failed: ${event.payload.reason}` },
-      },
-    }),
+    PaymentFailed: {
+      id: (event) => event.payload.referenceId,
+      handle: (event, state) => ({
+        state: { ...state, status: "payment_failed" as const },
+        commands: {
+          name: "CancelOrder",
+          targetAggregateId: state.orderId!,
+          payload: { reason: `Payment failed: ${event.payload.reason}` },
+        },
+      }),
+    },
 
     // Shipment dispatched → update order with tracking
-    ShipmentDispatched: (event, state) => ({
-      state: {
-        ...state,
-        trackingNumber: event.payload.trackingNumber,
-        status: "shipped" as const,
-      },
-      commands: {
-        name: "MarkOrderShipped",
-        targetAggregateId: state.orderId!,
-        payload: { trackingNumber: event.payload.trackingNumber },
-      },
-    }),
+    ShipmentDispatched: {
+      id: (event) => event.payload.customerReference,
+      handle: (event, state) => ({
+        state: {
+          ...state,
+          trackingNumber: event.payload.trackingNumber,
+          status: "shipped" as const,
+        },
+        commands: {
+          name: "MarkOrderShipped",
+          targetAggregateId: state.orderId!,
+          payload: { trackingNumber: event.payload.trackingNumber },
+        },
+      }),
+    },
 
     // Shipment delivered → notify customer, mark order complete
-    ShipmentDelivered: async (_event, state, { notificationService }) => {
-      await notificationService.notifyCustomer(
-        state.customerId!,
-        `Your order ${state.orderId} has been delivered!`,
-      );
-      return {
-        state: { ...state, status: "delivered" as const },
-        commands: {
-          name: "MarkOrderDelivered",
-          targetAggregateId: state.orderId!,
-        },
-      };
+    ShipmentDelivered: {
+      id: (event) => event.payload.customerReference,
+      handle: async (_event, state, { notificationService }) => {
+        await notificationService.notifyCustomer(
+          state.customerId!,
+          `Your order ${state.orderId} has been delivered!`,
+        );
+        return {
+          state: { ...state, status: "delivered" as const },
+          commands: {
+            name: "MarkOrderDelivered",
+            targetAggregateId: state.orderId!,
+          },
+        };
+      },
     },
 
     // Order cancelled → refund if payment was taken
-    OrderCancelled: (event, state) => ({
-      state: { ...state, status: "cancelled" as const },
-      commands: state.paymentId
-        ? {
-            name: "RefundPayment",
-            targetAggregateId: state.paymentId,
-            payload: { reason: event.payload.reason },
-          }
-        : undefined,
-    }),
+    OrderCancelled: {
+      id: (event) => event.payload.orderId,
+      handle: (event, state) => ({
+        state: { ...state, status: "cancelled" as const },
+        commands: state.paymentId
+          ? {
+              name: "RefundPayment",
+              targetAggregateId: state.paymentId,
+              payload: { reason: event.payload.reason },
+            }
+          : undefined,
+      }),
+    },
 
     // Events observed for tracking, no commands dispatched
-    OrderConfirmed: (_event, state) => ({ state }),
+    OrderConfirmed: {
+      id: (event) => event.payload.orderId,
+      handle: (_event, state) => ({ state }),
+    },
   },
 });
 ```
 
-## Associations
+## The `on` Map
 
 Aggregates have a simple routing mechanism: every command carries a `targetAggregateId` that identifies which instance should handle it. Sagas don't have this luxury. Events carry domain data, not a "target saga ID" -- and different bounded contexts name their correlation fields differently. The Order aggregate calls it `orderId`, the Payment aggregate calls it `referenceId`, and the Shipping aggregate calls it `customerReference`. They all refer to the same correlation ID, but each context uses its own naming convention.
 
-The **association map** solves this: a per-event function that extracts the saga instance ID from each event type, regardless of how each context stores it.
+The **`on` map** solves this: each entry bundles an `id` function that extracts the saga instance ID from the event and a `handle` function that processes the event, all keyed by event name.
 
-### Defining associations
+### Defining on entries
 
-The `associations` field is a map keyed by event name. Each entry is a function that receives the narrowed event type and returns the saga instance ID:
+The `on` field is a map keyed by event name. Each entry has an `id` function that receives the narrowed event type and returns the saga instance ID, and a `handle` function that receives the event, current state, and infrastructure:
 
 ```ts
-associations: {
+on: {
   // Order events — the order aggregate uses "orderId"
-  OrderPlaced: (event) => event.payload.orderId,
+  OrderPlaced: {
+    id: (event) => event.payload.orderId,
+    handle: (event, state) => ({ /* ... */ }),
+  },
   // Payment events — the payment aggregate uses "referenceId"
-  PaymentCompleted: (event) => event.payload.referenceId,
+  PaymentCompleted: {
+    id: (event) => event.payload.referenceId,
+    handle: (event, state) => ({ /* ... */ }),
+  },
   // Shipping events — the shipping aggregate uses "customerReference"
-  ShipmentDispatched: (event) => event.payload.customerReference,
+  ShipmentDispatched: {
+    id: (event) => event.payload.customerReference,
+    handle: (event, state) => ({ /* ... */ }),
+  },
 },
 ```
 
-Inside each association function, `event` is narrowed to the specific event type for that key -- not the full union. This means you get full IntelliSense on the event payload, and TypeScript will catch it if you try to access a field that doesn't exist on that specific event type.
+Inside each `on` entry, `event` is narrowed to the specific event type for that key -- not the full union. This means you get full IntelliSense on the event payload, and TypeScript will catch it if you try to access a field that doesn't exist on that specific event type.
 
-### Every event must have an association
+### The `on` map is partial
 
-The association map requires an entry for **every event** in the saga's event union. If you add an event to the `events` type but forget to add an association, TypeScript will report a compile error. This is enforced by the mapped type:
-
-```ts
-type SagaAssociationMap<T extends SagaTypes, TSagaId extends ID = string> = {
-  [K in T["events"]["name"]]: (
-    event: Extract<T["events"], { name: K }>,
-  ) => TSagaId;
-};
-```
+The `on` map is typed as partial over the event union. You only need entries for events the saga handles. Events in the saga's event type that have no entry in the `on` map are silently ignored at runtime.
 
 ### Why different field names?
 
 In real-world systems, each bounded context owns its own naming conventions. A Payment service doesn't think in terms of "orders" -- it processes payments for any kind of reference. A Shipping service tracks shipments by its own IDs and treats the originating order as an external customer reference.
 
-This is exactly why associations are per-event functions rather than a single shared extractor: the same correlation ID lives under a different key in each context's events.
+This is exactly why `id` functions are per-event rather than a single shared extractor: the same correlation ID lives under a different key in each context's events.
 
 ## The startedBy Declaration
 
@@ -321,7 +330,7 @@ startedBy: ["OrderPlaced"],
 
 When an event arrives:
 
-1. The association function extracts the saga ID
+1. The `id` function from the matching `on` entry extracts the saga ID
 2. The framework checks if a saga instance with that ID already exists
 3. **If the event is in `startedBy` and no instance exists** -- create a new instance with `initialState`
 4. **If the event is in `startedBy` and an instance exists** -- use the existing instance (idempotent restart)
@@ -348,8 +357,11 @@ type OrderSagaId = string & { __brand: "OrderSagaId" };
 
 const MySaga = defineSaga<MySagaDef, OrderSagaId>({
   // ...
-  associations: {
-    OrderPlaced: (event) => event.payload.orderId as OrderSagaId,
+  on: {
+    OrderPlaced: {
+      id: (event) => event.payload.orderId as OrderSagaId,
+      handle: (event, state) => ({ /* ... */ }),
+    },
   },
 });
 ```
@@ -359,30 +371,30 @@ const MySaga = defineSaga<MySagaDef, OrderSagaId>({
 The full saga runtime lifecycle proceeds as follows:
 
 1. **An event arrives** (from any aggregate in the domain)
-2. The framework checks if any saga subscribes to that event
-3. The **association map** extracts the saga instance ID from the event
+2. The framework checks if any saga has an `on` entry for that event
+3. The **`id` function** from the matching `on` entry extracts the saga instance ID from the event
 4. If the event is in `startedBy` and no instance exists, a new instance is created with `initialState`
 5. Otherwise, the existing saga state is loaded from persistence
-6. The **event handler** is called with `(event, state, infrastructure)`
+6. The **`handle` function** is called with `(event, state, infrastructure)`
 7. The handler returns a `SagaReaction`: new state + commands to dispatch
 8. The framework persists the new state and dispatches the returned commands
 9. Those commands trigger aggregates, which emit events, which may trigger the saga again
 
 ```
-Event ──> Association Map ──> Load State ──> Handler ──> SagaReaction
-                                                           |
-                                                    ┌──────┴──────┐
-                                                    v             v
-                                              Persist State   Dispatch Commands
-                                                                  |
-                                                                  v
-                                                           Aggregate(s)
-                                                                  |
-                                                                  v
-                                                            New Event(s)
-                                                                  |
-                                                                  v
-                                                            (cycle repeats)
+Event ──> on[event.name].id ──> Load State ──> on[event.name].handle ──> SagaReaction
+                                                                            |
+                                                                     ┌──────┴──────┐
+                                                                     v             v
+                                                               Persist State   Dispatch Commands
+                                                                                   |
+                                                                                   v
+                                                                            Aggregate(s)
+                                                                                   |
+                                                                                   v
+                                                                             New Event(s)
+                                                                                   |
+                                                                                   v
+                                                                             (cycle repeats)
 ```
 
 ## Registering Sagas
@@ -462,4 +474,4 @@ Use a saga when the workflow has multiple steps, needs to track progress, or req
 ## Next Steps
 
 - [Standalone Command Handlers](/docs/process-managers/standalone-commands) -- Stateless cross-aggregate orchestration
-- [Testing Sagas](/docs/testing/testing-sagas) -- Testing saga handlers and associations in isolation
+- [Testing Sagas](/docs/testing/testing-sagas) -- Testing saga handlers and on entries in isolation

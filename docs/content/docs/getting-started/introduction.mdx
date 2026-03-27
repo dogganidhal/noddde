@@ -86,12 +86,14 @@ Sagas are **event-driven process managers** that coordinate workflows across mul
 const OrderFulfillmentSaga = defineSaga<OrderFulfillmentSagaDef>({
   initialState: { status: null },
   startedBy: ["OrderPlaced"],
-  associations: { OrderPlaced: (event) => event.payload.orderId },
-  handlers: {
-    OrderPlaced: (event, state) => ({
-      state: { ...state, status: "awaiting_payment" },
-      commands: { name: "RequestPayment", targetAggregateId: "...", payload: { ... } },
-    }),
+  on: {
+    OrderPlaced: {
+      id: (event) => event.payload.orderId,
+      handle: (event, state) => ({
+        state: { ...state, status: "awaiting_payment" },
+        commands: { name: "RequestPayment", targetAggregateId: "...", payload: { ... } },
+      }),
+    },
   },
 });
 ```

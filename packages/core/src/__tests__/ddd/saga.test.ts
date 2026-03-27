@@ -43,33 +43,35 @@ describe("defineSaga", () => {
   const saga = defineSaga<FulfillmentTypes>({
     initialState: { status: "pending", orderId: null },
     startedBy: ["OrderPlaced"],
-    associations: {
-      OrderPlaced: (event) => event.payload.orderId,
-      PaymentReceived: (event) => event.payload.orderId,
-    },
-    handlers: {
-      OrderPlaced: (event, state) => ({
-        state: {
-          ...state,
-          status: "awaiting_payment",
-          orderId: event.payload.orderId,
-        },
-        commands: {
-          name: "RequestPayment",
-          targetAggregateId: event.payload.orderId,
-          payload: {
+    on: {
+      OrderPlaced: {
+        id: (event) => event.payload.orderId,
+        handle: (event, state) => ({
+          state: {
+            ...state,
+            status: "awaiting_payment",
             orderId: event.payload.orderId,
-            amount: event.payload.total,
           },
-        },
-      }),
-      PaymentReceived: (_event, state) => ({
-        state: { ...state, status: "paid" },
-        commands: {
-          name: "ConfirmOrder",
-          targetAggregateId: state.orderId!,
-        },
-      }),
+          commands: {
+            name: "RequestPayment",
+            targetAggregateId: event.payload.orderId,
+            payload: {
+              orderId: event.payload.orderId,
+              amount: event.payload.total,
+            },
+          },
+        }),
+      },
+      PaymentReceived: {
+        id: (event) => event.payload.orderId,
+        handle: (_event, state) => ({
+          state: { ...state, status: "paid" },
+          commands: {
+            name: "ConfirmOrder",
+            targetAggregateId: state.orderId!,
+          },
+        }),
+      },
     },
   });
 
@@ -82,14 +84,14 @@ describe("defineSaga", () => {
     expect(saga.startedBy).toContain("OrderPlaced");
   });
 
-  it("should have typed association functions", () => {
-    expectTypeOf(saga.associations.OrderPlaced).toBeFunction();
-    expectTypeOf(saga.associations.PaymentReceived).toBeFunction();
+  it("should have typed on entry id functions", () => {
+    expectTypeOf(saga.on.OrderPlaced!.id).toBeFunction();
+    expectTypeOf(saga.on.PaymentReceived!.id).toBeFunction();
   });
 
-  it("should have typed handlers", () => {
-    expectTypeOf(saga.handlers.OrderPlaced).toBeFunction();
-    expectTypeOf(saga.handlers.PaymentReceived).toBeFunction();
+  it("should have typed on entry handle functions", () => {
+    expectTypeOf(saga.on.OrderPlaced!.handle).toBeFunction();
+    expectTypeOf(saga.on.PaymentReceived!.handle).toBeFunction();
   });
 });
 
@@ -167,7 +169,7 @@ describe("SagaEventHandler", () => {
   });
 });
 
-describe("Saga associations", () => {
+describe("Saga on map", () => {
   type Events = DefineEvents<{
     TaskCreated: { taskId: string; projectId: string };
     TaskCompleted: { taskId: string };
@@ -185,21 +187,23 @@ describe("Saga associations", () => {
   const saga = defineSaga<Types>({
     initialState: { complete: false },
     startedBy: ["TaskCreated"],
-    associations: {
-      TaskCreated: (event) => event.payload.taskId,
-      TaskCompleted: (event) => event.payload.taskId,
-    },
-    handlers: {
-      TaskCreated: (_event, state) => ({ state }),
-      TaskCompleted: (_event, state) => ({
-        state: { ...state, complete: true },
-        commands: { name: "NotifyOwner" },
-      }),
+    on: {
+      TaskCreated: {
+        id: (event) => event.payload.taskId,
+        handle: (_event, state) => ({ state }),
+      },
+      TaskCompleted: {
+        id: (event) => event.payload.taskId,
+        handle: (_event, state) => ({
+          state: { ...state, complete: true },
+          commands: { name: "NotifyOwner" },
+        }),
+      },
     },
   });
 
-  it("should extract saga ID from events", () => {
-    const id = saga.associations.TaskCreated({
+  it("should extract saga ID from events via on entry", () => {
+    const id = saga.on.TaskCreated!.id({
       name: "TaskCreated",
       payload: { taskId: "t-1", projectId: "p-1" },
     });
@@ -235,14 +239,14 @@ describe("Saga Infer utilities", () => {
   const saga = defineSaga<Types>({
     initialState: { step: 0 },
     startedBy: ["StepCompleted"],
-    associations: {
-      StepCompleted: (event) => String(event.payload.stepId),
-    },
-    handlers: {
-      StepCompleted: (event, state) => ({
-        state: { step: event.payload.stepId + 1 },
-        commands: { name: "NextStep" },
-      }),
+    on: {
+      StepCompleted: {
+        id: (event) => String(event.payload.stepId),
+        handle: (event, state) => ({
+          state: { step: event.payload.stepId + 1 },
+          commands: { name: "NextStep" },
+        }),
+      },
     },
   });
 
@@ -282,11 +286,11 @@ describe("Saga with custom ID type", () => {
   const saga = defineSaga<Types, number>({
     initialState: {},
     startedBy: ["Started"],
-    associations: {
-      Started: (event) => event.payload.id,
-    },
-    handlers: {
-      Started: (_event, state) => ({ state }),
+    on: {
+      Started: {
+        id: (event) => event.payload.id,
+        handle: (_event, state) => ({ state }),
+      },
     },
   });
 
@@ -294,8 +298,8 @@ describe("Saga with custom ID type", () => {
     expectTypeOf<InferSagaId<typeof saga>>().toBeNumber();
   });
 
-  it("should type association return as number", () => {
-    const id = saga.associations.Started({
+  it("should type on entry id return as number", () => {
+    const id = saga.on.Started!.id({
       name: "Started",
       payload: { id: 42 },
     });
@@ -317,8 +321,12 @@ describe("defineSaga identity", () => {
     const config = {
       initialState: {},
       startedBy: ["X" as const],
-      associations: { X: (e: any) => String(e.payload.v) },
-      handlers: { X: (_e: any, s: any) => ({ state: s }) },
+      on: {
+        X: {
+          id: (e: any) => String(e.payload.v),
+          handle: (_e: any, s: any) => ({ state: s }),
+        },
+      },
     };
     const result = defineSaga<T>(config as any);
     expect(result).toBe(config);

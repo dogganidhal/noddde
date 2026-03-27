@@ -9,19 +9,25 @@ Saga event handlers return a `SagaReaction<TState, TCommands>` (state + commands
 
 ```ts
 // noddde approach: declarative return
-PaymentCompleted: (event, state) => ({
-  state: { ...state, status: "awaiting_shipment" },
-  commands: [
-    { name: "ConfirmOrder", targetAggregateId: state.orderId! },
-    { name: "ArrangeShipment", targetAggregateId: shipmentId, payload: { ... } },
-  ],
-}),
+PaymentCompleted: {
+  id: (event) => event.payload.referenceId,
+  handle: (event, state) => ({
+    state: { ...state, status: "awaiting_shipment" },
+    commands: [
+      { name: "ConfirmOrder", targetAggregateId: state.orderId! },
+      { name: "ArrangeShipment", targetAggregateId: shipmentId, payload: { ... } },
+    ],
+  }),
+},
 
 // Alternative: imperative dispatch (NOT what noddde does)
-PaymentCompleted: async (event, state, { commandBus }) => {
-  await commandBus.dispatch({ name: "ConfirmOrder", ... });
-  await commandBus.dispatch({ name: "ArrangeShipment", ... });
-  return { ...state, status: "awaiting_shipment" };
+PaymentCompleted: {
+  id: (event) => event.payload.referenceId,
+  handle: async (event, state, { commandBus }) => {
+    await commandBus.dispatch({ name: "ConfirmOrder", ... });
+    await commandBus.dispatch({ name: "ArrangeShipment", ... });
+    return { ...state, status: "awaiting_shipment" };
+  },
 },
 ```
 
@@ -38,7 +44,7 @@ This consistency makes the framework predictable: **handlers declare outputs, th
 With declarative returns, testing is trivial:
 
 ```ts
-const reaction = OrderFulfillmentSaga.handlers.PaymentCompleted(
+const reaction = OrderFulfillmentSaga.on.PaymentCompleted!.handle(
   event,
   state,
   mockInfra,

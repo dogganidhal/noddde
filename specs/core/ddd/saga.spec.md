@@ -1,5 +1,5 @@
 ---
-title: "SagaTypes, SagaReaction, SagaEventHandler, Saga, defineSaga & Infer Utilities"
+title: "SagaTypes, SagaReaction, SagaEventHandler, SagaOnEntry, Saga, defineSaga & Infer Utilities"
 module: ddd/saga
 source_file: packages/core/src/ddd/saga.ts
 status: implemented
@@ -8,6 +8,7 @@ exports:
     SagaTypes,
     SagaReaction,
     SagaEventHandler,
+    SagaOnEntry,
     Saga,
     defineSaga,
     InferSagaState,
@@ -20,13 +21,12 @@ depends_on: [id, edd/event, cqrs/command/command, infrastructure/index]
 docs:
   - sagas/overview.mdx
   - sagas/defining-sagas.mdx
-  - sagas/associations.mdx
   - sagas/testing-sagas.mdx
 ---
 
-# SagaTypes, SagaReaction, SagaEventHandler, Saga, defineSaga & Infer Utilities
+# SagaTypes, SagaReaction, SagaEventHandler, SagaOnEntry, Saga, defineSaga & Infer Utilities
 
-> Sagas (process managers) are the structural inverse of aggregates: where aggregates receive commands and emit events, sagas receive events and emit commands. This module provides the complete saga definition pattern: `SagaTypes` bundles the type parameters, `SagaReaction` is the handler return type, `SagaEventHandler` implements the react phase, `Saga` is the definition interface, `defineSaga` provides type inference, and five `Infer*` utilities extract individual types.
+> Sagas (process managers) are the structural inverse of aggregates: where aggregates receive commands and emit events, sagas receive events and emit commands. This module provides the complete saga definition pattern: `SagaTypes` bundles the type parameters, `SagaReaction` is the handler return type, `SagaEventHandler` implements the react phase, `SagaOnEntry` bundles identity extraction and handler per event, `Saga` is the definition interface with a unified `on` map, `defineSaga` provides type inference, and five `Infer*` utilities extract individual types.
 
 ## Type Contract
 
@@ -49,12 +49,18 @@ docs:
   - Receives the FULL event (not just payload), like projection reducers.
   - Infrastructure is merged with `CQRSInfrastructure` via intersection.
 
-- **`Saga<T extends SagaTypes, TSagaId extends ID = string>`** is an interface with four fields:
+- **`SagaOnEntry<TEvent, TState, TCommands, TInfrastructure, TSagaId>`** is an object type that bundles identity extraction and handler for one event:
+
+  - `id: (event: TEvent) => TSagaId` -- extracts the saga instance ID from the event. Required.
+  - `handle: SagaEventHandler<TEvent, TState, TCommands, TInfrastructure>` -- the saga event handler.
+
+- **`Saga<T extends SagaTypes, TSagaId extends ID = string>`** is an interface with three fields:
 
   - `initialState: T["state"]` -- zero-value state for new saga instances.
   - `startedBy: [T["events"]["name"], ...T["events"]["name"][]]` -- non-empty tuple of event names that start the saga.
-  - `associations: SagaAssociationMap<T, TSagaId>` -- maps each event name to a function extracting the saga instance ID.
-  - `handlers: SagaEventHandlerMap<T>` -- maps each event name to its handler.
+  - `on: SagaOnMap<T, TSagaId>` -- partial map of event names to `SagaOnEntry` objects. Only events the saga handles need entries.
+
+- **Internal type `SagaOnMap<T, TSagaId>`** -- maps each event name (optionally) to a `SagaOnEntry`. Partial over the event union.
 
 - **`defineSaga<T, TSagaId extends ID>(config): Saga<T, TSagaId>`** -- identity function for type inference.
 
@@ -70,8 +76,9 @@ docs:
 - Saga event handlers receive the FULL event object (with narrowed type), the current saga state, and infrastructure merged with CQRS buses.
 - Handlers return a `SagaReaction` containing the new state and optional commands to dispatch.
 - `startedBy` must be a non-empty array (tuple with at least one element). This is enforced by the tuple type `[T, ...T[]]`.
-- `associations` must have an entry for EVERY event name in the union -- this is how the runtime routes events to saga instances.
-- `handlers` must have an entry for EVERY event name in the union (exhaustive).
+- The `on` map is partial -- only events the saga handles need entries. Unhandled events are silently ignored at runtime.
+- Each `on` entry bundles an `id` function (extracts saga instance ID) and a `handle` function (processes the event).
+- The `id` function in each `on` entry is required -- sagas always need routing to a specific instance.
 - Commands in `SagaReaction` are optional -- a handler may only update state without dispatching.
 - Commands can be a single command or an array of commands.
 - `defineSaga` is an identity function returning the same config object.
@@ -79,8 +86,8 @@ docs:
 
 ## Invariants
 
-- `associations` map has exactly one key per event name.
-- `handlers` map has exactly one key per event name.
+- `on` map keys are a subset of event names from the saga's event union.
+- Each `on` entry has both `id` (required) and `handle` (required) fields.
 - `startedBy` has at least one element (non-empty tuple).
 - `startedBy` elements must be valid event names from the saga's event union.
 - `SagaReaction.commands` is optional; when omitted, no commands are dispatched.
@@ -91,15 +98,16 @@ docs:
 ## Edge Cases
 
 - **Saga that only updates state**: Handlers return `{ state: newState }` without `commands`.
-- **Saga with single event**: `startedBy`, `associations`, and `handlers` all have one key.
+- **Saga with single event**: `startedBy` and `on` both have one key.
 - **Multiple starting events**: `startedBy: ["OrderPlaced", "OrderImported"]` is valid.
 - **Async handlers**: Returning `Promise<SagaReaction<...>>` is valid.
 - **Custom saga ID type**: `TSagaId = number` or a branded string type.
 - **Commands as array**: `commands: [cmd1, cmd2]` dispatches multiple commands.
+- **Partial on map**: Only a subset of event types need entries in `on`.
 
 ## Integration Points
 
-- The engine/runtime subscribes sagas to the `EventBus`, uses `associations` to look up saga instance IDs, loads or creates saga state, invokes handlers, persists new state, and dispatches resulting commands via `CommandBus`.
+- The engine/runtime subscribes sagas to the `EventBus` by iterating `Object.keys(saga.on)`, uses `on[eventName].id` to look up saga instance IDs, loads or creates saga state, invokes `on[eventName].handle`, persists new state, and dispatches resulting commands via `CommandBus`.
 - `startedBy` tells the runtime which events should create new saga instances.
 - Sagas bridge between bounded contexts by reacting to events from one context and dispatching commands to another.
 - `InferSaga*` utilities are used downstream for persistence, testing, and engine configuration.
@@ -143,33 +151,35 @@ describe("defineSaga", () => {
   const saga = defineSaga<FulfillmentTypes>({
     initialState: { status: "pending", orderId: null },
     startedBy: ["OrderPlaced"],
-    associations: {
-      OrderPlaced: (event) => event.payload.orderId,
-      PaymentReceived: (event) => event.payload.orderId,
-    },
-    handlers: {
-      OrderPlaced: (event, state) => ({
-        state: {
-          ...state,
-          status: "awaiting_payment",
-          orderId: event.payload.orderId,
-        },
-        commands: {
-          name: "RequestPayment",
-          targetAggregateId: event.payload.orderId,
-          payload: {
+    on: {
+      OrderPlaced: {
+        id: (event) => event.payload.orderId,
+        handle: (event, state) => ({
+          state: {
+            ...state,
+            status: "awaiting_payment",
             orderId: event.payload.orderId,
-            amount: event.payload.total,
           },
-        },
-      }),
-      PaymentReceived: (_event, state) => ({
-        state: { ...state, status: "paid" },
-        commands: {
-          name: "ConfirmOrder",
-          targetAggregateId: state.orderId!,
-        },
-      }),
+          commands: {
+            name: "RequestPayment",
+            targetAggregateId: event.payload.orderId,
+            payload: {
+              orderId: event.payload.orderId,
+              amount: event.payload.total,
+            },
+          },
+        }),
+      },
+      PaymentReceived: {
+        id: (event) => event.payload.orderId,
+        handle: (_event, state) => ({
+          state: { ...state, status: "paid" },
+          commands: {
+            name: "ConfirmOrder",
+            targetAggregateId: state.orderId!,
+          },
+        }),
+      },
     },
   });
 
@@ -182,14 +192,14 @@ describe("defineSaga", () => {
     expect(saga.startedBy).toContain("OrderPlaced");
   });
 
-  it("should have typed association functions", () => {
-    expectTypeOf(saga.associations.OrderPlaced).toBeFunction();
-    expectTypeOf(saga.associations.PaymentReceived).toBeFunction();
+  it("should have typed on entry id functions", () => {
+    expectTypeOf(saga.on.OrderPlaced!.id).toBeFunction();
+    expectTypeOf(saga.on.PaymentReceived!.id).toBeFunction();
   });
 
-  it("should have typed handlers", () => {
-    expectTypeOf(saga.handlers.OrderPlaced).toBeFunction();
-    expectTypeOf(saga.handlers.PaymentReceived).toBeFunction();
+  it("should have typed on entry handle functions", () => {
+    expectTypeOf(saga.on.OrderPlaced!.handle).toBeFunction();
+    expectTypeOf(saga.on.PaymentReceived!.handle).toBeFunction();
   });
 });
 ```
@@ -289,14 +299,14 @@ describe("SagaEventHandler", () => {
 });
 ```
 
-### Saga associations extract saga instance ID
+### Saga on map extracts saga instance ID
 
 ```ts
 import { describe, it, expect } from "vitest";
 import type { DefineEvents, Command, Infrastructure } from "@noddde/core";
 import { defineSaga } from "@noddde/core";
 
-describe("Saga associations", () => {
+describe("Saga on map", () => {
   type Events = DefineEvents<{
     TaskCreated: { taskId: string; projectId: string };
     TaskCompleted: { taskId: string };
@@ -314,21 +324,23 @@ describe("Saga associations", () => {
   const saga = defineSaga<Types>({
     initialState: { complete: false },
     startedBy: ["TaskCreated"],
-    associations: {
-      TaskCreated: (event) => event.payload.taskId,
-      TaskCompleted: (event) => event.payload.taskId,
-    },
-    handlers: {
-      TaskCreated: (_event, state) => ({ state }),
-      TaskCompleted: (_event, state) => ({
-        state: { ...state, complete: true },
-        commands: { name: "NotifyOwner" },
-      }),
+    on: {
+      TaskCreated: {
+        id: (event) => event.payload.taskId,
+        handle: (_event, state) => ({ state }),
+      },
+      TaskCompleted: {
+        id: (event) => event.payload.taskId,
+        handle: (_event, state) => ({
+          state: { ...state, complete: true },
+          commands: { name: "NotifyOwner" },
+        }),
+      },
     },
   });
 
-  it("should extract saga ID from events", () => {
-    const id = saga.associations.TaskCreated({
+  it("should extract saga ID from events via on entry", () => {
+    const id = saga.on.TaskCreated!.id({
       name: "TaskCreated",
       payload: { taskId: "t-1", projectId: "p-1" },
     });
@@ -388,14 +400,14 @@ describe("Saga Infer utilities", () => {
   const saga = defineSaga<Types>({
     initialState: { step: 0 },
     startedBy: ["StepCompleted"],
-    associations: {
-      StepCompleted: (event) => String(event.payload.stepId),
-    },
-    handlers: {
-      StepCompleted: (event, state) => ({
-        state: { step: event.payload.stepId + 1 },
-        commands: { name: "NextStep" },
-      }),
+    on: {
+      StepCompleted: {
+        id: (event) => String(event.payload.stepId),
+        handle: (event, state) => ({
+          state: { step: event.payload.stepId + 1 },
+          commands: { name: "NextStep" },
+        }),
+      },
     },
   });
 
@@ -448,11 +460,11 @@ describe("Saga with custom ID type", () => {
   const saga = defineSaga<Types, number>({
     initialState: {},
     startedBy: ["Started"],
-    associations: {
-      Started: (event) => event.payload.id,
-    },
-    handlers: {
-      Started: (_event, state) => ({ state }),
+    on: {
+      Started: {
+        id: (event) => event.payload.id,
+        handle: (_event, state) => ({ state }),
+      },
     },
   });
 
@@ -460,8 +472,8 @@ describe("Saga with custom ID type", () => {
     expectTypeOf<InferSagaId<typeof saga>>().toBeNumber();
   });
 
-  it("should type association return as number", () => {
-    const id = saga.associations.Started({
+  it("should type on entry id return as number", () => {
+    const id = saga.on.Started!.id({
       name: "Started",
       payload: { id: 42 },
     });
@@ -491,8 +503,12 @@ describe("defineSaga identity", () => {
     const config = {
       initialState: {},
       startedBy: ["X" as const],
-      associations: { X: (e: any) => String(e.payload.v) },
-      handlers: { X: (_e: any, s: any) => ({ state: s }) },
+      on: {
+        X: {
+          id: (e: any) => String(e.payload.v),
+          handle: (_e: any, s: any) => ({ state: s }),
+        },
+      },
     };
     const result = defineSaga<T>(config as any);
     expect(result).toBe(config);

@@ -16,7 +16,7 @@ depends_on:
 
 # SagaExecutor
 
-> `SagaExecutor` executes the full saga event handling lifecycle: derive the saga instance ID from the event via associations, load the saga state, bootstrap (if the event is in `startedBy`) or ignore (if the saga has not started), execute the saga handler, persist the new saga state, and dispatch reaction commands -- all within an atomic unit of work. The saga's UoW spans both saga state persistence and all aggregate commands dispatched by the reaction, ensuring atomicity. This is an engine-internal class instantiated by `Domain` during `init()`.
+> `SagaExecutor` executes the full saga event handling lifecycle: derive the saga instance ID from the event via the `on` map, load the saga state, bootstrap (if the event is in `startedBy`) or ignore (if the saga has not started), execute the saga handler, persist the new saga state, and dispatch reaction commands -- all within an atomic unit of work. The saga's UoW spans both saga state persistence and all aggregate commands dispatched by the reaction, ensuring atomicity. This is an engine-internal class instantiated by `Domain` during `init()`.
 
 ## Type Contract
 
@@ -54,7 +54,7 @@ class SagaExecutor {
 
 ### Derive Saga Instance ID
 
-1. **Association lookup** -- Look up the association function via `saga.associations[event.name]`. If no association function exists for this event name, return immediately (no-op). Otherwise, call the association function with the event to derive the saga instance ID.
+1. **Association lookup** -- Look up the `on` map entry via `saga.on[event.name]`. If no entry exists for this event name, return immediately (no-op). Otherwise, call `saga.on[event.name].id(event)` to derive the saga instance ID.
 
 ### Load Saga State
 
@@ -71,7 +71,7 @@ class SagaExecutor {
 
 ### Execute Saga Handler
 
-5. **Handler lookup and invocation** -- Look up the handler via `saga.handlers[event.name]`. If no handler exists, return immediately (no-op). Otherwise, invoke the handler with `(event, currentState, infrastructure)`. The handler returns a `SagaReaction` containing `state` (the new saga state) and optional `commands`.
+5. **Handler lookup and invocation** -- Look up the handler via `saga.on[event.name]?.handle`. If no handler exists, return immediately (no-op). Otherwise, invoke the handler with `(event, currentState, infrastructure)`. The handler returns a `SagaReaction` containing `state` (the new saga state) and optional `commands`.
 
 ### Propagate Correlation Metadata
 
@@ -118,16 +118,16 @@ class SagaExecutor {
 - Events are published only after successful UoW commit (never before).
 - The metadata context is set before any commands are dispatched, ensuring enriched events carry the saga's correlation chain.
 - The `causationId` for events produced by saga-dispatched commands is the `eventId` of the triggering event (linking cause to effect).
-- If `saga.associations[event.name]` is `undefined`, the event is silently ignored (no error).
-- If `saga.handlers[event.name]` is `undefined`, the event is silently ignored (no error).
+- If `saga.on[event.name]` is `undefined`, the event is silently ignored (no error).
+- If `saga.on[event.name]?.handle` is `undefined`, the event is silently ignored (no error).
 - If the saga has not started and the event is not in `startedBy`, the event is silently ignored.
 - UoW rollback errors are swallowed; the original error is re-thrown.
 - The executor creates its own UoW (not reusing an existing one). Saga reactions always have their own atomic boundary.
 
 ## Edge Cases
 
-- **No association for event name** -- Returns immediately. No state load, no handler invocation.
-- **No handler for event name** -- Returns immediately after association lookup. State may be loaded but no handler runs.
+- **No `on` entry for event name** -- Returns immediately. No state load, no handler invocation.
+- **No handler for event name** -- Returns immediately after `on` map lookup. State may be loaded but no handler runs.
 - **Saga not started and event not in startedBy** -- Returns immediately. No handler invocation, no state persistence.
 - **Saga already started and receives a startedBy event** -- Uses the existing state (does not reset to `initialState`). The `startedBy` check only applies when state is `null`.
 - **Reaction with no commands** -- Only saga state is persisted. No commands dispatched. UoW commits with just the state save.
@@ -141,7 +141,7 @@ class SagaExecutor {
 
 ## Integration Points
 
-- **Domain** -- Constructs the `SagaExecutor` during `init()` and subscribes it to event bus events matching `saga.handlers` keys.
+- **Domain** -- Constructs the `SagaExecutor` during `init()` and subscribes it to event bus events matching `Object.keys(saga.on)`.
 - **CommandBus** -- Saga dispatches commands through `infrastructure.commandBus.dispatch()`. This routes to aggregate command handlers registered by the Domain.
 - **CommandLifecycleExecutor** -- When the saga dispatches commands, the command bus invokes the `CommandLifecycleExecutor`. Because the saga's UoW is in the `AsyncLocalStorage`, the executor uses the saga's UoW (explicit UoW path).
 - **SagaPersistence** -- Saga state is loaded and saved via the persistence interface.
@@ -188,17 +188,19 @@ type OrderSagaTypes = SagaTypes & {
 const OrderSaga = defineSaga<OrderSagaTypes>({
   initialState: { status: "new" },
   startedBy: ["OrderPlaced"],
-  associations: {
-    OrderPlaced: (event) => event.payload.orderId,
-    PaymentReceived: (event) => event.payload.orderId,
-  },
-  handlers: {
-    OrderPlaced: (event, state) => ({
-      state: { status: "placed" },
-    }),
-    PaymentReceived: (event, state) => ({
-      state: { status: "paid" },
-    }),
+  on: {
+    OrderPlaced: {
+      id: (event) => event.payload.orderId,
+      handle: (event, state) => ({
+        state: { status: "placed" },
+      }),
+    },
+    PaymentReceived: {
+      id: (event) => event.payload.orderId,
+      handle: (event, state) => ({
+        state: { status: "paid" },
+      }),
+    },
   },
 });
 
@@ -270,13 +272,15 @@ type MySagaTypes = SagaTypes & {
 const MySaga = defineSaga<MySagaTypes>({
   initialState: { started: false },
   startedBy: ["Started"],
-  associations: {
-    Started: (event) => event.payload.id,
-    Continued: (event) => event.payload.id,
-  },
-  handlers: {
-    Started: () => ({ state: { started: true } }),
-    Continued: (event, state) => ({ state }),
+  on: {
+    Started: {
+      id: (event) => event.payload.id,
+      handle: () => ({ state: { started: true } }),
+    },
+    Continued: {
+      id: (event) => event.payload.id,
+      handle: (event, state) => ({ state }),
+    },
   },
 });
 
@@ -346,11 +350,11 @@ type MinSagaTypes = SagaTypes & {
 const MinSaga = defineSaga<MinSagaTypes>({
   initialState: {},
   startedBy: ["Known"],
-  associations: {
-    Known: (event) => event.payload.id,
-  },
-  handlers: {
-    Known: () => ({ state: {} }),
+  on: {
+    Known: {
+      id: (event) => event.payload.id,
+      handle: () => ({ state: {} }),
+    },
   },
 });
 
@@ -374,7 +378,7 @@ describe("SagaExecutor", () => {
       metadataStorage,
     );
 
-    // "Unknown" has no association in MinSaga
+    // "Unknown" has no entry in MinSaga.on
     await executor.execute("MinSaga", MinSaga, {
       name: "Unknown",
       payload: { id: "x" },
@@ -426,18 +430,18 @@ type DispatchSagaTypes = SagaTypes & {
 const DispatchSaga = defineSaga<DispatchSagaTypes>({
   initialState: { dispatched: false },
   startedBy: ["TriggerReceived"],
-  associations: {
-    TriggerReceived: (event) => event.payload.id,
-  },
-  handlers: {
-    TriggerReceived: () => ({
-      state: { dispatched: true },
-      commands: {
-        name: "DoSomething",
-        payload: { value: 42 },
-        targetAggregateId: "target-1",
-      },
-    }),
+  on: {
+    TriggerReceived: {
+      id: (event) => event.payload.id,
+      handle: () => ({
+        state: { dispatched: true },
+        commands: {
+          name: "DoSomething",
+          payload: { value: 42 },
+          targetAggregateId: "target-1",
+        },
+      }),
+    },
   },
 });
 
@@ -518,18 +522,18 @@ type CorrSagaTypes = SagaTypes & {
 const CorrSaga = defineSaga<CorrSagaTypes>({
   initialState: {},
   startedBy: ["CorrEvent"],
-  associations: {
-    CorrEvent: (event) => event.payload.id,
-  },
-  handlers: {
-    CorrEvent: () => ({
-      state: {},
-      commands: {
-        name: "DownstreamCmd",
-        payload: {},
-        targetAggregateId: "ds1",
-      },
-    }),
+  on: {
+    CorrEvent: {
+      id: (event) => event.payload.id,
+      handle: () => ({
+        state: {},
+        commands: {
+          name: "DownstreamCmd",
+          payload: {},
+          targetAggregateId: "ds1",
+        },
+      }),
+    },
   },
 });
 
@@ -614,18 +618,18 @@ type RbSagaTypes = SagaTypes & {
 const RbSaga = defineSaga<RbSagaTypes>({
   initialState: { ran: false },
   startedBy: ["RbTrigger"],
-  associations: {
-    RbTrigger: (event) => event.payload.id,
-  },
-  handlers: {
-    RbTrigger: () => ({
-      state: { ran: true },
-      commands: {
-        name: "FailingCmd",
-        payload: {},
-        targetAggregateId: "fail-1",
-      },
-    }),
+  on: {
+    RbTrigger: {
+      id: (event) => event.payload.id,
+      handle: () => ({
+        state: { ran: true },
+        commands: {
+          name: "FailingCmd",
+          payload: {},
+          targetAggregateId: "fail-1",
+        },
+      }),
+    },
   },
 });
 
@@ -701,14 +705,14 @@ type NoCmdSagaTypes = SagaTypes & {
 const NoCmdSaga = defineSaga<NoCmdSagaTypes>({
   initialState: { step: 0 },
   startedBy: ["StepEvent"],
-  associations: {
-    StepEvent: (event) => event.payload.id,
-  },
-  handlers: {
-    StepEvent: (event, state) => ({
-      state: { step: state.step + 1 },
-      // No commands
-    }),
+  on: {
+    StepEvent: {
+      id: (event) => event.payload.id,
+      handle: (event, state) => ({
+        state: { step: state.step + 1 },
+        // No commands
+      }),
+    },
   },
 });
 
@@ -783,17 +787,19 @@ type FlowSagaTypes = SagaTypes & {
 const FlowSaga = defineSaga<FlowSagaTypes>({
   initialState: { steps: [] },
   startedBy: ["FlowStarted"],
-  associations: {
-    FlowStarted: (event) => event.payload.id,
-    FlowContinued: (event) => event.payload.id,
-  },
-  handlers: {
-    FlowStarted: (event, state) => ({
-      state: { steps: [...state.steps, "started"] },
-    }),
-    FlowContinued: (event, state) => ({
-      state: { steps: [...state.steps, "continued"] },
-    }),
+  on: {
+    FlowStarted: {
+      id: (event) => event.payload.id,
+      handle: (event, state) => ({
+        state: { steps: [...state.steps, "started"] },
+      }),
+    },
+    FlowContinued: {
+      id: (event) => event.payload.id,
+      handle: (event, state) => ({
+        state: { steps: [...state.steps, "continued"] },
+      }),
+    },
   },
 });
 

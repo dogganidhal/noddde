@@ -38,33 +38,37 @@ type FulfillmentSagaDef = {
 const OrderFulfillmentSaga = defineSaga<FulfillmentSagaDef>({
   initialState: { status: "pending", orderId: null },
   startedBy: ["OrderPlaced"],
-  associations: {
-    OrderPlaced: (event) => event.payload.orderId,
-    PaymentReceived: (event) => event.payload.orderId,
-    OrderFulfilled: (event) => event.payload.orderId,
-  },
-  handlers: {
-    OrderPlaced: (event, state) => ({
-      state: { status: "awaiting_payment", orderId: event.payload.orderId },
-      commands: {
-        name: "RequestPayment",
-        targetAggregateId: event.payload.orderId,
-        payload: {
-          orderId: event.payload.orderId,
-          amount: event.payload.amount,
+  on: {
+    OrderPlaced: {
+      id: (event) => event.payload.orderId,
+      handle: (event, state) => ({
+        state: { status: "awaiting_payment", orderId: event.payload.orderId },
+        commands: {
+          name: "RequestPayment",
+          targetAggregateId: event.payload.orderId,
+          payload: {
+            orderId: event.payload.orderId,
+            amount: event.payload.amount,
+          },
         },
-      },
-    }),
-    PaymentReceived: (event, state) => ({
-      state: { ...state, status: "fulfilled" },
-      commands: {
-        name: "FulfillOrder",
-        targetAggregateId: event.payload.orderId,
-      },
-    }),
-    OrderFulfilled: (_event, state) => ({
-      state, // no state change
-    }),
+      }),
+    },
+    PaymentReceived: {
+      id: (event) => event.payload.orderId,
+      handle: (event, state) => ({
+        state: { ...state, status: "fulfilled" },
+        commands: {
+          name: "FulfillOrder",
+          targetAggregateId: event.payload.orderId,
+        },
+      }),
+    },
+    OrderFulfilled: {
+      id: (event) => event.payload.orderId,
+      handle: (_event, state) => ({
+        state, // no state change
+      }),
+    },
   },
 });
 
@@ -84,13 +88,13 @@ type NotifySagaDef = {
 const NotifySaga = defineSaga<NotifySagaDef>({
   initialState: { notified: false },
   startedBy: ["TaskCompleted"],
-  associations: {
-    TaskCompleted: (event) => event.payload.taskId,
-  },
-  handlers: {
-    TaskCompleted: async (event, state, infrastructure) => {
-      await infrastructure.notifier.send(event.payload.message);
-      return { state: { notified: true } };
+  on: {
+    TaskCompleted: {
+      id: (event) => event.payload.taskId,
+      handle: async (event, state, infrastructure) => {
+        await infrastructure.notifier.send(event.payload.message);
+        return { state: { notified: true } };
+      },
     },
   },
 });
@@ -111,12 +115,12 @@ type ErrorSagaDef = {
 const ErrorSaga = defineSaga<ErrorSagaDef>({
   initialState: { ok: true },
   startedBy: ["BadEvent"],
-  associations: {
-    BadEvent: (event) => event.payload.value,
-  },
-  handlers: {
-    BadEvent: () => {
-      throw new Error("Saga handler failed");
+  on: {
+    BadEvent: {
+      id: (event) => event.payload.value,
+      handle: () => {
+        throw new Error("Saga handler failed");
+      },
     },
   },
 });
@@ -137,13 +141,13 @@ type AsyncSagaDef = {
 const AsyncSaga = defineSaga<AsyncSagaDef>({
   initialState: { processed: false },
   startedBy: ["SlowEvent"],
-  associations: {
-    SlowEvent: (event) => event.payload.id,
-  },
-  handlers: {
-    SlowEvent: async () => {
-      await new Promise((resolve) => setTimeout(resolve, 1));
-      return { state: { processed: true } };
+  on: {
+    SlowEvent: {
+      id: (event) => event.payload.id,
+      handle: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        return { state: { processed: true } };
+      },
     },
   },
 });

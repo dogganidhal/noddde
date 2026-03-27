@@ -417,21 +417,23 @@ type FulfillmentSagaTypes = SagaTypes & {
 const OrderFulfillmentSaga = defineSaga<FulfillmentSagaTypes>({
   initialState: { confirmed: false },
   startedBy: ["OrderPlaced"],
-  associations: {
-    OrderPlaced: (event) => event.payload.orderId,
-    OrderConfirmed: (event) => event.payload.orderId,
-  },
-  handlers: {
-    OrderPlaced: (event, state) => ({
-      state: { ...state, confirmed: false },
-      commands: {
-        name: "ConfirmOrder",
-        targetAggregateId: event.payload.orderId,
-      },
-    }),
-    OrderConfirmed: (_event, state) => ({
-      state: { ...state, confirmed: true },
-    }),
+  on: {
+    OrderPlaced: {
+      id: (event) => event.payload.orderId,
+      handle: (event, state) => ({
+        state: { ...state, confirmed: false },
+        commands: {
+          name: "ConfirmOrder",
+          targetAggregateId: event.payload.orderId,
+        },
+      }),
+    },
+    OrderConfirmed: {
+      id: (event) => event.payload.orderId,
+      handle: (_event, state) => ({
+        state: { ...state, confirmed: true },
+      }),
+    },
   },
 });
 
@@ -2174,13 +2176,13 @@ describe("wireDomain hello world", () => {
     const TestSaga = defineSaga<TestSagaTypes>({
       initialState: { started: false },
       startedBy: ["OrderPlaced"],
-      associations: {
-        OrderPlaced: (event) => event.payload.orderId,
-      },
-      handlers: {
-        OrderPlaced: (_event, state) => ({
-          state: { started: true },
-        }),
+      on: {
+        OrderPlaced: {
+          id: (event) => event.payload.orderId,
+          handle: (_event, state) => ({
+            state: { started: true },
+          }),
+        },
       },
     });
 

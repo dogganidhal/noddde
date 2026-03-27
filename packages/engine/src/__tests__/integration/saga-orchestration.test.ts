@@ -49,36 +49,40 @@ type FulfillmentSagaDef = {
 const OrderFulfillmentSaga = defineSaga<FulfillmentSagaDef>({
   initialState: { status: "pending", orderId: null },
   startedBy: ["OrderPlaced"],
-  associations: {
-    OrderPlaced: (event) => event.payload.orderId,
-    PaymentReceived: (event) => event.payload.orderId,
-    OrderFulfilled: (event) => event.payload.orderId,
-  },
-  handlers: {
-    OrderPlaced: (event, state) => ({
-      state: {
-        status: "awaiting_payment",
-        orderId: event.payload.orderId,
-      },
-      commands: {
-        name: "RequestPayment",
-        targetAggregateId: event.payload.orderId,
-        payload: {
+  on: {
+    OrderPlaced: {
+      id: (event) => event.payload.orderId,
+      handle: (event, state) => ({
+        state: {
+          status: "awaiting_payment",
           orderId: event.payload.orderId,
-          amount: event.payload.amount,
         },
-      },
-    }),
-    PaymentReceived: (event, state) => ({
-      state: { ...state, status: "fulfilled" },
-      commands: {
-        name: "FulfillOrder",
-        targetAggregateId: event.payload.orderId,
-      },
-    }),
-    OrderFulfilled: (event, state) => ({
-      state, // no state change, saga complete
-    }),
+        commands: {
+          name: "RequestPayment",
+          targetAggregateId: event.payload.orderId,
+          payload: {
+            orderId: event.payload.orderId,
+            amount: event.payload.amount,
+          },
+        },
+      }),
+    },
+    PaymentReceived: {
+      id: (event) => event.payload.orderId,
+      handle: (event, state) => ({
+        state: { ...state, status: "fulfilled" },
+        commands: {
+          name: "FulfillOrder",
+          targetAggregateId: event.payload.orderId,
+        },
+      }),
+    },
+    OrderFulfilled: {
+      id: (event) => event.payload.orderId,
+      handle: (event, state) => ({
+        state, // no state change, saga complete
+      }),
+    },
   },
 });
 
@@ -240,19 +244,21 @@ describe("Handler returning no commands", () => {
   const AckSaga = defineSaga<AckSagaDef>({
     initialState: { acknowledged: false },
     startedBy: ["TaskStarted"],
-    associations: {
-      TaskStarted: (event) => event.payload.taskId,
-      TaskAcknowledged: (event) => event.payload.taskId,
-    },
-    handlers: {
-      TaskStarted: (event, state) => ({
-        state: { acknowledged: false },
-        // no commands
-      }),
-      TaskAcknowledged: (event, state) => ({
-        state: { acknowledged: true },
-        // no commands
-      }),
+    on: {
+      TaskStarted: {
+        id: (event) => event.payload.taskId,
+        handle: (event, state) => ({
+          state: { acknowledged: false },
+          // no commands
+        }),
+      },
+      TaskAcknowledged: {
+        id: (event) => event.payload.taskId,
+        handle: (event, state) => ({
+          state: { acknowledged: true },
+          // no commands
+        }),
+      },
     },
   });
 
@@ -312,13 +318,13 @@ describe("startedBy event with existing instance", () => {
   const RetrySaga = defineSaga<RetrySagaDef>({
     initialState: { attempts: 0 },
     startedBy: ["JobStarted"],
-    associations: {
-      JobStarted: (event) => event.payload.jobId,
-    },
-    handlers: {
-      JobStarted: (event, state) => ({
-        state: { attempts: state.attempts + 1 },
-      }),
+    on: {
+      JobStarted: {
+        id: (event) => event.payload.jobId,
+        handle: (event, state) => ({
+          state: { attempts: state.attempts + 1 },
+        }),
+      },
     },
   });
 

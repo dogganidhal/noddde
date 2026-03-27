@@ -811,7 +811,7 @@ export class Domain<
       for (const [sagaName, saga] of Object.entries(
         definition.processModel.sagas,
       )) {
-        for (const eventName of Object.keys(saga.handlers)) {
+        for (const eventName of Object.keys(saga.on)) {
           this.subscribeToEvent(eventBus, eventName, async (event: Event) => {
             await this._sagaExecutor!.execute(sagaName, saga, event);
           });

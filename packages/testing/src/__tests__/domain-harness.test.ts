@@ -108,21 +108,21 @@ type TestSagaDef = {
 const TestSaga = defineSaga<TestSagaDef>({
   initialState: { status: "pending" },
   startedBy: ["OrderPlaced"],
-  associations: {
-    OrderPlaced: (event) => event.payload.orderId,
-  },
-  handlers: {
-    OrderPlaced: (event) => ({
-      state: { status: "payment_requested" },
-      commands: {
-        name: "RequestPayment",
-        targetAggregateId: event.payload.orderId,
-        payload: {
-          orderId: event.payload.orderId,
-          amount: event.payload.amount,
+  on: {
+    OrderPlaced: {
+      id: (event) => event.payload.orderId,
+      handle: (event) => ({
+        state: { status: "payment_requested" },
+        commands: {
+          name: "RequestPayment",
+          targetAggregateId: event.payload.orderId,
+          payload: {
+            orderId: event.payload.orderId,
+            amount: event.payload.amount,
+          },
         },
-      },
-    }),
+      }),
+    },
   },
 });
 
