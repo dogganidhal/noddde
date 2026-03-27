@@ -13,6 +13,8 @@ import type {
 import { defineAggregate, defineProjection, defineSaga } from "@noddde/core";
 import {
   configureDomain,
+  defineDomain,
+  wireDomain,
   createInMemoryUnitOfWork,
   Domain,
   EventEmitterEventBus,
@@ -24,6 +26,7 @@ import {
   InMemorySagaPersistence,
   InMemorySnapshotStore,
   InMemoryStateStoredAggregatePersistence,
+  InMemoryViewStore,
 } from "@noddde/engine";
 import { everyNEvents } from "@noddde/core";
 
@@ -1515,5 +1518,615 @@ describe("Mixed persistence with snapshots", () => {
     // No snapshot for state-stored BankAccount
     const bankSnapshot = await snapshotStore.load("BankAccount", "acc-1");
     expect(bankSnapshot).toBeNull();
+  });
+});
+
+// ============================================================
+// defineDomain returns a typed DomainDefinition
+// ============================================================
+
+describe("defineDomain", () => {
+  it("should return the definition unchanged with type inference", () => {
+    type PingState = { pinged: boolean };
+    type PingEvent = DefineEvents<{ Pinged: Record<string, never> }>;
+    type PingCommand = DefineCommands<{ Ping: void }>;
+    type PingTypes = AggregateTypes & {
+      state: PingState;
+      events: PingEvent;
+      commands: PingCommand;
+      infrastructure: Infrastructure;
+    };
+
+    const Pinger = defineAggregate<PingTypes>({
+      initialState: { pinged: false },
+      commands: {
+        Ping: () => ({ name: "Pinged", payload: {} }),
+      },
+      apply: {
+        Pinged: () => ({ pinged: true }),
+      },
+    });
+
+    const definition = defineDomain<Infrastructure>({
+      writeModel: { aggregates: { Pinger } },
+      readModel: { projections: {} },
+    });
+
+    expect(definition.writeModel.aggregates).toEqual({ Pinger });
+    expect(definition.readModel.projections).toEqual({});
+    expect(definition.processModel).toBeUndefined();
+  });
+});
+
+// ============================================================
+// wireDomain creates and initializes a domain from definition + wiring
+// ============================================================
+
+describe("wireDomain", () => {
+  type CounterState = { count: number };
+  type CounterEvent = DefineEvents<{
+    CounterCreated: { id: string };
+    Incremented: { by: number };
+  }>;
+  type CounterCommand = DefineCommands<{
+    CreateCounter: void;
+    Increment: { by: number };
+  }>;
+  type CounterTypes = AggregateTypes & {
+    state: CounterState;
+    events: CounterEvent;
+    commands: CounterCommand;
+    infrastructure: Infrastructure;
+  };
+
+  const Counter = defineAggregate<CounterTypes>({
+    initialState: { count: 0 },
+    commands: {
+      CreateCounter: (cmd) => ({
+        name: "CounterCreated",
+        payload: { id: cmd.targetAggregateId },
+      }),
+      Increment: (cmd) => ({
+        name: "Incremented",
+        payload: { by: cmd.payload.by },
+      }),
+    },
+    apply: {
+      CounterCreated: (_p, state) => state,
+      Incremented: (payload, state) => ({ count: state.count + payload.by }),
+    },
+  });
+
+  it("should create an initialized Domain from definition + wiring", async () => {
+    const definition = defineDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+    });
+
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => persistence,
+      },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    expect(domain).toBeInstanceOf(Domain);
+
+    // Verify it's functional
+    await domain.dispatchCommand({
+      name: "CreateCounter",
+      targetAggregateId: "c-1",
+    });
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "c-1",
+      payload: { by: 5 },
+    });
+
+    const events = await persistence.load("Counter", "c-1");
+    expect(events).toHaveLength(2);
+  });
+
+  it("should work with empty wiring using all defaults", async () => {
+    type PingState = { pinged: boolean };
+    type PingEvent = DefineEvents<{ Pinged: Record<string, never> }>;
+    type PingCommand = DefineCommands<{ Ping: void }>;
+    type PingTypes = AggregateTypes & {
+      state: PingState;
+      events: PingEvent;
+      commands: PingCommand;
+      infrastructure: Infrastructure;
+    };
+
+    const Pinger = defineAggregate<PingTypes>({
+      initialState: { pinged: false },
+      commands: {
+        Ping: () => ({ name: "Pinged", payload: {} }),
+      },
+      apply: {
+        Pinged: () => ({ pinged: true }),
+      },
+    });
+
+    const definition = defineDomain<Infrastructure>({
+      writeModel: { aggregates: { Pinger } },
+      readModel: { projections: {} },
+    });
+
+    const domain = await wireDomain(definition, {});
+    expect(domain).toBeInstanceOf(Domain);
+
+    await domain.dispatchCommand({
+      name: "Ping",
+      targetAggregateId: "p-1",
+    });
+  });
+
+  it("should provide user infrastructure separated from framework plumbing", async () => {
+    interface AppInfrastructure {
+      clock: { now(): Date };
+    }
+
+    type PingState = { lastPing: Date | null };
+    type PingEvent = DefineEvents<{ Pinged: { at: string } }>;
+    type PingCommand = DefineCommands<{ Ping: void }>;
+    type PingTypes = AggregateTypes & {
+      state: PingState;
+      events: PingEvent;
+      commands: PingCommand;
+      infrastructure: AppInfrastructure;
+    };
+
+    const Pinger = defineAggregate<PingTypes>({
+      initialState: { lastPing: null },
+      commands: {
+        Ping: (_cmd, _state, infra) => ({
+          name: "Pinged",
+          payload: { at: infra.clock.now().toISOString() },
+        }),
+      },
+      apply: {
+        Pinged: (payload) => ({ lastPing: new Date(payload.at) }),
+      },
+    });
+
+    const fixedDate = new Date("2025-06-01T12:00:00Z");
+
+    const definition = defineDomain<AppInfrastructure>({
+      writeModel: { aggregates: { Pinger } },
+      readModel: { projections: {} },
+    });
+
+    const domain = await wireDomain(definition, {
+      infrastructure: () => ({
+        clock: { now: () => fixedDate },
+      }),
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    // User infrastructure is accessible
+    expect(domain.infrastructure.clock.now()).toBe(fixedDate);
+
+    // CQRS buses are also on infrastructure (merged)
+    expect(domain.infrastructure.commandBus).toBeInstanceOf(InMemoryCommandBus);
+  });
+});
+
+// ============================================================
+// wireDomain per-aggregate config
+// ============================================================
+
+describe("wireDomain per-aggregate config", () => {
+  type CounterState = { count: number };
+  type CounterEvent = DefineEvents<{ Incremented: { by: number } }>;
+  type CounterCommand = DefineCommands<{ Increment: { by: number } }>;
+  type CounterTypes = AggregateTypes & {
+    state: CounterState;
+    events: CounterEvent;
+    commands: CounterCommand;
+    infrastructure: Infrastructure;
+  };
+
+  const Counter = defineAggregate<CounterTypes>({
+    initialState: { count: 0 },
+    commands: {
+      Increment: (cmd) => ({
+        name: "Incremented",
+        payload: { by: cmd.payload.by },
+      }),
+    },
+    apply: {
+      Incremented: (payload, state) => ({ count: state.count + payload.by }),
+    },
+  });
+
+  type BalanceState = { balance: number };
+  type BalanceEvent = DefineEvents<{ DepositMade: { amount: number } }>;
+  type BalanceCommand = DefineCommands<{ Deposit: { amount: number } }>;
+  type BalanceTypes = AggregateTypes & {
+    state: BalanceState;
+    events: BalanceEvent;
+    commands: BalanceCommand;
+    infrastructure: Infrastructure;
+  };
+
+  const BankAccount = defineAggregate<BalanceTypes>({
+    initialState: { balance: 0 },
+    commands: {
+      Deposit: (cmd) => ({
+        name: "DepositMade",
+        payload: { amount: cmd.payload.amount },
+      }),
+    },
+    apply: {
+      DepositMade: (payload, state) => ({
+        balance: state.balance + payload.amount,
+      }),
+    },
+  });
+
+  it("should support different concurrency and snapshots per aggregate", async () => {
+    const snapshotStore = new InMemorySnapshotStore();
+
+    const definition = defineDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter, BankAccount } },
+      readModel: { projections: {} },
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        Counter: {
+          persistence: () => new InMemoryEventSourcedAggregatePersistence(),
+          concurrency: { maxRetries: 5 },
+          snapshots: {
+            store: () => snapshotStore,
+            strategy: everyNEvents(1),
+          },
+        },
+        BankAccount: {
+          persistence: () => new InMemoryStateStoredAggregatePersistence(),
+          // No concurrency, no snapshots
+        },
+      },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    // Counter should produce snapshots
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "c-1",
+      payload: { by: 10 },
+    });
+
+    const counterSnapshot = await snapshotStore.load("Counter", "c-1");
+    expect(counterSnapshot).not.toBeNull();
+
+    // BankAccount should not produce snapshots
+    await domain.dispatchCommand({
+      name: "Deposit",
+      targetAggregateId: "acc-1",
+      payload: { amount: 100 },
+    });
+
+    const bankSnapshot = await snapshotStore.load("BankAccount", "acc-1");
+    expect(bankSnapshot).toBeNull();
+  });
+});
+
+// ============================================================
+// wireDomain projection wiring
+// ============================================================
+
+describe("wireDomain projection wiring", () => {
+  it("should resolve viewStore from wiring.projections", async () => {
+    type ItemEvent = DefineEvents<{
+      ItemAdded: { id: string; name: string };
+    }>;
+    type ItemQuery = DefineQueries<{
+      GetItem: {
+        payload: { id: string };
+        result: { id: string; name: string } | null;
+      };
+    }>;
+    type ItemView = { id: string; name: string };
+
+    type ItemProjectionTypes = ProjectionTypes & {
+      events: ItemEvent;
+      queries: ItemQuery;
+      view: ItemView;
+      infrastructure: Infrastructure;
+    };
+
+    const ItemProjection = defineProjection<ItemProjectionTypes>({
+      reducers: {
+        ItemAdded: (event) => ({
+          id: event.payload.id,
+          name: event.payload.name,
+        }),
+      },
+      queryHandlers: {
+        GetItem: (payload, { views }) =>
+          (views as InMemoryViewStore<ItemView>).load(payload.id),
+      },
+      identity: {
+        ItemAdded: (event) => event.payload.id,
+      },
+      initialView: { id: "", name: "" },
+      // No viewStore on the definition — provided via wiring
+    });
+
+    type ItemAggregateTypes = AggregateTypes & {
+      state: Record<string, never>;
+      events: ItemEvent;
+      commands: DefineCommands<{
+        AddItem: { id: string; name: string };
+      }>;
+      infrastructure: Infrastructure;
+    };
+
+    const ItemAggregate = defineAggregate<ItemAggregateTypes>({
+      initialState: {},
+      commands: {
+        AddItem: (cmd) => ({
+          name: "ItemAdded",
+          payload: { id: cmd.payload.id, name: cmd.payload.name },
+        }),
+      },
+      apply: {
+        ItemAdded: (_p, state) => state,
+      },
+    });
+
+    const viewStore = new InMemoryViewStore<ItemView>();
+
+    const definition = defineDomain<Infrastructure>({
+      writeModel: { aggregates: { Item: ItemAggregate } },
+      readModel: { projections: { ItemProjection } },
+    });
+
+    const domain = await wireDomain(definition, {
+      projections: {
+        ItemProjection: {
+          viewStore: () => viewStore,
+        },
+      },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    await domain.dispatchCommand({
+      name: "AddItem",
+      targetAggregateId: "item-1",
+      payload: { id: "item-1", name: "Widget" },
+    });
+
+    // Allow eventual consistency
+    await new Promise((r) => setTimeout(r, 50));
+
+    const result = await domain.dispatchQuery({
+      name: "GetItem",
+      payload: { id: "item-1" },
+    } as ItemQuery);
+
+    expect(result).toEqual({ id: "item-1", name: "Widget" });
+  });
+});
+
+// ============================================================
+// wireDomain hello world (no wiring argument)
+// ============================================================
+
+describe("wireDomain hello world", () => {
+  it("should work with no wiring argument at all", async () => {
+    type PingState = { pinged: boolean };
+    type PingEvent = DefineEvents<{ Pinged: Record<string, never> }>;
+    type PingCommand = DefineCommands<{ Ping: void }>;
+    type PingTypes = AggregateTypes & {
+      state: PingState;
+      events: PingEvent;
+      commands: PingCommand;
+      infrastructure: Infrastructure;
+    };
+
+    const Pinger = defineAggregate<PingTypes>({
+      initialState: { pinged: false },
+      commands: {
+        Ping: () => ({ name: "Pinged", payload: {} }),
+      },
+      apply: {
+        Pinged: () => ({ pinged: true }),
+      },
+    });
+
+    const definition = defineDomain<Infrastructure>({
+      writeModel: { aggregates: { Pinger } },
+      readModel: { projections: {} },
+    });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const domain = await wireDomain(definition);
+    expect(domain).toBeInstanceOf(Domain);
+
+    // Should work with in-memory defaults
+    await domain.dispatchCommand({
+      name: "Ping",
+      targetAggregateId: "p-1",
+    });
+
+    warnSpy.mockRestore();
+  });
+
+  it("should log warnings when using in-memory defaults", async () => {
+    type PingState = { pinged: boolean };
+    type PingEvent = DefineEvents<{ Pinged: Record<string, never> }>;
+    type PingCommand = DefineCommands<{ Ping: void }>;
+    type PingTypes = AggregateTypes & {
+      state: PingState;
+      events: PingEvent;
+      commands: PingCommand;
+      infrastructure: Infrastructure;
+    };
+
+    const Pinger = defineAggregate<PingTypes>({
+      initialState: { pinged: false },
+      commands: {
+        Ping: () => ({ name: "Pinged", payload: {} }),
+      },
+      apply: {
+        Pinged: () => ({ pinged: true }),
+      },
+    });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const definition = defineDomain<Infrastructure>({
+      writeModel: { aggregates: { Pinger } },
+      readModel: { projections: {} },
+    });
+
+    await wireDomain(definition);
+
+    // Should warn about in-memory persistence
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[noddde]"),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("aggregate persistence"),
+    );
+    // Should warn about in-memory buses
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("buses"),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it("should not log warnings when all wiring is explicitly provided", async () => {
+    type PingState = { pinged: boolean };
+    type PingEvent = DefineEvents<{ Pinged: Record<string, never> }>;
+    type PingCommand = DefineCommands<{ Ping: void }>;
+    type PingTypes = AggregateTypes & {
+      state: PingState;
+      events: PingEvent;
+      commands: PingCommand;
+      infrastructure: Infrastructure;
+    };
+
+    const Pinger = defineAggregate<PingTypes>({
+      initialState: { pinged: false },
+      commands: {
+        Ping: () => ({ name: "Pinged", payload: {} }),
+      },
+      apply: {
+        Pinged: () => ({ pinged: true }),
+      },
+    });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const definition = defineDomain<Infrastructure>({
+      writeModel: { aggregates: { Pinger } },
+      readModel: { projections: {} },
+    });
+
+    await wireDomain(definition, {
+      aggregates: {
+        persistence: () => new InMemoryEventSourcedAggregatePersistence(),
+      },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    expect(warnSpy).not.toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+  });
+
+  it("should log saga persistence warning when sagas use default", async () => {
+    type OrderEvent = DefineEvents<{
+      OrderPlaced: { orderId: string };
+    }>;
+    type OrderCommand = DefineCommands<{
+      PlaceOrder: void;
+    }>;
+    type OrderState = { placed: boolean };
+    type OrderTypes = AggregateTypes & {
+      state: OrderState;
+      events: OrderEvent;
+      commands: OrderCommand;
+      infrastructure: Infrastructure;
+    };
+
+    const Order = defineAggregate<OrderTypes>({
+      initialState: { placed: false },
+      commands: {
+        PlaceOrder: (cmd) => ({
+          name: "OrderPlaced",
+          payload: { orderId: cmd.targetAggregateId },
+        }),
+      },
+      apply: {
+        OrderPlaced: () => ({ placed: true }),
+      },
+    });
+
+    type SagaState = { started: boolean };
+    type TestSagaTypes = SagaTypes & {
+      state: SagaState;
+      events: OrderEvent;
+      commands: OrderCommand;
+      infrastructure: Infrastructure;
+    };
+
+    const TestSaga = defineSaga<TestSagaTypes>({
+      initialState: { started: false },
+      startedBy: ["OrderPlaced"],
+      associations: {
+        OrderPlaced: (event) => event.payload.orderId,
+      },
+      handlers: {
+        OrderPlaced: (_event, state) => ({
+          state: { started: true },
+        }),
+      },
+    });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const definition = defineDomain<Infrastructure>({
+      writeModel: { aggregates: { Order } },
+      readModel: { projections: {} },
+      processModel: { sagas: { TestSaga } },
+    });
+
+    await wireDomain(definition);
+
+    // Should warn about in-memory saga persistence
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("saga persistence"),
+    );
+
+    warnSpy.mockRestore();
   });
 });

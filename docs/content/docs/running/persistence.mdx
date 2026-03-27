@@ -101,28 +101,47 @@ const customStrategy: SnapshotStrategy = ({ version, eventsSinceSnapshot }) => {
 
 #### Configuring Snapshots
 
-Add `snapshotStore` and `snapshotStrategy` to the infrastructure section of your domain configuration:
+With `wireDomain`, snapshots are configured as part of the aggregate wiring -- either globally or per-aggregate:
 
 ```ts
 import {
-  configureDomain,
+  defineDomain,
+  wireDomain,
   InMemoryEventSourcedAggregatePersistence,
   InMemorySnapshotStore,
 } from "@noddde/engine";
 import { everyNEvents } from "@noddde/core";
 
-const domain = await configureDomain<MyInfrastructure>({
-  writeModel: { aggregates: { BankAccount } },
-  readModel: { projections: {} },
-  infrastructure: {
-    aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
-    snapshotStore: () => new InMemorySnapshotStore(),
-    snapshotStrategy: everyNEvents(100),
+const domain = await wireDomain(myDomain, {
+  // Global: snapshots for all event-sourced aggregates
+  aggregates: {
+    persistence: () => new InMemoryEventSourcedAggregatePersistence(),
+    snapshots: {
+      store: () => new InMemorySnapshotStore(),
+      strategy: everyNEvents(100),
+    },
+  },
+});
+
+// Or per-aggregate: snapshots only where needed
+const domain = await wireDomain(myDomain, {
+  aggregates: {
+    Order: {
+      persistence: () => drizzle.eventSourcedPersistence,
+      snapshots: {
+        store: () => drizzle.snapshotStore,
+        strategy: everyNEvents(50),
+      },
+    },
+    Inventory: {
+      persistence: () => drizzle.stateStoredPersistence,
+      // No snapshots needed for state-stored aggregates
+    },
   },
 });
 ```
 
-Both `snapshotStore` and `snapshotStrategy` are optional. If either is omitted, no automatic snapshotting occurs.
+Both `store` and `strategy` must be present in the `snapshots` object for snapshotting to take effect. If `snapshots` is omitted, no automatic snapshotting occurs for that aggregate.
 
 #### Partial Event Loading
 
@@ -161,38 +180,35 @@ Required when using sagas (`processModel`) in your [domain configuration](/docs/
 
 ## Configuring Persistence
 
-Provide a persistence implementation via the `aggregatePersistence` factory in the infrastructure section:
+Provide persistence via the `aggregates` field in `wireDomain`:
 
 ```ts
 import {
-  configureDomain,
+  wireDomain,
   InMemoryEventSourcedAggregatePersistence,
   InMemorySagaPersistence,
 } from "@noddde/engine";
 
-const domain = await configureDomain<BankingInfrastructure>({
-  writeModel: { aggregates: { BankAccount } },
-  readModel: { projections: { BankAccount: BankAccountProjection } },
-  infrastructure: {
-    aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
-    sagaPersistence: () => new InMemorySagaPersistence(),
-    // ...other providers
+const domain = await wireDomain(bankingDomain, {
+  aggregates: {
+    persistence: () => new InMemoryEventSourcedAggregatePersistence(),
+  },
+  sagas: {
+    persistence: () => new InMemorySagaPersistence(),
   },
 });
 ```
 
-The `aggregatePersistence` field accepts either a single factory (domain-wide) or a per-aggregate record. Each factory returns either an `EventSourcedAggregatePersistence` or a `StateStoredAggregatePersistence`.
-
-For per-aggregate persistence, provide a record mapping each aggregate name to its own factory. All registered aggregates must have an entry:
+For per-aggregate persistence, provide each aggregate name mapped to its own wiring. All registered aggregates must have an entry:
 
 ```ts
-const domain = await configureDomain<MyInfrastructure>({
-  writeModel: { aggregates: { Order, Inventory } },
-  readModel: { projections: {} },
-  infrastructure: {
-    aggregatePersistence: {
-      Order: () => new InMemoryEventSourcedAggregatePersistence(),
-      Inventory: () => new InMemoryStateStoredAggregatePersistence(),
+const domain = await wireDomain(myDomain, {
+  aggregates: {
+    Order: {
+      persistence: () => new InMemoryEventSourcedAggregatePersistence(),
+    },
+    Inventory: {
+      persistence: () => new InMemoryStateStoredAggregatePersistence(),
     },
   },
 });
@@ -200,36 +216,34 @@ const domain = await configureDomain<MyInfrastructure>({
 
 ## Concurrency Control
 
-noddde offers three concurrency modes for aggregate persistence, configured via `aggregateConcurrency`. All modes work with every database dialect — only pessimistic locking has [dialect restrictions](/docs/running/orm-adapters#dialect-support-matrix).
+noddde offers three concurrency modes for aggregate persistence, configured via the `concurrency` field in aggregate wiring. All modes work with every database dialect -- only pessimistic locking has [dialect restrictions](/docs/running/orm-adapters#dialect-support-matrix).
+
+With `wireDomain`, concurrency can be configured globally (all aggregates) or per-aggregate.
 
 ### No Concurrency Control (default)
 
-When `aggregateConcurrency` is omitted, no retry logic or locking is applied. The version check on `save()` still catches conflicts at the database level — if two concurrent commands target the same aggregate, the second to persist will throw `ConcurrencyError`. The error propagates directly to the caller.
+When `concurrency` is omitted, no retry logic or locking is applied. The version check on `save()` still catches conflicts at the database level -- if two concurrent commands target the same aggregate, the second to persist will throw `ConcurrencyError`. The error propagates directly to the caller.
 
 This is appropriate for low-contention scenarios and works with every database dialect supported by your ORM adapter.
 
 ```ts
-const domain = await configureDomain<MyInfrastructure>({
-  writeModel: { aggregates: { BankAccount } },
-  readModel: { projections: {} },
-  infrastructure: {
-    aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
-    // no aggregateConcurrency — ConcurrencyError propagates to caller
+const domain = await wireDomain(myDomain, {
+  aggregates: {
+    persistence: () => new InMemoryEventSourcedAggregatePersistence(),
+    // no concurrency — ConcurrencyError propagates to caller
   },
 });
 ```
 
 ### Optimistic Concurrency (with retries)
 
-Opt into automatic retries by setting `maxRetries`. On `ConcurrencyError`, the domain re-executes the full load→execute→save cycle against the latest state, up to `maxRetries` times. If all retries are exhausted, `ConcurrencyError` propagates.
+Opt into automatic retries by setting `maxRetries`. On `ConcurrencyError`, the domain re-executes the full load->execute->save cycle against the latest state, up to `maxRetries` times. If all retries are exhausted, `ConcurrencyError` propagates.
 
 ```ts
-const domain = await configureDomain<MyInfrastructure>({
-  writeModel: { aggregates: { BankAccount } },
-  readModel: { projections: {} },
-  infrastructure: {
-    aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
-    aggregateConcurrency: {
+const domain = await wireDomain(myDomain, {
+  aggregates: {
+    persistence: () => new InMemoryEventSourcedAggregatePersistence(),
+    concurrency: {
       maxRetries: 3, // retry up to 3 times on ConcurrencyError
     },
   },
@@ -245,15 +259,37 @@ For high-contention aggregates where retries waste work, pessimistic locking ser
 ```ts
 import { InMemoryAggregateLocker } from "@noddde/engine";
 
-const domain = await configureDomain<MyInfrastructure>({
-  writeModel: { aggregates: { BankAccount } },
-  readModel: { projections: {} },
-  infrastructure: {
-    aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
-    aggregateConcurrency: {
+const domain = await wireDomain(myDomain, {
+  aggregates: {
+    persistence: () => new InMemoryEventSourcedAggregatePersistence(),
+    concurrency: {
       strategy: "pessimistic",
       locker: new InMemoryAggregateLocker(),
       lockTimeoutMs: 5000, // optional: throw LockTimeoutError after 5s
+    },
+  },
+});
+```
+
+### Per-Aggregate Concurrency
+
+Different aggregates can use different concurrency strategies:
+
+```ts
+const domain = await wireDomain(myDomain, {
+  aggregates: {
+    // High-contention: pessimistic locking
+    BankAccount: {
+      persistence: () => drizzle.eventSourcedPersistence,
+      concurrency: {
+        strategy: "pessimistic",
+        locker: new DrizzleAdvisoryLocker(db),
+      },
+    },
+    // Low-contention: optimistic with retries
+    AuditLog: {
+      persistence: () => drizzle.eventSourcedPersistence,
+      concurrency: { maxRetries: 3 },
     },
   },
 });
@@ -466,7 +502,7 @@ noddde provides three ORM adapter packages that cover persistence and unit of wo
 | `InMemorySnapshotStore`                    | `@noddde/drizzle`, `@noddde/prisma`, or `@noddde/typeorm` |
 | `InMemoryIdempotencyStore`                 | Custom implementation (PostgreSQL, Redis, etc.)           |
 
-Each adapter provides a single factory function that creates all persistence implementations wired to share a database transaction context. Your aggregate and projection code remains unchanged -- only the infrastructure factories in `configureDomain` need to be updated.
+Each adapter provides a single factory function that creates all persistence implementations wired to share a database transaction context. Your aggregate and projection code remains unchanged -- only the wiring factories in `wireDomain` need to be updated.
 
 ## Unit of Work
 
@@ -565,17 +601,14 @@ A UnitOfWork is single-use: after `commit()` or `rollback()`, further calls thro
 
 ### Custom UnitOfWork Factory
 
-By default, the domain uses `InMemoryUnitOfWork`. For production use with a database, provide a custom `unitOfWorkFactory` in the [domain configuration](/docs/running/domain-configuration):
+By default, the domain uses `InMemoryUnitOfWork`. For production use with a database, provide a custom `unitOfWork` factory in [domain wiring](/docs/running/domain-configuration):
 
 ```ts
-const domain = await configureDomain<BankingInfrastructure>({
-  writeModel: { aggregates: { BankAccount } },
-  readModel: { projections: { BankAccount: BankAccountProjection } },
-  infrastructure: {
-    aggregatePersistence: () => new PostgresEventStore(),
-    unitOfWorkFactory: () => () => new PostgresUnitOfWork(pool),
-    // ...other providers
+const domain = await wireDomain(bankingDomain, {
+  aggregates: {
+    persistence: () => new PostgresEventStore(),
   },
+  unitOfWork: () => () => new PostgresUnitOfWork(pool),
 });
 ```
 

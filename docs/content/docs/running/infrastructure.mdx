@@ -3,7 +3,9 @@ title: Infrastructure
 description: How noddde uses injectable infrastructure to keep domain logic pure, and how to configure providers, buses, and custom services.
 ---
 
-Infrastructure in noddde refers to everything outside your domain logic -- databases, loggers, HTTP clients, clocks, view repositories, and any external service your handlers need. The framework enforces a strict boundary: domain logic depends on interfaces, and concrete implementations are injected at configuration time.
+Infrastructure in noddde refers to everything outside your domain logic -- databases, loggers, HTTP clients, clocks, view repositories, and any external service your handlers need. The framework enforces a strict boundary: domain logic depends on interfaces, and concrete implementations are injected at wiring time.
+
+With the `defineDomain` + `wireDomain` API, infrastructure is cleanly separated from domain structure. User-provided services (what handlers receive) are distinct from framework plumbing (persistence, buses, concurrency). See [Domain Configuration](/docs/running/domain-configuration) for the full API.
 
 ## The Core Principle
 
@@ -107,65 +109,80 @@ Standalone command handlers and saga handlers receive the merged type `TInfrastr
 
 ## The Infrastructure Providers
 
-The `infrastructure` section of the [domain configuration](/docs/running/domain-configuration) provides factory functions that create runtime dependencies.
+With `wireDomain`, infrastructure is provided via the `DomainWiring` object. The key distinction is that **user-provided services** (what handlers receive) are separated from **framework plumbing** (persistence, buses, concurrency).
 
-### provideInfrastructure
+### User Infrastructure
 
-Provides your custom domain infrastructure -- the services, repositories, and tools your handlers need:
+The `infrastructure` factory provides your custom domain services -- loggers, repositories, clients:
 
 ```ts
-provideInfrastructure: () => ({
-  logger: new ConsoleLogger(),
-  bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
-  transactionViewRepository: new InMemoryTransactionViewRepository(),
-}),
+const domain = await wireDomain(bankingDomain, {
+  infrastructure: () => ({
+    logger: new ConsoleLogger(),
+    bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
+    transactionViewRepository: new InMemoryTransactionViewRepository(),
+  }),
+  // ...framework plumbing below
+});
 ```
 
-The generic parameter `<BankingInfrastructure>` on `configureDomain` ensures the factory return type matches your infrastructure definition. TypeScript reports an error if you forget a member or return the wrong type.
+The `TInfrastructure` generic on `defineDomain` ensures the factory return type matches your infrastructure definition. TypeScript reports an error if you forget a member or return the wrong type.
 
-### cqrsInfrastructure
+### Buses
 
-Provides the three CQRS buses. It receives the custom infrastructure as a parameter, allowing buses to be configured based on your infrastructure:
+The `buses` factory provides the three CQRS buses. It receives the resolved user infrastructure as a parameter:
 
 ```ts
-cqrsInfrastructure: (customInfra) => ({
+buses: (customInfra) => ({
   commandBus: new InMemoryCommandBus(),
   eventBus: new EventEmitterEventBus(),
   queryBus: new InMemoryQueryBus(),
 }),
 ```
 
-### aggregatePersistence
+### Aggregate Wiring
 
-Provides the persistence strategy for aggregate state. Either a single factory (domain-wide) or a per-aggregate record mapping each aggregate name to its own factory. Each factory returns either an `EventSourcedAggregatePersistence` or a `StateStoredAggregatePersistence`. See [Persistence](/docs/running/persistence) for details.
+The `aggregates` field provides persistence, concurrency, and snapshots -- either globally or per-aggregate:
 
 ```ts
-// Domain-wide: all aggregates use the same persistence
-aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
+// Global: all aggregates share the same config
+aggregates: {
+  persistence: () => new InMemoryEventSourcedAggregatePersistence(),
+  concurrency: { maxRetries: 3 },
+},
 
-// Per-aggregate: each aggregate gets its own persistence strategy
-aggregatePersistence: {
-  Order: () => new InMemoryEventSourcedAggregatePersistence(),
-  Inventory: () => new InMemoryStateStoredAggregatePersistence(),
+// Per-aggregate: each aggregate configured independently
+aggregates: {
+  Order: {
+    persistence: () => drizzle.eventSourcedPersistence,
+    concurrency: { maxRetries: 5 },
+    snapshots: { store: () => drizzle.snapshotStore, strategy: everyNEvents(50) },
+  },
+  Inventory: {
+    persistence: () => drizzle.stateStoredPersistence,
+  },
 },
 ```
 
-When using the per-aggregate form, all registered aggregates must have a corresponding entry. TypeScript enforces this at compile time, and a runtime validation check runs during `init()`.
+See [Persistence](/docs/running/persistence) for details on persistence strategies and [Concurrency Control](/docs/running/persistence#concurrency-control) for concurrency options.
 
-### unitOfWorkFactory
+### Projection Wiring
 
-Provides the factory for creating `UnitOfWork` instances used for atomic command dispatch. See [Unit of Work](/docs/running/persistence#unit-of-work) for details.
+View stores are provided per-projection, separating runtime concerns from projection definitions:
 
 ```ts
-unitOfWorkFactory: () => () => new PostgresUnitOfWork(pool),
+projections: {
+  BankAccount: { viewStore: (infra) => infra.bankAccountViewRepository },
+  TransactionHistory: { viewStore: () => new InMemoryViewStore() },
+},
 ```
 
-### idempotencyStore
-
-Provides the store for tracking processed commands. When configured, commands with a `commandId` field are checked for duplicates before execution. See [Idempotent Commands](/docs/running/idempotent-commands) for details.
+### Other Wiring Fields
 
 ```ts
-idempotencyStore: () => new InMemoryIdempotencyStore(),
+unitOfWork: () => () => new PostgresUnitOfWork(pool),
+idempotency: () => new InMemoryIdempotencyStore(),
+sagas: { persistence: () => new InMemorySagaPersistence() },
 ```
 
 ## Why Factory Functions
@@ -195,14 +212,14 @@ infrastructure: {
 
 ## Provider Execution Order
 
-When `configureDomain` is called:
+When `wireDomain` is called:
 
-1. `provideInfrastructure()` is called first to create custom infrastructure
-2. `cqrsInfrastructure(customInfra)` is called with the custom infrastructure
-3. `aggregatePersistence` is resolved: if a function, called once; if a per-aggregate record, each factory is called
-4. `snapshotStore()` is called to set up the snapshot store (if configured)
-5. `idempotencyStore()` is called to set up the idempotency store (if configured)
-6. `unitOfWorkFactory()` is called to set up the unit of work factory
+1. `infrastructure()` is called first to create user-provided services
+2. `buses(userInfra)` is called with the resolved user infrastructure
+3. `aggregates` is resolved: global config applied to all aggregates, or per-aggregate configs resolved individually
+4. `projections` view stores are resolved per-projection
+5. `sagas.persistence()` is called if sagas are configured
+6. `idempotency()`, `unitOfWork()`, `outbox.store()` are resolved if configured
 7. The `Domain` instance is created with all infrastructure merged
 
 The resulting `domain.infrastructure` property is `TInfrastructure & CQRSInfrastructure` -- your custom infrastructure merged with the CQRS buses.
@@ -241,50 +258,48 @@ Notice how `cqrsInfrastructure` receives the custom infrastructure as a paramete
 
 ## Testing with Different Infrastructure
 
-The factory pattern makes it straightforward to swap infrastructure for testing:
+The `defineDomain` + `wireDomain` split makes it especially easy to swap infrastructure for testing -- the domain definition is shared, only the wiring differs:
 
 ```ts
-// Production
-const prodDomain = await configureDomain<BankingInfrastructure>({
+// Shared domain definition
+const bankingDomain = defineDomain<BankingInfrastructure>({
   writeModel: { aggregates: { BankAccount } },
   readModel: { projections: { BankAccount: BankAccountProjection } },
-  infrastructure: {
-    provideInfrastructure: () => createProductionInfrastructure(),
-    cqrsInfrastructure: () => createProductionBuses(),
-    aggregatePersistence: () => new PostgresEventStore(),
-  },
 });
 
-// Testing
-const testDomain = await configureDomain<BankingInfrastructure>({
-  writeModel: { aggregates: { BankAccount } },
-  readModel: { projections: { BankAccount: BankAccountProjection } },
-  infrastructure: {
-    provideInfrastructure: () => ({
-      logger: new SilentLogger(),
-      bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
-      transactionViewRepository: new InMemoryTransactionViewRepository(),
-    }),
-    cqrsInfrastructure: () => ({
-      commandBus: new InMemoryCommandBus(),
-      eventBus: new EventEmitterEventBus(),
-      queryBus: new InMemoryQueryBus(),
-    }),
-    aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
+// Production wiring
+const prodDomain = await wireDomain(bankingDomain, {
+  infrastructure: () => createProductionInfrastructure(),
+  aggregates: { persistence: () => new PostgresEventStore() },
+  buses: () => createProductionBuses(),
+});
+
+// Test wiring
+const testDomain = await wireDomain(bankingDomain, {
+  infrastructure: () => ({
+    logger: new SilentLogger(),
+    bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
+    transactionViewRepository: new InMemoryTransactionViewRepository(),
+  }),
+  aggregates: {
+    persistence: () => new InMemoryEventSourcedAggregatePersistence(),
   },
+  buses: () => ({
+    commandBus: new InMemoryCommandBus(),
+    eventBus: new EventEmitterEventBus(),
+    queryBus: new InMemoryQueryBus(),
+  }),
 });
 ```
 
-Same aggregates and projections, different infrastructure. The domain logic does not change -- only the infrastructure factories differ between environments.
+Same domain definition, different wiring. The domain logic does not change -- only the infrastructure factories differ between environments.
 
 ## Accessing Buses at Runtime
 
 After configuration, buses are available on `domain.infrastructure`:
 
 ```ts
-const domain = await configureDomain<BankingInfrastructure>({
-  /* ... */
-});
+const domain = await wireDomain(bankingDomain, { /* ... */ });
 
 const { commandBus, eventBus, queryBus } = domain.infrastructure;
 ```

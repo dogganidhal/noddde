@@ -3,8 +3,8 @@
  *
  * Demonstrates >90% of @noddde framework features:
  * - Per-aggregate persistence (event-sourced + state-stored)
- * - Snapshots, idempotency, optimistic concurrency
- * - Multiple projections (strong + eventual consistency)
+ * - Per-aggregate snapshots and concurrency
+ * - Multiple projections with wired view stores
  * - Multiple sagas with cross-aggregate orchestration
  * - Standalone event/command/query handlers
  * - MetadataProvider via AsyncLocalStorage
@@ -21,7 +21,8 @@ import {
   snapshots,
 } from "@noddde/drizzle/sqlite";
 import {
-  configureDomain,
+  defineDomain,
+  wireDomain,
   EventEmitterEventBus,
   InMemoryCommandBus,
   InMemoryQueryBus,
@@ -123,8 +124,8 @@ async function main() {
     snapshots,
   });
 
-  // ── Configure the domain ────────────────────────────────────────
-  const domain = await configureDomain<
+  // ── Define the domain structure (pure, sync) ───────────────────
+  const hotelDomain = defineDomain<
     HotelInfrastructure,
     RunNightlyAuditCommand,
     SearchQuery
@@ -165,49 +166,70 @@ async function main() {
         PaymentProcessing: PaymentProcessingSaga,
       },
     },
+  });
 
-    infrastructure: {
-      // Per-aggregate persistence: Room + Booking = event-sourced, Inventory = state-stored
-      aggregatePersistence: {
-        Room: () => drizzleInfra.eventSourcedPersistence,
-        Booking: () => drizzleInfra.eventSourcedPersistence,
-        Inventory: () => drizzleInfra.stateStoredPersistence,
-      } as any, // TS can't discriminate function vs Record in the union
+  // ── Wire with infrastructure (async) ───────────────────────────
+  const domain = await wireDomain(hotelDomain, {
+    // Custom infrastructure services (what handlers receive)
+    infrastructure: (): HotelInfrastructure => ({
+      clock: new SystemClock(),
+      emailService: new ConsoleEmailService(),
+      smsService: new ConsoleSmsService(),
+      paymentGateway: new FakePaymentGateway(),
+      roomAvailabilityViewStore: new DrizzleRoomAvailabilityViewStore(db),
+      guestHistoryViewStore: new InMemoryViewStore<GuestHistoryView>(),
+      revenueViewStore: new InMemoryViewStore<RevenueView>(),
+    }),
 
-      // Optimistic concurrency with retries
-      aggregateConcurrency: { maxRetries: 3 },
-
-      // Saga persistence via Drizzle
-      sagaPersistence: () => drizzleInfra.sagaPersistence,
-
-      // Snapshots for Room aggregate (many events over time)
-      snapshotStore: () => drizzleInfra.snapshotStore!,
-      snapshotStrategy: everyNEvents(50),
-
-      // Idempotency for payment commands
-      idempotencyStore: () => new InMemoryIdempotencyStore(),
-
-      // Unit of work for atomic operations
-      unitOfWorkFactory: () => drizzleInfra.unitOfWorkFactory,
-
-      // Custom infrastructure services
-      provideInfrastructure: (): HotelInfrastructure => ({
-        clock: new SystemClock(),
-        emailService: new ConsoleEmailService(),
-        smsService: new ConsoleSmsService(),
-        paymentGateway: new FakePaymentGateway(),
-        roomAvailabilityViewStore: new DrizzleRoomAvailabilityViewStore(db),
-        guestHistoryViewStore: new InMemoryViewStore<GuestHistoryView>(),
-        revenueViewStore: new InMemoryViewStore<RevenueView>(),
-      }),
-
-      // CQRS buses
-      cqrsInfrastructure: () => ({
-        commandBus: new InMemoryCommandBus(),
-        eventBus: new EventEmitterEventBus(),
-        queryBus: new InMemoryQueryBus(),
-      }),
+    // Per-aggregate persistence, concurrency, and snapshots
+    aggregates: {
+      Room: {
+        persistence: () => drizzleInfra.eventSourcedPersistence,
+        concurrency: { maxRetries: 3 },
+        snapshots: {
+          store: () => drizzleInfra.snapshotStore!,
+          strategy: everyNEvents(50),
+        },
+      },
+      Booking: {
+        persistence: () => drizzleInfra.eventSourcedPersistence,
+        concurrency: { maxRetries: 3 },
+      },
+      Inventory: {
+        persistence: () => drizzleInfra.stateStoredPersistence,
+      },
     },
+
+    // Projection view stores
+    projections: {
+      RoomAvailability: {
+        viewStore: (infra) => infra.roomAvailabilityViewStore,
+      },
+      GuestHistory: {
+        viewStore: (infra) => infra.guestHistoryViewStore,
+      },
+      Revenue: {
+        viewStore: (infra) => infra.revenueViewStore,
+      },
+    },
+
+    // Saga persistence via Drizzle
+    sagas: {
+      persistence: () => drizzleInfra.sagaPersistence,
+    },
+
+    // CQRS buses
+    buses: () => ({
+      commandBus: new InMemoryCommandBus(),
+      eventBus: new EventEmitterEventBus(),
+      queryBus: new InMemoryQueryBus(),
+    }),
+
+    // Unit of work for atomic operations
+    unitOfWork: () => drizzleInfra.unitOfWorkFactory,
+
+    // Idempotency for payment commands
+    idempotency: () => new InMemoryIdempotencyStore(),
 
     // MetadataProvider reads from AsyncLocalStorage set by Fastify plugin
     metadataProvider: () => requestMetadataStorage.getStore() ?? {},

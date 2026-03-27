@@ -11,20 +11,16 @@ The **transactional outbox pattern** solves this by writing events to an outbox 
 
 ```ts
 import {
-  configureDomain,
+  wireDomain,
   InMemoryOutboxStore,
 } from "@noddde/engine";
 
-const domain = await configureDomain<MyInfrastructure>({
-  writeModel: { aggregates: { Order } },
-  readModel: { projections: { OrderSummary } },
-  infrastructure: {
-    outbox: {
-      store: () => new InMemoryOutboxStore(),
-      relayOptions: { pollIntervalMs: 1000, batchSize: 100 },
-    },
-    // ...other providers
+const domain = await wireDomain(orderDomain, {
+  outbox: {
+    store: () => new InMemoryOutboxStore(),
+    relayOptions: { pollIntervalMs: 1000, batchSize: 100 },
   },
+  // ...other wiring
 });
 
 // Start the background relay (polls for unpublished entries)
@@ -149,11 +145,9 @@ import { InMemoryOutboxStore } from "@noddde/engine";
 
 const outboxStore = new InMemoryOutboxStore();
 
-const domain = await configureDomain<MyInfrastructure>({
+const domain = await wireDomain(myDomain, {
   // ...
-  infrastructure: {
-    outbox: { store: () => outboxStore },
-  },
+  outbox: { store: () => outboxStore },
 });
 
 await domain.dispatchCommand(someCommand);

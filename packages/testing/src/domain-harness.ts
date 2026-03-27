@@ -8,7 +8,8 @@ import type {
   Event,
 } from "@noddde/core";
 import {
-  configureDomain,
+  defineDomain,
+  wireDomain,
   type Domain,
   EventEmitterEventBus,
   InMemoryCommandBus,
@@ -116,7 +117,7 @@ export async function testDomain<
     }
   };
 
-  const domain = await configureDomain<TInfrastructure>({
+  const definition = defineDomain<TInfrastructure>({
     writeModel: {
       aggregates: config.aggregates ?? {},
     },
@@ -124,20 +125,21 @@ export async function testDomain<
       projections: config.projections ?? {},
     },
     processModel: config.sagas ? { sagas: config.sagas } : undefined,
-    infrastructure: {
-      provideInfrastructure: () =>
-        (config.infrastructure ?? {}) as TInfrastructure,
-      cqrsInfrastructure: () => ({
-        commandBus,
-        eventBus,
-        queryBus: new InMemoryQueryBus(),
-      }),
-      aggregatePersistence: () =>
-        new InMemoryEventSourcedAggregatePersistence(),
-      ...(config.sagas
-        ? { sagaPersistence: () => new InMemorySagaPersistence() }
-        : {}),
+  });
+
+  const domain = await wireDomain(definition, {
+    infrastructure: () => (config.infrastructure ?? {}) as TInfrastructure,
+    buses: () => ({
+      commandBus,
+      eventBus,
+      queryBus: new InMemoryQueryBus(),
+    }),
+    aggregates: {
+      persistence: () => new InMemoryEventSourcedAggregatePersistence(),
     },
+    ...(config.sagas
+      ? { sagas: { persistence: () => new InMemorySagaPersistence() } }
+      : {}),
   });
 
   return {

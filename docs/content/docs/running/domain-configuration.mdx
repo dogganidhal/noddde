@@ -1,96 +1,171 @@
 ---
 title: Domain Configuration
-description: Using configureDomain to wire aggregates, projections, sagas, and infrastructure into a running domain.
+description: Using defineDomain and wireDomain to separate domain structure from runtime infrastructure, creating a running Domain instance.
 ---
 
 The domain configuration is the entry point of every noddde application. It wires together your write model (aggregates), read model (projections), process model (sagas), and infrastructure into a single `Domain` instance that can dispatch commands and queries.
 
-## The configureDomain Function
+The API is split into two phases:
+
+- **`defineDomain`** -- Captures the pure domain structure (aggregates, projections, sagas, handlers) as a sync identity function. No infrastructure, no async, no side effects.
+- **`wireDomain`** -- Connects that definition to infrastructure (persistence, buses, concurrency, snapshots) and returns a running `Domain` instance.
+
+This separation allows domain definitions to be shared, tested, and analyzed independently of runtime concerns.
+
+## Defining the Domain
+
+`defineDomain` is a sync identity function -- it returns the input unchanged with full type inference. Consistent with `defineAggregate`, `defineProjection`, `defineSaga`.
 
 ```ts
-import { configureDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/engine";
 
-const domain = await configureDomain<BankingInfrastructure>({
+const bankingDomain = defineDomain<BankingInfrastructure>({
   writeModel: {
-    aggregates: {
-      /* ... */
-    },
+    aggregates: { BankAccount },
     standaloneCommandHandlers: {
-      /* ... */
+      ProcessDailySettlements: processSettlements,
     },
   },
   readModel: {
     projections: {
-      /* ... */
+      BankAccount: BankAccountProjection,
+      TransactionHistory: TransactionHistoryProjection,
     },
     standaloneQueryHandlers: {
-      /* ... */
+      GetSystemStatus: getSystemStatus,
     },
   },
   processModel: {
     sagas: {
-      /* ... */
-    },
-  },
-  infrastructure: {
-    aggregatePersistence: () => {
-      /* ... */
-    },
-    sagaPersistence: () => {
-      /* ... */
-    },
-    provideInfrastructure: () => {
-      /* ... */
-    },
-    cqrsInfrastructure: () => {
-      /* ... */
+      BookingFulfillment: BookingFulfillmentSaga,
     },
   },
 });
 ```
 
-`configureDomain` is an async factory function. It initializes infrastructure using the provider factories, registers all handlers on the appropriate buses, and returns a ready-to-use `Domain` instance.
-
-## The DomainConfiguration Type
-
-```ts
-type DomainConfiguration<TInfrastructure extends Infrastructure> = {
-  writeModel: {
-    aggregates: Record<string, Aggregate<any>>;
-    standaloneCommandHandlers?: Record<string, StandaloneCommandHandler<...>>;
-  };
-  readModel: {
-    projections: Record<string, Projection<any> | { projection: Projection<any>; viewStore: (infra: TInfrastructure) => ViewStore }>;
-    standaloneQueryHandlers?: Record<string, QueryHandler<...>>;
-  };
-  processModel?: {
-    sagas: Record<string, Saga<any, any>>;
-  };
-  infrastructure: {
-    aggregatePersistence?:
-      | (() => PersistenceConfiguration | Promise<PersistenceConfiguration>)
-      | Record<string, () => PersistenceConfiguration | Promise<PersistenceConfiguration>>;
-    aggregateConcurrency?:
-      | { strategy?: "optimistic"; maxRetries?: number }
-      | { strategy: "pessimistic"; locker: AggregateLocker; lockTimeoutMs?: number };
-    snapshotStore?: () => SnapshotStore | Promise<SnapshotStore>;
-    snapshotStrategy?: SnapshotStrategy;
-    idempotencyStore?: () => IdempotencyStore | Promise<IdempotencyStore>;
-    sagaPersistence?: () => SagaPersistence | Promise<SagaPersistence>;
-    provideInfrastructure?: () => TInfrastructure | Promise<TInfrastructure>;
-    cqrsInfrastructure?: (infra: TInfrastructure) => CQRSInfrastructure | Promise<CQRSInfrastructure>;
-  };
-  metadataProvider?: () => MetadataContext;
-};
-```
-
-Five top-level sections, each with a distinct responsibility:
+The `DomainDefinition` type captures three top-level sections:
 
 - **`writeModel`** -- What handles commands (aggregates and standalone command handlers)
 - **`readModel`** -- What handles events and queries (projections and standalone query handlers)
 - **`processModel`** -- What coordinates cross-aggregate workflows (sagas). Optional -- omit if you have no sagas.
-- **`infrastructure`** -- How things are wired (persistence, domain infrastructure, CQRS buses). See the [Infrastructure](/docs/running/infrastructure) page for details.
-- **`metadataProvider`** -- Optional function called on every command dispatch to provide [event metadata](/docs/running/domain-configuration#event-metadata) context (userId, correlationId, etc.).
+
+The `TInfrastructure` generic is a type parameter only -- it flows through handler signatures for type safety but no infrastructure value is present in the definition.
+
+## Wiring the Domain
+
+`wireDomain` accepts a `DomainDefinition` and an **optional** `DomainWiring`, resolves all factories, creates a `Domain` instance, and returns it. The wiring parameter can be omitted entirely for a zero-config hello world:
+
+```ts
+import { wireDomain } from "@noddde/engine";
+
+// Hello world -- everything defaults to in-memory
+const domain = await wireDomain(bankingDomain);
+```
+
+When you're ready for production, provide explicit wiring:
+
+```ts
+const domain = await wireDomain(bankingDomain, {
+  // User-provided services (what handlers receive as `infrastructure`)
+  infrastructure: () => ({
+    logger: new ConsoleLogger(),
+    bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
+  }),
+
+  // Aggregate runtime -- global or per-aggregate
+  aggregates: {
+    persistence: () => new InMemoryEventSourcedAggregatePersistence(),
+    concurrency: { maxRetries: 3 },
+  },
+
+  // CQRS buses
+  buses: () => ({
+    commandBus: new InMemoryCommandBus(),
+    eventBus: new EventEmitterEventBus(),
+    queryBus: new InMemoryQueryBus(),
+  }),
+});
+```
+
+### In-Memory Default Warnings
+
+When infrastructure components fall back to in-memory defaults, the framework logs startup warnings to the console:
+
+```
+[noddde] Using in-memory aggregate persistence. This is not suitable for production.
+[noddde] Using in-memory CQRS buses. This is not suitable for production.
+[noddde] Using in-memory saga persistence. This is not suitable for production.
+```
+
+These warnings only appear when the framework itself supplies the default -- not when you explicitly provide a factory (even if it happens to return an in-memory implementation). Optional components like snapshots, idempotency, and outbox do not trigger warnings when omitted, since omitting them is a valid production choice.
+
+### DomainWiring Fields
+
+| Field | Description |
+| --- | --- |
+| `infrastructure` | Factory for user-provided services. What handlers receive as the `infrastructure` parameter. |
+| `aggregates` | Aggregate runtime config -- global `AggregateWiring` or per-aggregate record. See below. |
+| `projections` | Per-projection view store wiring. See [Projection Wiring](#projection-wiring). |
+| `sagas` | Saga runtime config. Defaults to in-memory if `processModel` has sagas. |
+| `buses` | Factory for CQRS buses. Receives resolved user infrastructure. |
+| `unitOfWork` | Factory for the UnitOfWorkFactory. |
+| `idempotency` | Factory for idempotency store (command dedup by commandId). |
+| `outbox` | Transactional outbox configuration. |
+| `metadataProvider` | Function called on every command dispatch for event metadata context. |
+
+All fields are optional. Both `wireDomain(definition)` and `wireDomain(definition, {})` use in-memory defaults for everything.
+
+### Aggregate Wiring
+
+The `aggregates` field accepts either a global config (applies to all aggregates) or a per-aggregate record:
+
+```ts
+// Global: all aggregates share the same config
+aggregates: {
+  persistence: () => drizzle.eventSourcedPersistence,
+  concurrency: { maxRetries: 3 },
+},
+
+// Per-aggregate: each aggregate configured independently
+aggregates: {
+  Order: {
+    persistence: () => drizzle.eventSourcedPersistence,
+    concurrency: { maxRetries: 5 },
+    snapshots: {
+      store: () => drizzle.snapshotStore,
+      strategy: everyNEvents(50),
+    },
+  },
+  Inventory: {
+    persistence: () => drizzle.stateStoredPersistence,
+  },
+},
+```
+
+Each `AggregateWiring` groups three concerns:
+
+- **`persistence`** -- Factory returning `EventSourcedAggregatePersistence` or `StateStoredAggregatePersistence`
+- **`concurrency`** -- Optimistic (with retries) or pessimistic (with locker)
+- **`snapshots`** -- Snapshot store + strategy for event-sourced aggregates
+
+### Projection Wiring
+
+View stores are configured per-projection in the wiring, separating runtime concerns from the projection definition:
+
+```ts
+projections: {
+  BankAccount: {
+    viewStore: (infra) => infra.bankAccountViewRepository,
+  },
+  TransactionHistory: {
+    viewStore: (infra) => new InMemoryViewStore(),
+  },
+},
+```
+
+The `viewStore` factory receives the resolved user infrastructure, allowing you to pull view stores from your infrastructure services.
+
+> **Note**: The `Projection.viewStore` field is deprecated. Provide view stores via `DomainWiring.projections` instead. When both are set, the wiring version takes priority.
 
 ## Write Model
 
@@ -219,25 +294,9 @@ processModel: {
 
 The process model is optional. Omit it entirely if your domain does not need cross-aggregate coordination.
 
-## Infrastructure
-
-The `infrastructure` section provides factory functions that create the runtime dependencies for your domain. All providers are optional and all are factory functions -- not raw values. This enables lazy initialization, async setup (database connections, config loading), and clean test isolation.
-
-The providers are:
-
-- **`provideInfrastructure`** -- Your custom domain infrastructure (loggers, repositories, clients)
-- **`cqrsInfrastructure`** -- The three CQRS buses (CommandBus, EventBus, QueryBus)
-- **`aggregatePersistence`** -- The persistence strategy for aggregate state. Either a single factory (domain-wide) or a per-aggregate record. See [Persistence](/docs/running/persistence).
-- **`aggregateConcurrency`** -- Optimistic or pessimistic concurrency strategy. See [Concurrency Control](/docs/running/persistence#concurrency-control).
-- **`snapshotStore`** / **`snapshotStrategy`** -- Snapshot caching for event-sourced aggregates. See [State Snapshotting](/docs/running/persistence#state-snapshotting-event-sourced-optimization).
-- **`idempotencyStore`** -- Duplicate command detection. See [Idempotent Commands](/docs/running/idempotent-commands).
-- **`unitOfWorkFactory`** -- Atomic command dispatch boundaries. See [Unit of Work](/docs/running/persistence#unit-of-work).
-
-For a full treatment of each provider, how they are initialized, and how to swap them for testing, see the [Infrastructure](/docs/running/infrastructure) page.
-
 ## The Domain Class
 
-The `Domain` class returned by `configureDomain` exposes the main capabilities of your application.
+The `Domain` class returned by `wireDomain` exposes the main capabilities of your application.
 
 ### Dispatching Commands
 
@@ -288,7 +347,7 @@ See [View Persistence](/docs/read-model/view-persistence) for details on configu
 
 ## Event Metadata
 
-Every event dispatched through the domain is automatically enriched with an `EventMetadata` envelope containing audit, tracing, and sequencing information. Command handlers return bare `{ name, payload }` objects — the engine adds metadata before persistence and publication.
+Every event dispatched through the domain is automatically enriched with an `EventMetadata` envelope containing audit, tracing, and sequencing information. Command handlers return bare `{ name, payload }` objects -- the engine adds metadata before persistence and publication.
 
 ### What Metadata Contains
 
@@ -310,12 +369,8 @@ interface EventMetadata {
 The `metadataProvider` is a function called on every command dispatch. Use it to inject per-request context (e.g., the authenticated user ID or a trace ID from HTTP middleware):
 
 ```ts
-const domain = await configureDomain<MyInfrastructure>({
-  writeModel: { aggregates: { BankAccount } },
-  readModel: { projections: {} },
-  infrastructure: {
-    /* ... */
-  },
+const domain = await wireDomain(bankingDomain, {
+  // ...other wiring
   metadataProvider: () => ({
     userId: getCurrentUserId(), // from your auth middleware
     correlationId: getRequestTraceId(), // from your HTTP context
@@ -344,15 +399,17 @@ When a saga dispatches commands in response to an event, the engine automaticall
 
 ## Complete Example
 
-Here is a full domain configuration for a banking application, showing all sections together:
+Here is a full domain configuration for a banking application using `defineDomain` + `wireDomain`:
 
 ```ts
 import {
-  configureDomain,
+  defineDomain,
+  wireDomain,
   EventEmitterEventBus,
   InMemoryCommandBus,
   InMemoryEventSourcedAggregatePersistence,
   InMemoryQueryBus,
+  InMemoryViewStore,
 } from "@noddde/engine";
 import { BankAccount } from "./aggregate";
 import { BankAccountProjection } from "./projection";
@@ -364,11 +421,10 @@ interface BankingInfrastructure {
   transactionViewRepository: TransactionViewRepository;
 }
 
-const domain = await configureDomain<BankingInfrastructure>({
+// Step 1: Define the domain structure (pure, sync)
+const bankingDomain = defineDomain<BankingInfrastructure>({
   writeModel: {
-    aggregates: {
-      BankAccount,
-    },
+    aggregates: { BankAccount },
   },
   readModel: {
     projections: {
@@ -381,19 +437,31 @@ const domain = await configureDomain<BankingInfrastructure>({
       TransactionHistory: TransactionHistoryProjection,
     },
   },
-  infrastructure: {
-    aggregatePersistence: () => new InMemoryEventSourcedAggregatePersistence(),
-    provideInfrastructure: () => ({
-      logger: new ConsoleLogger(),
-      bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
-      transactionViewRepository: new InMemoryTransactionViewRepository(),
-    }),
-    cqrsInfrastructure: () => ({
-      commandBus: new InMemoryCommandBus(),
-      eventBus: new EventEmitterEventBus(),
-      queryBus: new InMemoryQueryBus(),
-    }),
+});
+
+// Step 2: Wire with infrastructure (async)
+const domain = await wireDomain(bankingDomain, {
+  infrastructure: () => ({
+    logger: new ConsoleLogger(),
+    bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
+    transactionViewRepository: new InMemoryTransactionViewRepository(),
+  }),
+  aggregates: {
+    persistence: () => new InMemoryEventSourcedAggregatePersistence(),
   },
+  projections: {
+    BankAccount: {
+      viewStore: (infra) => infra.bankAccountViewRepository,
+    },
+    TransactionHistory: {
+      viewStore: (infra) => infra.transactionViewRepository,
+    },
+  },
+  buses: () => ({
+    commandBus: new InMemoryCommandBus(),
+    eventBus: new EventEmitterEventBus(),
+    queryBus: new InMemoryQueryBus(),
+  }),
 });
 
 // Dispatch a command
@@ -409,6 +477,26 @@ const account = await domain.dispatchQuery({
   payload: { id: "acc-001" },
 });
 ```
+
+## Migrating from `configureDomain`
+
+`configureDomain` is deprecated but still works. To migrate:
+
+1. Extract the `writeModel`, `readModel`, and `processModel` into a `defineDomain` call
+2. Map `infrastructure.*` fields to the `DomainWiring` shape:
+
+| Old (`DomainConfiguration.infrastructure.*`) | New (`DomainWiring.*`) |
+| --- | --- |
+| `provideInfrastructure` | `infrastructure` |
+| `aggregatePersistence` | `aggregates.persistence` or `aggregates.{name}.persistence` |
+| `aggregateConcurrency` | `aggregates.concurrency` or `aggregates.{name}.concurrency` |
+| `snapshotStore` + `snapshotStrategy` | `aggregates.snapshots` or `aggregates.{name}.snapshots` |
+| `cqrsInfrastructure` | `buses` |
+| `sagaPersistence` | `sagas.persistence` |
+| `unitOfWorkFactory` | `unitOfWork` |
+| `idempotencyStore` | `idempotency` |
+| `outbox` | `outbox` |
+| `metadataProvider` (top-level) | `metadataProvider` |
 
 ## Next Steps
 

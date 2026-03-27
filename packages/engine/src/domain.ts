@@ -56,6 +56,7 @@ import type { ConcurrencyStrategy } from "./concurrency-strategy";
 import {
   OptimisticConcurrencyStrategy,
   PessimisticConcurrencyStrategy,
+  PerAggregateConcurrencyStrategy,
 } from "./concurrency-strategy";
 import { MetadataEnricher } from "./executors/metadata-enricher";
 import { CommandLifecycleExecutor } from "./executors/command-lifecycle-executor";
@@ -124,6 +125,143 @@ type StandaloneQueryHandlerMap<
 type PersistenceFactory = () =>
   | PersistenceConfiguration
   | Promise<PersistenceConfiguration>;
+
+// ---- New API: defineDomain + wireDomain ----
+
+/**
+ * Per-aggregate runtime configuration. Groups persistence, concurrency,
+ * and snapshot settings.
+ */
+export type AggregateWiring = {
+  /** Persistence factory for this aggregate. */
+  persistence?: PersistenceFactory;
+  /** Concurrency control for this aggregate. */
+  concurrency?:
+    | { strategy?: "optimistic"; maxRetries?: number }
+    | {
+        strategy: "pessimistic";
+        locker: AggregateLocker;
+        lockTimeoutMs?: number;
+      };
+  /** Snapshot configuration for this aggregate (event-sourced only). */
+  snapshots?: {
+    store: () => SnapshotStore | Promise<SnapshotStore>;
+    strategy: SnapshotStrategy;
+  };
+};
+
+/**
+ * Per-projection runtime configuration. Provides the view store factory
+ * for a projection, extracted from the projection definition.
+ */
+export type ProjectionWiring<
+  TInfrastructure extends Infrastructure = Infrastructure,
+> = {
+  /** Factory that resolves the view store. */
+  viewStore: (infrastructure: TInfrastructure) => ViewStore;
+};
+
+/**
+ * Pure structural definition of a domain. Contains aggregates, projections,
+ * sagas, and handler registrations — no runtime or infrastructure concerns.
+ *
+ * Created via {@link defineDomain}. Pass to {@link wireDomain} along with
+ * infrastructure wiring to create a running {@link Domain}.
+ */
+export type DomainDefinition<
+  TInfrastructure extends Infrastructure = Infrastructure,
+  TStandaloneCommand extends Command = Command,
+  TStandaloneQuery extends Query<any> = Query<any>,
+  TAggregates extends AggregateMap = AggregateMap,
+> = {
+  /** The write side: aggregates and standalone command handlers. */
+  writeModel: {
+    /** A map of aggregate definitions keyed by aggregate name. */
+    aggregates: TAggregates;
+    /** Optional map of standalone command handlers keyed by command name. */
+    standaloneCommandHandlers?: StandaloneCommandHandlerMap<
+      TInfrastructure,
+      TStandaloneCommand
+    >;
+  };
+  /** The read side: projections and standalone query handlers. */
+  readModel: {
+    /** A map of projection definitions keyed by projection name. */
+    projections: ProjectionMap;
+    /** Optional map of standalone query handlers keyed by query name. */
+    standaloneQueryHandlers?: StandaloneQueryHandlerMap<
+      TInfrastructure,
+      TStandaloneQuery
+    >;
+  };
+  /**
+   * Process managers (sagas). Optional — omit if the domain has no
+   * cross-aggregate workflows.
+   */
+  processModel?: {
+    /** A map of saga definitions keyed by saga name. */
+    sagas: SagaMap;
+  };
+};
+
+/**
+ * Runtime infrastructure wiring for a domain. Connects a {@link DomainDefinition}
+ * to persistence, buses, concurrency, snapshots, and user-provided services.
+ *
+ * Pass to {@link wireDomain} along with a definition to create a running {@link Domain}.
+ */
+export type DomainWiring<
+  TInfrastructure extends Infrastructure = Infrastructure,
+  TAggregates extends AggregateMap = AggregateMap,
+> = {
+  /** Factory for user-provided infrastructure services. */
+  infrastructure?: () => TInfrastructure | Promise<TInfrastructure>;
+  /** Aggregate runtime config — global {@link AggregateWiring} OR per-aggregate record. */
+  aggregates?: AggregateWiring | Record<keyof TAggregates & string, AggregateWiring>;
+  /** Projection runtime config — per-projection view store wiring. */
+  projections?: Record<string, ProjectionWiring<TInfrastructure>>;
+  /** Saga runtime config. Required if processModel has sagas. */
+  sagas?: {
+    persistence: () => SagaPersistence | Promise<SagaPersistence>;
+  };
+  /** Factory for CQRS buses. Receives resolved user infrastructure. */
+  buses?: (
+    infrastructure: TInfrastructure,
+  ) => CQRSInfrastructure | Promise<CQRSInfrastructure>;
+  /** Factory for the UnitOfWorkFactory. */
+  unitOfWork?: () => UnitOfWorkFactory | Promise<UnitOfWorkFactory>;
+  /** Factory for idempotency store. */
+  idempotency?: () => IdempotencyStore | Promise<IdempotencyStore>;
+  /** Transactional outbox configuration. */
+  outbox?: {
+    store: () => OutboxStore | Promise<OutboxStore>;
+    relayOptions?: OutboxRelayOptions;
+  };
+  /** Metadata provider called on every command dispatch. */
+  metadataProvider?: MetadataProvider;
+};
+
+/**
+ * Creates a pure, sync domain definition with full type inference.
+ * Consistent with {@link defineAggregate}, {@link defineProjection}, {@link defineSaga}.
+ *
+ * @returns The same definition object, fully typed.
+ */
+export function defineDomain<
+  TInfrastructure extends Infrastructure = Infrastructure,
+  TStandaloneCommand extends Command = Command,
+  TStandaloneQuery extends Query<any> = Query<any>,
+  TAggregates extends AggregateMap = AggregateMap,
+>(
+  definition: DomainDefinition<
+    TInfrastructure,
+    TStandaloneCommand,
+    TStandaloneQuery,
+    TAggregates
+  >,
+): DomainDefinition<TInfrastructure, TStandaloneCommand, TStandaloneQuery, TAggregates> {
+  return definition;
+}
 
 /**
  * The full configuration object for a domain, wiring together the write model
@@ -337,6 +475,16 @@ export type DomainConfiguration<
 };
 
 /**
+ * Internal context passed by wireDomain to Domain, carrying per-aggregate
+ * and projection wiring overrides.
+ * @internal
+ */
+interface WiringContext<TInfrastructure extends Infrastructure> {
+  perAggregateWirings?: Map<string, AggregateWiring>;
+  projectionViewStoreOverrides?: Record<string, ProjectionWiring<TInfrastructure>>;
+}
+
+/**
  * The running domain instance. Created via {@link configureDomain}, it is the
  * primary entry point for dispatching commands and accessing infrastructure.
  *
@@ -368,6 +516,7 @@ export class Domain<
       TStandaloneCommand,
       TStandaloneQuery
     >,
+    private readonly _wiringContext?: WiringContext<TInfrastructure>,
   ) {}
 
   /**
@@ -385,13 +534,17 @@ export class Domain<
       : ({} as TInfrastructure);
 
     // Step 2: Resolve CQRS infrastructure
-    const cqrsInfra = configuration.infrastructure.cqrsInfrastructure
-      ? await configuration.infrastructure.cqrsInfrastructure(customInfra)
-      : {
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        };
+    let cqrsInfra: CQRSInfrastructure;
+    if (configuration.infrastructure.cqrsInfrastructure) {
+      cqrsInfra = await configuration.infrastructure.cqrsInfrastructure(customInfra);
+    } else {
+      console.warn("[noddde] Using in-memory CQRS buses. This is not suitable for production.");
+      cqrsInfra = {
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      };
+    }
 
     // Step 3: Merge infrastructure
     this._infrastructure = {
@@ -405,6 +558,7 @@ export class Domain<
 
     if (!persistenceConfig) {
       // Omitted — in-memory default for all
+      console.warn("[noddde] Using in-memory aggregate persistence. This is not suitable for production.");
       persistenceResolver = new GlobalAggregatePersistenceResolver(
         new InMemoryEventSourcedAggregatePersistence(),
       );
@@ -444,19 +598,45 @@ export class Domain<
       persistenceResolver = new PerAggregatePersistenceResolver(resolved);
     }
 
-    // Step 4.5: Resolve snapshot store and strategy
-    let snapshotStore: SnapshotStore | undefined;
-    if (configuration.infrastructure.snapshotStore) {
-      snapshotStore = await configuration.infrastructure.snapshotStore();
+    // Step 4.5: Resolve snapshot configuration
+    let snapshotResolver: ((aggregateName: string) => { store: SnapshotStore; strategy: SnapshotStrategy } | undefined) | undefined;
+
+    if (this._wiringContext?.perAggregateWirings) {
+      // Per-aggregate snapshots from wireDomain
+      const resolvedSnapshots = new Map<string, { store: SnapshotStore; strategy: SnapshotStrategy }>();
+      for (const [name, aw] of this._wiringContext.perAggregateWirings) {
+        if (aw.snapshots) {
+          const store = await aw.snapshots.store();
+          resolvedSnapshots.set(name, { store, strategy: aw.snapshots.strategy });
+        }
+      }
+      if (resolvedSnapshots.size > 0) {
+        snapshotResolver = (aggregateName) => resolvedSnapshots.get(aggregateName);
+      }
+    } else {
+      // Global snapshots from DomainConfiguration (legacy path)
+      let snapshotStore: SnapshotStore | undefined;
+      if (configuration.infrastructure.snapshotStore) {
+        snapshotStore = await configuration.infrastructure.snapshotStore();
+      }
+      const snapshotStrategy = configuration.infrastructure.snapshotStrategy;
+      if (snapshotStore && snapshotStrategy) {
+        snapshotResolver = () => ({ store: snapshotStore!, strategy: snapshotStrategy });
+      } else if (snapshotStore) {
+        // Store without strategy — still need for loading
+        snapshotResolver = () => ({ store: snapshotStore!, strategy: () => false });
+      }
     }
-    const snapshotStrategy = configuration.infrastructure.snapshotStrategy;
 
     // Step 5: Resolve saga persistence (only when processModel is configured)
     let sagaPersistence: SagaPersistence | undefined;
     if (configuration.processModel) {
-      sagaPersistence = configuration.infrastructure.sagaPersistence
-        ? await configuration.infrastructure.sagaPersistence()
-        : new InMemorySagaPersistence();
+      if (configuration.infrastructure.sagaPersistence) {
+        sagaPersistence = await configuration.infrastructure.sagaPersistence();
+      } else {
+        console.warn("[noddde] Using in-memory saga persistence. This is not suitable for production.");
+        sagaPersistence = new InMemorySagaPersistence();
+      }
     }
 
     // Step 5.5: Resolve UnitOfWork factory
@@ -465,21 +645,46 @@ export class Domain<
       : createInMemoryUnitOfWork;
 
     // Step 5.6: Resolve concurrency strategy
-    const concurrency = configuration.infrastructure.aggregateConcurrency;
     let concurrencyStrategy: ConcurrencyStrategy;
-    if (
-      concurrency &&
-      "strategy" in concurrency &&
-      concurrency.strategy === "pessimistic"
-    ) {
-      concurrencyStrategy = new PessimisticConcurrencyStrategy(
-        concurrency.locker,
-        concurrency.lockTimeoutMs,
-      );
+
+    if (this._wiringContext?.perAggregateWirings) {
+      // Per-aggregate concurrency from wireDomain
+      const strategies = new Map<string, ConcurrencyStrategy>();
+      for (const [name, aw] of this._wiringContext.perAggregateWirings) {
+        if (aw.concurrency) {
+          if ("strategy" in aw.concurrency && aw.concurrency.strategy === "pessimistic") {
+            strategies.set(name, new PessimisticConcurrencyStrategy(
+              aw.concurrency.locker,
+              aw.concurrency.lockTimeoutMs,
+            ));
+          } else {
+            strategies.set(name, new OptimisticConcurrencyStrategy(
+              (aw.concurrency as { maxRetries?: number })?.maxRetries ?? 0,
+            ));
+          }
+        }
+      }
+      const defaultStrategy = new OptimisticConcurrencyStrategy(0);
+      concurrencyStrategy = strategies.size > 0
+        ? new PerAggregateConcurrencyStrategy(strategies, defaultStrategy)
+        : defaultStrategy;
     } else {
-      concurrencyStrategy = new OptimisticConcurrencyStrategy(
-        (concurrency as { maxRetries?: number } | undefined)?.maxRetries ?? 0,
-      );
+      // Global concurrency from DomainConfiguration (legacy path)
+      const concurrency = configuration.infrastructure.aggregateConcurrency;
+      if (
+        concurrency &&
+        "strategy" in concurrency &&
+        concurrency.strategy === "pessimistic"
+      ) {
+        concurrencyStrategy = new PessimisticConcurrencyStrategy(
+          concurrency.locker,
+          concurrency.lockTimeoutMs,
+        );
+      } else {
+        concurrencyStrategy = new OptimisticConcurrencyStrategy(
+          (concurrency as { maxRetries?: number } | undefined)?.maxRetries ?? 0,
+        );
+      }
     }
 
     // Step 5.7: Resolve idempotency store
@@ -500,9 +705,14 @@ export class Domain<
     for (const [name, entry] of Object.entries(
       configuration.readModel.projections,
     )) {
-      const { projection, viewStore: viewStoreFactory } =
+      const { projection, viewStore: inlineViewStoreFactory } =
         resolveProjectionEntry(entry);
       resolvedProjections.set(name, projection);
+      // Check wiring overrides first (from wireDomain), then inline viewStore from config
+      const wiringViewStore = this._wiringContext?.projectionViewStoreOverrides?.[name];
+      const viewStoreFactory = wiringViewStore
+        ? wiringViewStore.viewStore
+        : inlineViewStoreFactory;
       if (viewStoreFactory) {
         const storeInstance = viewStoreFactory(this._infrastructure);
         resolvedViewStores.set(name, storeInstance);
@@ -594,8 +804,7 @@ export class Domain<
       concurrencyStrategy,
       this._uowStorage,
       metadataEnricher,
-      snapshotStore,
-      snapshotStrategy,
+      snapshotResolver,
       idempotencyStore,
       onEventsProduced,
       onEventsDispatched,
@@ -929,8 +1138,120 @@ export class Domain<
 }
 
 /**
+ * Wires a {@link DomainDefinition} with infrastructure to create a running
+ * {@link Domain} instance. Resolves all factories, initializes persistence,
+ * registers handlers, and returns the fully initialized domain.
+ *
+ * Type parameters propagate from the definition — no need to repeat them.
+ *
+ * @param definition - The domain structure from {@link defineDomain}.
+ * @param wiring - The infrastructure wiring configuration.
+ * @returns A fully initialized {@link Domain} instance.
+ */
+export const wireDomain = async <
+  TInfrastructure extends Infrastructure,
+  TStandaloneCommand extends Command = Command,
+  TStandaloneQuery extends Query<any> = Query<any>,
+  TAggregates extends AggregateMap = AggregateMap,
+>(
+  definition: DomainDefinition<
+    TInfrastructure,
+    TStandaloneCommand,
+    TStandaloneQuery,
+    TAggregates
+  >,
+  wiring: DomainWiring<TInfrastructure, TAggregates> = {} as DomainWiring<TInfrastructure, TAggregates>,
+): Promise<Domain<TInfrastructure, TStandaloneCommand, TStandaloneQuery>> => {
+  // Map DomainWiring → DomainConfiguration for the Domain constructor
+  const isGlobalAggregateWiring = (
+    agg: AggregateWiring | Record<string, AggregateWiring> | undefined,
+  ): agg is AggregateWiring => {
+    if (!agg) return true; // undefined = global (defaults)
+    return (
+      "persistence" in agg ||
+      "concurrency" in agg ||
+      "snapshots" in agg ||
+      Object.keys(agg).length === 0
+    );
+  };
+
+  const aggregatesConfig = wiring.aggregates;
+  let aggregatePersistence: DomainConfiguration<TInfrastructure, TStandaloneCommand, TStandaloneQuery, TAggregates>["infrastructure"]["aggregatePersistence"];
+  let aggregateConcurrency: DomainConfiguration<TInfrastructure, TStandaloneCommand, TStandaloneQuery, TAggregates>["infrastructure"]["aggregateConcurrency"];
+  let snapshotStoreFactory: (() => SnapshotStore | Promise<SnapshotStore>) | undefined;
+  let snapshotStrategy: SnapshotStrategy | undefined;
+  let perAggregateWirings: Map<string, AggregateWiring> | undefined;
+
+  if (!aggregatesConfig || isGlobalAggregateWiring(aggregatesConfig)) {
+    // Global mode
+    const global = aggregatesConfig as AggregateWiring | undefined;
+    aggregatePersistence = global?.persistence;
+    aggregateConcurrency = global?.concurrency;
+    snapshotStoreFactory = global?.snapshots?.store;
+    snapshotStrategy = global?.snapshots?.strategy;
+  } else {
+    // Per-aggregate mode
+    const perAgg = aggregatesConfig as Record<string, AggregateWiring>;
+    perAggregateWirings = new Map(Object.entries(perAgg));
+
+    // Build per-aggregate persistence record
+    const persistenceRecord: Record<string, PersistenceFactory> = {};
+    let hasPersistence = false;
+    for (const [name, aw] of Object.entries(perAgg)) {
+      if (aw.persistence) {
+        persistenceRecord[name] = aw.persistence;
+        hasPersistence = true;
+      }
+    }
+    if (hasPersistence) {
+      // Fill in defaults for aggregates that didn't specify persistence
+      for (const name of Object.keys(definition.writeModel.aggregates)) {
+        if (!(name in persistenceRecord)) {
+          persistenceRecord[name] = () => new InMemoryEventSourcedAggregatePersistence();
+        }
+      }
+      aggregatePersistence = persistenceRecord as any;
+    }
+  }
+
+  const configuration: DomainConfiguration<
+    TInfrastructure,
+    TStandaloneCommand,
+    TStandaloneQuery,
+    TAggregates
+  > = {
+    writeModel: definition.writeModel,
+    readModel: definition.readModel,
+    processModel: definition.processModel,
+    infrastructure: {
+      aggregatePersistence,
+      aggregateConcurrency,
+      sagaPersistence: wiring.sagas?.persistence,
+      snapshotStore: snapshotStoreFactory,
+      snapshotStrategy,
+      idempotencyStore: wiring.idempotency,
+      provideInfrastructure: wiring.infrastructure,
+      cqrsInfrastructure: wiring.buses,
+      unitOfWorkFactory: wiring.unitOfWork,
+      outbox: wiring.outbox,
+    },
+    metadataProvider: wiring.metadataProvider,
+  };
+
+  const domain = new Domain(configuration, {
+    perAggregateWirings,
+    projectionViewStoreOverrides: wiring.projections,
+  });
+  await domain.init();
+  return domain;
+};
+
+/**
  * Creates and initializes a {@link Domain} instance from a configuration.
  * This is the main entry point for bootstrapping a noddde application.
+ *
+ * @deprecated Use {@link defineDomain} + {@link wireDomain} instead for
+ * better separation of domain structure and infrastructure wiring.
  *
  * @typeParam TInfrastructure - The custom infrastructure type.
  * @typeParam TStandaloneCommand - Union of standalone command types (inferred).

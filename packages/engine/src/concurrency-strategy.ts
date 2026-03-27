@@ -95,3 +95,25 @@ export class PessimisticConcurrencyStrategy implements ConcurrencyStrategy {
     }
   }
 }
+
+/**
+ * Composite concurrency strategy that routes to per-aggregate strategies.
+ * Falls back to a default strategy for aggregates without specific config.
+ *
+ * @internal
+ */
+export class PerAggregateConcurrencyStrategy implements ConcurrencyStrategy {
+  constructor(
+    private readonly strategies: Map<string, ConcurrencyStrategy>,
+    private readonly defaultStrategy: ConcurrencyStrategy,
+  ) {}
+
+  async execute(
+    aggregateName: string,
+    aggregateId: ID,
+    attempt: () => Promise<Event[]>,
+  ): Promise<Event[]> {
+    const strategy = this.strategies.get(aggregateName) ?? this.defaultStrategy;
+    return strategy.execute(aggregateName, aggregateId, attempt);
+  }
+}
