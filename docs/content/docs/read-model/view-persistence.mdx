@@ -1,9 +1,9 @@
 ---
 title: View Persistence
-description: Persisting projection views with ViewStore, auto-persistence via identity maps, and choosing between eventual and strong consistency.
+description: Persisting projection views with ViewStore, auto-persistence via the on map, and choosing between eventual and strong consistency.
 ---
 
-View persistence enables projections to automatically store and retrieve per-entity views using typed view stores. Instead of manually wiring event handlers to save views and writing boilerplate query handlers that delegate to repositories, you declare an `identity` map and a `viewStore` factory -- the framework handles the rest.
+View persistence enables projections to automatically store and retrieve per-entity views using typed view stores. Instead of manually wiring event handlers to save views and writing boilerplate query handlers that delegate to repositories, you declare `id` extractors in the projection's `on` map and provide a `viewStore` in the domain configuration — the framework handles the rest.
 
 ## The ViewStore Interface
 
@@ -57,9 +57,9 @@ For production, use ORM adapters or implement your own `ViewStore`.
 
 To enable automatic view persistence on a projection, provide three things:
 
-1. **`viewStore`** field in your `ProjectionTypes` bundle
-2. **`identity`** map on the projection definition
-3. **`viewStore`** factory on the projection definition
+1. **`viewStore`** type hint in your `ProjectionTypes` bundle (for typed `{ views }` injection)
+2. **`id`** function in each `on` entry (tells the engine how to derive the view instance ID)
+3. **`viewStore`** factory in the domain configuration (provides the actual store instance)
 
 ```ts
 import type { ViewStore, DefineEvents, DefineQueries } from "@noddde/core";
@@ -87,64 +87,82 @@ type AccountQuery = DefineQueries<{
   };
 }>;
 
-// Infrastructure provides the view store — initialized outside the domain
-type AccountInfrastructure = {
-  accountViewStore: AccountViewStore;
-};
-
 type AccountProjectionDef = {
   events: AccountEvent;
   queries: AccountQuery;
   view: AccountView;
-  infrastructure: AccountInfrastructure;
-  viewStore: AccountViewStore;  // Typed view store
+  infrastructure: {};
+  viewStore: AccountViewStore;  // Type hint for { views } injection
 };
 
 const AccountProjection = defineProjection<AccountProjectionDef>({
-  reducers: {
-    AccountCreated: (event) => ({
-      id: event.payload.id,
-      balance: 0,
-    }),
-    DepositMade: (event, view) => ({
-      ...view,
-      balance: view.balance + event.payload.amount,
-    }),
+  on: {
+    AccountCreated: {
+      id: (event) => event.payload.id,
+      reduce: (event) => ({
+        id: event.payload.id,
+        balance: 0,
+      }),
+    },
+    DepositMade: {
+      id: (event) => event.payload.accountId,
+      reduce: (event, view) => ({
+        ...view,
+        balance: view.balance + event.payload.amount,
+      }),
+    },
   },
-
-  // Maps each event to the view instance ID
-  identity: {
-    AccountCreated: (event) => event.payload.id,
-    DepositMade: (event) => event.payload.accountId,
-  },
-
-  // Returns the already-initialized view store from infrastructure
-  viewStore: (infra) => infra.accountViewStore,
 
   // Query handlers receive { views } typed as AccountViewStore
   queryHandlers: {
-    GetAccountById: (query, { views }) => views.load(query.id),
+    GetAccountById: async (query, { views }) =>
+      (await views.load(query.id)) ?? null,
     GetAccountsInRange: (query, { views }) =>
       views.findByBalanceRange(query.min, query.max),
   },
 });
+
+// In domain configuration — viewStore is provided here
+import { configureDomain } from "@noddde/engine";
+
+const domain = await configureDomain({
+  writeModel: { aggregates: { /* ... */ } },
+  readModel: {
+    projections: {
+      Account: {
+        projection: AccountProjection,
+        viewStore: (infra) => infra.accountViewStore,
+      },
+    },
+  },
+  infrastructure: { /* ... */ },
+});
 ```
 
-## The Identity Map
+## View Instance IDs
 
-The `identity` map tells the engine how to derive the view instance ID from each event. It must be **exhaustive** -- every event in the projection's event union must have a mapping.
+The `id` function inside each `on` entry tells the engine how to derive the view instance ID from an event. It is optional at the type level, but required by the engine when a view store is configured.
 
 ```ts
-identity: {
-  AccountCreated: (event) => event.payload.id,
-  DepositMade: (event) => event.payload.accountId,
+on: {
+  AccountCreated: {
+    id: (event) => event.payload.id,
+    reduce: (event) => ({ id: event.payload.id, balance: 0 }),
+  },
+  DepositMade: {
+    id: (event) => event.payload.accountId,
+    reduce: (event, view) => ({
+      ...view,
+      balance: view.balance + event.payload.amount,
+    }),
+  },
 },
 ```
 
-This mirrors the saga `associations` pattern. When an event arrives, the engine:
-1. Calls `identity[event.name](event)` to get the view ID
-2. Loads the current view from the view store
-3. Runs the reducer with the event and current view
+Unlike the old exhaustive `identity` map, only events the projection cares about need entries in `on`. When an event arrives, the engine:
+1. Calls `on[event.name].id(event)` to get the view ID
+2. Loads the current view from the view store (falling back to `initialView`)
+3. Runs `on[event.name].reduce(event, view)` to produce the new view
 4. Saves the new view to the view store
 
 ### initialView
@@ -153,25 +171,35 @@ When `load()` returns `undefined` (new entity), the reducer receives `undefined`
 
 ```ts
 const projection = defineProjection<Def>({
-  reducers: { /* ... */ },
-  identity: { /* ... */ },
-  viewStore: (infra) => infra.accountViewStore,
+  on: {
+    AccountCreated: {
+      id: (event) => event.payload.id,
+      reduce: (event) => ({ id: event.payload.id, balance: 0 }),
+    },
+  },
   initialView: { id: "", balance: 0 },  // Default for new entities
   queryHandlers: {},
 });
 ```
 
-## The viewStore Factory
+## The viewStore in Domain Configuration
 
-The `viewStore` field is a factory function, not a direct instance. It receives the resolved infrastructure and should return an **already-initialized** view store instance from it:
+The `viewStore` factory has moved from the projection definition to the domain configuration. It is now provided as part of the projection entry in `readModel.projections`:
 
 ```ts
-viewStore: (infra) => infra.accountViewStore,
+readModel: {
+  projections: {
+    Account: {
+      projection: AccountProjection,
+      viewStore: (infra) => infra.accountViewStore,
+    },
+  },
+},
 ```
 
-This keeps the projection definition free of infrastructure concerns — the view store is created and configured when you set up your infrastructure, not inside domain code. Constructing a view store inline (e.g., `new InMemoryViewStore()`) defeats the purpose of separating domain from infrastructure.
+The factory receives the resolved infrastructure and should return an **already-initialized** view store instance from it. This keeps the projection definition free of infrastructure concerns — the view store is created and configured when you set up your infrastructure, not inside domain code. Constructing a view store inline (e.g., `new InMemoryViewStore()`) defeats the purpose of separating domain from infrastructure.
 
-The factory is **synchronous only**. The view store must be fully initialized before being provided via infrastructure — async initialization belongs in your infrastructure setup, not in a projection definition. The factory is called during `Domain.init()` with the fully resolved infrastructure (custom + CQRS).
+The factory is **synchronous only**. The view store must be fully initialized before being provided via infrastructure — async initialization belongs in your infrastructure setup, not in a domain configuration factory. The factory is called during `configureDomain()` with the fully resolved infrastructure (custom + CQRS).
 
 ## Consistency Modes
 
@@ -203,9 +231,12 @@ Enable it with `consistency: "strong"`:
 
 ```ts
 const projection = defineProjection<Def>({
-  reducers: { /* ... */ },
-  identity: { /* ... */ },
-  viewStore: (infra) => infra.accountViewStore,
+  on: {
+    Created: {
+      id: (event) => event.payload.id,
+      reduce: (event, _view) => ({ id: event.payload.id }),
+    },
+  },
   consistency: "strong",
   queryHandlers: {},
 });
@@ -215,12 +246,12 @@ Strong-consistency projections do **not** subscribe to the event bus (to avoid d
 
 ## Validation
 
-The engine validates projection configuration during `Domain.init()`:
+The engine validates projection configuration during `configureDomain()`:
 
-- **`identity` without `viewStore`**: Throws an error. Identity maps require a view store to persist to.
-- **`viewStore` without `identity`**: Valid. Query handlers receive `{ views }`, but auto-persistence is not enabled (manual persistence by the user).
-- **`consistency: "strong"` without `identity` and `viewStore`**: Silently ignored -- treated as eventual.
+- **`on` entry without `id` when `viewStore` configured**: Throws at init. Each `on` entry must have an `id` function when a view store is provided.
+- **`viewStore` configured but no `on` entries with `id`**: Valid only if `on` is empty — then the projection is query-only.
+- **`consistency: "strong"` without `viewStore` in config**: Silently ignored -- treated as eventual.
 
 ## Optional Fields
 
-All view persistence fields (`identity`, `viewStore`, `initialView`, `consistency`) are optional at the type level. However, projections without `identity` and `viewStore` will not have their reducers subscribed to the event bus — they serve only as query handler containers. To enable auto-persistence, provide both `identity` and `viewStore`.
+All view persistence fields (`id` per `on` entry, `initialView`, `consistency`) are optional at the type level on the projection. The `viewStore` is optional in the domain configuration. However, to enable auto-persistence, provide `id` on each `on` entry and a `viewStore` in the domain configuration.

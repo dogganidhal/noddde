@@ -66,15 +66,14 @@ function createCounterProjection() {
   const viewStore = new InMemoryViewStore<CounterViewType>();
 
   const projection = defineProjection<CounterProjectionDef>({
-    reducers: {
-      Incremented: (event, view) => ({
-        total: (view?.total ?? 0) + event.payload.amount,
-      }),
+    on: {
+      Incremented: {
+        id: () => "global",
+        reduce: (event, view) => ({
+          total: (view?.total ?? 0) + event.payload.amount,
+        }),
+      },
     },
-    identity: {
-      Incremented: () => "global",
-    },
-    viewStore: () => viewStore,
     queryHandlers: {
       GetTotal: async (_payload, { views }) => {
         const view = await views.load("global");
@@ -83,7 +82,7 @@ function createCounterProjection() {
     },
   });
 
-  return { projection, viewStore };
+  return { projection: { projection, viewStore: () => viewStore }, viewStore };
 }
 
 // ---- Simple saga for testing command spy ----

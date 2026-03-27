@@ -18,38 +18,38 @@ docs:
 
 # Event-to-Projection Flow
 
-> Validates the end-to-end flow from event publication to projection view update: when an event is published on the EventBus, all registered projection reducers for that event name are invoked with the full event object and the current view, producing an updated view. Subsequently, query handlers serve the updated view. This spec verifies that `configureDomain` correctly wires projection subscriptions and that the reducer/query contract holds.
+> Validates the end-to-end flow from event publication to projection view update: when an event is published on the EventBus, all registered projection `on` map handlers for that event name are invoked with the full event object and the current view, producing an updated view. Subsequently, query handlers serve the updated view. This spec verifies that `configureDomain` correctly wires projection subscriptions and that the `projection.on` entries / query contract holds.
 
 ## Involved Components
 
 - **`EventBus`** (`EventEmitterEventBus`) -- publishes domain events; projections subscribe via event name.
-- **`Projection`** -- defines `reducers` (event name -> update function) and `queryHandlers` (query name -> read function).
-- **`Domain` / `configureDomain`** -- wires projection reducers as EventBus subscribers during `init()`.
+- **`Projection`** -- defines `on` map (event name -> `{ id?, reduce }` entry) and `queryHandlers` (query name -> read function).
+- **`Domain` / `configureDomain`** -- wires `projection.on` entries as EventBus subscribers during `init()`.
 - **`QueryBus`** (`InMemoryQueryBus`) -- routes queries to the projection's query handlers.
 
 ## Behavioral Requirements
 
-1. **Subscription wiring**: During `domain.init()`, for each projection, for each event name in its `reducers` map, the framework must subscribe a listener on the EventBus that invokes the reducer.
-2. **Reducer invocation**: When an event is published, the matching reducer receives `(event, currentView)` where `event` is the full event object (not just payload). The reducer returns the new view (or a Promise of it).
-3. **View state management**: The framework must maintain the current view for each projection. The initial view state is implementation-defined (typically `undefined` or a default). After each reducer call, the view is replaced with the return value.
+1. **Subscription wiring**: During `domain.init()`, for each projection, for each event name in its `on` map, the framework must subscribe a listener on the EventBus that invokes the entry's `reduce` function.
+2. **Reduce invocation**: When an event is published, the matching `on` entry's `reduce` function receives `(event, currentView)` where `event` is the full event object (not just payload). It returns the new view (or a Promise of it).
+3. **View state management**: The framework must maintain the current view for each projection. The initial view state is implementation-defined (typically `undefined` or a default). After each `reduce` call, the view is replaced with the return value.
 4. **Query serving**: Query handlers receive the query payload and infrastructure, and return results. The framework must register query handlers on the QueryBus so that `queryBus.dispatch(query)` routes to the correct handler.
-5. **Multiple projections, same event**: If two projections both have a reducer for `"OrderPlaced"`, both must be invoked when that event is published. They maintain independent views.
-6. **Event ordering**: Reducers are invoked in the order events are published. Within a single event dispatch, if multiple projections handle it, all are invoked (order among projections is not guaranteed).
+5. **Multiple projections, same event**: If two projections both have an `on` entry for `"OrderPlaced"`, both must be invoked when that event is published. They maintain independent views.
+6. **Event ordering**: Reduce handlers are invoked in the order events are published. Within a single event dispatch, if multiple projections handle it, all are invoked (order among projections is not guaranteed).
 
 ## Invariants
 
-- Reducers are only invoked for event names they are registered for.
-- The view returned by a reducer becomes the `currentView` for the next invocation.
+- Reduce handlers are only invoked for event names they are registered for in the `on` map.
+- The view returned by a `reduce` call becomes the `currentView` for the next invocation.
 - Query handlers are isolated per projection -- two projections can define handlers for different query names without conflict.
-- Reducer exceptions propagate to the EventBus dispatch call (they do not silently fail).
+- Reduce handler exceptions propagate to the EventBus dispatch call (they do not silently fail).
 
 ## Edge Cases
 
-- **Reducer returning a Promise**: The framework must await async reducers before the EventBus dispatch resolves.
-- **No reducer for a given event**: If a projection does not handle event `"X"`, publishing `"X"` does not invoke that projection.
-- **View starts as undefined**: Before any events are processed, the view is `undefined`. Reducers must handle this (e.g., by providing a fallback).
+- **Reduce handler returning a Promise**: The framework must await async reduce handlers before the EventBus dispatch resolves.
+- **No on entry for a given event**: If a projection does not handle event `"X"` in its `on` map, publishing `"X"` does not invoke that projection.
+- **View starts as undefined**: Before any events are processed, the view is `undefined`. Reduce handlers must handle this (e.g., by providing a fallback).
 - **Projection with no query handlers**: A projection may have an empty `queryHandlers` map; it only builds a view without serving queries directly.
-- **Multiple events in sequence**: Each event triggers the reducer with the view produced by the previous event (not the original view).
+- **Multiple events in sequence**: Each event triggers the reduce handler with the view produced by the previous event (not the original view).
 
 ## Integration Points
 
@@ -134,18 +134,22 @@ type TodoProjectionTypes = {
 };
 
 const TodoProjection = defineProjection<TodoProjectionTypes>({
-  reducers: {
-    TodoAdded: (event, view) => ({
-      todos: [
-        ...(view?.todos ?? []),
-        { id: event.payload.id, title: event.payload.title, completed: false },
-      ],
-    }),
-    TodoCompleted: (event, view) => ({
-      todos: (view?.todos ?? []).map((t) =>
-        t.id === event.payload.id ? { ...t, completed: true } : t,
-      ),
-    }),
+  on: {
+    TodoAdded: {
+      reduce: (event, view) => ({
+        todos: [
+          ...(view?.todos ?? []),
+          { id: event.payload.id, title: event.payload.title, completed: false },
+        ],
+      }),
+    },
+    TodoCompleted: {
+      reduce: (event, view) => ({
+        todos: (view?.todos ?? []).map((t) =>
+          t.id === event.payload.id ? { ...t, completed: true } : t,
+        ),
+      }),
+    },
   },
   queryHandlers: {},
 });
@@ -248,13 +252,15 @@ const CatalogProjection = defineProjection<{
   view: { items: Array<{ id: string; name: string }> };
   infrastructure: {};
 }>({
-  reducers: {
-    ItemCreated: (event, view) => ({
-      items: [
-        ...(view?.items ?? []),
-        { id: event.payload.id, name: event.payload.name },
-      ],
-    }),
+  on: {
+    ItemCreated: {
+      reduce: (event, view) => ({
+        items: [
+          ...(view?.items ?? []),
+          { id: event.payload.id, name: event.payload.name },
+        ],
+      }),
+    },
   },
   queryHandlers: {},
 });
@@ -266,17 +272,19 @@ const PriceIndexProjection = defineProjection<{
   view: { totalValue: number; count: number };
   infrastructure: {};
 }>({
-  reducers: {
-    ItemCreated: (event, view) => ({
-      totalValue: (view?.totalValue ?? 0) + event.payload.price,
-      count: (view?.count ?? 0) + 1,
-    }),
+  on: {
+    ItemCreated: {
+      reduce: (event, view) => ({
+        totalValue: (view?.totalValue ?? 0) + event.payload.price,
+        count: (view?.count ?? 0) + 1,
+      }),
+    },
   },
   queryHandlers: {},
 });
 
 describe("Multiple projections for same event", () => {
-  it("should invoke both projection reducers when the event is published", async () => {
+  it("should invoke both projection reduce handlers when the event is published", async () => {
     const eventBus = new EventEmitterEventBus();
 
     const domain = await configureDomain({
@@ -308,7 +316,7 @@ describe("Multiple projections for same event", () => {
 });
 ```
 
-### Async reducer
+### Async reduce handler
 
 ```ts
 import { describe, it, expect } from "vitest";
@@ -355,20 +363,22 @@ const AsyncLogProjection = defineProjection<{
   view: { entries: string[] };
   infrastructure: {};
 }>({
-  reducers: {
-    EntryLogged: async (event, view) => {
-      // Simulate async work (e.g., enrichment)
-      await new Promise((resolve) => setTimeout(resolve, 1));
-      return {
-        entries: [...(view?.entries ?? []), event.payload.message],
-      };
+  on: {
+    EntryLogged: {
+      reduce: async (event, view) => {
+        // Simulate async work (e.g., enrichment)
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        return {
+          entries: [...(view?.entries ?? []), event.payload.message],
+        };
+      },
     },
   },
   queryHandlers: {},
 });
 
-describe("Async projection reducer", () => {
-  it("should await the async reducer before completing event dispatch", async () => {
+describe("Async projection reduce handler", () => {
+  it("should await the async reduce handler before completing event dispatch", async () => {
     const domain = await configureDomain({
       writeModel: { aggregates: { Logger } },
       readModel: { projections: { AsyncLogProjection } },
@@ -389,7 +399,7 @@ describe("Async projection reducer", () => {
       payload: { message: "hello world" },
     });
 
-    // After dispatch resolves, the async reducer should have completed.
+    // After dispatch resolves, the async reduce handler should have completed.
     // The view should contain: { entries: ["hello world"] }
   });
 });
@@ -453,15 +463,19 @@ const BalanceProjection = defineProjection<{
   view: { totalDeposits: number; totalWithdrawals: number };
   infrastructure: {};
 }>({
-  reducers: {
-    Deposited: (event, view) => ({
-      totalDeposits: (view?.totalDeposits ?? 0) + event.payload.amount,
-      totalWithdrawals: view?.totalWithdrawals ?? 0,
-    }),
-    Withdrawn: (event, view) => ({
-      totalDeposits: view?.totalDeposits ?? 0,
-      totalWithdrawals: (view?.totalWithdrawals ?? 0) + event.payload.amount,
-    }),
+  on: {
+    Deposited: {
+      reduce: (event, view) => ({
+        totalDeposits: (view?.totalDeposits ?? 0) + event.payload.amount,
+        totalWithdrawals: view?.totalWithdrawals ?? 0,
+      }),
+    },
+    Withdrawn: {
+      reduce: (event, view) => ({
+        totalDeposits: view?.totalDeposits ?? 0,
+        totalWithdrawals: (view?.totalWithdrawals ?? 0) + event.payload.amount,
+      }),
+    },
   },
   queryHandlers: {},
 });
@@ -501,7 +515,7 @@ describe("Sequential events produce cumulative view", () => {
     });
 
     // Expected view: { totalDeposits: 150, totalWithdrawals: 30 }
-    // Each reducer saw the view produced by the previous reducer call.
+    // Each reduce handler saw the view produced by the previous reduce call.
   });
 });
 ```

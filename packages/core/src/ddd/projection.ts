@@ -21,7 +21,7 @@ import type { ViewStore } from "../persistence/view-store";
  *   queries: BankAccountQuery;
  *   view: BankAccountView;
  *   infrastructure: BankingInfrastructure;
- *   viewStore: BankAccountViewStore; // optional
+ *   viewStore: BankAccountViewStore; // optional — type hint for { views } injection
  * };
  * ```
  */
@@ -34,27 +34,56 @@ export type ProjectionTypes = {
   view: any;
   /** The external dependencies available to query handlers. */
   infrastructure: Infrastructure;
-  /** Optional typed view store for this projection. */
+  /**
+   * Optional typed view store for this projection. When present, enables
+   * typed `{ views }` injection into query handlers via `ProjectionQueryInfra<T>`.
+   * This is a type-level hint only — the actual view store is provided in the
+   * domain configuration, not in the projection definition.
+   */
   viewStore?: ViewStore;
 };
 
-// ---- Internal handler maps ----
+// ---- Event handler types ----
 
-type ReducerMap<T extends ProjectionTypes> = {
-  [EventName in T["events"]["name"]]: (
-    event: Extract<T["events"], { name: EventName }>,
-    view: T["view"],
-  ) => Promise<T["view"]> | T["view"];
+/**
+ * A single event handler entry within a projection's `on` map.
+ * Bundles the identity extractor and reducer for one event type.
+ *
+ * @typeParam TEvent - The narrowed event type for this handler.
+ * @typeParam TView - The projection's view model type.
+ */
+export type ProjectionEventHandler<TEvent extends Event, TView> = {
+  /**
+   * Extracts the view instance ID from the event.
+   * Optional per-entry at the type level. Required by the engine when
+   * a view store is configured for auto-persistence.
+   */
+  id?: (event: TEvent) => ID;
+
+  /**
+   * Transforms the current view based on the event, returning the updated view.
+   * Receives the full event object (not just payload).
+   * May be sync or async.
+   */
+  reduce: (event: TEvent, view: TView) => TView | Promise<TView>;
 };
 
 /**
- * Maps each event name to a function that extracts the view instance ID.
- * Mirrors {@link SagaAssociationMap} from saga.ts. Enables the engine to
- * route events to the correct view instance for auto-persistence.
+ * Maps event names to their projection handlers. Each entry bundles
+ * an identity extractor and a reducer. This map is **partial** — only
+ * events the projection cares about need entries. Unhandled events
+ * are silently ignored at runtime.
+ *
+ * @typeParam T - The {@link ProjectionTypes} bundle.
  */
-type IdentityMap<T extends ProjectionTypes> = {
-  [K in T["events"]["name"]]: (event: Extract<T["events"], { name: K }>) => ID;
+type ProjectionOnMap<T extends ProjectionTypes> = {
+  [EventName in T["events"]["name"]]?: ProjectionEventHandler<
+    Extract<T["events"], { name: EventName }>,
+    T["view"]
+  >;
 };
+
+// ---- Internal handler maps ----
 
 /**
  * Conditionally injects the view store into query handler infrastructure.
@@ -67,21 +96,6 @@ type ProjectionQueryInfra<T extends ProjectionTypes> = T extends {
 }
   ? T["infrastructure"] & { views: VS }
   : T["infrastructure"];
-
-/**
- * Factory type for resolving a view store from infrastructure.
- * The factory should return an already-initialized view store instance
- * from the infrastructure — e.g., `(infra) => infra.myViewStore`.
- *
- * Synchronous only: the view store must be fully initialized before
- * being provided via infrastructure. This keeps projection definitions
- * free of infrastructure initialization concerns.
- */
-type ViewStoreFactory<T extends ProjectionTypes> = T extends {
-  viewStore: infer VS extends ViewStore;
-}
-  ? (infrastructure: T["infrastructure"]) => VS
-  : (infrastructure: T["infrastructure"]) => ViewStore<T["view"]>;
 
 type QueryHandlerMap<T extends ProjectionTypes> = {
   [QueryName in T["queries"]["name"]]?: QueryHandler<
@@ -98,14 +112,15 @@ type QueryHandlerMap<T extends ProjectionTypes> = {
  * side of CQRS — they subscribe to events and maintain denormalized views
  * tailored for specific query needs.
  *
- * Each reducer receives the full event (with type narrowed by event name)
- * and the current view, returning the updated view.
+ * The `on` map defines which events the projection handles. Each entry
+ * bundles an identity extractor (`id`) and a reducer (`reduce`). Only
+ * events the projection cares about need entries — unhandled events are
+ * silently ignored.
  *
- * Optionally, projections can declare:
- * - {@link identity} — maps events to view instance IDs for auto-persistence.
- * - {@link viewStore} — factory for the typed view store (IoC).
- * - {@link initialView} — default view state for new entities.
- * - {@link consistency} — `"eventual"` (default) or `"strong"`.
+ * View store configuration has moved to the domain runtime wiring
+ * (`DomainConfiguration.readModel.projections`). The `viewStore` field
+ * in `ProjectionTypes` is a type-level hint only — it enables typed
+ * `{ views }` injection into query handlers.
  *
  * Use {@link defineProjection} to create a projection with full type inference.
  *
@@ -113,28 +128,33 @@ type QueryHandlerMap<T extends ProjectionTypes> = {
  *
  * @example
  * ```ts
- * const BankAccountProjection = defineProjection<BankAccountProjectionDef>({
- *   reducers: {
- *     AccountCreated: (event, view) => ({ ...view, id: event.payload.id }),
- *     DepositMade: (event, view) => ({ ...view, balance: view.balance + event.payload.amount }),
+ * const RevenueProjection = defineProjection<RevenueProjectionDef>({
+ *   initialView: { date: "", totalRevenue: 0, bookingCount: 0 },
+ *   on: {
+ *     PaymentCompleted: {
+ *       id: (event) => day(event.payload.completedAt),
+ *       reduce: (event, view) => ({
+ *         date: day(event.payload.completedAt),
+ *         totalRevenue: view.totalRevenue + event.payload.amount,
+ *         bookingCount: view.bookingCount + 1,
+ *       }),
+ *     },
  *   },
- *   identity: {
- *     AccountCreated: (event) => event.payload.id,
- *     DepositMade: (event) => event.payload.accountId,
- *   },
- *   viewStore: (infra) => new InMemoryViewStore(),
  *   queryHandlers: {
- *     GetAccountById: (payload, { views }) => views.load(payload.id),
+ *     GetDailyRevenue: (query, { views }) => views.load(query.date),
  *   },
  * });
  * ```
  */
 export interface Projection<T extends ProjectionTypes = ProjectionTypes> {
   /**
-   * A map of reducer functions keyed by event name. Each reducer receives the
-   * narrowed event type and current view, returning the updated view.
+   * A partial map of event handlers keyed by event name. Each handler bundles
+   * an `id` function (extracts view instance ID) and a `reduce` function
+   * (transforms the view). Only events the projection cares about need
+   * entries — this map is partial over the event union.
    */
-  reducers: ReducerMap<T>;
+  on: ProjectionOnMap<T>;
+
   /**
    * A map of query handlers keyed by query name. Handlers serve the view
    * built by the reducers. All handlers are optional — a projection may
@@ -153,27 +173,6 @@ export interface Projection<T extends ProjectionTypes = ProjectionTypes> {
   initialView?: T["view"];
 
   /**
-   * Maps each event name to a function that extracts the view instance ID.
-   * Enables per-entity auto-persistence: `event → identity → load → reduce → save`.
-   *
-   * Must be exhaustive — every event in the union must have a mapping.
-   * Mirrors saga {@link SagaAssociationMap | associations}.
-   */
-  identity?: IdentityMap<T>;
-
-  /**
-   * Factory that resolves the view store from infrastructure. Should return
-   * an already-initialized instance — e.g., `(infra) => infra.myViewStore`.
-   *
-   * Synchronous only: the view store must be fully initialized before being
-   * provided via infrastructure. This keeps projection definitions free of
-   * infrastructure initialization concerns.
-   *
-   * Called during `Domain.init()` with the resolved infrastructure.
-   */
-  viewStore?: ViewStoreFactory<T>;
-
-  /**
    * Consistency mode for view persistence:
    * - `"eventual"` (default): Views updated asynchronously via event bus
    *   after the command's UoW is committed and events are dispatched.
@@ -190,18 +189,21 @@ export interface Projection<T extends ProjectionTypes = ProjectionTypes> {
  * recommended way to define projections.
  *
  * @typeParam T - Inferred {@link ProjectionTypes} bundle.
- * @param config - The projection configuration (reducers, queryHandlers,
- *   and optional identity, viewStore, initialView, consistency).
+ * @param config - The projection configuration (`on` map, `queryHandlers`,
+ *   and optional `initialView`, `consistency`).
  * @returns The same configuration object, fully typed.
  *
  * @example
  * ```ts
- * const BankAccountProjection = defineProjection<BankAccountProjectionDef>({
- *   reducers: {
- *     AccountCreated: (event, view) => ({ ...view, id: event.payload.id }),
+ * const RevenueProjection = defineProjection<RevenueProjectionDef>({
+ *   on: {
+ *     PaymentCompleted: {
+ *       id: (event) => day(event.payload.completedAt),
+ *       reduce: (event, view) => ({ ...view, count: view.count + 1 }),
+ *     },
  *   },
  *   queryHandlers: {
- *     GetAccountById: (payload, { views }) => views.load(payload.id),
+ *     GetDailyRevenue: (query, { views }) => views.load(query.date),
  *   },
  * });
  * ```

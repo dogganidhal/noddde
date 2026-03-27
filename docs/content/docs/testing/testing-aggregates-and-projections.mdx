@@ -270,16 +270,20 @@ expect(result.view.balance).toBe(800);
 When `.initialView()` is not called, the first reducer invocation receives `undefined` as the view. This matches real projection behavior when the first event arrives. Design your reducers to handle this:
 
 ```ts
-reducers: {
-  AccountCreated: (event, view) => ({
-    id: event.payload.id,
-    balance: 0,              // Initialize from scratch
-    transactions: [],
-  }),
-  DepositMade: (event, view) => ({
-    ...view,                 // Spread existing view
-    balance: (view?.balance ?? 0) + event.payload.amount,
-  }),
+on: {
+  AccountCreated: {
+    reduce: (event, view) => ({
+      id: event.payload.id,
+      balance: 0,              // Initialize from scratch
+      transactions: [],
+    }),
+  },
+  DepositMade: {
+    reduce: (event, view) => ({
+      ...view,                 // Spread existing view
+      balance: (view?.balance ?? 0) + event.payload.amount,
+    }),
+  },
 },
 ```
 
@@ -312,10 +316,12 @@ expect(result.view.transactions).toHaveLength(1);
 Projection reducers receive the **full event object** (`{ name, payload }`), not just the payload. The event type is narrowed by name:
 
 ```ts
-reducers: {
-  AccountCreated: (event, view) => {
-    // event is { name: "AccountCreated", payload: { id: string } }
-    return { ...view, id: event.payload.id };
+on: {
+  AccountCreated: {
+    reduce: (event, view) => {
+      // event is { name: "AccountCreated", payload: { id: string } }
+      return { ...view, id: event.payload.id };
+    },
   },
 },
 ```
@@ -352,7 +358,7 @@ expect(result.error!.message).toContain("invalid");
 You can always call reducers directly for focused tests:
 
 ```ts
-const newView = BankAccountProjection.reducers.TransactionProcessed(
+const newView = BankAccountProjection.on.TransactionProcessed!.reduce(
   {
     name: "TransactionProcessed",
     payload: { id: "t1", amount: 100, merchant: "Store", timestamp: now },

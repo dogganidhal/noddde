@@ -165,7 +165,7 @@ The `init()` method must execute the following steps in order:
 8. **Register standalone command handlers** -- For each handler in `writeModel.standaloneCommandHandlers`, register it on the command bus, wrapping it to receive the merged infrastructure.
 9. **Register query handlers** -- For each projection in `readModel.projections`, register each query handler from `Projection.queryHandlers` on the query bus.
 10. **Register standalone query handlers** -- For each handler in `readModel.standaloneQueryHandlers`, register it on the query bus.
-11. **Register event listeners for projections** -- For each projection, subscribe to each event name in `Projection.reducers` on the event bus. When an event arrives, invoke the reducer to update the projection's view.
+11. **Register event listeners for projections** -- For each projection, subscribe to each event name in `Projection.on` on the event bus. When an event arrives, invoke the entry's `reduce` function to update the projection's view.
 12. **Register event listeners for sagas** -- For each saga in `processModel.sagas`, subscribe to each event name in `Saga.handlers` on the event bus. When an event arrives, execute the saga event handling lifecycle.
 
 ### Domain.dispatchCommand() -- Command Dispatch Lifecycle
@@ -322,7 +322,7 @@ When outbox is configured, after the explicit UoW commits and events are dispatc
 - **CommandLifecycleExecutor** -- Internal executor that handles the full aggregate command lifecycle (load, execute, apply, enrich, persist, publish). Created during `init()` and used by `dispatchCommand()` and command bus handlers.
 - **SagaExecutor** -- Internal executor that handles the saga event handling lifecycle (derive ID, load state, bootstrap/resume, execute handler, dispatch commands atomically). Created during `init()` when `processModel` is configured.
 - **MetadataEnricher** -- Internal helper that enriches raw events with metadata (eventId, timestamp, correlationId, causationId, userId, aggregate context). Used by `CommandLifecycleExecutor`.
-- **Projections** -- The domain reads `Projection.reducers` and `Projection.queryHandlers` to wire event listeners and query handlers.
+- **Projections** -- The domain reads `Projection.on` and `Projection.queryHandlers` to wire event listeners and query handlers.
 - **External consumers** -- Applications interact with the domain via `domain.dispatchCommand(command)` and `domain.dispatchQuery(query)`. The query bus remains accessible directly via `domain.infrastructure.queryBus` for advanced use cases.
 
 ## Test Scenarios
@@ -668,10 +668,12 @@ type ItemProjectionTypes = ProjectionTypes & {
 };
 
 const ItemProjection = defineProjection<ItemProjectionTypes>({
-  reducers: {
-    ItemAdded: (event, view) => {
-      view.set(event.payload.id, event.payload);
-      return view;
+  on: {
+    ItemAdded: {
+      reduce: (event, view) => {
+        view.set(event.payload.id, event.payload);
+        return view;
+      },
     },
   },
   queryHandlers: {
@@ -1131,10 +1133,12 @@ type ProductProjectionTypes = ProjectionTypes & {
 };
 
 const ProductProjection = defineProjection<ProductProjectionTypes>({
-  reducers: {
-    ProductAdded: (event, view) => {
-      view.set(event.payload.id, event.payload);
-      return view;
+  on: {
+    ProductAdded: {
+      reduce: (event, view) => {
+        view.set(event.payload.id, event.payload);
+        return view;
+      },
     },
   },
   queryHandlers: {

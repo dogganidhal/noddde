@@ -4,7 +4,6 @@ import type {
   DefineCommands,
   DefineEvents,
   DefineQueries,
-  ViewStore,
 } from "@noddde/core";
 import { defineAggregate, defineProjection } from "@noddde/core";
 import {
@@ -72,34 +71,34 @@ describe("Event-to-projection flow", () => {
     queries: TodoQuery;
     view: TodoView;
     infrastructure: {};
-    viewStore: ViewStore<TodoView>;
   };
 
   const todoViewStore = new InMemoryViewStore<TodoView>();
 
   const TodoProjection = defineProjection<TodoProjectionTypes>({
-    reducers: {
-      TodoAdded: (event, view) => ({
-        todos: [
-          ...(view?.todos ?? []),
-          {
-            id: event.payload.id,
-            title: event.payload.title,
-            completed: false,
-          },
-        ],
-      }),
-      TodoCompleted: (event, view) => ({
-        todos: (view?.todos ?? []).map((t) =>
-          t.id === event.payload.id ? { ...t, completed: true } : t,
-        ),
-      }),
+    on: {
+      TodoAdded: {
+        id: () => "global",
+        reduce: (event, view) => ({
+          todos: [
+            ...(view?.todos ?? []),
+            {
+              id: event.payload.id,
+              title: event.payload.title,
+              completed: false,
+            },
+          ],
+        }),
+      },
+      TodoCompleted: {
+        id: () => "global",
+        reduce: (event, view) => ({
+          todos: (view?.todos ?? []).map((t) =>
+            t.id === event.payload.id ? { ...t, completed: true } : t,
+          ),
+        }),
+      },
     },
-    identity: {
-      TodoAdded: () => "global",
-      TodoCompleted: () => "global",
-    },
-    viewStore: () => todoViewStore,
     queryHandlers: {},
   });
 
@@ -109,7 +108,14 @@ describe("Event-to-projection flow", () => {
 
     const domain = await configureDomain({
       writeModel: { aggregates: { Todo } },
-      readModel: { projections: { TodoProjection } },
+      readModel: {
+        projections: {
+          TodoProjection: {
+            projection: TodoProjection,
+            viewStore: () => todoViewStore,
+          },
+        },
+      },
       infrastructure: {
         aggregatePersistence: () => persistence,
         cqrsInfrastructure: () => ({
@@ -197,20 +203,18 @@ describe("Multiple projections for same event", () => {
     queries: never;
     view: { items: Array<{ id: string; name: string }> };
     infrastructure: {};
-    viewStore: ViewStore<{ items: Array<{ id: string; name: string }> }>;
   }>({
-    reducers: {
-      ItemCreated: (event, view) => ({
-        items: [
-          ...(view?.items ?? []),
-          { id: event.payload.id, name: event.payload.name },
-        ],
-      }),
+    on: {
+      ItemCreated: {
+        id: () => "global",
+        reduce: (event, view) => ({
+          items: [
+            ...(view?.items ?? []),
+            { id: event.payload.id, name: event.payload.name },
+          ],
+        }),
+      },
     },
-    identity: {
-      ItemCreated: () => "global",
-    },
-    viewStore: () => catalogViewStore,
     queryHandlers: {},
   });
 
@@ -225,18 +229,16 @@ describe("Multiple projections for same event", () => {
     queries: never;
     view: { totalValue: number; count: number };
     infrastructure: {};
-    viewStore: ViewStore<{ totalValue: number; count: number }>;
   }>({
-    reducers: {
-      ItemCreated: (event, view) => ({
-        totalValue: (view?.totalValue ?? 0) + event.payload.price,
-        count: (view?.count ?? 0) + 1,
-      }),
+    on: {
+      ItemCreated: {
+        id: () => "global",
+        reduce: (event, view) => ({
+          totalValue: (view?.totalValue ?? 0) + event.payload.price,
+          count: (view?.count ?? 0) + 1,
+        }),
+      },
     },
-    identity: {
-      ItemCreated: () => "global",
-    },
-    viewStore: () => priceViewStore,
     queryHandlers: {},
   });
 
@@ -246,7 +248,16 @@ describe("Multiple projections for same event", () => {
     const domain = await configureDomain({
       writeModel: { aggregates: { Item } },
       readModel: {
-        projections: { CatalogProjection, PriceIndexProjection },
+        projections: {
+          CatalogProjection: {
+            projection: CatalogProjection,
+            viewStore: () => catalogViewStore,
+          },
+          PriceIndexProjection: {
+            projection: PriceIndexProjection,
+            viewStore: () => priceViewStore,
+          },
+        },
       },
       infrastructure: {
         aggregatePersistence: () =>
@@ -312,28 +323,33 @@ describe("Async projection reducer", () => {
     queries: never;
     view: { entries: string[] };
     infrastructure: {};
-    viewStore: ViewStore<{ entries: string[] }>;
   }>({
-    reducers: {
-      EntryLogged: async (event, view) => {
-        // Simulate async work (e.g., enrichment)
-        await new Promise((resolve) => setTimeout(resolve, 1));
-        return {
-          entries: [...(view?.entries ?? []), event.payload.message],
-        };
+    on: {
+      EntryLogged: {
+        id: () => "global",
+        reduce: async (event, view) => {
+          // Simulate async work (e.g., enrichment)
+          await new Promise((resolve) => setTimeout(resolve, 1));
+          return {
+            entries: [...(view?.entries ?? []), event.payload.message],
+          };
+        },
       },
     },
-    identity: {
-      EntryLogged: () => "global",
-    },
-    viewStore: () => asyncLogViewStore,
     queryHandlers: {},
   });
 
   it("should await the async reducer before completing event dispatch", async () => {
     const domain = await configureDomain({
       writeModel: { aggregates: { Logger } },
-      readModel: { projections: { AsyncLogProjection } },
+      readModel: {
+        projections: {
+          AsyncLogProjection: {
+            projection: AsyncLogProjection,
+            viewStore: () => asyncLogViewStore,
+          },
+        },
+      },
       infrastructure: {
         aggregatePersistence: () =>
           new InMemoryEventSourcedAggregatePersistence(),
@@ -407,30 +423,38 @@ describe("Sequential events produce cumulative view", () => {
     queries: never;
     view: { totalDeposits: number; totalWithdrawals: number };
     infrastructure: {};
-    viewStore: ViewStore<{ totalDeposits: number; totalWithdrawals: number }>;
   }>({
-    reducers: {
-      Deposited: (event, view) => ({
-        totalDeposits: (view?.totalDeposits ?? 0) + event.payload.amount,
-        totalWithdrawals: view?.totalWithdrawals ?? 0,
-      }),
-      Withdrawn: (event, view) => ({
-        totalDeposits: view?.totalDeposits ?? 0,
-        totalWithdrawals: (view?.totalWithdrawals ?? 0) + event.payload.amount,
-      }),
+    on: {
+      Deposited: {
+        id: () => "global",
+        reduce: (event, view) => ({
+          totalDeposits: (view?.totalDeposits ?? 0) + event.payload.amount,
+          totalWithdrawals: view?.totalWithdrawals ?? 0,
+        }),
+      },
+      Withdrawn: {
+        id: () => "global",
+        reduce: (event, view) => ({
+          totalDeposits: view?.totalDeposits ?? 0,
+          totalWithdrawals:
+            (view?.totalWithdrawals ?? 0) + event.payload.amount,
+        }),
+      },
     },
-    identity: {
-      Deposited: () => "global",
-      Withdrawn: () => "global",
-    },
-    viewStore: () => balanceViewStore,
     queryHandlers: {},
   });
 
   it("should accumulate view state across multiple event dispatches", async () => {
     const domain = await configureDomain({
       writeModel: { aggregates: { Account } },
-      readModel: { projections: { BalanceProjection } },
+      readModel: {
+        projections: {
+          BalanceProjection: {
+            projection: BalanceProjection,
+            viewStore: () => balanceViewStore,
+          },
+        },
+      },
       infrastructure: {
         aggregatePersistence: () =>
           new InMemoryEventSourcedAggregatePersistence(),

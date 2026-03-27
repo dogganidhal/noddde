@@ -1,11 +1,12 @@
 ---
-title: "ProjectionTypes, Projection, defineProjection & Infer Utilities"
+title: "ProjectionTypes, Projection, ProjectionEventHandler, defineProjection & Infer Utilities"
 module: ddd/projection
 source_file: packages/core/src/ddd/projection.ts
 status: implemented
 exports:
   [
     ProjectionTypes,
+    ProjectionEventHandler,
     Projection,
     defineProjection,
     InferProjectionView,
@@ -28,9 +29,9 @@ docs:
   - projections/view-persistence.mdx
 ---
 
-# ProjectionTypes, Projection, defineProjection & Infer Utilities
+# ProjectionTypes, Projection, ProjectionEventHandler, defineProjection & Infer Utilities
 
-> Projections are the read side of CQRS. They subscribe to domain events and maintain denormalized views tailored for specific query needs. `ProjectionTypes` bundles the type parameters. `Projection` is the definition interface containing reducers (event-to-view transformers), query handlers, and optional view persistence configuration (`identity`, `viewStore`, `initialView`, `consistency`). `defineProjection` provides type inference. Four `Infer*` utilities extract individual types.
+> Projections are the read side of CQRS. They subscribe to domain events and maintain denormalized views tailored for specific query needs. The `on` map defines which events a projection handles — each entry bundles an identity extractor (`id`) and a reducer (`reduce`). Only events the projection cares about need entries; unhandled events are silently ignored. `viewStore` configuration has moved to the domain runtime wiring (engine); projections remain pure domain definitions. `defineProjection` provides type inference. Four `Infer*` utilities extract individual types.
 
 ## Type Contract
 
@@ -40,42 +41,33 @@ docs:
   - `queries: Query<any>` -- discriminated union of queries this projection answers.
   - `view: any` -- the read-optimized view model.
   - `infrastructure: Infrastructure` -- external dependencies for query handlers.
-  - `viewStore?: ViewStore` -- (optional) the typed view store for this projection. When present, enables typed `{ views }` injection into query handlers and auto-persistence.
+  - `viewStore?: ViewStore` -- (optional) type-level hint for the view store. When present, enables typed `{ views }` injection into query handlers via `ProjectionQueryInfra<T>`. Not used at runtime in the projection definition — the actual view store is provided in the domain configuration.
 
-- **`ReducerMap<T>`** (internal) maps each event name to:
+- **`ProjectionEventHandler<TEvent, TView>`** (exported) bundles the identity extractor and reducer for one event type:
 
-  - `(event: Extract<T["events"], { name: EventName }>, view: T["view"]) => Promise<T["view"]> | T["view"]`
-  - Reducers receive the FULL event (not just payload), unlike `ApplyHandler`.
+  - `id?: (event: TEvent) => ID` -- extracts the view instance ID from the event. Optional per-entry. Required by the engine when a view store is configured for auto-persistence.
+  - `reduce: (event: TEvent, view: TView) => TView | Promise<TView>` -- transforms the current view based on the event. Receives the full event object (not just payload). May be sync or async.
 
-- **`IdentityMap<T>`** (internal) maps each event name to a function that extracts the view instance ID:
+- **`ProjectionOnMap<T>`** (internal) maps event names to their handlers. This map is **partial** — only events the projection cares about need entries:
 
-  - `[K in T["events"]["name"]]: (event: Extract<T["events"], { name: K }>) => ID`
-  - Mirrors `SagaAssociationMap` from `saga.ts`. Enables the engine to route events to the correct view instance for auto-persistence.
+  - `[K in T["events"]["name"]]?: ProjectionEventHandler<Extract<T["events"], { name: K }>, T["view"]>`
+  - Keys are constrained to valid event names (typos caught at compile time).
+  - Unhandled events are silently ignored at runtime.
 
 - **`ProjectionQueryInfra<T>`** (internal) conditionally injects the view store into query handler infrastructure:
 
   - When `T` has a `viewStore` field extending `ViewStore`: `T["infrastructure"] & { views: T["viewStore"] }`
   - When `T` does not have a `viewStore` field: `T["infrastructure"]`
-  - This is backward compatible — existing projections without `viewStore` continue to work.
-
-- **`ViewStoreFactory<T>`** (internal) is the factory type for resolving a view store from infrastructure:
-
-  - When `T` has a `viewStore` field extending `ViewStore`: `(infrastructure: T["infrastructure"]) => T["viewStore"]`
-  - When `T` does not have a `viewStore` field: `(infrastructure: T["infrastructure"]) => ViewStore<T["view"]>`
-  - Synchronous only — the view store must be fully initialized before being provided via infrastructure.
-  - Enables IoC: the projection definition (domain code) resolves the store from infrastructure rather than constructing it.
 
 - **`QueryHandlerMap<T>`** (internal) maps each query name to an OPTIONAL `QueryHandler`, using `ProjectionQueryInfra<T>` as the infrastructure type:
 
   - `[QueryName]?: QueryHandler<ProjectionQueryInfra<T>, Extract<T["queries"], { name: QueryName }>>`
 
-- **`Projection<T extends ProjectionTypes>`** is an interface with two required fields and four optional fields:
+- **`Projection<T extends ProjectionTypes>`** is an interface with two required fields and two optional fields:
 
-  - `reducers: ReducerMap<T>` -- required handler for every event name.
+  - `on: ProjectionOnMap<T>` -- partial map of event handlers. Each entry bundles an `id` function (extracts view instance ID) and a `reduce` function (transforms the view). Only events the projection cares about need entries.
   - `queryHandlers: QueryHandlerMap<T>` -- optional handler per query name.
   - `initialView?: T["view"]` -- optional default view state for new view instances.
-  - `identity?: IdentityMap<T>` -- optional map from event names to view instance ID extractors.
-  - `viewStore?: ViewStoreFactory<T>` -- optional factory for creating the view store.
   - `consistency?: "eventual" | "strong"` -- optional consistency mode (defaults to `"eventual"`).
 
 - **`defineProjection<T>(config): Projection<T>`** -- identity function for type inference.
@@ -88,58 +80,57 @@ docs:
 
 ## Behavioral Requirements
 
-1. Reducers receive the FULL event object (with narrowed type via `Extract`), not just the payload. This differs from `ApplyHandler` which receives only the payload. The reason is that projection reducers may need event metadata (like the `name` field) for routing or logging.
+1. Reducers receive the FULL event object (with narrowed type via `Extract`), not just the payload. This differs from `ApplyHandler` which receives only the payload.
 2. Reducers may be sync or async (`T["view"] | Promise<T["view"]>`).
-3. Every event in the union MUST have a corresponding reducer (exhaustive).
+3. The `on` map is **partial** over the event union — only events the projection cares about need entries. Unhandled events are silently ignored. This replaces the old exhaustive `reducers` map.
 4. Query handlers are OPTIONAL per query name (the `?` modifier). A projection may handle events without directly serving queries.
 5. `defineProjection` is an identity function returning the same config object.
 6. When `T` has a `viewStore` field, `QueryHandlerMap` uses `ProjectionQueryInfra<T>` which merges `{ views: T["viewStore"] }` into the infrastructure type. Query handlers can access `views.load()`, `views.save()`, and any custom methods on the view store.
-7. When `T` does not have a `viewStore` field, `QueryHandlerMap` uses `T["infrastructure"]` as-is (backward compatible).
-8. `identity` requires a mapping for ALL event names (exhaustive, TypeScript enforced). This mirrors saga `associations`. When present, the engine uses it to derive the view instance ID from each event for auto-persistence.
-9. `viewStore` is a synchronous factory function `(infrastructure) => ViewStore`. It receives the resolved infrastructure and returns an already-initialized view store instance. The factory must not be async — infrastructure initialization belongs outside the projection definition.
-10. `initialView` provides the default view state when `viewStore.load()` returns `undefined`/`null` for a new entity. Without it, reducers may receive `undefined` as the current view.
-11. `consistency` defaults to `"eventual"`. When `"strong"`, the engine enlists view persistence in the same UoW as the originating command. When `"eventual"`, views are updated asynchronously via the event bus.
-12. All fields (`identity`, `viewStore`, `initialView`, `consistency`) are optional at the type level. However, projections without `identity` and `viewStore` will not have their reducers subscribed to the event bus — they serve only as query handler containers.
+7. When `T` does not have a `viewStore` field, `QueryHandlerMap` uses `T["infrastructure"]` as-is.
+8. The `id` function within each `on` entry is optional at the type level. When a view store is configured in the domain runtime, the engine validates that every `on` entry has an `id` function.
+9. `initialView` provides the default view state when the view store returns `undefined`/`null` for a new entity. Without it, reducers may receive `undefined` as the current view.
+10. `consistency` defaults to `"eventual"`. When `"strong"`, the engine enlists view persistence in the same UoW as the originating command. When `"eventual"`, views are updated asynchronously via the event bus.
+11. `ProjectionEventHandler` is exported so users can reference it in utility types and generic helpers.
 
 ## Invariants
 
-- The `reducers` map has exactly one key per event name in `T["events"]`.
+- The `on` map has at most one key per event name in `T["events"]`; keys are optional.
 - The `queryHandlers` map has at most one key per query name in `T["queries"]`; keys are optional.
 - Reducer first parameter is the full event (with `name` and `payload`), not just `payload`.
 - Reducer second parameter and return type are both `T["view"]`.
 - Query handler infrastructure type is `ProjectionQueryInfra<T>` -- conditionally includes `{ views }`.
 - `defineProjection` returns the exact same object reference.
-- `identity` map (when present) has exactly one key per event name in `T["events"]` (exhaustive).
-- `identity` functions return `ID` (`string | number | bigint`).
-- `viewStore` factory receives `T["infrastructure"]` and returns `ViewStore` (or a user-extended subtype).
+- `id` functions (when present) return `ID` (`string | number | bigint`).
 - `consistency` is `"eventual"` or `"strong"` when specified; the engine defaults to `"eventual"` when omitted.
+- `on` map keys are constrained to `T["events"]["name"]` — invalid event names are compile errors.
 
 ## Edge Cases
 
 - **Projection with no query handlers**: `queryHandlers: {}` is valid since all entries are optional.
 - **Async reducers**: Returning `Promise<T["view"]>` is valid.
-- **Single event projection**: The reducer map has one key.
+- **Single event projection**: The `on` map has one key.
 - **View type is a primitive**: `view: number` is valid; reducers accept and return `number`.
-- **Projection without viewStore**: All fields (`identity`, `viewStore`, `initialView`, `consistency`) are optional at the type level. A projection without `identity` and `viewStore` will not have its reducers subscribed to the event bus — it serves only as a query handler container.
-- **Projection with viewStore but no identity**: Valid — the engine does not auto-persist views, but query handlers still receive `{ views }`. Manual persistence by the user.
-- **Projection with identity but no viewStore**: The engine MUST throw an error at init time. `identity` without `viewStore` is nonsensical (no store to persist to).
-- **initialView is undefined**: Reducers may receive `undefined` as the current view when processing the first event for a new entity. The user is responsible for handling this in their reducer.
-- **ViewStore factory is synchronous**: The factory must return the view store instance directly (not a Promise). Async initialization belongs in infrastructure setup.
+- **Empty on map**: `on: {}` is valid — the projection serves only as a query handler container.
+- **Partial on map**: A projection listening to 1 out of 8 events only has 1 entry in `on`. The other 7 are silently ignored.
+- **on entry without id**: Valid at the type level. The engine validates that `id` is present when a view store is configured.
+- **initialView is undefined**: Reducers may receive `undefined` as the current view when processing the first event for a new entity.
+- **Projection with viewStore type hint but no id on entries**: Valid at the type level. Query handlers still receive `{ views }` typing. The engine validates `id` presence at init.
 
 ## Integration Points
 
-- The engine/runtime subscribes projections to the `EventBus` and invokes reducers when matching events arrive.
+- The engine/runtime subscribes projections to the `EventBus` for events listed in the `on` map.
 - Query handlers are registered with the `QueryBus` implementation.
 - `InferProjection*` utilities are used downstream for type-safe view access and query building.
 - Projections complement aggregates: aggregates handle the write side, projections handle the read side.
-- When `identity` and `viewStore` are present, the engine auto-persists views: `event → identity → load → reduce → save`.
-- When `viewStore` is present, query handlers receive `{ views: viewStoreInstance }` merged into their infrastructure.
+- View store configuration lives in the domain runtime (`DomainConfiguration.readModel.projections`), not in the projection definition.
+- When a view store is configured for a projection and `on` entries have `id`, the engine auto-persists views: `event → id → load → reduce → save`.
+- When `T` has a `viewStore` type hint, query handlers receive `{ views: viewStoreInstance }` merged into their infrastructure.
 - Strong consistency projections: view persistence is enlisted in the command's `UnitOfWork` via `onEventsProduced` callback.
 - Eventual consistency projections: view persistence happens asynchronously via event bus subscription.
 
 ## Test Scenarios
 
-### defineProjection with reducers and query handlers
+### defineProjection with on map and query handlers
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
@@ -175,15 +166,19 @@ describe("defineProjection", () => {
   };
 
   const projection = defineProjection<AccountProjectionDef>({
-    reducers: {
-      AccountCreated: (event, _view) => ({
-        id: event.payload.id,
-        balance: 0,
-      }),
-      DepositMade: (event, view) => ({
-        ...view,
-        balance: view.balance + event.payload.amount,
-      }),
+    on: {
+      AccountCreated: {
+        reduce: (event, _view) => ({
+          id: event.payload.id,
+          balance: 0,
+        }),
+      },
+      DepositMade: {
+        reduce: (event, view) => ({
+          ...view,
+          balance: view.balance + event.payload.amount,
+        }),
+      },
     },
     queryHandlers: {
       GetAccountById: (payload, infra) => infra.accountRepo.getById(payload.id),
@@ -191,9 +186,9 @@ describe("defineProjection", () => {
     },
   });
 
-  it("should have typed reducers", () => {
-    expectTypeOf(projection.reducers.AccountCreated).toBeFunction();
-    expectTypeOf(projection.reducers.DepositMade).toBeFunction();
+  it("should have typed on map entries", () => {
+    expectTypeOf(projection.on.AccountCreated!.reduce).toBeFunction();
+    expectTypeOf(projection.on.DepositMade!.reduce).toBeFunction();
   });
 
   it("should have typed query handlers", () => {
@@ -208,7 +203,6 @@ describe("defineProjection", () => {
 import { describe, it, expectTypeOf } from "vitest";
 import type {
   DefineEvents,
-  DefineQueries,
   Infrastructure,
   Query,
 } from "@noddde/core";
@@ -226,16 +220,17 @@ describe("Reducer event parameter", () => {
 
   it("should pass the full event to reducer, not just payload", () => {
     const projection = defineProjection<Def>({
-      reducers: {
-        ItemAdded: (event, view) => {
-          // event has both name and payload
-          expectTypeOf(event).toEqualTypeOf<{
-            name: "ItemAdded";
-            payload: { item: string };
-          }>();
-          expectTypeOf(event.name).toEqualTypeOf<"ItemAdded">();
-          expectTypeOf(event.payload).toEqualTypeOf<{ item: string }>();
-          return [...view, event.payload.item];
+      on: {
+        ItemAdded: {
+          reduce: (event, view) => {
+            expectTypeOf(event).toEqualTypeOf<{
+              name: "ItemAdded";
+              payload: { item: string };
+            }>();
+            expectTypeOf(event.name).toEqualTypeOf<"ItemAdded">();
+            expectTypeOf(event.payload).toEqualTypeOf<{ item: string }>();
+            return [...view, event.payload.item];
+          },
         },
       },
       queryHandlers: {},
@@ -268,8 +263,10 @@ describe("Optional query handlers", () => {
 
   it("should compile with empty query handlers", () => {
     const projection = defineProjection<Def>({
-      reducers: {
-        Created: (event, _view) => ({ id: event.payload.id }),
+      on: {
+        Created: {
+          reduce: (event, _view) => ({ id: event.payload.id }),
+        },
       },
       queryHandlers: {},
     });
@@ -278,8 +275,10 @@ describe("Optional query handlers", () => {
 
   it("should compile with partial query handlers", () => {
     const projection = defineProjection<Def>({
-      reducers: {
-        Created: (event, _view) => ({ id: event.payload.id }),
+      on: {
+        Created: {
+          reduce: (event, _view) => ({ id: event.payload.id }),
+        },
       },
       queryHandlers: {
         GetById: (payload, _infra) => ({ id: payload.id }),
@@ -323,8 +322,10 @@ describe("Projection Infer utilities", () => {
   };
 
   const proj = defineProjection<Def>({
-    reducers: {
-      Added: (event, view) => ({ items: [...view.items, event.payload.item] }),
+    on: {
+      Added: {
+        reduce: (event, view) => ({ items: [...view.items, event.payload.item] }),
+      },
     },
     queryHandlers: {},
   });
@@ -369,9 +370,11 @@ describe("Async reducers", () => {
 
   it("should accept async reducer functions", () => {
     const proj = defineProjection<Def>({
-      reducers: {
-        ItemAdded: async (event, view) => {
-          return [...view, event.payload.item];
+      on: {
+        ItemAdded: {
+          reduce: async (event, view) => {
+            return [...view, event.payload.item];
+          },
         },
       },
       queryHandlers: {},
@@ -399,7 +402,7 @@ describe("defineProjection identity", () => {
 
   it("should return the exact same config object", () => {
     const config = {
-      reducers: { X: (_event: any, _view: any) => 42 },
+      on: { X: { reduce: (_event: any, _view: any) => 42 } },
       queryHandlers: {},
     };
     const result = defineProjection<Def>(config as any);
@@ -408,7 +411,7 @@ describe("defineProjection identity", () => {
 });
 ```
 
-### Projection with identity map
+### Projection with id in on entries
 
 ```ts
 import { describe, it, expectTypeOf, expect } from "vitest";
@@ -420,7 +423,7 @@ import type {
 } from "@noddde/core";
 import { defineProjection } from "@noddde/core";
 
-describe("Projection with identity", () => {
+describe("Projection with id in on entries", () => {
   interface AccountView {
     id: string;
     balance: number;
@@ -447,40 +450,36 @@ describe("Projection with identity", () => {
     viewStore: AccountViewStore;
   };
 
-  it("should accept identity map with exhaustive event mappings", () => {
+  it("should accept id functions in on entries", () => {
     const projection = defineProjection<Def>({
-      reducers: {
-        AccountCreated: (event, _view) => ({
-          id: event.payload.id,
-          balance: 0,
-        }),
-        DepositMade: (event, view) => ({
-          ...view,
-          balance: view.balance + event.payload.amount,
-        }),
+      on: {
+        AccountCreated: {
+          id: (event) => event.payload.id,
+          reduce: (event, _view) => ({
+            id: event.payload.id,
+            balance: 0,
+          }),
+        },
+        DepositMade: {
+          id: (event) => event.payload.accountId,
+          reduce: (event, view) => ({
+            ...view,
+            balance: view.balance + event.payload.amount,
+          }),
+        },
       },
-      identity: {
-        AccountCreated: (event) => event.payload.id,
-        DepositMade: (event) => event.payload.accountId,
-      },
-      viewStore: (_infra) => ({
-        save: async () => {},
-        load: async () => undefined,
-        findByBalanceRange: async () => [],
-      }),
       queryHandlers: {
         GetAccountById: (payload, { views }) => views.load(payload.id),
       },
     });
 
-    expect(projection.identity).toBeDefined();
-    expect(projection.identity!.AccountCreated).toBeTypeOf("function");
-    expect(projection.identity!.DepositMade).toBeTypeOf("function");
+    expect(projection.on.AccountCreated!.id).toBeTypeOf("function");
+    expect(projection.on.DepositMade!.id).toBeTypeOf("function");
   });
 });
 ```
 
-### Query handlers receive views when viewStore is defined
+### Query handlers receive views when viewStore type is defined
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
@@ -518,23 +517,17 @@ describe("Query handlers with views injection", () => {
 
   it("should inject typed views into query handler infrastructure", () => {
     const projection = defineProjection<Def>({
-      reducers: {
-        ItemCreated: (event, _view) => ({
-          id: event.payload.id,
-          name: event.payload.name,
-        }),
+      on: {
+        ItemCreated: {
+          id: (event) => event.payload.id,
+          reduce: (event, _view) => ({
+            id: event.payload.id,
+            name: event.payload.name,
+          }),
+        },
       },
-      identity: {
-        ItemCreated: (event) => event.payload.id,
-      },
-      viewStore: (_infra) => ({
-        save: async () => {},
-        load: async () => undefined,
-        findByName: async () => [],
-      }),
       queryHandlers: {
         GetItem: (payload, infra) => {
-          // infra should have views with typed ViewStore methods
           expectTypeOf(infra.views).toMatchTypeOf<ItemViewStore>();
           return infra.views.load(payload.id);
         },
@@ -556,7 +549,7 @@ import { describe, it, expectTypeOf } from "vitest";
 import type { DefineEvents, DefineQueries, Infrastructure } from "@noddde/core";
 import { defineProjection } from "@noddde/core";
 
-describe("Backward compatible query handlers (no viewStore)", () => {
+describe("Query handlers without viewStore (no views)", () => {
   interface MyInfra extends Infrastructure {
     repo: { getById(id: string): Promise<{ id: string }> };
   }
@@ -575,12 +568,13 @@ describe("Backward compatible query handlers (no viewStore)", () => {
 
   it("should use plain infrastructure without views", () => {
     const projection = defineProjection<Def>({
-      reducers: {
-        Created: (event, _view) => ({ id: event.payload.id }),
+      on: {
+        Created: {
+          reduce: (event, _view) => ({ id: event.payload.id }),
+        },
       },
       queryHandlers: {
         GetById: (payload, infra) => {
-          // infra should NOT have views property
           expectTypeOf(infra).toEqualTypeOf<MyInfra>();
           return infra.repo.getById(payload.id);
         },
@@ -610,8 +604,10 @@ describe("Projection with initialView", () => {
 
   it("should accept initialView field", () => {
     const projection = defineProjection<Def>({
-      reducers: {
-        ItemAdded: (event, view) => [...view, event.payload.item],
+      on: {
+        ItemAdded: {
+          reduce: (event, view) => [...view, event.payload.item],
+        },
       },
       queryHandlers: {},
       initialView: [],
@@ -646,16 +642,12 @@ describe("Projection consistency mode", () => {
 
   it("should accept eventual consistency", () => {
     const projection = defineProjection<Def>({
-      reducers: {
-        Created: (event, _view) => ({ id: event.payload.id }),
+      on: {
+        Created: {
+          id: (event) => event.payload.id,
+          reduce: (event, _view) => ({ id: event.payload.id }),
+        },
       },
-      identity: {
-        Created: (event) => event.payload.id,
-      },
-      viewStore: (_infra) => ({
-        save: async () => {},
-        load: async () => undefined,
-      }),
       queryHandlers: {},
       consistency: "eventual",
     });
@@ -664,16 +656,12 @@ describe("Projection consistency mode", () => {
 
   it("should accept strong consistency", () => {
     const projection = defineProjection<Def>({
-      reducers: {
-        Created: (event, _view) => ({ id: event.payload.id }),
+      on: {
+        Created: {
+          id: (event) => event.payload.id,
+          reduce: (event, _view) => ({ id: event.payload.id }),
+        },
       },
-      identity: {
-        Created: (event) => event.payload.id,
-      },
-      viewStore: (_infra) => ({
-        save: async () => {},
-        load: async () => undefined,
-      }),
       queryHandlers: {},
       consistency: "strong",
     });
@@ -682,83 +670,108 @@ describe("Projection consistency mode", () => {
 });
 ```
 
-### viewStore factory receives infrastructure
+### Partial on map — only handle events you care about
 
 ```ts
-import { describe, it, expectTypeOf, expect } from "vitest";
-import type {
-  DefineEvents,
-  Infrastructure,
-  Query,
-  ViewStore,
-} from "@noddde/core";
+import { describe, it, expect, expectTypeOf } from "vitest";
+import type { DefineEvents, Infrastructure, Query } from "@noddde/core";
 import { defineProjection } from "@noddde/core";
 
-describe("viewStore factory", () => {
-  interface MyInfra extends Infrastructure {
-    db: { getConnection(): string };
-  }
+describe("Partial on map", () => {
+  type Events = DefineEvents<{
+    Created: { id: string };
+    Updated: { id: string; name: string };
+    Deleted: { id: string };
+    Archived: { id: string };
+  }>;
 
-  type Events = DefineEvents<{ Created: { id: string } }>;
   type Def = {
     events: Events;
     queries: Query<any>;
-    view: { id: string };
-    infrastructure: MyInfra;
-    viewStore: ViewStore<{ id: string }>;
+    view: { id: string; name: string };
+    infrastructure: Infrastructure;
   };
 
-  it("should pass infrastructure to the viewStore factory", () => {
-    let receivedInfra: MyInfra | undefined;
-
+  it("should compile with only a subset of events in on map", () => {
     const projection = defineProjection<Def>({
-      reducers: {
-        Created: (event, _view) => ({ id: event.payload.id }),
-      },
-      viewStore: (infra) => {
-        receivedInfra = infra;
-        expectTypeOf(infra).toEqualTypeOf<MyInfra>();
-        return {
-          save: async () => {},
-          load: async () => undefined,
-        };
+      on: {
+        Created: {
+          reduce: (event, _view) => ({ id: event.payload.id, name: "" }),
+        },
+        Updated: {
+          reduce: (event, view) => ({ ...view, name: event.payload.name }),
+        },
+        // Deleted and Archived intentionally omitted
       },
       queryHandlers: {},
     });
 
-    expect(projection.viewStore).toBeTypeOf("function");
+    expect(projection.on.Created).toBeDefined();
+    expect(projection.on.Updated).toBeDefined();
+    expect(projection.on.Deleted).toBeUndefined();
+    expect(projection.on.Archived).toBeUndefined();
+  });
+
+  it("should compile with empty on map", () => {
+    const projection = defineProjection<Def>({
+      on: {},
+      queryHandlers: {},
+    });
+    expect(Object.keys(projection.on)).toHaveLength(0);
   });
 });
 ```
 
-### All view persistence fields are optional
+### id is optional per on entry
 
 ```ts
 import { describe, it, expect } from "vitest";
 import type { DefineEvents, Infrastructure, Query } from "@noddde/core";
 import { defineProjection } from "@noddde/core";
 
-describe("Backward compatibility", () => {
-  type Events = DefineEvents<{ Created: { id: string } }>;
+describe("Optional id in on entries", () => {
+  type Events = DefineEvents<{
+    Created: { id: string };
+    Updated: { id: string; name: string };
+  }>;
+
   type Def = {
     events: Events;
     queries: Query<any>;
-    view: { id: string };
+    view: { id: string; name: string };
     infrastructure: Infrastructure;
   };
 
-  it("should work without any new fields", () => {
+  it("should compile with id on some entries but not others", () => {
     const projection = defineProjection<Def>({
-      reducers: {
-        Created: (event, _view) => ({ id: event.payload.id }),
+      on: {
+        Created: {
+          id: (event) => event.payload.id,
+          reduce: (event, _view) => ({ id: event.payload.id, name: "" }),
+        },
+        Updated: {
+          // no id — valid at type level
+          reduce: (event, view) => ({ ...view, name: event.payload.name }),
+        },
       },
       queryHandlers: {},
     });
 
-    expect(projection.identity).toBeUndefined();
-    expect(projection.viewStore).toBeUndefined();
-    expect(projection.initialView).toBeUndefined();
-    expect(projection.consistency).toBeUndefined();
+    expect(projection.on.Created!.id).toBeTypeOf("function");
+    expect(projection.on.Updated!.id).toBeUndefined();
+  });
+
+  it("should compile with no id on any entry", () => {
+    const projection = defineProjection<Def>({
+      on: {
+        Created: {
+          reduce: (event, _view) => ({ id: event.payload.id, name: "" }),
+        },
+      },
+      queryHandlers: {},
+    });
+
+    expect(projection.on.Created!.id).toBeUndefined();
   });
 });
 ```
