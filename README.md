@@ -34,18 +34,18 @@ Most TypeScript frameworks force you into a corner: either drown in OOP boilerpl
 
 ## How does noddde compare to the alternatives?
 
-The TypeScript ecosystem generally forces you to choose between heavyweight OOP frameworks (like NestJS) or committing your entire architecture to Event Sourcing. **noddde is built for the pragmatic middle ground.** Both `noddde` and excellent frameworks like `Emmett` share the exact same modern domain philosophy: **we both use pure functions and the Decider pattern** to eliminate boilerplate. The difference lies entirely in *infrastructure and persistence*.
+The TypeScript ecosystem generally forces you to choose between heavyweight OOP frameworks (like NestJS) or committing your entire architecture to Event Sourcing. **noddde is built for the pragmatic middle ground.** Both `noddde` and excellent frameworks like `Emmett` share the exact same modern domain philosophy: **we both use pure functions and the Decider pattern** to eliminate boilerplate. The difference lies entirely in _infrastructure and persistence_.
 
 `Emmett` is designed to be the ultimate developer experience for pure Event Sourced systems (often pairing with EventStoreDB). `noddde` is designed to bring that same elegant DX to **standard relational databases**, allowing you to choose your persistence strategy on a per-aggregate basis.
 
-| Feature / Philosophy | NestJS CQRS | Emmett | noddde |
-| :--- | :--- | :--- | :--- |
-| **Primary Focus** | Full application framework modularity. | Dedicated Event Sourcing & Event-Driven systems. | **Pragmatic Hybrid DDD & CQRS.** |
-| **Domain Paradigm** | Heavy OOP, Base Classes, and `@Decorators`. | Pure Functions (Decider Pattern). | **Pure Functions (Decider Pattern).** |
-| **Persistence Strategy** | Typically State-Stored (via ORMs). | Event-Sourced strictly by default. | **Hybrid:** Mix State-Stored & Event-Sourced aggregates. |
+| Feature / Philosophy     | NestJS CQRS                                 | Emmett                                                | noddde                                                              |
+| :----------------------- | :------------------------------------------ | :---------------------------------------------------- | :------------------------------------------------------------------ |
+| **Primary Focus**        | Full application framework modularity.      | Dedicated Event Sourcing & Event-Driven systems.      | **Pragmatic Hybrid DDD & CQRS.**                                    |
+| **Domain Paradigm**      | Heavy OOP, Base Classes, and `@Decorators`. | Pure Functions (Decider Pattern).                     | **Pure Functions (Decider Pattern).**                               |
+| **Persistence Strategy** | Typically State-Stored (via ORMs).          | Event-Sourced strictly by default.                    | **Hybrid:** Mix State-Stored & Event-Sourced aggregates.            |
 | **Infrastructure Focus** | Tightly coupled to the NestJS DI container. | Native append-only Event Stores (e.g., EventStoreDB). | **Relational First:** Native Drizzle/Prisma + Transactional Outbox. |
-| **Data Safety** | Left entirely to the developer. | Stream Versioning & Optimistic Concurrency. | **ACID Unit of Work, Outbox, & Pessimistic Locks.** |
-| **Workflows / Sagas** | Stateful classes listening to event buses. | Process Managers reacting to streams. | **Pure functions** returning commands (executed in UoW). |
+| **Data Safety**          | Left entirely to the developer.             | Stream Versioning & Optimistic Concurrency.           | **ACID Unit of Work, Outbox, & Pessimistic Locks.**                 |
+| **Workflows / Sagas**    | Stateful classes listening to event buses.  | Process Managers reacting to streams.                 | **Pure functions** returning commands (executed in UoW).            |
 
 ### State-Stored or Event-Sourced: You Decide
 
