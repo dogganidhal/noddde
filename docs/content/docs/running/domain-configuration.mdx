@@ -280,7 +280,7 @@ Standalone query handlers are useful for cross-projection queries, system health
 
 ## Process Model
 
-The `processModel` section registers [sagas](/docs/process-managers/overview) that coordinate workflows across multiple aggregates:
+The `processModel` section registers [sagas](/docs/process-managers/sagas) that coordinate workflows across multiple aggregates:
 
 ```ts
 import { BookingFulfillmentSaga } from "./process-model/booking-fulfillment";
@@ -503,4 +503,4 @@ const account = await domain.dispatchQuery({
 - [Infrastructure](/docs/running/infrastructure) -- The infrastructure providers in detail
 - [Persistence](/docs/running/persistence) -- Event-sourced vs. state-stored persistence
 - [Unit of Work](/docs/running/persistence#unit-of-work) -- Atomic command dispatch
-- [Process Managers](/docs/process-managers/overview) -- Coordinating workflows across aggregates
+- [Process Managers](/docs/process-managers/sagas) -- Coordinating workflows across aggregates
