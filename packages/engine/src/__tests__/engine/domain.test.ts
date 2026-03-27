@@ -1928,18 +1928,18 @@ describe("wireDomain projection wiring", () => {
     };
 
     const ItemProjection = defineProjection<ItemProjectionTypes>({
-      reducers: {
-        ItemAdded: (event) => ({
-          id: event.payload.id,
-          name: event.payload.name,
-        }),
+      on: {
+        ItemAdded: {
+          id: (event) => event.payload.id,
+          reduce: (event) => ({
+            id: event.payload.id,
+            name: event.payload.name,
+          }),
+        },
       },
       queryHandlers: {
         GetItem: (payload, { views }) =>
           (views as InMemoryViewStore<ItemView>).load(payload.id),
-      },
-      identity: {
-        ItemAdded: (event) => event.payload.id,
       },
       initialView: { id: "", name: "" },
       // No viewStore on the definition — provided via wiring

@@ -139,20 +139,9 @@ async function main() {
 
     readModel: {
       projections: {
-        RoomAvailability: {
-          projection: RoomAvailabilityProjection,
-          viewStore: (infra: HotelInfrastructure) =>
-            infra.roomAvailabilityViewStore,
-        },
-        GuestHistory: {
-          projection: GuestHistoryProjection,
-          viewStore: (infra: HotelInfrastructure) =>
-            infra.guestHistoryViewStore,
-        },
-        Revenue: {
-          projection: RevenueProjection,
-          viewStore: (infra: HotelInfrastructure) => infra.revenueViewStore,
-        },
+        RoomAvailability: RoomAvailabilityProjection,
+        GuestHistory: GuestHistoryProjection,
+        Revenue: RevenueProjection,
       },
       standaloneQueryHandlers: {
         SearchAvailableRooms: SearchAvailableRoomsHandler,

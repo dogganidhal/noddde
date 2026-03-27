@@ -243,14 +243,8 @@ describe("Multiple projections for same event", () => {
       writeModel: { aggregates: { Item } },
       readModel: {
         projections: {
-          CatalogProjection: {
-            projection: CatalogProjection,
-            viewStore: () => catalogViewStore,
-          },
-          PriceIndexProjection: {
-            projection: PriceIndexProjection,
-            viewStore: () => priceViewStore,
-          },
+          CatalogProjection,
+          PriceIndexProjection,
         },
       },
     });

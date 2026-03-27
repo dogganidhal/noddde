@@ -31,11 +31,12 @@ export type TestDomainConfig<
 > = {
   /** Aggregate definitions keyed by name. */
   aggregates?: Record<string, Aggregate<any>>;
-  /** Projection definitions keyed by name. Entries can be bare projections or wrapped with a viewStore. */
-  projections?: Record<
+  /** Projection definitions keyed by name. */
+  projections?: Record<string, Projection<any>>;
+  /** Optional per-projection view store factories. */
+  projectionViewStores?: Record<
     string,
-    | Projection<any>
-    | { projection: Projection<any>; viewStore: (infrastructure: any) => any }
+    { viewStore: (infrastructure: any) => any }
   >;
   /** Saga definitions keyed by name. */
   sagas?: Record<string, Saga<any, any>>;
@@ -137,6 +138,9 @@ export async function testDomain<
     aggregates: {
       persistence: () => new InMemoryEventSourcedAggregatePersistence(),
     },
+    ...(config.projectionViewStores
+      ? { projections: config.projectionViewStores }
+      : {}),
     ...(config.sagas
       ? { sagas: { persistence: () => new InMemorySagaPersistence() } }
       : {}),

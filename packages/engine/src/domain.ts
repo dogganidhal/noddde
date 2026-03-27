@@ -69,27 +69,7 @@ import type { AggregatePersistenceResolver } from "./aggregate-persistence-resol
 
 type AggregateMap = Record<string | symbol, Aggregate<any>>;
 
-/** A projection entry in domain config — bare projection or with viewStore. */
-type ProjectionEntry =
-  | Projection<any>
-  | {
-      projection: Projection<any>;
-      viewStore: (infrastructure: any) => ViewStore;
-    };
-
-type ProjectionMap = Record<string | symbol, ProjectionEntry>;
-
-/** Normalize a ProjectionEntry to extract the projection and optional viewStore factory. */
-function resolveProjectionEntry(entry: ProjectionEntry): {
-  projection: Projection<any>;
-  viewStore?: (infrastructure: any) => ViewStore;
-} {
-  if ("projection" in entry && "viewStore" in entry) {
-    return { projection: entry.projection, viewStore: entry.viewStore as any };
-  }
-  // Bare projection (has 'on' field)
-  return { projection: entry as Projection<any> };
-}
+type ProjectionMap = Record<string | symbol, Projection<any>>;
 
 type SagaMap = Record<string | symbol, Saga<any, any>>;
 
