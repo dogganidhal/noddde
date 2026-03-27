@@ -56,6 +56,7 @@ type DomainDefinition<
   TStandaloneCommand extends Command = Command,
   TStandaloneQuery extends Query<any> = Query<any>,
   TAggregates extends AggregateMap = AggregateMap,
+  TStandaloneEvent extends Event = Event,
 > = {
   writeModel: {
     aggregates: TAggregates;
@@ -72,8 +73,29 @@ type DomainDefinition<
     >;
   };
   processModel?: {
-    sagas: SagaMap;
+    /** A map of saga definitions keyed by saga name. Optional — omit if no sagas. */
+    sagas?: SagaMap;
+    /** Optional map of standalone event handlers keyed by event name. */
+    standaloneEventHandlers?: StandaloneEventHandlerMap<
+      TInfrastructure,
+      TStandaloneEvent
+    >;
   };
+};
+
+/**
+ * Maps event names to standalone event handlers. Each handler receives the
+ * full event and infrastructure. Follows the same pattern as
+ * StandaloneCommandHandlerMap and StandaloneQueryHandlerMap.
+ */
+type StandaloneEventHandlerMap<
+  TInfrastructure extends Infrastructure,
+  TStandaloneEvent extends Event,
+> = {
+  [EventName in TStandaloneEvent["name"]]?: EventHandler<
+    Extract<TStandaloneEvent, { name: EventName }>,
+    TInfrastructure
+  >;
 };
 
 /**
@@ -85,18 +107,21 @@ const defineDomain: <
   TStandaloneCommand extends Command = Command,
   TStandaloneQuery extends Query<any> = Query<any>,
   TAggregates extends AggregateMap = AggregateMap,
+  TStandaloneEvent extends Event = Event,
 >(
   definition: DomainDefinition<
     TInfrastructure,
     TStandaloneCommand,
     TStandaloneQuery,
-    TAggregates
+    TAggregates,
+    TStandaloneEvent
   >,
 ) => DomainDefinition<
   TInfrastructure,
   TStandaloneCommand,
   TStandaloneQuery,
-  TAggregates
+  TAggregates,
+  TStandaloneEvent
 >;
 
 /**
@@ -174,12 +199,14 @@ const wireDomain: <
   TStandaloneCommand extends Command = Command,
   TStandaloneQuery extends Query<any> = Query<any>,
   TAggregates extends AggregateMap = AggregateMap,
+  TStandaloneEvent extends Event = Event,
 >(
   definition: DomainDefinition<
     TInfrastructure,
     TStandaloneCommand,
     TStandaloneQuery,
-    TAggregates
+    TAggregates,
+    TStandaloneEvent
   >,
   wiring?: DomainWiring<TInfrastructure, TAggregates>,
 ) => Promise<Domain<TInfrastructure, TStandaloneCommand, TStandaloneQuery>>;
@@ -208,14 +235,15 @@ The `init()` method must execute the following steps in order:
    - **Per-aggregate record**: Validate that every aggregate in `definition.writeModel.aggregates` has a corresponding entry and that no unknown aggregate names are present. Throw a descriptive error on mismatch. Resolve each factory. Create a `PerAggregatePersistenceResolver` wrapping a `Map<string, PersistenceConfiguration>`.
      Pass the resolver to `CommandLifecycleExecutor`, which calls `resolver.resolve(aggregateName)` at each command dispatch to obtain the persistence for the target aggregate.
 5. **Resolve snapshots** -- For each aggregate with `AggregateWiring.snapshots` configured, call `snapshots.store()` and store the `snapshots.strategy`. Both are optional per-aggregate.
-6. **Resolve saga persistence** -- Call `wiring.sagas.persistence()` if provided. If omitted and `processModel` is configured, default to `InMemorySagaPersistence` and log a warning: `[noddde] Using in-memory saga persistence. This is not suitable for production.`
+6. **Resolve saga persistence** -- Only when `processModel.sagas` is defined and non-empty: call `wiring.sagas.persistence()` if provided. If omitted, default to `InMemorySagaPersistence` and log a warning: `[noddde] Using in-memory saga persistence. This is not suitable for production.` When `processModel` has only `standaloneEventHandlers` and no `sagas`, saga persistence is not resolved and no warning is logged.
    6b. **Resolve outbox store** -- If `wiring.outbox` is provided, call `outbox.store()` to resolve the `OutboxStore`. Create an `OutboxRelay` instance (but do not start it). The outbox store is used to compose the `onEventsProduced` callback (enlisting outbox writes in the UoW) and the `onEventsDispatched` callback (marking entries published by event ID after dispatch).
 7. **Register command handlers** -- For each aggregate in `writeModel.aggregates`, register a command handler on the command bus for each command name defined in `Aggregate.commands`. The registered handler encapsulates the full command lifecycle (load, execute, apply, persist, publish).
 8. **Register standalone command handlers** -- For each handler in `writeModel.standaloneCommandHandlers`, register it on the command bus, wrapping it to receive the merged infrastructure.
 9. **Register query handlers** -- For each projection in `readModel.projections`, register each query handler from `Projection.queryHandlers` on the query bus.
 10. **Register standalone query handlers** -- For each handler in `readModel.standaloneQueryHandlers`, register it on the query bus.
 11. **Register event listeners for projections** -- For each projection, subscribe to each event name in `Projection.reducers` on the event bus. When an event arrives, invoke the reducer to update the projection's view.
-12. **Register event listeners for sagas** -- For each saga in `processModel.sagas`, subscribe to each event name in `Saga.handlers` on the event bus. When an event arrives, execute the saga event handling lifecycle.
+12. **Register event listeners for sagas** -- For each saga in `processModel.sagas` (if defined), subscribe to each event name in `Saga.handlers` on the event bus. When an event arrives, execute the saga event handling lifecycle.
+13. **Register standalone event handlers** -- For each handler in `processModel.standaloneEventHandlers` (if defined), subscribe it to the event bus for the corresponding event name. When an event arrives, invoke the handler with the full event and the merged infrastructure (`TInfrastructure & CQRSInfrastructure`). Runs after saga handler registration.
 
 ### Domain.dispatchCommand() -- Command Dispatch Lifecycle
 
@@ -351,7 +379,7 @@ Warnings are logged for:
 
 1. **Aggregate persistence** — When `wiring.aggregates` is omitted (global default `InMemoryEventSourcedAggregatePersistence`). Logged once, not per-aggregate.
 2. **CQRS buses** — When `wiring.buses` is omitted (default `InMemoryCommandBus`, `EventEmitterEventBus`, `InMemoryQueryBus`). Logged as a single warning covering all three buses.
-3. **Saga persistence** — When `processModel` has sagas and `wiring.sagas.persistence` is omitted (default `InMemorySagaPersistence`).
+3. **Saga persistence** — When `processModel.sagas` is defined and non-empty and `wiring.sagas.persistence` is omitted (default `InMemorySagaPersistence`). Not triggered when `processModel` has only `standaloneEventHandlers`.
 
 Warnings are **not** logged for:
 
@@ -400,6 +428,10 @@ In global mode, the same snapshot config applies to all event-sourced aggregates
 - **No aggregates configured** -- `writeModel.aggregates` can be `{}`. The domain can still serve queries via standalone query handlers.
 - **No projections configured** -- `readModel.projections` can be `{}`. The domain can still dispatch commands.
 - **No sagas configured** -- `processModel` can be omitted. No saga listeners are registered.
+- **processModel with only standaloneEventHandlers (no sagas)** -- `processModel: { standaloneEventHandlers: { ... } }` with `sagas` omitted. Saga persistence is not resolved, no saga warning is logged. Event handlers are subscribed normally.
+- **Empty standaloneEventHandlers** -- `processModel: { standaloneEventHandlers: {} }` — no event subscriptions are created. No error.
+- **Standalone event handler is async** -- The handler returns `Promise<void>`. The event bus awaits the handler before proceeding.
+- **Standalone event handler throws** -- The error propagates through the event bus dispatch, consistent with saga and projection handler behavior.
 - **No custom infrastructure** -- `wiring.infrastructure` can be omitted. The domain uses `{}` as the custom infrastructure.
 - **No CQRS infrastructure provided** -- `wiring.buses` can be omitted. The domain creates default in-memory buses.
 - **No persistence provided** -- `wiring.aggregates` can be omitted. The domain uses a default in-memory event-sourced persistence for all aggregates via `GlobalAggregatePersistenceResolver`.
@@ -436,7 +468,8 @@ In global mode, the same snapshot config applies to all event-sourced aggregates
 - **CQRS buses** -- The domain owns the command bus, query bus, and event bus. They are wired during init and exposed via `domain.infrastructure`.
 - **Persistence** -- The domain resolves aggregate persistence during init from factory functions, building an `AggregatePersistenceResolver` (either `GlobalAggregatePersistenceResolver` or `PerAggregatePersistenceResolver`). The resolver is passed to `CommandLifecycleExecutor`. Saga persistence is resolved separately.
 - **CommandLifecycleExecutor** -- Internal executor that handles the full aggregate command lifecycle (load, execute, apply, enrich, persist, publish). Created during `init()` and used by `dispatchCommand()` and command bus handlers.
-- **SagaExecutor** -- Internal executor that handles the saga event handling lifecycle (derive ID, load state, bootstrap/resume, execute handler, dispatch commands atomically). Created during `init()` when `processModel` is configured.
+- **SagaExecutor** -- Internal executor that handles the saga event handling lifecycle (derive ID, load state, bootstrap/resume, execute handler, dispatch commands atomically). Created during `init()` when `processModel.sagas` is configured.
+- **Standalone event handlers** -- Registered during `init()` from `processModel.standaloneEventHandlers`. Each handler subscribes to its event name on the event bus and receives the full event + merged infrastructure. No executor or persistence needed — handlers are fire-and-forget side effects.
 - **MetadataEnricher** -- Internal helper that enriches raw events with metadata (eventId, timestamp, correlationId, causationId, userId, aggregate context). Used by `CommandLifecycleExecutor`.
 - **Projections** -- The domain reads `Projection.reducers` and `Projection.queryHandlers` to wire event listeners and query handlers.
 - **External consumers** -- Applications interact with the domain via `domain.dispatchCommand(command)` and `domain.dispatchQuery(query)`. The query bus remains accessible directly via `domain.infrastructure.queryBus` for advanced use cases.
@@ -1081,6 +1114,322 @@ describe("wireDomain infrastructure separation", () => {
 
     // CQRS buses are also on infrastructure (merged)
     expect(domain.infrastructure.commandBus).toBeInstanceOf(InMemoryCommandBus);
+  });
+});
+```
+
+### Standalone event handler receives event and infrastructure
+
+```ts
+import { describe, it, expect } from "vitest";
+import {
+  defineDomain,
+  wireDomain,
+  defineAggregate,
+  EventEmitterEventBus,
+  InMemoryCommandBus,
+  InMemoryQueryBus,
+} from "@noddde/engine";
+import type {
+  AggregateTypes,
+  DefineCommands,
+  DefineEvents,
+  Event,
+  Infrastructure,
+} from "@noddde/core";
+
+type CounterState = { count: number };
+type CounterEvent = DefineEvents<{ Incremented: { by: number } }>;
+type CounterCommand = DefineCommands<{ Increment: { by: number } }>;
+type CounterTypes = AggregateTypes & {
+  state: CounterState;
+  events: CounterEvent;
+  commands: CounterCommand;
+  infrastructure: Infrastructure;
+};
+
+const Counter = defineAggregate<CounterTypes>({
+  initialState: { count: 0 },
+  commands: {
+    Increment: (cmd) => ({
+      name: "Incremented",
+      payload: { by: cmd.payload.by },
+    }),
+  },
+  apply: {
+    Incremented: (payload, state) => ({ count: state.count + payload.by }),
+  },
+});
+
+describe("standalone event handlers", () => {
+  it("should invoke handler when matching event is dispatched", async () => {
+    const receivedEvents: Event[] = [];
+
+    const definition = defineDomain<
+      Infrastructure,
+      never,
+      never,
+      typeof Counter extends infer A ? { Counter: typeof Counter } : never,
+      CounterEvent
+    >({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      processModel: {
+        standaloneEventHandlers: {
+          Incremented: (event, _infrastructure) => {
+            receivedEvents.push(event);
+          },
+        },
+      },
+    });
+
+    const domain = await wireDomain(definition, {
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "c-1",
+      payload: { by: 5 },
+    });
+
+    expect(receivedEvents).toHaveLength(1);
+    expect(receivedEvents[0]!.name).toBe("Incremented");
+    expect(receivedEvents[0]!.payload).toEqual({ by: 5 });
+  });
+});
+```
+
+### Standalone event handler without sagas does not trigger saga persistence
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import {
+  defineDomain,
+  wireDomain,
+  defineAggregate,
+  EventEmitterEventBus,
+  InMemoryCommandBus,
+  InMemoryQueryBus,
+} from "@noddde/engine";
+import type {
+  AggregateTypes,
+  DefineCommands,
+  DefineEvents,
+  Infrastructure,
+} from "@noddde/core";
+
+type CounterState = { count: number };
+type CounterEvent = DefineEvents<{ Incremented: { by: number } }>;
+type CounterCommand = DefineCommands<{ Increment: { by: number } }>;
+type CounterTypes = AggregateTypes & {
+  state: CounterState;
+  events: CounterEvent;
+  commands: CounterCommand;
+  infrastructure: Infrastructure;
+};
+
+const Counter = defineAggregate<CounterTypes>({
+  initialState: { count: 0 },
+  commands: {
+    Increment: (cmd) => ({
+      name: "Incremented",
+      payload: { by: cmd.payload.by },
+    }),
+  },
+  apply: {
+    Incremented: (payload, state) => ({ count: state.count + payload.by }),
+  },
+});
+
+describe("standalone event handlers without sagas", () => {
+  it("should not log saga persistence warning when processModel has only standaloneEventHandlers", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const definition = defineDomain<
+      Infrastructure,
+      never,
+      never,
+      typeof Counter extends infer A ? { Counter: typeof Counter } : never,
+      CounterEvent
+    >({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      processModel: {
+        standaloneEventHandlers: {
+          Incremented: () => {},
+        },
+      },
+    });
+
+    await wireDomain(definition, {
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    const sagaWarnings = warnSpy.mock.calls.filter((args) =>
+      String(args[0]).includes("saga persistence"),
+    );
+    expect(sagaWarnings).toHaveLength(0);
+
+    warnSpy.mockRestore();
+  });
+});
+```
+
+### Async standalone event handler is awaited
+
+```ts
+import { describe, it, expect } from "vitest";
+import {
+  defineDomain,
+  wireDomain,
+  defineAggregate,
+  EventEmitterEventBus,
+  InMemoryCommandBus,
+  InMemoryQueryBus,
+} from "@noddde/engine";
+import type {
+  AggregateTypes,
+  DefineCommands,
+  DefineEvents,
+  Infrastructure,
+} from "@noddde/core";
+
+type CounterState = { count: number };
+type CounterEvent = DefineEvents<{ Incremented: { by: number } }>;
+type CounterCommand = DefineCommands<{ Increment: { by: number } }>;
+type CounterTypes = AggregateTypes & {
+  state: CounterState;
+  events: CounterEvent;
+  commands: CounterCommand;
+  infrastructure: Infrastructure;
+};
+
+const Counter = defineAggregate<CounterTypes>({
+  initialState: { count: 0 },
+  commands: {
+    Increment: (cmd) => ({
+      name: "Incremented",
+      payload: { by: cmd.payload.by },
+    }),
+  },
+  apply: {
+    Incremented: (payload, state) => ({ count: state.count + payload.by }),
+  },
+});
+
+describe("async standalone event handler", () => {
+  it("should await async standalone event handlers before dispatch resolves", async () => {
+    let completed = false;
+
+    const definition = defineDomain<
+      Infrastructure,
+      never,
+      never,
+      typeof Counter extends infer A ? { Counter: typeof Counter } : never,
+      CounterEvent
+    >({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      processModel: {
+        standaloneEventHandlers: {
+          Incremented: async () => {
+            await new Promise((r) => setTimeout(r, 10));
+            completed = true;
+          },
+        },
+      },
+    });
+
+    const domain = await wireDomain(definition, {
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "c-1",
+      payload: { by: 1 },
+    });
+
+    expect(completed).toBe(true);
+  });
+});
+```
+
+### Empty standaloneEventHandlers is a no-op
+
+```ts
+import { describe, it, expect } from "vitest";
+import {
+  defineDomain,
+  wireDomain,
+  Domain,
+  defineAggregate,
+  EventEmitterEventBus,
+  InMemoryCommandBus,
+  InMemoryQueryBus,
+} from "@noddde/engine";
+import type {
+  AggregateTypes,
+  DefineCommands,
+  DefineEvents,
+  Infrastructure,
+} from "@noddde/core";
+
+type CounterState = { count: number };
+type CounterEvent = DefineEvents<{ Incremented: { by: number } }>;
+type CounterCommand = DefineCommands<{ Increment: { by: number } }>;
+type CounterTypes = AggregateTypes & {
+  state: CounterState;
+  events: CounterEvent;
+  commands: CounterCommand;
+  infrastructure: Infrastructure;
+};
+
+const Counter = defineAggregate<CounterTypes>({
+  initialState: { count: 0 },
+  commands: {
+    Increment: (cmd) => ({
+      name: "Incremented",
+      payload: { by: cmd.payload.by },
+    }),
+  },
+  apply: {
+    Incremented: (payload, state) => ({ count: state.count + payload.by }),
+  },
+});
+
+describe("empty standalone event handlers", () => {
+  it("should handle empty standaloneEventHandlers gracefully", async () => {
+    const definition = defineDomain<Infrastructure>({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      processModel: {
+        standaloneEventHandlers: {},
+      },
+    });
+
+    const domain = await wireDomain(definition, {
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    expect(domain).toBeInstanceOf(Domain);
   });
 });
 ```
