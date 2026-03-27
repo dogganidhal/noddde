@@ -16,14 +16,14 @@ export type DrizzleDialect = "pg" | "mysql" | "sqlite";
  * ```ts
  * import { drizzle } from "drizzle-orm/node-postgres";
  * import { DrizzleAdvisoryLocker } from "@noddde/drizzle";
+ * import { wireDomain } from "@noddde/engine";
  *
  * const db = drizzle(pool);
  * const locker = new DrizzleAdvisoryLocker(db, "pg");
  *
- * const domain = await configureDomain({
- *   // ...
- *   infrastructure: {
- *     aggregateConcurrency: {
+ * const domain = await wireDomain(definition, {
+ *   aggregates: {
+ *     concurrency: {
  *       strategy: "pessimistic",
  *       locker,
  *       lockTimeoutMs: 5000,

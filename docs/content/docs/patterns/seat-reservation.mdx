@@ -80,21 +80,26 @@ The `ReserveSeat` handler uses `infrastructure.clock` — a real-world handler w
 ## Domain Configuration
 
 ```ts
+import { defineDomain, wireDomain } from "@noddde/engine";
+
 const locker = new PrismaAdvisoryLocker(prisma, "mysql");
 
-const domain = await configureDomain<VenueInfrastructure>({
+const venueDomain = defineDomain<VenueInfrastructure>({
   writeModel: { aggregates: { Venue } },
   readModel: { projections: {} },
-  infrastructure: {
-    aggregatePersistence: () => prismaInfra.eventSourcedPersistence,
-    unitOfWorkFactory: () => prismaInfra.unitOfWorkFactory,
-    aggregateConcurrency: {
+});
+
+const domain = await wireDomain(venueDomain, {
+  infrastructure: () => ({ clock: new SystemClock() }),
+  aggregates: {
+    persistence: () => prismaInfra.eventSourcedPersistence,
+    concurrency: {
       strategy: "pessimistic",
       locker,
       lockTimeoutMs: 5000,
     },
-    provideInfrastructure: () => ({ clock: new SystemClock() }),
   },
+  unitOfWork: () => prismaInfra.unitOfWorkFactory,
 });
 ```
 

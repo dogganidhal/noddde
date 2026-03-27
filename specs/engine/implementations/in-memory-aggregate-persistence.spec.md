@@ -93,7 +93,7 @@ class InMemoryStateStoredAggregatePersistence
 
 ## Integration Points
 
-- **Domain.init()** -- The domain receives the persistence instance from `infrastructure.aggregatePersistence()` and uses it for all aggregate load/save operations.
+- **Domain.init()** -- The domain receives the persistence instance from `DomainWiring.aggregates.persistence` and uses it for all aggregate load/save operations.
 - **Domain.dispatchCommand()** -- For event-sourced: loads the event stream, replays to rebuild state, executes the command handler, then saves new events. For state-stored: loads the snapshot, executes the handler, then saves the updated state.
 
 ## Test Scenarios

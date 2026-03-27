@@ -66,6 +66,7 @@ export interface TypeORMPersistenceInfrastructure {
  *   NodddeSagaStateEntity,
  *   NodddeSnapshotEntity,
  * } from "@noddde/typeorm";
+ * import { defineDomain, wireDomain } from "@noddde/engine";
  *
  * const dataSource = new DataSource({
  *   type: "sqlite",
@@ -77,14 +78,19 @@ export interface TypeORMPersistenceInfrastructure {
  *
  * const infra = createTypeORMPersistence(dataSource);
  *
- * const domain = await configureDomain({
+ * const definition = defineDomain({
  *   writeModel: { aggregates: { MyAggregate } },
  *   readModel: { projections: {} },
- *   infrastructure: {
- *     aggregatePersistence: () => infra.eventSourcedPersistence,
- *     sagaPersistence: () => infra.sagaPersistence,
- *     unitOfWorkFactory: () => infra.unitOfWorkFactory,
+ * });
+ *
+ * const domain = await wireDomain(definition, {
+ *   aggregates: {
+ *     persistence: () => infra.eventSourcedPersistence,
  *   },
+ *   sagas: {
+ *     persistence: () => infra.sagaPersistence,
+ *   },
+ *   unitOfWork: () => infra.unitOfWorkFactory,
  * });
  * ```
  */

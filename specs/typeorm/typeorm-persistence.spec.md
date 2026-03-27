@@ -401,7 +401,7 @@ export class NodddeOutboxEntryEntity {
 - Persistence implementations satisfy `EventSourcedAggregatePersistence`, `StateStoredAggregatePersistence`, and `SagaPersistence` from `@noddde/core`.
 - UoW satisfies `UnitOfWork` from `@noddde/core`.
 - Advisory locker satisfies `AggregateLocker` from `@noddde/core`.
-- Factory return type matches the infrastructure shape expected by `configureDomain()`.
+- Factory return type matches the infrastructure shape expected by `DomainWiring`.
 - Entity classes must be registered in `DataSource.options.entities` for TypeORM to create/manage the tables.
 - Outbox store satisfies `OutboxStore` from `@noddde/core`.
 - `NodddeOutboxEntryEntity` must be registered in `DataSource.options.entities`.

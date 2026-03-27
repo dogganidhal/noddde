@@ -38,7 +38,7 @@ class InMemoryUnitOfWork implements UnitOfWork {
 /**
  * Factory function that creates a new {@link InMemoryUnitOfWork} instance.
  * Matches the {@link UnitOfWorkFactory} type and can be used as the
- * default value for `DomainConfiguration.infrastructure.unitOfWorkFactory`.
+ * default value for `DomainWiring.unitOfWork`.
  */
 const createInMemoryUnitOfWork: UnitOfWorkFactory;
 ```
@@ -80,7 +80,7 @@ const createInMemoryUnitOfWork: UnitOfWorkFactory;
 ## Integration Points
 
 - **`@noddde/core` persistence/unit-of-work** — Implements the `UnitOfWork` interface.
-- **Domain.init()** — `createInMemoryUnitOfWork` is used as the default `UnitOfWorkFactory` when `DomainConfiguration.infrastructure.unitOfWorkFactory` is not provided.
+- **Domain.init()** — `createInMemoryUnitOfWork` is used as the default `UnitOfWorkFactory` when `DomainWiring.unitOfWork` is not provided.
 
 ## Test Scenarios
 

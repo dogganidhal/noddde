@@ -57,9 +57,9 @@ Key differences from aggregate command handlers:
 Standalone command handlers are registered in the `writeModel.standaloneCommandHandlers` map of your domain configuration:
 
 ```typescript
-import { configureDomain } from "@noddde/engine";
+import { defineDomain, wireDomain } from "@noddde/engine";
 
-const domain = await configureDomain<BankingInfrastructure>({
+const bankingDomain = defineDomain<BankingInfrastructure>({
   writeModel: {
     aggregates: {
       BankAccount,
@@ -87,10 +87,9 @@ const domain = await configureDomain<BankingInfrastructure>({
   readModel: {
     projections: {},
   },
-  infrastructure: {
-    // ...
-  },
 });
+
+const domain = await wireDomain(bankingDomain, { /* wiring */ });
 ```
 
 ## Use Cases

@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { DefineCommands, DefineEvents } from "@noddde/core";
 import { defineAggregate } from "@noddde/core";
 import {
-  configureDomain,
+  defineDomain,
+  wireDomain,
   EventEmitterEventBus,
   InMemoryCommandBus,
   InMemoryEventSourcedAggregatePersistence,
@@ -59,17 +60,18 @@ describe("Command dispatch lifecycle (event-sourced)", () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const eventBus = new EventEmitterEventBus();
 
-    const domain = await configureDomain({
+    const definition = defineDomain({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus,
-          queryBus: new InMemoryQueryBus(),
-        }),
-      },
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: { persistence: () => persistence },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus,
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     const aggregateId = await domain.dispatchCommand({
@@ -96,17 +98,18 @@ describe("Command dispatch lifecycle (event-sourced)", () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const eventBus = new EventEmitterEventBus();
 
-    const domain = await configureDomain({
+    const definition = defineDomain({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus,
-          queryBus: new InMemoryQueryBus(),
-        }),
-      },
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: { persistence: () => persistence },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus,
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     await domain.dispatchCommand({
@@ -133,17 +136,18 @@ describe("Command dispatch lifecycle (event-sourced)", () => {
     const eventBus = new EventEmitterEventBus();
     const dispatchSpy = vi.spyOn(eventBus, "dispatch");
 
-    const domain = await configureDomain({
+    const definition = defineDomain({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus,
-          queryBus: new InMemoryQueryBus(),
-        }),
-      },
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: { persistence: () => persistence },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus,
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     await domain.dispatchCommand({
@@ -165,17 +169,18 @@ describe("First command with state-stored persistence", () => {
   it("should use initialState when no prior state exists", async () => {
     const persistence = new InMemoryStateStoredAggregatePersistence();
 
-    const domain = await configureDomain({
+    const definition = defineDomain({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
-      },
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: { persistence: () => persistence },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     await domain.dispatchCommand({
@@ -192,17 +197,18 @@ describe("First command with state-stored persistence", () => {
   it("should accumulate state across multiple commands", async () => {
     const persistence = new InMemoryStateStoredAggregatePersistence();
 
-    const domain = await configureDomain({
+    const definition = defineDomain({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
-      },
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: { persistence: () => persistence },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     await domain.dispatchCommand({
@@ -258,17 +264,18 @@ describe("Multiple events from one command", () => {
     const eventBus = new EventEmitterEventBus();
     const dispatchSpy = vi.spyOn(eventBus, "dispatch");
 
-    const domain = await configureDomain({
+    const definition = defineDomain({
       writeModel: { aggregates: { BatchCounter } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus,
-          queryBus: new InMemoryQueryBus(),
-        }),
-      },
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: { persistence: () => persistence },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus,
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     await domain.dispatchCommand({
@@ -322,17 +329,18 @@ describe("Async command handler", () => {
   it("should await the command handler and process the result", async () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
 
-    const domain = await configureDomain({
+    const definition = defineDomain({
       writeModel: { aggregates: { AsyncAggregate } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
-      },
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: { persistence: () => persistence },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     const id = await domain.dispatchCommand({
@@ -355,19 +363,24 @@ describe("Snapshot-aware command dispatch", () => {
     const snapshotStore = new InMemorySnapshotStore();
     const eventBus = new EventEmitterEventBus();
 
-    const domain = await configureDomain({
+    const definition = defineDomain({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        snapshotStore: () => snapshotStore,
-        snapshotStrategy: everyNEvents(3),
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus,
-          queryBus: new InMemoryQueryBus(),
-        }),
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => persistence,
+        snapshots: {
+          store: () => snapshotStore,
+          strategy: everyNEvents(3),
+        },
       },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus,
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     // Dispatch 3 commands — snapshot should trigger after the 3rd
@@ -415,19 +428,24 @@ describe("Snapshot-aware command dispatch", () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const snapshotStore = new InMemorySnapshotStore();
 
-    const domain = await configureDomain({
+    const definition = defineDomain({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        snapshotStore: () => snapshotStore,
-        snapshotStrategy: everyNEvents(2),
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => persistence,
+        snapshots: {
+          store: () => snapshotStore,
+          strategy: everyNEvents(2),
+        },
       },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     // Dispatch 5 commands: snapshots at version 2 and 4
@@ -457,18 +475,19 @@ describe("Command dispatch without snapshot (regression check)", () => {
   it("should work identically without snapshot store configured", async () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
 
-    const domain = await configureDomain({
+    const definition = defineDomain({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => persistence,
-        // No snapshotStore, no snapshotStrategy
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
-      },
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: { persistence: () => persistence },
+      // No snapshots configured
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     await domain.dispatchCommand({

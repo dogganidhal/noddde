@@ -7,7 +7,8 @@ import {
   defineUpcasters,
 } from "@noddde/core";
 import {
-  configureDomain,
+  defineDomain,
+  wireDomain,
   EventEmitterEventBus,
   InMemoryCommandBus,
   InMemoryEventSourcedAggregatePersistence,
@@ -92,26 +93,30 @@ const Account = defineAggregate<AccountTypes>({
   upcasters: accountUpcasters,
 });
 
-// ---- Helper: create domain with shared persistence ----
+// ---- Helper: create domain wiring with shared persistence ----
 
-function createDomainInfra(
+function createDomainWiring(
   persistence: InMemoryEventSourcedAggregatePersistence,
   snapshotStore?: InMemorySnapshotStore,
 ) {
   return {
-    aggregatePersistence: () => persistence,
-    ...(snapshotStore
-      ? {
-          snapshotStore: () => snapshotStore,
-          snapshotStrategy: everyNEvents(3),
-        }
-      : {}),
-    cqrsInfrastructure: () => ({
+    aggregates: {
+      persistence: () => persistence,
+      ...(snapshotStore
+        ? {
+            snapshots: {
+              store: () => snapshotStore,
+              strategy: everyNEvents(3),
+            },
+          }
+        : {}),
+    },
+    buses: () => ({
       commandBus: new InMemoryCommandBus(),
       eventBus: new EventEmitterEventBus(),
       queryBus: new InMemoryQueryBus(),
     }),
-  };
+  } as const;
 }
 
 // ---- Test scenarios ----
@@ -155,12 +160,16 @@ describe("Event upcasting integration", () => {
       // Pre-populate the persistence with v1 events
       await persistence.save("Account", "acc-1", v1Events, 0);
 
-      // Boot the domain with the v2 aggregate (which has upcasters)
-      const domain = await configureDomain({
+      const definition = defineDomain({
         writeModel: { aggregates: { Account } },
         readModel: { projections: {} },
-        infrastructure: createDomainInfra(persistence),
       });
+
+      // Boot the domain with the v2 aggregate (which has upcasters)
+      const domain = await wireDomain(
+        definition,
+        createDomainWiring(persistence),
+      );
 
       // Dispatch a new command — this forces replay of the 2 v1 events
       // through the upcaster chain, then applies the new command
@@ -187,11 +196,15 @@ describe("Event upcasting integration", () => {
     it("should set metadata.version on new events matching the upcaster chain version", async () => {
       const persistence = new InMemoryEventSourcedAggregatePersistence();
 
-      const domain = await configureDomain({
+      const definition = defineDomain({
         writeModel: { aggregates: { Account } },
         readModel: { projections: {} },
-        infrastructure: createDomainInfra(persistence),
       });
+
+      const domain = await wireDomain(
+        definition,
+        createDomainWiring(persistence),
+      );
 
       await domain.dispatchCommand({
         name: "CreateAccount",
@@ -209,11 +222,15 @@ describe("Event upcasting integration", () => {
     it("should stamp version on all event types with upcasters", async () => {
       const persistence = new InMemoryEventSourcedAggregatePersistence();
 
-      const domain = await configureDomain({
+      const definition = defineDomain({
         writeModel: { aggregates: { Account } },
         readModel: { projections: {} },
-        infrastructure: createDomainInfra(persistence),
       });
+
+      const domain = await wireDomain(
+        definition,
+        createDomainWiring(persistence),
+      );
 
       await domain.dispatchCommand({
         name: "CreateAccount",
@@ -296,11 +313,15 @@ describe("Event upcasting integration", () => {
         version: 2,
       });
 
-      const domain = await configureDomain({
+      const definition = defineDomain({
         writeModel: { aggregates: { Account } },
         readModel: { projections: {} },
-        infrastructure: createDomainInfra(persistence, snapshotStore),
       });
+
+      const domain = await wireDomain(
+        definition,
+        createDomainWiring(persistence, snapshotStore),
+      );
 
       // Dispatch a new command — engine loads snapshot (version 2),
       // then replays post-snapshot events (the 3rd event at index 2),
@@ -398,17 +419,18 @@ describe("Event upcasting integration", () => {
         0,
       );
 
-      const domain = await configureDomain({
+      const definition = defineDomain({
         writeModel: { aggregates: { Item } },
         readModel: { projections: {} },
-        infrastructure: {
-          aggregatePersistence: () => persistence,
-          cqrsInfrastructure: () => ({
-            commandBus: new InMemoryCommandBus(),
-            eventBus: new EventEmitterEventBus(),
-            queryBus: new InMemoryQueryBus(),
-          }),
-        },
+      });
+
+      const domain = await wireDomain(definition, {
+        aggregates: { persistence: () => persistence },
+        buses: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
       });
 
       // Dispatch another command — triggers replay of the v1 event
@@ -503,17 +525,18 @@ describe("Event upcasting integration", () => {
         0,
       );
 
-      const domain = await configureDomain({
+      const definition = defineDomain({
         writeModel: { aggregates: { Tag } },
         readModel: { projections: {} },
-        infrastructure: {
-          aggregatePersistence: () => persistence,
-          cqrsInfrastructure: () => ({
-            commandBus: new InMemoryCommandBus(),
-            eventBus: new EventEmitterEventBus(),
-            queryBus: new InMemoryQueryBus(),
-          }),
-        },
+      });
+
+      const domain = await wireDomain(definition, {
+        aggregates: { persistence: () => persistence },
+        buses: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
       });
 
       // Dispatch a command — replays the v2 event, which should only apply
@@ -568,19 +591,21 @@ describe("Event upcasting integration", () => {
         },
       });
 
+      const definition = defineDomain({
+        writeModel: { aggregates: { InvalidAggregate } },
+        readModel: { projections: {} },
+      });
+
       await expect(
-        configureDomain({
-          writeModel: { aggregates: { InvalidAggregate } },
-          readModel: { projections: {} },
-          infrastructure: {
-            aggregatePersistence: () =>
-              new InMemoryEventSourcedAggregatePersistence(),
-            cqrsInfrastructure: () => ({
-              commandBus: new InMemoryCommandBus(),
-              eventBus: new EventEmitterEventBus(),
-              queryBus: new InMemoryQueryBus(),
-            }),
+        wireDomain(definition, {
+          aggregates: {
+            persistence: () => new InMemoryEventSourcedAggregatePersistence(),
           },
+          buses: () => ({
+            commandBus: new InMemoryCommandBus(),
+            eventBus: new EventEmitterEventBus(),
+            queryBus: new InMemoryQueryBus(),
+          }),
         }),
       ).rejects.toThrow(/Invalid upcaster chain/);
     });
@@ -592,17 +617,18 @@ describe("Event upcasting integration", () => {
       const eventBus = new EventEmitterEventBus();
       const dispatchSpy = vi.spyOn(eventBus, "dispatch");
 
-      const domain = await configureDomain({
+      const definition = defineDomain({
         writeModel: { aggregates: { Account } },
         readModel: { projections: {} },
-        infrastructure: {
-          aggregatePersistence: () => persistence,
-          cqrsInfrastructure: () => ({
-            commandBus: new InMemoryCommandBus(),
-            eventBus,
-            queryBus: new InMemoryQueryBus(),
-          }),
-        },
+      });
+
+      const domain = await wireDomain(definition, {
+        aggregates: { persistence: () => persistence },
+        buses: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus,
+          queryBus: new InMemoryQueryBus(),
+        }),
       });
 
       await domain.dispatchCommand({

@@ -41,8 +41,9 @@ export class CommandLifecycleExecutor {
     private readonly concurrencyStrategy: ConcurrencyStrategy,
     private readonly uowStorage: AsyncLocalStorage<UnitOfWork>,
     private readonly metadataEnricher: MetadataEnricher,
-    private readonly snapshotStore?: SnapshotStore,
-    private readonly snapshotStrategy?: SnapshotStrategy,
+    private readonly snapshotResolver?: (
+      aggregateName: string,
+    ) => { store: SnapshotStore; strategy: SnapshotStrategy } | undefined,
     private readonly idempotencyStore?: IdempotencyStore,
     private readonly onEventsProduced?: (
       events: Event[],
@@ -125,9 +126,10 @@ export class CommandLifecycleExecutor {
       );
 
       // Save snapshot after successful commit (best-effort)
-      if (snapshotResult.value && this.snapshotStore) {
+      const snapshotConfig = this.snapshotResolver?.(aggregateName);
+      if (snapshotResult.value && snapshotConfig?.store) {
         try {
-          await this.snapshotStore.save(
+          await snapshotConfig.store.save(
             snapshotResult.value.aggregateName,
             snapshotResult.value.aggregateId,
             snapshotResult.value.snapshot,
@@ -180,9 +182,10 @@ export class CommandLifecycleExecutor {
     snapshot: Snapshot;
   } | null> {
     // Step 1: Load (snapshot-aware for event-sourced persistence)
+    const snapshotConfig = this.snapshotResolver?.(aggregateName);
     let snapshot: Snapshot | null = null;
-    if (this.snapshotStore) {
-      snapshot = await this.snapshotStore.load(
+    if (snapshotConfig?.store) {
+      snapshot = await snapshotConfig.store.load(
         aggregateName,
         command.targetAggregateId,
       );
@@ -326,12 +329,12 @@ export class CommandLifecycleExecutor {
     }
 
     // Step 7: Evaluate snapshot strategy (if configured)
-    if (isEventSourced && this.snapshotStore && this.snapshotStrategy) {
+    if (isEventSourced && snapshotConfig?.store && snapshotConfig?.strategy) {
       const newVersion = version + newEvents.length;
       const lastSnapshotVersion = snapshot?.version ?? 0;
       const eventsSinceSnapshot = newVersion - lastSnapshotVersion;
       if (
-        this.snapshotStrategy({
+        snapshotConfig.strategy({
           version: newVersion,
           lastSnapshotVersion,
           eventsSinceSnapshot,

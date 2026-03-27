@@ -122,7 +122,7 @@ docs:
 - Query handlers are registered with the `QueryBus` implementation.
 - `InferProjection*` utilities are used downstream for type-safe view access and query building.
 - Projections complement aggregates: aggregates handle the write side, projections handle the read side.
-- View store configuration lives in the domain runtime (`DomainConfiguration.readModel.projections`), not in the projection definition.
+- View store configuration lives in the domain runtime (`DomainWiring.projections` via `wireDomain`), not in the projection definition.
 - When a view store is configured for a projection and `on` entries have `id`, the engine auto-persists views: `event → id → load → reduce → save`.
 - When `T` has a `viewStore` type hint, query handlers receive `{ views: viewStoreInstance }` merged into their infrastructure.
 - Strong consistency projections: view persistence is enlisted in the command's `UnitOfWork` via `onEventsProduced` callback.

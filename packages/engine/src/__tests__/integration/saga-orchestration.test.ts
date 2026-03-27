@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { DefineCommands, DefineEvents } from "@noddde/core";
 import { defineSaga } from "@noddde/core";
 import {
-  configureDomain,
+  defineDomain,
+  wireDomain,
   EventEmitterEventBus,
   InMemoryCommandBus,
   InMemoryQueryBus,
@@ -92,18 +93,19 @@ describe("Saga orchestration - two-step fulfillment", () => {
       .mockResolvedValue(undefined);
     const eventBus = new EventEmitterEventBus();
 
-    const domain = await configureDomain({
+    const definition = defineDomain({
       writeModel: { aggregates: {} },
       readModel: { projections: {} },
       processModel: { sagas: { OrderFulfillmentSaga } },
-      infrastructure: {
-        sagaPersistence: () => sagaPersistence,
-        cqrsInfrastructure: () => ({
-          commandBus,
-          eventBus,
-          queryBus: new InMemoryQueryBus(),
-        }),
-      },
+    });
+
+    const domain = await wireDomain(definition, {
+      sagas: { persistence: () => sagaPersistence },
+      buses: () => ({
+        commandBus,
+        eventBus,
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     // Simulate publishing the OrderPlaced event
@@ -138,18 +140,19 @@ describe("Saga orchestration - two-step fulfillment", () => {
       .mockResolvedValue(undefined);
     const eventBus = new EventEmitterEventBus();
 
-    const domain = await configureDomain({
+    const definition = defineDomain({
       writeModel: { aggregates: {} },
       readModel: { projections: {} },
       processModel: { sagas: { OrderFulfillmentSaga } },
-      infrastructure: {
-        sagaPersistence: () => sagaPersistence,
-        cqrsInfrastructure: () => ({
-          commandBus,
-          eventBus,
-          queryBus: new InMemoryQueryBus(),
-        }),
-      },
+    });
+
+    const domain = await wireDomain(definition, {
+      sagas: { persistence: () => sagaPersistence },
+      buses: () => ({
+        commandBus,
+        eventBus,
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     // Step 1: OrderPlaced creates the saga
@@ -188,18 +191,19 @@ describe("Non-starter event without existing saga instance", () => {
     const commandDispatchSpy = vi.spyOn(commandBus, "dispatch");
     const eventBus = new EventEmitterEventBus();
 
-    const domain = await configureDomain({
+    const definition = defineDomain({
       writeModel: { aggregates: {} },
       readModel: { projections: {} },
       processModel: { sagas: { OrderFulfillmentSaga } },
-      infrastructure: {
-        sagaPersistence: () => sagaPersistence,
-        cqrsInfrastructure: () => ({
-          commandBus,
-          eventBus,
-          queryBus: new InMemoryQueryBus(),
-        }),
-      },
+    });
+
+    const domain = await wireDomain(definition, {
+      sagas: { persistence: () => sagaPersistence },
+      buses: () => ({
+        commandBus,
+        eventBus,
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     // PaymentReceived is NOT in startedBy, and no saga instance exists
@@ -258,18 +262,19 @@ describe("Handler returning no commands", () => {
     const commandDispatchSpy = vi.spyOn(commandBus, "dispatch");
     const eventBus = new EventEmitterEventBus();
 
-    await configureDomain({
+    const definition = defineDomain({
       writeModel: { aggregates: {} },
       readModel: { projections: {} },
       processModel: { sagas: { AckSaga } },
-      infrastructure: {
-        sagaPersistence: () => sagaPersistence,
-        cqrsInfrastructure: () => ({
-          commandBus,
-          eventBus,
-          queryBus: new InMemoryQueryBus(),
-        }),
-      },
+    });
+
+    await wireDomain(definition, {
+      sagas: { persistence: () => sagaPersistence },
+      buses: () => ({
+        commandBus,
+        eventBus,
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     await eventBus.dispatch({
@@ -321,18 +326,19 @@ describe("startedBy event with existing instance", () => {
     const sagaPersistence = new InMemorySagaPersistence();
     const eventBus = new EventEmitterEventBus();
 
-    await configureDomain({
+    const definition = defineDomain({
       writeModel: { aggregates: {} },
       readModel: { projections: {} },
       processModel: { sagas: { RetrySaga } },
-      infrastructure: {
-        sagaPersistence: () => sagaPersistence,
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus,
-          queryBus: new InMemoryQueryBus(),
-        }),
-      },
+    });
+
+    await wireDomain(definition, {
+      sagas: { persistence: () => sagaPersistence },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus,
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     await eventBus.dispatch({

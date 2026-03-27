@@ -2,7 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import type { DefineCommands, DefineEvents } from "@noddde/core";
 import { defineAggregate } from "@noddde/core";
 import {
-  configureDomain,
+  defineDomain,
+  wireDomain,
   InMemoryOutboxStore,
   EventEmitterEventBus,
   InMemoryCommandBus,
@@ -37,15 +38,17 @@ const Order = defineAggregate<{
   },
 });
 
+const orderDefinition = defineDomain({
+  writeModel: { aggregates: { Order } },
+  readModel: { projections: {} },
+});
+
 describe("Outbox Delivery", () => {
   it("should write outbox entries atomically with aggregate persistence", async () => {
     const outboxStore = new InMemoryOutboxStore();
-    const domain = await configureDomain({
-      writeModel: { aggregates: { Order } },
-      readModel: { projections: {} },
-      infrastructure: {
-        outbox: { store: () => outboxStore },
-      },
+
+    const domain = await wireDomain(orderDefinition, {
+      outbox: { store: () => outboxStore },
     });
 
     await domain.dispatchCommand({
@@ -66,12 +69,9 @@ describe("Outbox Delivery", () => {
 
   it("should mark outbox entries as published on happy path", async () => {
     const outboxStore = new InMemoryOutboxStore();
-    const domain = await configureDomain({
-      writeModel: { aggregates: { Order } },
-      readModel: { projections: {} },
-      infrastructure: {
-        outbox: { store: () => outboxStore },
-      },
+
+    const domain = await wireDomain(orderDefinition, {
+      outbox: { store: () => outboxStore },
     });
 
     await domain.dispatchCommand({
@@ -90,17 +90,13 @@ describe("Outbox Delivery", () => {
     const eventBus = new EventEmitterEventBus();
     const dispatchSpy = vi.spyOn(eventBus, "dispatch");
 
-    const domain = await configureDomain({
-      writeModel: { aggregates: { Order } },
-      readModel: { projections: {} },
-      infrastructure: {
-        outbox: { store: () => outboxStore },
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus,
-          queryBus: new InMemoryQueryBus(),
-        }),
-      },
+    const domain = await wireDomain(orderDefinition, {
+      outbox: { store: () => outboxStore },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus,
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     // Manually insert an unpublished outbox entry (simulating crash)
@@ -139,12 +135,9 @@ describe("Outbox Delivery", () => {
 
   it("should write outbox entries for all commands in withUnitOfWork", async () => {
     const outboxStore = new InMemoryOutboxStore();
-    const domain = await configureDomain({
-      writeModel: { aggregates: { Order } },
-      readModel: { projections: {} },
-      infrastructure: {
-        outbox: { store: () => outboxStore },
-      },
+
+    const domain = await wireDomain(orderDefinition, {
+      outbox: { store: () => outboxStore },
     });
 
     await domain.withUnitOfWork(async () => {
@@ -175,11 +168,7 @@ describe("Outbox Delivery", () => {
   });
 
   it("should return 0 from processOutboxOnce when no outbox configured", async () => {
-    const domain = await configureDomain({
-      writeModel: { aggregates: { Order } },
-      readModel: { projections: {} },
-      infrastructure: {},
-    });
+    const domain = await wireDomain(orderDefinition, {});
 
     const dispatched = await domain.processOutboxOnce();
     expect(dispatched).toBe(0);
@@ -190,17 +179,13 @@ describe("Outbox Delivery", () => {
     const eventBus = new EventEmitterEventBus();
     const dispatchSpy = vi.spyOn(eventBus, "dispatch");
 
-    const domain = await configureDomain({
-      writeModel: { aggregates: { Order } },
-      readModel: { projections: {} },
-      infrastructure: {
-        outbox: { store: () => outboxStore },
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus,
-          queryBus: new InMemoryQueryBus(),
-        }),
-      },
+    const domain = await wireDomain(orderDefinition, {
+      outbox: { store: () => outboxStore },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus,
+        queryBus: new InMemoryQueryBus(),
+      }),
     });
 
     await domain.dispatchCommand({

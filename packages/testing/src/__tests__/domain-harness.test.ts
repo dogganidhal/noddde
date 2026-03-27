@@ -80,9 +80,10 @@ function createCounterProjection() {
         return view?.total ?? 0;
       },
     },
+    viewStore: () => viewStore,
   });
 
-  return { projection: { projection, viewStore: () => viewStore }, viewStore };
+  return { projection, viewStore };
 }
 
 // ---- Simple saga for testing command spy ----

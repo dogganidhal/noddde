@@ -7,7 +7,7 @@ import { ConcurrencyError } from "@noddde/core";
  * The Domain delegates to a strategy instance during command dispatch.
  *
  * @internal Not exported — users configure concurrency via
- * `DomainConfiguration.infrastructure.aggregateConcurrency`.
+ * {@link AggregateWiring.concurrency} in {@link DomainWiring}.
  */
 export interface ConcurrencyStrategy {
   /**
@@ -93,5 +93,27 @@ export class PessimisticConcurrencyStrategy implements ConcurrencyStrategy {
     } finally {
       await this.locker.release(aggregateName, aggregateId);
     }
+  }
+}
+
+/**
+ * Composite concurrency strategy that routes to per-aggregate strategies.
+ * Falls back to a default strategy for aggregates without specific config.
+ *
+ * @internal
+ */
+export class PerAggregateConcurrencyStrategy implements ConcurrencyStrategy {
+  constructor(
+    private readonly strategies: Map<string, ConcurrencyStrategy>,
+    private readonly defaultStrategy: ConcurrencyStrategy,
+  ) {}
+
+  async execute(
+    aggregateName: string,
+    aggregateId: ID,
+    attempt: () => Promise<Event[]>,
+  ): Promise<Event[]> {
+    const strategy = this.strategies.get(aggregateName) ?? this.defaultStrategy;
+    return strategy.execute(aggregateName, aggregateId, attempt);
   }
 }

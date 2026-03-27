@@ -18,14 +18,14 @@ export type PrismaDialect = "postgresql" | "mysql" | "mariadb";
  * ```ts
  * import { PrismaClient } from "@prisma/client";
  * import { PrismaAdvisoryLocker } from "@noddde/prisma";
+ * import { wireDomain } from "@noddde/engine";
  *
  * const prisma = new PrismaClient();
  * const locker = new PrismaAdvisoryLocker(prisma, "postgresql");
  *
- * const domain = await configureDomain({
- *   // ...
- *   infrastructure: {
- *     aggregateConcurrency: {
+ * const domain = await wireDomain(definition, {
+ *   aggregates: {
+ *     concurrency: {
  *       strategy: "pessimistic",
  *       locker,
  *       lockTimeoutMs: 5000,

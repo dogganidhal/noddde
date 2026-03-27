@@ -8,7 +8,7 @@ import type { PersistenceConfiguration } from "@noddde/core";
  * `aggregatePersistence` configuration.
  *
  * @internal Not exported — users configure persistence via
- * `DomainConfiguration.infrastructure.aggregatePersistence`.
+ * {@link AggregateWiring.persistence} in {@link DomainWiring}.
  */
 export interface AggregatePersistenceResolver {
   /**

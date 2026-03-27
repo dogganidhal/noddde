@@ -41,7 +41,7 @@ type MyProjectionDef = {
 };
 ```
 
-The first four fields are required. The `viewStore` field is a **type-level hint only** — it is not used at runtime inside the projection definition itself. The actual view store instance is provided in the domain configuration via `configureDomain`. When present, it enables typed `{ views }` injection into query handlers. See [View Persistence](/docs/read-model/view-persistence) for details.
+The first four fields are required. The `viewStore` field is a **type-level hint only** — it is not used at runtime inside the projection definition itself. The actual view store instance is provided via `DomainWiring.projections` in `wireDomain`. When present, it enables typed `{ views }` injection into query handlers. See [View Persistence](/docs/read-model/view-persistence) for details.
 
 This follows the same pattern as `AggregateTypes` in [defining aggregates](/docs/modeling/defining-aggregates) -- instead of threading positional generics, you declare a single named type.
 
@@ -283,9 +283,9 @@ This is useful for building views that span multiple domain concepts, such as an
 Projections are registered in the `readModel.projections` map of the domain configuration:
 
 ```ts
-import { configureDomain } from "@noddde/engine";
+import { defineDomain, wireDomain } from "@noddde/engine";
 
-const domain = await configureDomain<BankingInfrastructure>({
+const bankingDomain = defineDomain<BankingInfrastructure>({
   writeModel: {
     aggregates: { BankAccount },
   },
@@ -300,10 +300,9 @@ const domain = await configureDomain<BankingInfrastructure>({
       TransactionHistory: TransactionHistoryProjection,
     },
   },
-  infrastructure: {
-    /* ... */
-  },
 });
+
+const domain = await wireDomain(bankingDomain, { /* wiring */ });
 ```
 
 The key in the projections map (e.g., `"AccountBalance"`) is the projection's name. It does not need to match the aggregate name. Passing `{ projection, viewStore }` connects the projection to a view store from your infrastructure, enabling automatic view persistence and `{ views }` injection into query handlers.

@@ -60,7 +60,7 @@ class InMemoryOutboxStore implements OutboxStore {
 
 ## Integration Points
 
-- Used as the default `OutboxStore` in `DomainConfiguration.infrastructure.outbox.store` for testing.
+- Used as the default `OutboxStore` in `DomainWiring.outbox` for testing.
 - The `OutboxRelay` reads from it via `loadUnpublished` and marks entries via `markPublished`.
 
 ## Test Scenarios

@@ -7,7 +7,7 @@ title: "Domain"
 
 Defined in: [engine/domain.ts:302](https://github.com/dogganidhal/noddde/blob/main/packages/engine/src/domain.ts#L302)
 
-The running domain instance. Created via `configureDomain`, it is the primary entry point for dispatching commands, queries, and accessing infrastructure.
+The running domain instance. Created via `wireDomain`, it is the primary entry point for dispatching commands, queries, and accessing infrastructure.
 
 ## Type Parameters
 
@@ -33,9 +33,13 @@ Defined in: [engine/domain.ts:318](https://github.com/dogganidhal/noddde/blob/ma
 
 #### Parameters
 
-##### configuration
+##### definition
 
-[`DomainConfiguration`](/api/type-aliases/domainconfiguration/)\<`TInfrastructure`, `TStandaloneCommand`, `TStandaloneQuery`\>
+`DomainDefinition`\<`TInfrastructure`, `TStandaloneCommand`, `TStandaloneQuery`\>
+
+##### wiring
+
+`DomainWiring`\<`TInfrastructure`\>
 
 #### Returns
 

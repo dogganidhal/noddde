@@ -56,7 +56,7 @@ class InMemoryAggregateLocker implements AggregateLocker {
 
 ## Integration Points
 
-- **DomainConfiguration.infrastructure.aggregateConcurrency** -- Provided as the `locker` field when `strategy` is `"pessimistic"`.
+- **DomainWiring.aggregates.concurrency** -- Provided as the `locker` field when `strategy` is `"pessimistic"`.
 - **PessimisticConcurrencyStrategy** -- Calls `acquire` before the command lifecycle and `release` in a `finally` block.
 
 ## Test Scenarios

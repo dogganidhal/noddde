@@ -66,14 +66,19 @@ const db = drizzle(sqlite);
 const { stateStoredPersistence, eventSourcedPersistence } =
   createDrizzlePersistence(db);
 
-const engine = defineDomain({
+const myDomain = defineDomain({
   writeModel: {
     aggregates: { UserProfile, Wallet },
   },
-  infrastructure: {
-    aggregatePersistence: {
-      UserProfile: () => stateStoredPersistence,
-      Wallet: () => eventSourcedPersistence,
+});
+
+const domain = await wireDomain(myDomain, {
+  aggregates: {
+    UserProfile: {
+      persistence: () => stateStoredPersistence,
+    },
+    Wallet: {
+      persistence: () => eventSourcedPersistence,
     },
   },
 });

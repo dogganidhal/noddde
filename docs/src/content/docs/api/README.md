@@ -50,7 +50,6 @@ title: "@noddde/core"
 - [DefineCommands](/api/type-aliases/definecommands/)
 - [DefineEvents](/api/type-aliases/defineevents/)
 - [DefineQueries](/api/type-aliases/definequeries/)
-- [DomainConfiguration](/api/type-aliases/domainconfiguration/)
 - [EventHandler](/api/type-aliases/eventhandler/)
 - [ID](/api/type-aliases/id/)
 - [InferAggregateCommands](/api/type-aliases/inferaggregatecommands/)
@@ -84,7 +83,6 @@ title: "@noddde/core"
 
 ## Functions
 
-- [configureDomain](/api/functions/configuredomain/)
 - [defineAggregate](/api/functions/defineaggregate/)
 - [defineProjection](/api/functions/defineprojection/)
 - [defineSaga](/api/functions/definesaga/)

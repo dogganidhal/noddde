@@ -98,7 +98,7 @@ export interface EventSourcedAggregatePersistence {
 
 /**
  * Union of the two aggregate persistence strategies.
- * Used in {@link DomainConfiguration} to allow either approach.
+ * Used in domain wiring to allow either approach.
  */
 export type PersistenceConfiguration =
   | StateStoredAggregatePersistence

@@ -68,6 +68,6 @@ export interface UnitOfWork {
  * Called once per unit of work boundary (per command dispatch, saga reaction,
  * or explicit `domain.withUnitOfWork()` call).
  *
- * Configured via `DomainConfiguration.infrastructure.unitOfWorkFactory`.
+ * Configured via `DomainWiring.unitOfWork`.
  */
 export type UnitOfWorkFactory = () => UnitOfWork;

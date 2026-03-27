@@ -4,7 +4,8 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { createDrizzlePersistence } from "@noddde/drizzle";
 import { events, aggregateStates, sagaStates } from "@noddde/drizzle/pg";
 import {
-  configureDomain,
+  defineDomain,
+  wireDomain,
   EventEmitterEventBus,
   InMemoryCommandBus,
   InMemoryQueryBus,
@@ -63,19 +64,24 @@ async function main() {
       sagaStates,
     });
 
-    const domain = await configureDomain<Infrastructure>({
+    // Define the domain structure (pure, sync)
+    const flashSaleDomain = defineDomain<Infrastructure>({
       writeModel: { aggregates: { FlashSaleItem } },
       readModel: { projections: {} },
-      infrastructure: {
-        aggregatePersistence: () => drizzleInfra.eventSourcedPersistence,
-        unitOfWorkFactory: () => drizzleInfra.unitOfWorkFactory,
-        aggregateConcurrency: { maxRetries: 5 },
-        cqrsInfrastructure: () => ({
-          commandBus: new InMemoryCommandBus(),
-          eventBus: new EventEmitterEventBus(),
-          queryBus: new InMemoryQueryBus(),
-        }),
+    });
+
+    // Wire with infrastructure (async)
+    const domain = await wireDomain(flashSaleDomain, {
+      aggregates: {
+        persistence: () => drizzleInfra.eventSourcedPersistence,
+        concurrency: { maxRetries: 5 },
       },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+      unitOfWork: () => drizzleInfra.unitOfWorkFactory,
     });
     console.log(
       "Domain configured: optimistic concurrency with maxRetries: 5\n",

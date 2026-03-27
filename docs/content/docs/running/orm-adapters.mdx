@@ -109,6 +109,7 @@ import {
   snapshots,
 } from "@noddde/drizzle/sqlite";
 import { everyNEvents } from "@noddde/core";
+import { defineDomain, wireDomain } from "@noddde/engine";
 
 const db = drizzle(new Database("app.db"));
 const infra = createDrizzlePersistence(db, {
@@ -118,16 +119,23 @@ const infra = createDrizzlePersistence(db, {
   snapshots,
 });
 
-const domain = await configureDomain({
+const bankingDomain = defineDomain({
   writeModel: { aggregates: { BankAccount } },
   readModel: { projections: { BankAccount: BankAccountProjection } },
-  infrastructure: {
-    aggregatePersistence: () => infra.eventSourcedPersistence,
-    sagaPersistence: () => infra.sagaPersistence,
-    snapshotStore: () => infra.snapshotStore,
-    snapshotStrategy: everyNEvents(100),
-    unitOfWorkFactory: () => infra.unitOfWorkFactory,
+});
+
+const domain = await wireDomain(bankingDomain, {
+  aggregates: {
+    persistence: () => infra.eventSourcedPersistence,
+    snapshots: {
+      store: () => infra.snapshotStore,
+      strategy: everyNEvents(100),
+    },
   },
+  sagas: {
+    persistence: () => infra.sagaPersistence,
+  },
+  unitOfWork: () => infra.unitOfWorkFactory,
 });
 ```
 
@@ -202,20 +210,28 @@ Then run `prisma generate` and your preferred migration command.
 import { PrismaClient } from "@prisma/client";
 import { createPrismaPersistence } from "@noddde/prisma";
 import { everyNEvents } from "@noddde/core";
+import { defineDomain, wireDomain } from "@noddde/engine";
 
 const prisma = new PrismaClient();
 const infra = createPrismaPersistence(prisma);
 
-const domain = await configureDomain({
+const bankingDomain = defineDomain({
   writeModel: { aggregates: { BankAccount } },
   readModel: { projections: { BankAccount: BankAccountProjection } },
-  infrastructure: {
-    aggregatePersistence: () => infra.eventSourcedPersistence,
-    sagaPersistence: () => infra.sagaPersistence,
-    snapshotStore: () => infra.snapshotStore,
-    snapshotStrategy: everyNEvents(100),
-    unitOfWorkFactory: () => infra.unitOfWorkFactory,
+});
+
+const domain = await wireDomain(bankingDomain, {
+  aggregates: {
+    persistence: () => infra.eventSourcedPersistence,
+    snapshots: {
+      store: () => infra.snapshotStore,
+      strategy: everyNEvents(100),
+    },
   },
+  sagas: {
+    persistence: () => infra.sagaPersistence,
+  },
+  unitOfWork: () => infra.unitOfWorkFactory,
 });
 ```
 
@@ -266,19 +282,27 @@ For production, use TypeORM migrations instead of `synchronize: true`.
 ```ts
 import { createTypeORMPersistence } from "@noddde/typeorm";
 import { everyNEvents } from "@noddde/core";
+import { defineDomain, wireDomain } from "@noddde/engine";
 
 const infra = createTypeORMPersistence(dataSource);
 
-const domain = await configureDomain({
+const bankingDomain = defineDomain({
   writeModel: { aggregates: { BankAccount } },
   readModel: { projections: { BankAccount: BankAccountProjection } },
-  infrastructure: {
-    aggregatePersistence: () => infra.eventSourcedPersistence,
-    sagaPersistence: () => infra.sagaPersistence,
-    snapshotStore: () => infra.snapshotStore,
-    snapshotStrategy: everyNEvents(100),
-    unitOfWorkFactory: () => infra.unitOfWorkFactory,
+});
+
+const domain = await wireDomain(bankingDomain, {
+  aggregates: {
+    persistence: () => infra.eventSourcedPersistence,
+    snapshots: {
+      store: () => infra.snapshotStore,
+      strategy: everyNEvents(100),
+    },
   },
+  sagas: {
+    persistence: () => infra.sagaPersistence,
+  },
+  unitOfWork: () => infra.unitOfWorkFactory,
 });
 ```
 

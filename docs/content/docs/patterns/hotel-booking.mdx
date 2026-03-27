@@ -342,15 +342,14 @@ See [Queries](/docs/read-model/queries) for the full standalone query handler pa
 
 ## Domain Configuration
 
-The `configureDomain` call wires all the pieces together. Two type parameters beyond `HotelInfrastructure` are required: `RunNightlyAuditCommand` (a standalone command handler) and `SearchQuery` (a standalone query handler).
+The domain configuration uses `defineDomain` to capture the pure domain structure, then `wireDomain` to connect infrastructure.
 
 ```ts
 // src/main.ts
-const domain = await configureDomain<
-  HotelInfrastructure,
-  RunNightlyAuditCommand,  // standalone command type
-  SearchQuery              // standalone query type
->({
+import { defineDomain, wireDomain } from "@noddde/engine";
+
+// Step 1: Define the domain structure (pure, sync)
+const hotelDomain = defineDomain<HotelInfrastructure>({
   writeModel: {
     aggregates: { Room, Booking, Inventory },
     standaloneCommandHandlers: { RunNightlyAudit: RunNightlyAuditHandler },
@@ -374,41 +373,54 @@ const domain = await configureDomain<
       PaymentProcessing: PaymentProcessingSaga,
     },
   },
+});
 
-  infrastructure: {
-    // Per-aggregate persistence: Room + Booking → event-sourced, Inventory → state-stored
-    aggregatePersistence: {
-      Room: () => drizzleInfra.eventSourcedPersistence,
-      Booking: () => drizzleInfra.eventSourcedPersistence,
-      Inventory: () => drizzleInfra.stateStoredPersistence,
-    } as any, // TypeScript cannot discriminate function vs Record in the union
+// Step 2: Wire with infrastructure (async)
+const domain = await wireDomain(hotelDomain, {
+  infrastructure: (): HotelInfrastructure => ({
+    clock: new SystemClock(),
+    paymentGateway: new FakePaymentGateway(),
+    roomAvailabilityViewStore: new DrizzleRoomAvailabilityViewStore(db),
+    // ...emailService, smsService, guestHistoryViewStore, revenueViewStore
+  }),
 
-    aggregateConcurrency: { maxRetries: 3 },
-    sagaPersistence: () => drizzleInfra.sagaPersistence,
-    snapshotStore: () => drizzleInfra.snapshotStore!,
-    snapshotStrategy: everyNEvents(50), // snapshot Room every 50 events
-    idempotencyStore: () => new InMemoryIdempotencyStore(),
-    unitOfWorkFactory: () => drizzleInfra.unitOfWorkFactory,
-
-    provideInfrastructure: (): HotelInfrastructure => ({
-      clock: new SystemClock(),
-      paymentGateway: new FakePaymentGateway(),
-      roomAvailabilityViewStore: new DrizzleRoomAvailabilityViewStore(db),
-      // ...emailService, smsService, guestHistoryViewStore, revenueViewStore
-    }),
-
-    cqrsInfrastructure: () => ({
-      commandBus: new InMemoryCommandBus(),
-      eventBus: new EventEmitterEventBus(),
-      queryBus: new InMemoryQueryBus(),
-    }),
+  // Per-aggregate persistence: Room + Booking → event-sourced, Inventory → state-stored
+  aggregates: {
+    Room: {
+      persistence: () => drizzleInfra.eventSourcedPersistence,
+      concurrency: { maxRetries: 3 },
+      snapshots: {
+        store: () => drizzleInfra.snapshotStore!,
+        strategy: everyNEvents(50),
+      },
+    },
+    Booking: {
+      persistence: () => drizzleInfra.eventSourcedPersistence,
+      concurrency: { maxRetries: 3 },
+    },
+    Inventory: {
+      persistence: () => drizzleInfra.stateStoredPersistence,
+      concurrency: { maxRetries: 3 },
+    },
   },
 
+  sagas: {
+    persistence: () => drizzleInfra.sagaPersistence,
+  },
+
+  buses: () => ({
+    commandBus: new InMemoryCommandBus(),
+    eventBus: new EventEmitterEventBus(),
+    queryBus: new InMemoryQueryBus(),
+  }),
+
+  unitOfWork: () => drizzleInfra.unitOfWorkFactory,
+  idempotency: () => new InMemoryIdempotencyStore(),
   metadataProvider: () => requestMetadataStorage.getStore() ?? {},
 });
 ```
 
-The `as any` on `aggregatePersistence` is a deliberate workaround: the engine accepts either a single factory function (applies to all aggregates) or a `Record<AggregateName, factory>` (per-aggregate), but TypeScript's union discrimination cannot distinguish between the two at the call site when the record values are themselves functions.
+Per-aggregate wiring allows each aggregate to have its own persistence strategy, concurrency settings, and snapshot configuration. Snapshots are only configured for `Room` since it is the longest-lived event-sourced aggregate.
 
 ## Unit of Work
 

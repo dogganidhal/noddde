@@ -36,12 +36,12 @@ noddde organizes a domain into three sides:
 
 The write model is where domain logic lives. Its primary building blocks are **aggregates** -- Decider-based state machines that receive commands, validate them against the current state, and produce events. For commands that do not target an aggregate (sending a notification, calling an external API), noddde provides **standalone command handlers**.
 
-In the domain configuration, the write model is declared under the `writeModel` key:
+In the domain definition, the write model is declared under the `writeModel` key:
 
 ```typescript
-import { configureDomain } from "@noddde/engine";
+import { defineDomain, wireDomain } from "@noddde/engine";
 
-const domain = await configureDomain({
+const bankingDomain = defineDomain({
   writeModel: {
     aggregates: {
       BankAccount,
@@ -54,6 +54,8 @@ const domain = await configureDomain({
   },
   // ...
 });
+
+const domain = await wireDomain(bankingDomain);
 ```
 
 For a complete treatment of how to define aggregates, commands, and apply handlers, see [Modeling Your Domain](/docs/modeling/defining-aggregates).
@@ -68,7 +70,7 @@ The read model consumes events and builds **projections** -- query-optimized dat
 For queries that do not belong to any projection, noddde provides **standalone query handlers**.
 
 ```typescript
-const domain = await configureDomain({
+const bankingDomain = defineDomain({
   // ...
   readModel: {
     projections: {

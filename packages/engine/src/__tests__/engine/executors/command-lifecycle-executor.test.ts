@@ -352,8 +352,7 @@ describe("CommandLifecycleExecutor", () => {
       strategy,
       uowStorage,
       enricher,
-      snapshotStore,
-      snapshotStrategy,
+      () => ({ store: snapshotStore, strategy: snapshotStrategy }),
     );
 
     // Dispatch 3 commands to trigger snapshot (everyNEvents(3))
@@ -436,7 +435,7 @@ describe("CommandLifecycleExecutor", () => {
       strategy,
       uowStorage,
       enricher,
-      snapshotStore,
+      () => ({ store: snapshotStore, strategy: () => false }),
     );
 
     const publishedEvents: any[] = [];

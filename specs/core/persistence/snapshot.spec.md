@@ -151,8 +151,7 @@ function everyNEvents(n: number): SnapshotStrategy;
 
 ## Integration Points
 
-- **DomainConfiguration.infrastructure.snapshotStore** -- Factory function returning a `SnapshotStore`. Optional — if omitted, no snapshotting occurs.
-- **DomainConfiguration.infrastructure.snapshotStrategy** -- A `SnapshotStrategy` function. Optional — if omitted (but snapshot store is provided), no automatic snapshotting occurs.
+- **DomainWiring.aggregates.snapshots** -- Configuration providing a `SnapshotStore` and optional `SnapshotStrategy`. Optional — if omitted, no snapshotting occurs.
 - **Domain.executeCommandLifecycle()** -- Uses `SnapshotStore.load()` before event loading and `SnapshotStore.save()` after successful commit.
 - **EventSourcedAggregatePersistence** -- If the persistence implementation also implements `PartialEventLoad`, the engine uses `loadAfterVersion()` for optimized I/O.
 

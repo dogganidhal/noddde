@@ -65,14 +65,19 @@ The `PurchaseItem` handler either produces `ItemPurchased` (decrements stock) or
 ## Domain Configuration
 
 ```ts
-const domain = await configureDomain<Infrastructure>({
+import { defineDomain, wireDomain } from "@noddde/engine";
+
+const flashSaleDomain = defineDomain<Infrastructure>({
   writeModel: { aggregates: { FlashSaleItem } },
   readModel: { projections: {} },
-  infrastructure: {
-    aggregatePersistence: () => drizzleInfra.eventSourcedPersistence,
-    unitOfWorkFactory: () => drizzleInfra.unitOfWorkFactory,
-    aggregateConcurrency: { maxRetries: 5 },
+});
+
+const domain = await wireDomain(flashSaleDomain, {
+  aggregates: {
+    persistence: () => drizzleInfra.eventSourcedPersistence,
+    concurrency: { maxRetries: 5 },
   },
+  unitOfWork: () => drizzleInfra.unitOfWorkFactory,
 });
 ```
 

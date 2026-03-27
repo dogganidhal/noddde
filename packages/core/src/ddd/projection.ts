@@ -37,8 +37,8 @@ export type ProjectionTypes = {
   /**
    * Optional typed view store for this projection. When present, enables
    * typed `{ views }` injection into query handlers via `ProjectionQueryInfra<T>`.
-   * This is a type-level hint only — the actual view store is provided in the
-   * domain configuration, not in the projection definition.
+   * This is a type-level hint only — the actual view store is provided via
+   * `DomainWiring.projections` in {@link wireDomain}.
    */
   viewStore?: ViewStore;
 };
@@ -104,6 +104,18 @@ type QueryHandlerMap<T extends ProjectionTypes> = {
   >;
 };
 
+/**
+ * Factory function that resolves a view store from user infrastructure.
+ * When `T` has a typed `viewStore` field in its `ProjectionTypes`, the
+ * factory returns that specific view store type. Otherwise, it returns
+ * a generic `ViewStore<T["view"]>`.
+ */
+type ViewStoreFactory<T extends ProjectionTypes> = T extends {
+  viewStore: infer VS extends ViewStore;
+}
+  ? (infrastructure: T["infrastructure"]) => VS
+  : (infrastructure: T["infrastructure"]) => ViewStore<T["view"]>;
+
 // ---- Projection definition ----
 
 /**
@@ -117,10 +129,10 @@ type QueryHandlerMap<T extends ProjectionTypes> = {
  * events the projection cares about need entries — unhandled events are
  * silently ignored.
  *
- * View store configuration has moved to the domain runtime wiring
- * (`DomainConfiguration.readModel.projections`). The `viewStore` field
- * in `ProjectionTypes` is a type-level hint only — it enables typed
- * `{ views }` injection into query handlers.
+ * View store configuration lives in `DomainWiring.projections` via
+ * {@link wireDomain}. The `viewStore` field in `ProjectionTypes` is a
+ * type-level hint only — it enables typed `{ views }` injection into
+ * query handlers.
  *
  * Use {@link defineProjection} to create a projection with full type inference.
  *
@@ -171,6 +183,13 @@ export interface Projection<T extends ProjectionTypes = ProjectionTypes> {
    * `initialView` is used as the starting state for the reducer.
    */
   initialView?: T["view"];
+
+  /**
+   * Optional factory that resolves the view store from user infrastructure.
+   * Can be provided here for convenience, or via `DomainWiring.projections`
+   * in {@link wireDomain} (which takes priority if both are set).
+   */
+  viewStore?: ViewStoreFactory<T>;
 
   /**
    * Consistency mode for view persistence:

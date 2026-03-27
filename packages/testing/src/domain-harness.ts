@@ -8,7 +8,8 @@ import type {
   Event,
 } from "@noddde/core";
 import {
-  configureDomain,
+  defineDomain,
+  wireDomain,
   type Domain,
   EventEmitterEventBus,
   InMemoryCommandBus,
@@ -30,11 +31,12 @@ export type TestDomainConfig<
 > = {
   /** Aggregate definitions keyed by name. */
   aggregates?: Record<string, Aggregate<any>>;
-  /** Projection definitions keyed by name. Entries can be bare projections or wrapped with a viewStore. */
-  projections?: Record<
+  /** Projection definitions keyed by name. */
+  projections?: Record<string, Projection<any>>;
+  /** Optional per-projection view store factories. */
+  projectionViewStores?: Record<
     string,
-    | Projection<any>
-    | { projection: Projection<any>; viewStore: (infrastructure: any) => any }
+    { viewStore: (infrastructure: any) => any }
   >;
   /** Saga definitions keyed by name. */
   sagas?: Record<string, Saga<any, any>>;
@@ -116,7 +118,7 @@ export async function testDomain<
     }
   };
 
-  const domain = await configureDomain<TInfrastructure>({
+  const definition = defineDomain<TInfrastructure>({
     writeModel: {
       aggregates: config.aggregates ?? {},
     },
@@ -124,20 +126,24 @@ export async function testDomain<
       projections: config.projections ?? {},
     },
     processModel: config.sagas ? { sagas: config.sagas } : undefined,
-    infrastructure: {
-      provideInfrastructure: () =>
-        (config.infrastructure ?? {}) as TInfrastructure,
-      cqrsInfrastructure: () => ({
-        commandBus,
-        eventBus,
-        queryBus: new InMemoryQueryBus(),
-      }),
-      aggregatePersistence: () =>
-        new InMemoryEventSourcedAggregatePersistence(),
-      ...(config.sagas
-        ? { sagaPersistence: () => new InMemorySagaPersistence() }
-        : {}),
+  });
+
+  const domain = await wireDomain(definition, {
+    infrastructure: () => (config.infrastructure ?? {}) as TInfrastructure,
+    buses: () => ({
+      commandBus,
+      eventBus,
+      queryBus: new InMemoryQueryBus(),
+    }),
+    aggregates: {
+      persistence: () => new InMemoryEventSourcedAggregatePersistence(),
     },
+    ...(config.projectionViewStores
+      ? { projections: config.projectionViewStores }
+      : {}),
+    ...(config.sagas
+      ? { sagas: { persistence: () => new InMemorySagaPersistence() } }
+      : {}),
   });
 
   return {

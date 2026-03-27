@@ -10,11 +10,13 @@ When you call `domain.dispatchCommand()`, the framework executes a deterministic
 The entry point for all command processing is `domain.dispatchCommand()`. You pass a command object with a `name`, a `targetAggregateId`, and optionally a `payload`:
 
 ```typescript
-import { configureDomain } from "@noddde/engine";
+import { defineDomain, wireDomain } from "@noddde/engine";
 
-const domain = await configureDomain<BankingInfrastructure>({
-  // ... configuration
+const bankingDomain = defineDomain<BankingInfrastructure>({
+  // ... definition
 });
+
+const domain = await wireDomain(bankingDomain, { /* wiring */ });
 
 const bankAccountId = randomUUID();
 
@@ -142,7 +144,7 @@ The framework matches the command's `name` against the `commands` map of each re
 // BankAccount handles: CreateBankAccount, AuthorizeTransaction
 // Auction handles: CreateAuction, PlaceBid, CloseAuction
 
-const domain = await configureDomain({
+const myDomain = defineDomain({
   writeModel: {
     aggregates: {
       BankAccount, // aggregate name: "BankAccount"
@@ -151,6 +153,8 @@ const domain = await configureDomain({
   },
   // ...
 });
+
+const domain = await wireDomain(myDomain);
 
 // Routed to BankAccount
 await domain.dispatchCommand({
@@ -294,7 +298,7 @@ import {
   InMemoryQueryBus,
 } from "@noddde/engine";
 
-cqrsInfrastructure: () => ({
+buses: () => ({
   commandBus: new InMemoryCommandBus(),
   eventBus: new EventEmitterEventBus(),
   queryBus: new InMemoryQueryBus(),
@@ -324,14 +328,14 @@ The built-in `EventEmitterEventBus` is an in-process implementation that tracks 
 ```typescript
 import { EventEmitterEventBus } from "@noddde/engine";
 
-cqrsInfrastructure: () => ({
+buses: () => ({
   commandBus: new InMemoryCommandBus(),
   eventBus: new EventEmitterEventBus(),
   queryBus: new InMemoryQueryBus(),
 }),
 ```
 
-During `configureDomain`, the framework reads the `on` map from each projection and the `handlers` map from each saga, then registers them with the event bus via `bus.on(eventName, handler)`. You do not subscribe manually.
+During `wireDomain`, the framework reads the `on` map from each projection and the `handlers` map from each saga, then registers them with the event bus via `bus.on(eventName, handler)`. You do not subscribe manually.
 
 | Property    | Behavior                                                    |
 | ----------- | ----------------------------------------------------------- |

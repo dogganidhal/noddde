@@ -79,22 +79,18 @@ await domain.dispatchCommand({ ...cmd, commandId: requestId });
 
 ## Configuring the IdempotencyStore
 
-Add an `idempotencyStore` factory to the [infrastructure section](/docs/running/infrastructure) of your domain configuration:
+Add an `idempotency` factory to your [domain wiring](/docs/running/domain-configuration):
 
 ```ts
-import { configureDomain, InMemoryIdempotencyStore } from "@noddde/engine";
+import { wireDomain, InMemoryIdempotencyStore } from "@noddde/engine";
 
-const domain = await configureDomain<MyInfrastructure>({
-  writeModel: { aggregates: { BankAccount } },
-  readModel: { projections: {} },
-  infrastructure: {
-    idempotencyStore: () => new InMemoryIdempotencyStore(),
-    // ...other providers
-  },
+const domain = await wireDomain(bankingDomain, {
+  idempotency: () => new InMemoryIdempotencyStore(),
+  // ...other wiring
 });
 ```
 
-Without an `idempotencyStore` configured, the `commandId` field is ignored and all commands are processed normally.
+Without `idempotency` configured, the `commandId` field is ignored and all commands are processed normally.
 
 ## TTL and Cleanup
 
