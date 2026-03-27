@@ -593,10 +593,7 @@ describe("Domain - standalone command handlers", () => {
   it("should invoke standalone handler with merged infrastructure", async () => {
     const sendSpy = vi.fn();
 
-    const definition = defineDomain<
-      NotificationInfrastructure,
-      NotifyCommand
-    >({
+    const definition = defineDomain<NotificationInfrastructure, NotifyCommand>({
       writeModel: {
         aggregates: {},
         standaloneCommandHandlers: {

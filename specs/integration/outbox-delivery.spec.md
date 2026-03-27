@@ -94,7 +94,7 @@ describe("Outbox Delivery", () => {
         readModel: { projections: {} },
       }),
       {
-        outbox: { store: () => outboxStore }
+        outbox: { store: () => outboxStore },
       },
     );
 
@@ -123,11 +123,11 @@ it("should mark outbox entries as published on happy path", async () => {
   const outboxStore = new InMemoryOutboxStore();
   const domain = await wireDomain(
     defineDomain({
-    writeModel: { aggregates: { Order } },
-    readModel: { projections: {} }
+      writeModel: { aggregates: { Order } },
+      readModel: { projections: {} },
     }),
     {
-      outbox: { store: () => outboxStore }
+      outbox: { store: () => outboxStore },
     },
   );
 
@@ -153,8 +153,8 @@ it("should recover unpublished entries via processOutboxOnce", async () => {
 
   const domain = await wireDomain(
     defineDomain({
-    writeModel: { aggregates: { Order } },
-    readModel: { projections: {} }
+      writeModel: { aggregates: { Order } },
+      readModel: { projections: {} },
     }),
     {
       outbox: { store: () => outboxStore },
@@ -208,11 +208,11 @@ it("should write outbox entries for all commands in withUnitOfWork", async () =>
   const outboxStore = new InMemoryOutboxStore();
   const domain = await wireDomain(
     defineDomain({
-    writeModel: { aggregates: { Order } },
-    readModel: { projections: {} }
+      writeModel: { aggregates: { Order } },
+      readModel: { projections: {} },
     }),
     {
-      outbox: { store: () => outboxStore }
+      outbox: { store: () => outboxStore },
     },
   );
 
@@ -273,8 +273,8 @@ it("should not re-dispatch already published entries", async () => {
 
   const domain = await wireDomain(
     defineDomain({
-    writeModel: { aggregates: { Order } },
-    readModel: { projections: {} }
+      writeModel: { aggregates: { Order } },
+      readModel: { projections: {} },
     }),
     {
       outbox: { store: () => outboxStore },

@@ -1024,10 +1024,7 @@ export const wireDomain = async <
   };
 
   let perAggregateWirings: Map<string, AggregateWiring> | undefined;
-  if (
-    wiring.aggregates &&
-    !isGlobalAggregateWiring(wiring.aggregates)
-  ) {
+  if (wiring.aggregates && !isGlobalAggregateWiring(wiring.aggregates)) {
     perAggregateWirings = new Map(
       Object.entries(wiring.aggregates as Record<string, AggregateWiring>),
     );
@@ -1037,4 +1034,3 @@ export const wireDomain = async <
   await domain.init();
   return domain;
 };
-

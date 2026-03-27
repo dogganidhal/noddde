@@ -599,8 +599,7 @@ describe("Event upcasting integration", () => {
       await expect(
         wireDomain(definition, {
           aggregates: {
-            persistence: () =>
-              new InMemoryEventSourcedAggregatePersistence(),
+            persistence: () => new InMemoryEventSourcedAggregatePersistence(),
           },
           buses: () => ({
             commandBus: new InMemoryCommandBus(),
