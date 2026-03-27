@@ -201,11 +201,7 @@ describe("defineProjection", () => {
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
-import type {
-  DefineEvents,
-  Infrastructure,
-  Query,
-} from "@noddde/core";
+import type { DefineEvents, Infrastructure, Query } from "@noddde/core";
 import { defineProjection } from "@noddde/core";
 
 describe("Reducer event parameter", () => {
@@ -324,7 +320,9 @@ describe("Projection Infer utilities", () => {
   const proj = defineProjection<Def>({
     on: {
       Added: {
-        reduce: (event, view) => ({ items: [...view.items, event.payload.item] }),
+        reduce: (event, view) => ({
+          items: [...view.items, event.payload.item],
+        }),
       },
     },
     queryHandlers: {},

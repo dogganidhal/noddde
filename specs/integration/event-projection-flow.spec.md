@@ -139,7 +139,11 @@ const TodoProjection = defineProjection<TodoProjectionTypes>({
       reduce: (event, view) => ({
         todos: [
           ...(view?.todos ?? []),
-          { id: event.payload.id, title: event.payload.title, completed: false },
+          {
+            id: event.payload.id,
+            title: event.payload.title,
+            completed: false,
+          },
         ],
       }),
     },

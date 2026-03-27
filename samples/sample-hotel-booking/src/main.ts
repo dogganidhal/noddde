@@ -140,11 +140,13 @@ async function main() {
       projections: {
         RoomAvailability: {
           projection: RoomAvailabilityProjection,
-          viewStore: (infra: HotelInfrastructure) => infra.roomAvailabilityViewStore,
+          viewStore: (infra: HotelInfrastructure) =>
+            infra.roomAvailabilityViewStore,
         },
         GuestHistory: {
           projection: GuestHistoryProjection,
-          viewStore: (infra: HotelInfrastructure) => infra.guestHistoryViewStore,
+          viewStore: (infra: HotelInfrastructure) =>
+            infra.guestHistoryViewStore,
         },
         Revenue: {
           projection: RevenueProjection,

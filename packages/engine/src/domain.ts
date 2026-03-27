@@ -71,7 +71,10 @@ type AggregateMap = Record<string | symbol, Aggregate<any>>;
 /** A projection entry in domain config — bare projection or with viewStore. */
 type ProjectionEntry =
   | Projection<any>
-  | { projection: Projection<any>; viewStore: (infrastructure: any) => ViewStore };
+  | {
+      projection: Projection<any>;
+      viewStore: (infrastructure: any) => ViewStore;
+    };
 
 type ProjectionMap = Record<string | symbol, ProjectionEntry>;
 
@@ -523,8 +526,7 @@ export class Domain<
 
     // Step 5.10: Build strong-consistency callback for projections
     const strongProjections = [...resolvedProjections.entries()].filter(
-      ([name, p]) =>
-        p.consistency === "strong" && resolvedViewStores.has(name),
+      ([name, p]) => p.consistency === "strong" && resolvedViewStores.has(name),
     );
 
     // Compose onEventsProduced: strong-consistency projections + outbox writes

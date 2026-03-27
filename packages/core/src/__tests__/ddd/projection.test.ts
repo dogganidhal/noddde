@@ -164,7 +164,9 @@ describe("Projection Infer utilities", () => {
   const proj = defineProjection<Def>({
     on: {
       Added: {
-        reduce: (event, view) => ({ items: [...view.items, event.payload.item] }),
+        reduce: (event, view) => ({
+          items: [...view.items, event.payload.item],
+        }),
       },
     },
     queryHandlers: {},
