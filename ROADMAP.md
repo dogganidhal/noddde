@@ -30,8 +30,8 @@ _These items must be completed to guarantee state consistency and developer ergo
   - Implement SIGTERM handlers to drain in-flight commands, wait for active Sagas/Outbox relays to finish, and safely close database connections.
 - [ ] **Projection & Handler Error Isolation**
   - Granular error boundaries so a single failing read-model reducer does not crash the event bus or block other successful projections.
-- [ ] **The CLI & "Golden Path" Scaffolding**
-  - `npx noddde generate aggregate <Name>` to generate opinionated, scalable folder structures, preventing massive files as domains grow.
+- [x] **The CLI & "Golden Path" Scaffolding**
+  - `@noddde/cli` with 5 commands: `new project`, `new domain`, `new aggregate`, `new projection`, `new saga`. Project-aware generators auto-place files in the correct layered structure. Extracted handlers (command-handlers, query-handlers, view-reducers, transition-handlers) keep files focused as domains grow.
 - [ ] **Type System Stress Testing**
   - Formal benchmarks for the type inference bundles to ensure IDE performance and TS compilation remain instant even with large domains.
 - [ ] **Projection Rebuild API**
