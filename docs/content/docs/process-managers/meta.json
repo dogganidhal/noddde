@@ -1,4 +1,4 @@
 {
   "title": "Process Managers",
-  "pages": ["sagas", "standalone-commands"]
+  "pages": ["sagas", "standalone-commands", "standalone-events"]
 }

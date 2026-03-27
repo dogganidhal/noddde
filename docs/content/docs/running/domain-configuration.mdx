@@ -101,17 +101,17 @@ These warnings only appear when the framework itself supplies the default -- not
 
 ### DomainWiring Fields
 
-| Field | Description |
-| --- | --- |
-| `infrastructure` | Factory for user-provided services. What handlers receive as the `infrastructure` parameter. |
-| `aggregates` | Aggregate runtime config -- global `AggregateWiring` or per-aggregate record. See below. |
-| `projections` | Per-projection view store wiring. See [Projection Wiring](#projection-wiring). |
-| `sagas` | Saga runtime config. Defaults to in-memory if `processModel` has sagas. |
-| `buses` | Factory for CQRS buses. Receives resolved user infrastructure. |
-| `unitOfWork` | Factory for the UnitOfWorkFactory. |
-| `idempotency` | Factory for idempotency store (command dedup by commandId). |
-| `outbox` | Transactional outbox configuration. |
-| `metadataProvider` | Function called on every command dispatch for event metadata context. |
+| Field              | Description                                                                                  |
+| ------------------ | -------------------------------------------------------------------------------------------- |
+| `infrastructure`   | Factory for user-provided services. What handlers receive as the `infrastructure` parameter. |
+| `aggregates`       | Aggregate runtime config -- global `AggregateWiring` or per-aggregate record. See below.     |
+| `projections`      | Per-projection view store wiring. See [Projection Wiring](#projection-wiring).               |
+| `sagas`            | Saga runtime config. Defaults to in-memory if `processModel` has sagas.                      |
+| `buses`            | Factory for CQRS buses. Receives resolved user infrastructure.                               |
+| `unitOfWork`       | Factory for the UnitOfWorkFactory.                                                           |
+| `idempotency`      | Factory for idempotency store (command dedup by commandId).                                  |
+| `outbox`           | Transactional outbox configuration.                                                          |
+| `metadataProvider` | Function called on every command dispatch for event metadata context.                        |
 
 All fields are optional. Both `wireDomain(definition)` and `wireDomain(definition, {})` use in-memory defaults for everything.
 
@@ -280,7 +280,7 @@ Standalone query handlers are useful for cross-projection queries, system health
 
 ## Process Model
 
-The `processModel` section registers [sagas](/docs/process-managers/sagas) that coordinate workflows across multiple aggregates:
+The `processModel` section registers [sagas](/docs/process-managers/sagas) and standalone event handlers for event-driven workflows and side effects:
 
 ```ts
 import { BookingFulfillmentSaga } from "./process-model/booking-fulfillment";
@@ -289,10 +289,34 @@ processModel: {
   sagas: {
     BookingFulfillment: BookingFulfillmentSaga,
   },
+  standaloneEventHandlers: {
+    BookingConfirmed: (event, infrastructure) => {
+      infrastructure.emailService.sendConfirmation(event.payload.guestEmail);
+    },
+  },
 },
 ```
 
-The process model is optional. Omit it entirely if your domain does not need cross-aggregate coordination.
+Both `sagas` and `standaloneEventHandlers` are optional — include only what you need.
+
+### Standalone Event Handlers
+
+Standalone event handlers are lightweight, stateless functions that react to domain events with simple side effects — sending emails, logging audit trails, notifying external systems. Unlike sagas, they don't maintain state, don't dispatch commands, and don't need persistence.
+
+```ts
+standaloneEventHandlers: {
+  OrderPlaced: async (event, infrastructure) => {
+    await infrastructure.analytics.track("order_placed", event.payload);
+  },
+  PaymentReceived: (event, infrastructure) => {
+    infrastructure.logger.info(`Payment received: ${event.payload.amount}`);
+  },
+},
+```
+
+Each handler receives the full event object (including metadata) and the domain infrastructure. Use a saga instead when you need state tracking, command dispatch, or multi-step coordination.
+
+The process model is optional. Omit it entirely if your domain does not need cross-aggregate coordination or event-driven side effects.
 
 ## The Domain Class
 

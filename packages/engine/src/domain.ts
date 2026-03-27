@@ -7,6 +7,7 @@ import type {
   CQRSInfrastructure,
   Event,
   EventBus,
+  EventHandler,
   ID,
   Infrastructure,
   PersistenceConfiguration,
@@ -99,6 +100,21 @@ type StandaloneQueryHandlerMap<
 };
 
 /**
+ * Maps event names to standalone event handlers. Each handler receives the
+ * full event and infrastructure. Follows the same pattern as
+ * StandaloneCommandHandlerMap and StandaloneQueryHandlerMap.
+ */
+type StandaloneEventHandlerMap<
+  TInfrastructure extends Infrastructure,
+  TStandaloneEvent extends Event,
+> = {
+  [EventName in TStandaloneEvent["name"]]?: EventHandler<
+    Extract<TStandaloneEvent, { name: EventName }>,
+    TInfrastructure
+  >;
+};
+
+/**
  * Factory function returning a persistence configuration, either synchronously
  * or as a promise.
  */
@@ -153,6 +169,7 @@ export type DomainDefinition<
   TStandaloneCommand extends Command = Command,
   TStandaloneQuery extends Query<any> = Query<any>,
   TAggregates extends AggregateMap = AggregateMap,
+  TStandaloneEvent extends Event = Event,
 > = {
   /** The write side: aggregates and standalone command handlers. */
   writeModel: {
@@ -175,12 +192,17 @@ export type DomainDefinition<
     >;
   };
   /**
-   * Process managers (sagas). Optional — omit if the domain has no
-   * cross-aggregate workflows.
+   * Process model: sagas and standalone event handlers. Optional — omit if
+   * the domain has no cross-aggregate workflows or event-driven side effects.
    */
   processModel?: {
-    /** A map of saga definitions keyed by saga name. */
-    sagas: SagaMap;
+    /** A map of saga definitions keyed by saga name. Optional — omit if no sagas. */
+    sagas?: SagaMap;
+    /** Optional map of standalone event handlers keyed by event name. */
+    standaloneEventHandlers?: StandaloneEventHandlerMap<
+      TInfrastructure,
+      TStandaloneEvent
+    >;
   };
 };
 
@@ -234,18 +256,21 @@ export function defineDomain<
   TStandaloneCommand extends Command = Command,
   TStandaloneQuery extends Query<any> = Query<any>,
   TAggregates extends AggregateMap = AggregateMap,
+  TStandaloneEvent extends Event = Event,
 >(
   definition: DomainDefinition<
     TInfrastructure,
     TStandaloneCommand,
     TStandaloneQuery,
-    TAggregates
+    TAggregates,
+    TStandaloneEvent
   >,
 ): DomainDefinition<
   TInfrastructure,
   TStandaloneCommand,
   TStandaloneQuery,
-  TAggregates
+  TAggregates,
+  TStandaloneEvent
 > {
   return definition;
 }
@@ -447,9 +472,12 @@ export class Domain<
       }
     }
 
-    // Step 5: Resolve saga persistence (only when processModel is configured)
+    // Step 5: Resolve saga persistence (only when processModel.sagas is defined and non-empty)
     let sagaPersistence: SagaPersistence | undefined;
-    if (definition.processModel) {
+    const hasSagas =
+      definition.processModel?.sagas &&
+      Object.keys(definition.processModel.sagas).length > 0;
+    if (hasSagas) {
       if (wiring.sagas?.persistence) {
         sagaPersistence = await wiring.sagas.persistence();
       } else {
@@ -779,7 +807,7 @@ export class Domain<
     }
 
     // Step 11: Register event listeners for sagas
-    if (definition.processModel && this._sagaExecutor) {
+    if (definition.processModel?.sagas && this._sagaExecutor) {
       for (const [sagaName, saga] of Object.entries(
         definition.processModel.sagas,
       )) {
@@ -788,6 +816,18 @@ export class Domain<
             await this._sagaExecutor!.execute(sagaName, saga, event);
           });
         }
+      }
+    }
+
+    // Step 12: Register standalone event handlers
+    if (definition.processModel?.standaloneEventHandlers) {
+      for (const [eventName, handler] of Object.entries(
+        definition.processModel.standaloneEventHandlers,
+      )) {
+        if (!handler) continue;
+        this.subscribeToEvent(eventBus, eventName, async (event: Event) => {
+          await (handler as any)(event, this._infrastructure);
+        });
       }
     }
   }
@@ -981,12 +1021,14 @@ export const wireDomain = async <
   TStandaloneCommand extends Command = Command,
   TStandaloneQuery extends Query<any> = Query<any>,
   TAggregates extends AggregateMap = AggregateMap,
+  TStandaloneEvent extends Event = Event,
 >(
   definition: DomainDefinition<
     TInfrastructure,
     TStandaloneCommand,
     TStandaloneQuery,
-    TAggregates
+    TAggregates,
+    TStandaloneEvent
   >,
   wiring: DomainWiring<TInfrastructure, TAggregates> = {} as DomainWiring<
     TInfrastructure,
@@ -1013,7 +1055,15 @@ export const wireDomain = async <
     );
   }
 
-  const domain = new Domain(definition, wiring, { perAggregateWirings });
+  const domain = new Domain(
+    definition as DomainDefinition<
+      TInfrastructure,
+      TStandaloneCommand,
+      TStandaloneQuery
+    >,
+    wiring,
+    { perAggregateWirings },
+  );
   await domain.init();
   return domain;
 };

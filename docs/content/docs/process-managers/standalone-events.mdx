@@ -1,0 +1,91 @@
+---
+title: Standalone Event Handlers
+description: Lightweight, stateless handlers that react to domain events with simple side effects like notifications, logging, and external system updates.
+---
+
+## What Are Standalone Event Handlers?
+
+Most event handling in noddde happens through [projections](/docs/read-model/projections) (updating read models) or [sagas](/docs/process-managers/sagas) (coordinating multi-step workflows). But some event reactions are simpler: send an email, log an audit entry, notify an external system. **Standalone event handlers** handle these cases without the ceremony of a full saga.
+
+A standalone event handler is a plain function that receives an event and infrastructure, performs a side effect, and returns nothing.
+
+For stateful workflows that need to track progress, dispatch commands, or handle compensation, use [Sagas](/docs/process-managers/sagas) instead.
+
+## The EventHandler Type
+
+Standalone event handlers use the `EventHandler` type from `@noddde/core`:
+
+```typescript
+type EventHandler<
+  TEvent extends Event,
+  TInfrastructure extends Infrastructure,
+> = (event: TEvent, infrastructure: TInfrastructure) => void | Promise<void>;
+```
+
+| Parameter        | Description                                                  |
+| ---------------- | ------------------------------------------------------------ |
+| `event`          | The full event object (name, payload, and optional metadata) |
+| `infrastructure` | Your domain infrastructure (repositories, services, etc.)    |
+
+Key characteristics:
+
+- **Stateless.** No saga state to manage, no persistence needed.
+- **Fire-and-forget.** The handler returns `void` — it does not produce commands or events.
+- **Full event access.** Receives the complete event including metadata for audit/tracing.
+- **Async-capable.** Can return `Promise<void>` for async operations.
+
+## Registering Standalone Event Handlers
+
+Standalone event handlers are registered in the `processModel.standaloneEventHandlers` map of your domain configuration:
+
+```typescript
+import { defineDomain } from "@noddde/engine";
+
+const definition = defineDomain<AppInfrastructure>({
+  writeModel: { aggregates: { Order } },
+  readModel: { projections: { OrderSummary } },
+  processModel: {
+    standaloneEventHandlers: {
+      OrderPlaced: async (event, infrastructure) => {
+        await infrastructure.emailService.sendOrderConfirmation(
+          event.payload.customerEmail,
+          event.payload.orderId,
+        );
+      },
+      PaymentFailed: (event, infrastructure) => {
+        infrastructure.logger.warn(
+          `Payment failed for order ${event.payload.orderId}`,
+        );
+      },
+    },
+  },
+});
+```
+
+Each key is an event name, and each value is an `EventHandler` function. The handler is automatically subscribed to the event bus during domain initialization.
+
+## When to Use What
+
+| Need                                        | Use                                                                                                      |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Simple side effect (email, log, webhook)    | **Standalone event handler**                                                                             |
+| Stateful multi-step workflow                | [Saga](/docs/process-managers/sagas)                                                                     |
+| Update a queryable read model               | [Projection](/docs/read-model/projections)                                                               |
+| Cross-aggregate orchestration with commands | [Saga](/docs/process-managers/sagas) or [Standalone command](/docs/process-managers/standalone-commands) |
+
+## Without Sagas
+
+You can use `standaloneEventHandlers` without defining any sagas. The `sagas` field in `processModel` is optional:
+
+```typescript
+processModel: {
+  standaloneEventHandlers: {
+    OrderShipped: (event, infrastructure) => {
+      infrastructure.analytics.track("order_shipped", event.payload);
+    },
+  },
+  // No sagas needed — saga persistence is not resolved
+},
+```
+
+When `processModel` has only `standaloneEventHandlers` and no `sagas`, the framework does not create a saga persistence backend and does not log a saga persistence warning.

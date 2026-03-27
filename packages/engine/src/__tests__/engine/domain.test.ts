@@ -2202,3 +2202,152 @@ describe("wireDomain hello world", () => {
     warnSpy.mockRestore();
   });
 });
+
+// ============================================================
+// Standalone event handlers on processModel
+// ============================================================
+
+describe("standalone event handlers", () => {
+  // Reuse the Counter aggregate defined earlier in this file
+  const CounterAggregate = defineAggregate<CounterTypes>({
+    initialState: { count: 0 },
+    commands: {
+      CreateCounter: (cmd) => ({
+        name: "CounterCreated",
+        payload: { id: cmd.targetAggregateId },
+      }),
+      Increment: (cmd) => ({
+        name: "Incremented",
+        payload: { by: cmd.payload.by },
+      }),
+    },
+    apply: {
+      CounterCreated: (_p, state) => state,
+      Incremented: (payload, state) => ({ count: state.count + payload.by }),
+    },
+  });
+
+  it("should invoke handler when matching event is dispatched", async () => {
+    const receivedEvents: Array<{ name: string; payload: unknown }> = [];
+
+    const definition = defineDomain<Infrastructure>({
+      writeModel: { aggregates: { CounterAggregate } },
+      readModel: { projections: {} },
+      processModel: {
+        standaloneEventHandlers: {
+          Incremented: (event) => {
+            receivedEvents.push({ name: event.name, payload: event.payload });
+          },
+        },
+      },
+    });
+
+    const domain = await wireDomain(definition, {
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    await domain.dispatchCommand({
+      name: "CreateCounter",
+      targetAggregateId: "c-1",
+    });
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "c-1",
+      payload: { by: 5 },
+    });
+
+    expect(receivedEvents).toHaveLength(1);
+    expect(receivedEvents[0]!.name).toBe("Incremented");
+    expect(receivedEvents[0]!.payload).toEqual({ by: 5 });
+  });
+
+  it("should not log saga persistence warning when processModel has only standaloneEventHandlers", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const definition = defineDomain<Infrastructure>({
+      writeModel: { aggregates: { CounterAggregate } },
+      readModel: { projections: {} },
+      processModel: {
+        standaloneEventHandlers: {
+          Incremented: () => {},
+        },
+      },
+    });
+
+    await wireDomain(definition, {
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    const sagaWarnings = warnSpy.mock.calls.filter((args) =>
+      String(args[0]).includes("saga persistence"),
+    );
+    expect(sagaWarnings).toHaveLength(0);
+
+    warnSpy.mockRestore();
+  });
+
+  it("should await async standalone event handlers before dispatch resolves", async () => {
+    let completed = false;
+
+    const definition = defineDomain<Infrastructure>({
+      writeModel: { aggregates: { CounterAggregate } },
+      readModel: { projections: {} },
+      processModel: {
+        standaloneEventHandlers: {
+          Incremented: async () => {
+            await new Promise((r) => setTimeout(r, 10));
+            completed = true;
+          },
+        },
+      },
+    });
+
+    const domain = await wireDomain(definition, {
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    await domain.dispatchCommand({
+      name: "CreateCounter",
+      targetAggregateId: "c-1",
+    });
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "c-1",
+      payload: { by: 1 },
+    });
+
+    expect(completed).toBe(true);
+  });
+
+  it("should handle empty standaloneEventHandlers gracefully", async () => {
+    const definition = defineDomain<Infrastructure>({
+      writeModel: { aggregates: { CounterAggregate } },
+      readModel: { projections: {} },
+      processModel: {
+        standaloneEventHandlers: {},
+      },
+    });
+
+    const domain = await wireDomain(definition, {
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    expect(domain).toBeInstanceOf(Domain);
+  });
+});
