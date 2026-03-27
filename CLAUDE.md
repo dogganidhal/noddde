@@ -14,6 +14,7 @@ noddde is a TypeScript framework for DDD, CQRS, and Event Sourcing using the fun
 
 - `packages/core/` — Types, interfaces, definition functions (`@noddde/core`) — zero runtime deps
 - `packages/engine/` — Runtime: Domain orchestration + in-memory implementations (`@noddde/engine`)
+- `packages/cli/` — CLI tool for scaffolding aggregates, projections, sagas (`@noddde/cli`)
 - `packages/samples/` — 3 reference domains (auction, banking, order-fulfillment)
 - `docs/` — Fumadocs documentation site
 - `specs/` — Behavioral specs (mirror source directories). See `specs/README.md`
@@ -77,6 +78,10 @@ Spec `## Test Scenarios` → vitest files. Path: `specs/core/<path>.spec.md` →
 ## Validation
 
 Before `implemented`: all exports present, all requirements tested, invariants enforced, edge cases covered, `tsc --noEmit` passes, `vitest run` passes, no stubs, docs updated. Full checklist in `validate-spec` skill.
+
+## CLI Template Maintenance
+
+When a spec changes or a new spec is added that affects aggregate, projection, or saga patterns (types, handler signatures, folder structure), reassess whether `packages/cli/` templates need updating. The `/spec` pipeline (step 5) enforces this automatically — see `.claude/skills/spec/SKILL.md`.
 
 ## Non-Spec Work
 
