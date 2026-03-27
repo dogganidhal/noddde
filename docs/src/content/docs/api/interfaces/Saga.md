@@ -5,9 +5,9 @@ prev: false
 title: "Saga"
 ---
 
-Defined in: [ddd/saga.ts:138](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/saga.ts#L138)
+Defined in: [ddd/saga.ts:162](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/saga.ts#L162)
 
-A saga definition following the process manager pattern: initial state, event handlers (react), association logic (identity), and lifecycle declaration (startedBy).
+A saga definition following the process manager pattern: initial state, lifecycle declaration (startedBy), and a unified `on` map that bundles identity extraction and event handling per event type.
 
 ## Type Parameters
 
@@ -25,7 +25,7 @@ A saga definition following the process manager pattern: initial state, event ha
 
 > **initialState**: `T`\[`"state"`\]
 
-Defined in: [ddd/saga.ts:146](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/saga.ts#L146)
+Defined in: [ddd/saga.ts:170](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/saga.ts#L170)
 
 The zero-value state used when a saga instance is first created.
 
@@ -35,26 +35,16 @@ The zero-value state used when a saga instance is first created.
 
 > **startedBy**: \[`T`\[`"events"`\]\[`"name"`\], ...`T`\[`"events"`\]\[`"name"`\]\[\]\]
 
-Defined in: [ddd/saga.ts:155](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/saga.ts#L155)
+Defined in: [ddd/saga.ts:179](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/saga.ts#L179)
 
 One or more event names that start a new saga instance. Must be a non-empty subset of the saga's event names.
 
 ---
 
-### associations
+### on
 
-> **associations**: `SagaAssociationMap`\<`T`, `TSagaId`\>
+> **on**: `SagaOnMap`\<`T`, `TSagaId`\>
 
-Defined in: [ddd/saga.ts:162](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/saga.ts#L162)
+Defined in: [ddd/saga.ts:187](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/saga.ts#L187)
 
-Maps each event to a function that extracts the saga instance ID. Every event the saga handles must have an association entry.
-
----
-
-### handlers
-
-> **handlers**: `SagaEventHandlerMap`\<`T`\>
-
-Defined in: [ddd/saga.ts:168](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/saga.ts#L168)
-
-A map of event handlers keyed by event name. Each handler implements the "react" phase.
+A partial map of event handlers keyed by event name. Each entry bundles an `id` function (extracts saga instance ID) and a `handle` function (processes the event). Only events the saga handles need entries.

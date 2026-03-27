@@ -52,7 +52,7 @@ class InMemorySagaPersistence implements SagaPersistence {
 ## Integration Points
 
 - **Domain.init()** -- The domain receives the saga persistence instance from `DomainWiring.sagas.persistence`.
-- **Saga event handling lifecycle** -- When an event arrives for a saga: (1) derive the saga instance ID via `saga.associations[event.name](event)`, (2) `load(sagaName, sagaId)`, (3) if `undefined` and event is in `saga.startedBy`, use `saga.initialState`, (4) invoke the handler, (5) `save(sagaName, sagaId, reaction.state)`, (6) dispatch `reaction.commands`.
+- **Saga event handling lifecycle** -- When an event arrives for a saga: (1) derive the saga instance ID via `saga.on[event.name].id(event)`, (2) `load(sagaName, sagaId)`, (3) if `undefined` and event is in `saga.startedBy`, use `saga.initialState`, (4) invoke the handler via `saga.on[event.name].handle(event, state, infrastructure)`, (5) `save(sagaName, sagaId, reaction.state)`, (6) dispatch `reaction.commands`.
 
 ## Test Scenarios
 

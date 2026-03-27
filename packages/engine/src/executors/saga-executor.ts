@@ -44,17 +44,19 @@ export class SagaExecutor {
     saga: Saga<any, any>,
     event: Event,
   ): Promise<void> {
-    // Step 1: Derive saga instance ID
-    const associationFn = saga.associations[event.name];
-    if (!associationFn) {
+    // Step 1: Look up on-map entry for this event
+    const onEntry = (saga.on as Record<string, any>)[event.name];
+    if (!onEntry) {
       return;
     }
-    const sagaId = associationFn(event);
 
-    // Step 2: Load saga state
+    // Step 2: Derive saga instance ID
+    const sagaId = onEntry.id(event);
+
+    // Step 3: Load saga state
     let currentState = await this.sagaPersistence.load(sagaName, sagaId);
 
-    // Step 3: Bootstrap or resume
+    // Step 4: Bootstrap or resume
     if (currentState == null) {
       if ((saga.startedBy as string[]).includes(event.name)) {
         currentState = saga.initialState;
@@ -64,25 +66,21 @@ export class SagaExecutor {
       }
     }
 
-    // Step 4: Execute handler
-    const sagaHandler = saga.handlers[event.name];
-    if (!sagaHandler) {
-      return;
-    }
-    const reaction = await sagaHandler(
+    // Step 5: Execute handler
+    const reaction = await onEntry.handle(
       event,
       currentState,
       this.infrastructure,
     );
 
-    // Step 5: Propagate correlation context from triggering event
+    // Step 6: Propagate correlation context from triggering event
     const sagaCtx: MetadataContext = {
       correlationId: event.metadata?.correlationId ?? uuidv7(),
       causationId: event.metadata?.eventId ?? event.name,
       userId: event.metadata?.userId,
     };
 
-    // Step 6: Create UoW for saga reaction (spans state + commands)
+    // Step 7: Create UoW for saga reaction (spans state + commands)
     const uow = this.unitOfWorkFactory();
     const sagaPersistence = this.sagaPersistence;
 
@@ -94,7 +92,7 @@ export class SagaExecutor {
             sagaPersistence.save(sagaName, sagaId, reaction.state),
           );
 
-          // Step 7: Dispatch commands (within the saga's UoW + metadata context)
+          // Step 8: Dispatch commands (within the saga's UoW + metadata context)
           if (reaction.commands) {
             const commands = Array.isArray(reaction.commands)
               ? reaction.commands
@@ -104,10 +102,10 @@ export class SagaExecutor {
             }
           }
 
-          // Step 8: Commit saga state + all aggregate changes atomically
+          // Step 9: Commit saga state + all aggregate changes atomically
           const events = await uow.commit();
 
-          // Step 9: Publish all deferred events
+          // Step 10: Publish all deferred events
           for (const deferredEvent of events) {
             await this.infrastructure.eventBus.dispatch(deferredEvent);
           }

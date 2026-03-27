@@ -226,25 +226,27 @@ describe("Domain bootstrap - full configuration", () => {
   }>({
     initialState: { notified: false },
     startedBy: ["TicketCreated"],
-    associations: {
-      TicketCreated: (event) => event.payload.id,
-      TicketResolved: (event) => event.payload.id,
-    },
-    handlers: {
-      TicketCreated: (event, state) => ({
-        state: { notified: true },
-        commands: {
-          name: "SendNotification",
-          targetAggregateId: event.payload.id,
-          payload: {
-            ticketId: event.payload.id,
-            message: `New ticket: ${event.payload.title}`,
+    on: {
+      TicketCreated: {
+        id: (event) => event.payload.id,
+        handle: (event, state) => ({
+          state: { notified: true },
+          commands: {
+            name: "SendNotification",
+            targetAggregateId: event.payload.id,
+            payload: {
+              ticketId: event.payload.id,
+              message: `New ticket: ${event.payload.title}`,
+            },
           },
-        },
-      }),
-      TicketResolved: (event, state) => ({
-        state,
-      }),
+        }),
+      },
+      TicketResolved: {
+        id: (event) => event.payload.id,
+        handle: (event, state) => ({
+          state,
+        }),
+      },
     },
   });
 

@@ -63,68 +63,71 @@ export const PaymentProcessingSaga = defineSaga<PaymentProcessingDef>({
 
   startedBy: ["PaymentRequested"],
 
-  associations: {
-    PaymentRequested: (event) => event.payload.bookingId,
-    PaymentCompleted: (event) => event.payload.bookingId,
-    PaymentFailed: (event) => event.payload.bookingId,
-  },
-
-  handlers: {
+  on: {
     // ─── Payment requested → charge via gateway ───────────────────
-    PaymentRequested: async (event, _state, { paymentGateway }) => {
-      try {
-        const { transactionId } = await paymentGateway.charge(
-          event.payload.guestId,
-          event.payload.amount,
-        );
+    PaymentRequested: {
+      id: (event) => event.payload.bookingId,
+      handle: async (event, _state, { paymentGateway }) => {
+        try {
+          const { transactionId } = await paymentGateway.charge(
+            event.payload.guestId,
+            event.payload.amount,
+          );
 
-        return {
-          state: {
-            bookingId: event.payload.bookingId,
-            guestId: event.payload.guestId,
-            paymentId: event.payload.paymentId,
-            amount: event.payload.amount,
-            status: "charging" as const,
-          },
-          commands: {
-            name: "CompletePayment" as const,
-            targetAggregateId: event.payload.bookingId,
-            payload: {
+          return {
+            state: {
+              bookingId: event.payload.bookingId,
+              guestId: event.payload.guestId,
               paymentId: event.payload.paymentId,
-              transactionId,
               amount: event.payload.amount,
+              status: "charging" as const,
             },
-          },
-        };
-      } catch (error: any) {
-        return {
-          state: {
-            bookingId: event.payload.bookingId,
-            guestId: event.payload.guestId,
-            paymentId: event.payload.paymentId,
-            amount: event.payload.amount,
-            status: "failed" as const,
-          },
-          commands: {
-            name: "FailPayment" as const,
-            targetAggregateId: event.payload.bookingId,
-            payload: {
+            commands: {
+              name: "CompletePayment" as const,
+              targetAggregateId: event.payload.bookingId,
+              payload: {
+                paymentId: event.payload.paymentId,
+                transactionId,
+                amount: event.payload.amount,
+              },
+            },
+          };
+        } catch (error: any) {
+          return {
+            state: {
+              bookingId: event.payload.bookingId,
+              guestId: event.payload.guestId,
               paymentId: event.payload.paymentId,
-              reason: error.message ?? "Payment gateway error",
+              amount: event.payload.amount,
+              status: "failed" as const,
             },
-          },
-        };
-      }
+            commands: {
+              name: "FailPayment" as const,
+              targetAggregateId: event.payload.bookingId,
+              payload: {
+                paymentId: event.payload.paymentId,
+                reason: error.message ?? "Payment gateway error",
+              },
+            },
+          };
+        }
+      },
     },
 
     // ─── Observation: payment completed ───────────────────────────
-    PaymentCompleted: (_event, state) => ({
-      state: { ...state, status: "completed" as const },
-    }),
+    PaymentCompleted: {
+      id: (event) => event.payload.bookingId,
+      handle: (_event, state) => ({
+        state: { ...state, status: "completed" as const },
+      }),
+    },
 
     // ─── Observation: payment failed ──────────────────────────────
-    PaymentFailed: (_event, state) => ({
-      state: { ...state, status: "failed" as const },
-    }),
+    PaymentFailed: {
+      id: (event) => event.payload.bookingId,
+      handle: (_event, state) => ({
+        state: { ...state, status: "failed" as const },
+      }),
+    },
   },
 });

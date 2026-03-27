@@ -148,12 +148,12 @@ expect(result.error).toBeDefined();
 expect(result.commands).toEqual([]);
 ```
 
-## Testing Associations
+## Testing ID Extraction
 
-Saga associations (the functions that extract a saga ID from an event) are plain functions. Test them directly:
+Each `on` entry in a saga bundles an `id` function that extracts the saga instance ID from an event. These are plain functions -- test them directly:
 
 ```ts
-const sagaId = OrderFulfillmentSaga.associations.OrderPlaced({
+const sagaId = OrderFulfillmentSaga.on.OrderPlaced!.id({
   name: "OrderPlaced",
   payload: { orderId: "o-1", amount: 99.99 },
 });
@@ -161,10 +161,10 @@ const sagaId = OrderFulfillmentSaga.associations.OrderPlaced({
 expect(sagaId).toBe("o-1");
 ```
 
-Each bounded context may name the correlation field differently (`orderId`, `referenceId`, `customerReference`), so verify that each association resolves to the same saga ID:
+Each bounded context may name the correlation field differently (`orderId`, `referenceId`, `customerReference`), so verify that each `on` entry's `id` function resolves to the same saga ID:
 
 ```ts
-describe("associations", () => {
+describe("on entry id extraction", () => {
   it("should extract orderId from OrderPlaced", () => {
     const event = {
       name: "OrderPlaced" as const,
@@ -176,7 +176,7 @@ describe("associations", () => {
         placedAt: new Date(),
       },
     };
-    expect(OrderFulfillmentSaga.associations.OrderPlaced(event)).toBe(
+    expect(OrderFulfillmentSaga.on.OrderPlaced!.id(event)).toBe(
       "order-1",
     );
   });
@@ -191,7 +191,7 @@ describe("associations", () => {
         completedAt: new Date(),
       },
     };
-    expect(OrderFulfillmentSaga.associations.PaymentCompleted(event)).toBe(
+    expect(OrderFulfillmentSaga.on.PaymentCompleted!.id(event)).toBe(
       "order-1",
     );
   });
@@ -200,7 +200,7 @@ describe("associations", () => {
 
 ## Testing Full Workflows
 
-Replay a sequence of events through the saga to verify the complete lifecycle. You can either use the harness for each step or call handlers directly:
+Replay a sequence of events through the saga to verify the complete lifecycle. You can either use the harness for each step or call handlers directly via the `on` map:
 
 ```ts
 it("should complete the full happy path", async () => {
@@ -208,7 +208,7 @@ it("should complete the full happy path", async () => {
   let commands: any;
 
   // Step 1: Order placed
-  ({ state, commands } = OrderFulfillmentSaga.handlers.OrderPlaced(
+  ({ state, commands } = OrderFulfillmentSaga.on.OrderPlaced!.handle(
     {
       name: "OrderPlaced",
       payload: {
@@ -226,7 +226,7 @@ it("should complete the full happy path", async () => {
   expect(commands.name).toBe("RequestPayment");
 
   // Step 2: Payment completed
-  ({ state, commands } = OrderFulfillmentSaga.handlers.PaymentCompleted(
+  ({ state, commands } = OrderFulfillmentSaga.on.PaymentCompleted!.handle(
     {
       name: "PaymentCompleted",
       payload: {
@@ -242,7 +242,7 @@ it("should complete the full happy path", async () => {
   expect(state.status).toBe("awaiting_shipment");
 
   // Step 3: Shipment dispatched
-  ({ state, commands } = OrderFulfillmentSaga.handlers.ShipmentDispatched(
+  ({ state, commands } = OrderFulfillmentSaga.on.ShipmentDispatched!.handle(
     {
       name: "ShipmentDispatched",
       payload: {
@@ -264,4 +264,4 @@ it("should complete the full happy path", async () => {
 
 - [Testing Aggregates and Projections](/docs/testing/testing-aggregates-and-projections) -- `testAggregate` for command handler testing
 - [Testing Domains](/docs/testing/testing-domains) -- `testDomain` for full saga orchestration tests
-- [Defining Sagas](/docs/process-managers/defining-sagas) -- Saga definition reference
+- [Defining Sagas](/docs/process-managers/sagas) -- Saga definition reference

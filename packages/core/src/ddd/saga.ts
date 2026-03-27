@@ -92,43 +92,67 @@ export type SagaEventHandler<
   infrastructure: TInfrastructure & CQRSInfrastructure,
 ) => SagaReaction<TState, TCommands> | Promise<SagaReaction<TState, TCommands>>;
 
-// ---- Internal handler maps ----
+// ---- On-map entry ----
 
 /**
- * Maps each event name to its handler, with the event type narrowed
- * via Extract. Follows the same pattern as `CommandHandlerMap` for
- * aggregates and `ReducerMap` for projections.
+ * A single entry in the saga's `on` map. Bundles the identity extractor
+ * (routing) and the event handler (behavior) for one event type.
+ *
+ * This is the saga equivalent of {@link ProjectionEventHandler} for
+ * projections: each `on` entry bundles an `id` function and a `handle`
+ * function, just as projection entries bundle `id` and `reduce`.
+ *
+ * @typeParam TEvent - The narrowed event type for this entry.
+ * @typeParam TState - The saga state type.
+ * @typeParam TCommands - The union of command types this saga may dispatch.
+ * @typeParam TInfrastructure - The infrastructure dependencies available.
+ * @typeParam TSagaId - The saga instance identifier type.
  */
-type SagaEventHandlerMap<T extends SagaTypes> = {
-  [K in T["events"]["name"]]: SagaEventHandler<
+export type SagaOnEntry<
+  TEvent extends Event,
+  TState,
+  TCommands extends Command,
+  TInfrastructure extends Infrastructure = Infrastructure,
+  TSagaId extends ID = string,
+> = {
+  /** Extracts the saga instance ID from the event. Required for routing. */
+  id: (event: TEvent) => TSagaId;
+  /** The saga event handler: receives event, state, and infrastructure. */
+  handle: SagaEventHandler<TEvent, TState, TCommands, TInfrastructure>;
+};
+
+// ---- On map ----
+
+/**
+ * Maps event names to their saga on-entries. Each entry bundles an
+ * identity extractor (`id`) and a handler (`handle`). This map is
+ * **partial** — only events the saga handles need entries. Unhandled
+ * events are silently ignored at runtime.
+ *
+ * @typeParam T - The {@link SagaTypes} bundle.
+ * @typeParam TSagaId - The saga instance identifier type.
+ */
+type SagaOnMap<T extends SagaTypes, TSagaId extends ID = string> = {
+  [K in T["events"]["name"]]?: SagaOnEntry<
     Extract<T["events"], { name: K }>,
     T["state"],
     T["commands"],
-    T["infrastructure"]
+    T["infrastructure"],
+    TSagaId
   >;
-};
-
-/**
- * Maps each event name to a function that extracts the saga instance ID
- * from that event. This is how the framework routes incoming events to
- * the correct saga instance.
- *
- * Analogous to `targetAggregateId` on commands, but since events don't
- * carry a saga ID natively, the association must be user-defined per
- * event type.
- */
-type SagaAssociationMap<T extends SagaTypes, TSagaId extends ID = string> = {
-  [K in T["events"]["name"]]: (
-    event: Extract<T["events"], { name: K }>,
-  ) => TSagaId;
 };
 
 // ---- Saga definition ----
 
 /**
  * A saga definition following the process manager pattern: initial state,
- * event handlers (react), association logic (identity), and lifecycle
- * declaration (startedBy). No base classes, no decorators — just a typed object.
+ * lifecycle declaration (startedBy), and a unified `on` map that bundles
+ * identity extraction and event handling per event type. No base classes,
+ * no decorators — just a typed object.
+ *
+ * The `on` map is partial — only events the saga handles need entries.
+ * Each entry bundles an `id` function (extracts saga instance ID) and a
+ * `handle` function (processes the event and returns a reaction).
  *
  * Use {@link defineSaga} to create a saga with full type inference.
  *
@@ -155,17 +179,12 @@ export interface Saga<
   startedBy: [T["events"]["name"], ...T["events"]["name"][]];
 
   /**
-   * Maps each event to a function that extracts the saga instance ID.
-   * Every event the saga handles must have an association entry so
-   * the runtime can route the event to the correct saga instance.
+   * A partial map of event handlers keyed by event name. Each entry bundles
+   * an `id` function (extracts saga instance ID) and a `handle` function
+   * (processes the event). Only events the saga handles need entries —
+   * this map is partial over the event union.
    */
-  associations: SagaAssociationMap<T, TSagaId>;
-
-  /**
-   * A map of event handlers keyed by event name. Each handler implements
-   * the "react" phase: `(event, state, infrastructure) => { state, commands }`.
-   */
-  handlers: SagaEventHandlerMap<T>;
+  on: SagaOnMap<T, TSagaId>;
 }
 
 /**
@@ -175,8 +194,7 @@ export interface Saga<
  *
  * @typeParam T - Inferred {@link SagaTypes} bundle.
  * @typeParam TSagaId - The saga instance identifier type. Bounded by {@link ID}, defaults to `string`.
- * @param config - The saga configuration (initialState, startedBy,
- *   associations, handlers).
+ * @param config - The saga configuration (initialState, startedBy, on).
  * @returns The same configuration object, fully typed.
  *
  * @example
@@ -184,21 +202,24 @@ export interface Saga<
  * const OrderFulfillmentSaga = defineSaga<OrderFulfillmentSagaDef>({
  *   initialState: { status: "pending" },
  *   startedBy: ["OrderPlaced"],
- *   associations: {
- *     OrderPlaced: (event) => event.payload.orderId,
- *     PaymentCompleted: (event) => event.payload.orderId,
- *     ShipmentDispatched: (event) => event.payload.orderId,
- *   },
- *   handlers: {
- *     OrderPlaced: (event, state) => ({
- *       state: { ...state, status: "awaiting_payment" },
- *       commands: {
- *         name: "RequestPayment",
- *         targetAggregateId: event.payload.paymentId,
- *         payload: { orderId: event.payload.orderId, amount: event.payload.total },
- *       },
- *     }),
- *     // ...
+ *   on: {
+ *     OrderPlaced: {
+ *       id: (event) => event.payload.orderId,
+ *       handle: (event, state) => ({
+ *         state: { ...state, status: "awaiting_payment" },
+ *         commands: {
+ *           name: "RequestPayment",
+ *           targetAggregateId: event.payload.orderId,
+ *           payload: { orderId: event.payload.orderId, amount: event.payload.total },
+ *         },
+ *       }),
+ *     },
+ *     PaymentCompleted: {
+ *       id: (event) => event.payload.orderId,
+ *       handle: (_event, state) => ({
+ *         state: { ...state, status: "paid" },
+ *       }),
+ *     },
  *   },
  * });
  * ```

@@ -156,81 +156,93 @@ This saga orchestrates the top-level booking flow. It starts on `BookingCreated`
 export const BookingFulfillmentSaga = defineSaga<BookingFulfillmentDef>({
   startedBy: ["BookingCreated"],
 
-  handlers: {
+  on: {
     // Step 1: booking created → ask Booking aggregate to request payment
-    BookingCreated: (event) => {
-      const paymentId = randomUUID();
-      return {
-        state: { /* ... bookingId, guestId, roomType, status: "awaiting_payment" */ },
-        commands: {
-          name: "RequestPayment",
-          targetAggregateId: event.payload.bookingId,
-          payload: { paymentId, amount: event.payload.totalAmount },
-        },
-      };
+    BookingCreated: {
+      id: (event) => event.payload.bookingId,
+      handle: (event) => {
+        const paymentId = randomUUID();
+        return {
+          state: { /* ... bookingId, guestId, roomType, status: "awaiting_payment" */ },
+          commands: {
+            name: "RequestPayment",
+            targetAggregateId: event.payload.bookingId,
+            payload: { paymentId, amount: event.payload.totalAmount },
+          },
+        };
+      },
     },
 
     // Step 3: payment confirmed → find a room, dispatch two commands atomically
-    PaymentCompleted: async (event, state, infrastructure) => {
-      const availableRooms = (await infrastructure.queryBus.dispatch({
-        name: "SearchAvailableRooms",
-        payload: { type: state.roomType },
-      })) as any[];
+    PaymentCompleted: {
+      id: (event) => event.payload.bookingId,
+      handle: async (event, state, infrastructure) => {
+        const availableRooms = (await infrastructure.queryBus.dispatch({
+          name: "SearchAvailableRooms",
+          payload: { type: state.roomType },
+        })) as any[];
 
-      const room = availableRooms?.[0];
+        const room = availableRooms?.[0];
 
-      // Compensation: no room available → cancel the booking
-      if (!room) {
+        // Compensation: no room available → cancel the booking
+        if (!room) {
+          return {
+            state: { ...state, status: "cancelled" as const },
+            commands: {
+              name: "CancelBooking",
+              targetAggregateId: state.bookingId,
+              payload: { reason: "No available room of requested type" },
+            },
+          };
+        }
+
+        // Success path: multi-command dispatch across two aggregates
         return {
-          state: { ...state, status: "cancelled" as const },
-          commands: {
-            name: "CancelBooking",
-            targetAggregateId: state.bookingId,
-            payload: { reason: "No available room of requested type" },
-          },
+          state: { ...state, status: "confirmed" as const, roomId: room.roomId },
+          commands: [
+            {
+              name: "ConfirmBooking",
+              targetAggregateId: state.bookingId,
+              payload: { roomId: room.roomId },
+            },
+            {
+              name: "ReserveRoom",
+              targetAggregateId: room.roomId,
+              payload: { bookingId: state.bookingId, /* checkIn, checkOut, guestId */ },
+            },
+          ],
         };
-      }
-
-      // Success path: multi-command dispatch across two aggregates
-      return {
-        state: { ...state, status: "confirmed" as const, roomId: room.roomId },
-        commands: [
-          {
-            name: "ConfirmBooking",
-            targetAggregateId: state.bookingId,
-            payload: { roomId: room.roomId },
-          },
-          {
-            name: "ReserveRoom",
-            targetAggregateId: room.roomId,
-            payload: { bookingId: state.bookingId, /* checkIn, checkOut, guestId */ },
-          },
-        ],
-      };
+      },
     },
 
     // Compensation: payment failed → cancel booking
-    PaymentFailed: (event, state) => ({
-      state: { ...state, status: "cancelled" as const },
-      commands: {
-        name: "CancelBooking",
-        targetAggregateId: state.bookingId,
-        payload: { reason: `Payment failed: ${event.payload.reason}` },
-      },
-    }),
+    PaymentFailed: {
+      id: (event) => event.payload.bookingId,
+      handle: (event, state) => ({
+        state: { ...state, status: "cancelled" as const },
+        commands: {
+          name: "CancelBooking",
+          targetAggregateId: state.bookingId,
+          payload: { reason: `Payment failed: ${event.payload.reason}` },
+        },
+      }),
+    },
 
     // Conditional compensation: refund only if payment was previously completed
-    BookingCancelled: (_event, state) => ({
-      state: { ...state, status: "cancelled" as const },
-      commands:
-        state.status === "confirmed" && state.paymentId
-          ? {
-              name: "RefundPayment" as const,
-              targetAggregateId: state.bookingId,
-              payload: { paymentId: state.paymentId, amount: state.totalAmount },
-            }
-          : undefined,  // no refund if payment never completed
-    }),
+    BookingCancelled: {
+      id: (event) => event.payload.bookingId,
+      handle: (_event, state) => ({
+        state: { ...state, status: "cancelled" as const },
+        commands:
+          state.status === "confirmed" && state.paymentId
+            ? {
+                name: "RefundPayment" as const,
+                targetAggregateId: state.bookingId,
+                payload: { paymentId: state.paymentId, amount: state.totalAmount },
+              }
+            : undefined,  // no refund if payment never completed
+      }),
+    },
   },
 });
 ```
@@ -249,44 +261,53 @@ This saga bridges the `RequestPayment` command (dispatched by `BookingFulfillmen
 export const PaymentProcessingSaga = defineSaga<PaymentProcessingDef>({
   startedBy: ["PaymentRequested"],
 
-  handlers: {
-    PaymentRequested: async (event, _state, { paymentGateway }) => {
-      try {
-        const { transactionId } = await paymentGateway.charge(
-          event.payload.guestId,
-          event.payload.amount,
-        );
+  on: {
+    PaymentRequested: {
+      id: (event) => event.payload.bookingId,
+      handle: async (event, _state, { paymentGateway }) => {
+        try {
+          const { transactionId } = await paymentGateway.charge(
+            event.payload.guestId,
+            event.payload.amount,
+          );
 
-        return {
-          state: { /* ..., status: "charging" */ },
-          commands: {
-            name: "CompletePayment" as const,
-            targetAggregateId: event.payload.bookingId,
-            payload: {
-              paymentId: event.payload.paymentId,
-              transactionId,
-              amount: event.payload.amount,
+          return {
+            state: { /* ..., status: "charging" */ },
+            commands: {
+              name: "CompletePayment" as const,
+              targetAggregateId: event.payload.bookingId,
+              payload: {
+                paymentId: event.payload.paymentId,
+                transactionId,
+                amount: event.payload.amount,
+              },
             },
-          },
-        };
-      } catch (error: any) {
-        return {
-          state: { /* ..., status: "failed" */ },
-          commands: {
-            name: "FailPayment" as const,
-            targetAggregateId: event.payload.bookingId,
-            payload: {
-              paymentId: event.payload.paymentId,
-              reason: error.message ?? "Payment gateway error",
+          };
+        } catch (error: any) {
+          return {
+            state: { /* ..., status: "failed" */ },
+            commands: {
+              name: "FailPayment" as const,
+              targetAggregateId: event.payload.bookingId,
+              payload: {
+                paymentId: event.payload.paymentId,
+                reason: error.message ?? "Payment gateway error",
+              },
             },
-          },
-        };
-      }
+          };
+        }
+      },
     },
 
     // Observe terminal states for saga record-keeping
-    PaymentCompleted: (_event, state) => ({ state: { ...state, status: "completed" as const } }),
-    PaymentFailed: (_event, state) => ({ state: { ...state, status: "failed" as const } }),
+    PaymentCompleted: {
+      id: (event) => event.payload.bookingId,
+      handle: (_event, state) => ({ state: { ...state, status: "completed" as const } }),
+    },
+    PaymentFailed: {
+      id: (event) => event.payload.bookingId,
+      handle: (_event, state) => ({ state: { ...state, status: "failed" as const } }),
+    },
   },
 });
 ```

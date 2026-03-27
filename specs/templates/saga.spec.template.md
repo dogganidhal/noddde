@@ -141,14 +141,15 @@ type [SagaName]Types = {
 
 - Started by: `[EventName1]`, `[EventName2]`
 
-### Associations
+### On Map (Associations + Handlers)
 
 <!--
-  For each event, describe how the saga instance ID is extracted.
-  Every event must have an association entry.
+  For each event, describe how the saga instance ID is extracted (id)
+  and what the handler (handle) does. Every event the saga reacts to
+  must have an entry in the `on` map with both `id` and `handle`.
 -->
 
-- **[EventName]**: saga ID = `event.payload.[field]`
+- **[EventName]**: `id` = `event.payload.[field]`, `handle` = [description]
 
 ## Invariants
 
@@ -186,20 +187,19 @@ const [SagaName] = defineSaga<[SagaName]Types>({
     // TODO: List event names that can start this saga
     // "[EventName1]",
   ],
-  associations: {
-    // TODO: Map each event to a saga instance ID extractor
-    // [EventName]: (event) => event.payload.[field],
-  },
-  handlers: {
-    // TODO: Implement event handlers
-    // [EventName]: (event, state, infrastructure) => ({
-    //   state: { ...state, /* updated fields */ },
-    //   commands: {
-    //     name: "[CommandName]",
-    //     targetAggregateId: "...",
-    //     payload: { ... },
-    //   },
-    // }),
+  on: {
+    // TODO: Map each event to { id, handle } entries
+    // [EventName]: {
+    //   id: (event) => event.payload.[field],
+    //   handle: (event, state, infrastructure) => ({
+    //     state: { ...state, /* updated fields */ },
+    //     commands: {
+    //       name: "[CommandName]",
+    //       targetAggregateId: "...",
+    //       payload: { ... },
+    //     },
+    //   }),
+    // },
   },
 });
 ```
@@ -222,8 +222,9 @@ describe("[SagaName]", () => {
       payload: { /* TODO */ },
     };
 
-    const sagaId = saga.associations.[EventName](event);
-    const reaction = saga.handlers.[EventName](
+    const onEntry = saga.on.[EventName];
+    const sagaId = onEntry.id(event);
+    const reaction = onEntry.handle(
       event,
       saga.initialState,
       { /* infrastructure + CQRS buses */ } as any,
@@ -248,7 +249,7 @@ describe("[SagaName] state transitions", () => {
       // TODO: State after the startedBy event
     };
 
-    const reaction = saga.handlers.[EventName](
+    const reaction = saga.on.[EventName].handle(
       {
         name: "[EventName]",
         payload: { /* TODO */ },
@@ -273,7 +274,7 @@ describe("[SagaName] no-command handler", () => {
     const saga = /* your saga definition */;
     const currentState = { /* TODO */ };
 
-    const reaction = saga.handlers.[EventName](
+    const reaction = saga.on.[EventName].handle(
       {
         name: "[EventName]",
         payload: { /* TODO */ },
@@ -288,25 +289,25 @@ describe("[SagaName] no-command handler", () => {
 });
 ```
 
-### Association correctly extracts saga instance ID
+### On map correctly extracts saga instance ID
 
 ```ts
 import { describe, it, expect } from "vitest";
 
-describe("[SagaName] associations", () => {
+describe("[SagaName] on map", () => {
   it("should extract the correct saga ID from each event type", () => {
     const saga = /* your saga definition */;
 
-    // Test each association
+    // Test each on entry's id function
     expect(
-      saga.associations.[EventName1]({
+      saga.on.[EventName1].id({
         name: "[EventName1]",
         payload: { /* TODO - include the ID field */ },
       }),
     ).toBe(/* expected saga ID */);
 
     expect(
-      saga.associations.[EventName2]({
+      saga.on.[EventName2].id({
         name: "[EventName2]",
         payload: { /* TODO - include the ID field */ },
       }),
@@ -326,7 +327,7 @@ describe("[SagaName] full lifecycle", () => {
     let state = saga.initialState;
 
     // Step 1: Start
-    const step1 = saga.handlers.[StartEventName](
+    const step1 = saga.on.[StartEventName].handle(
       { name: "[StartEventName]", payload: { /* TODO */ } },
       state,
       { /* infrastructure */ } as any,
@@ -335,7 +336,7 @@ describe("[SagaName] full lifecycle", () => {
     expect(state).toEqual(/* expected state after step 1 */);
 
     // Step 2: Continue
-    const step2 = saga.handlers.[NextEventName](
+    const step2 = saga.on.[NextEventName].handle(
       { name: "[NextEventName]", payload: { /* TODO */ } },
       state,
       { /* infrastructure */ } as any,

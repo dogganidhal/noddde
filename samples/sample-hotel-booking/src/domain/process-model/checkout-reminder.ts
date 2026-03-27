@@ -42,53 +42,62 @@ export const CheckoutReminderSaga = defineSaga<CheckoutReminderDef>({
 
   startedBy: ["GuestCheckedIn"],
 
-  associations: {
-    RoomCreated: (event) => event.payload.roomId,
-    RoomMadeAvailable: (event) => event.payload.roomId,
-    RoomReserved: (event) => event.payload.roomId,
-    GuestCheckedIn: (event) => event.payload.roomId,
-    GuestCheckedOut: (event) => event.payload.roomId,
-    RoomUnderMaintenance: (event) => event.payload.roomId,
-  },
-
-  handlers: {
+  on: {
     // ─── Guest checked in → record stay, send welcome SMS ────────
-    GuestCheckedIn: async (event, state, { smsService }) => {
-      await smsService.send(
-        event.payload.guestId,
-        `Welcome! Your checkout is expected at the end of your stay.`,
-      );
-      return {
-        state: {
-          ...state,
-          roomId: event.payload.roomId,
-          bookingId: event.payload.bookingId,
-          guestId: event.payload.guestId,
-          status: "guest_checked_in" as const,
-        },
-      };
+    GuestCheckedIn: {
+      id: (event) => event.payload.roomId,
+      handle: async (event, state, { smsService }) => {
+        await smsService.send(
+          event.payload.guestId,
+          `Welcome! Your checkout is expected at the end of your stay.`,
+        );
+        return {
+          state: {
+            ...state,
+            roomId: event.payload.roomId,
+            bookingId: event.payload.bookingId,
+            guestId: event.payload.guestId,
+            status: "guest_checked_in" as const,
+          },
+        };
+      },
     },
 
     // ─── Guest checked out → send farewell, complete saga ────────
-    GuestCheckedOut: async (event, state, { smsService }) => {
-      await smsService.send(
-        state.guestId,
-        `Thank you for your stay! We hope to see you again.`,
-      );
-      return {
-        state: {
-          ...state,
-          status: "completed" as const,
-        },
-      };
+    GuestCheckedOut: {
+      id: (event) => event.payload.roomId,
+      handle: async (event, state, { smsService }) => {
+        await smsService.send(
+          state.guestId,
+          `Thank you for your stay! We hope to see you again.`,
+        );
+        return {
+          state: {
+            ...state,
+            status: "completed" as const,
+          },
+        };
+      },
     },
 
     // ─── Room reserved → observation (no action needed) ──────────
-    RoomReserved: (_event, state) => ({ state }),
+    RoomReserved: {
+      id: (event) => event.payload.roomId,
+      handle: (_event, state) => ({ state }),
+    },
 
     // ─── Events observed but not acted upon ──────────────────────
-    RoomCreated: (_event, state) => ({ state }),
-    RoomMadeAvailable: (_event, state) => ({ state }),
-    RoomUnderMaintenance: (_event, state) => ({ state }),
+    RoomCreated: {
+      id: (event) => event.payload.roomId,
+      handle: (_event, state) => ({ state }),
+    },
+    RoomMadeAvailable: {
+      id: (event) => event.payload.roomId,
+      handle: (_event, state) => ({ state }),
+    },
+    RoomUnderMaintenance: {
+      id: (event) => event.payload.roomId,
+      handle: (_event, state) => ({ state }),
+    },
   },
 });

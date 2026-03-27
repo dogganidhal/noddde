@@ -242,7 +242,7 @@ The `init()` method must execute the following steps in order:
 9. **Register query handlers** -- For each projection in `readModel.projections`, register each query handler from `Projection.queryHandlers` on the query bus.
 10. **Register standalone query handlers** -- For each handler in `readModel.standaloneQueryHandlers`, register it on the query bus.
 11. **Register event listeners for projections** -- For each projection, subscribe to each event name in `Projection.reducers` on the event bus. When an event arrives, invoke the reducer to update the projection's view.
-12. **Register event listeners for sagas** -- For each saga in `processModel.sagas` (if defined), subscribe to each event name in `Saga.handlers` on the event bus. When an event arrives, execute the saga event handling lifecycle.
+12. **Register event listeners for sagas** -- For each saga in `processModel.sagas` (if defined), subscribe to each event name in `Object.keys(saga.on)` on the event bus. When an event arrives, execute the saga event handling lifecycle.
 13. **Register standalone event handlers** -- For each handler in `processModel.standaloneEventHandlers` (if defined), subscribe it to the event bus for the corresponding event name. When an event arrives, invoke the handler with the full event and the merged infrastructure (`TInfrastructure & CQRSInfrastructure`). Runs after saga handler registration.
 
 ### Domain.dispatchCommand() -- Command Dispatch Lifecycle
@@ -318,12 +318,12 @@ When an `IdempotencyStore` is configured (via `DomainWiring.idempotency`) and a 
 
 When an event arrives on the event bus for a registered saga:
 
-1. **Derive saga instance ID** -- Call `saga.associations[event.name](event)` to get the saga instance ID.
+1. **Derive saga instance ID** -- Call `saga.on[event.name].id(event)` to get the saga instance ID.
 2. **Load saga state** -- Call `sagaPersistence.load(sagaName, sagaId)`.
 3. **Bootstrap or resume** -- If state is `null`/`undefined`:
    - If `event.name` is in `saga.startedBy`, use `saga.initialState` as the current state.
    - Otherwise, ignore the event (the saga has not been started yet).
-4. **Execute handler** -- Call `saga.handlers[event.name](event, currentState, infrastructure)`. Returns a `SagaReaction` with new state and optional commands.
+4. **Execute handler** -- Call `saga.on[event.name].handle(event, currentState, infrastructure)`. Returns a `SagaReaction` with new state and optional commands.
 5. **Persist saga state** -- Call `sagaPersistence.save(sagaName, sagaId, reaction.state)`.
 6. **Dispatch commands** -- For each command in `reaction.commands`, dispatch it through the command bus.
 

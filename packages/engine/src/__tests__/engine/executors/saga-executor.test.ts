@@ -77,17 +77,19 @@ type OrderSagaTypes = SagaTypes & {
 const OrderSaga = defineSaga<OrderSagaTypes>({
   initialState: { status: "new" },
   startedBy: ["OrderPlaced"],
-  associations: {
-    OrderPlaced: (event) => event.payload.orderId,
-    PaymentReceived: (event) => event.payload.orderId,
-  },
-  handlers: {
-    OrderPlaced: (event, state) => ({
-      state: { status: "placed" },
-    }),
-    PaymentReceived: (event, state) => ({
-      state: { status: "paid" },
-    }),
+  on: {
+    OrderPlaced: {
+      id: (event) => event.payload.orderId,
+      handle: (event, state) => ({
+        state: { status: "placed" },
+      }),
+    },
+    PaymentReceived: {
+      id: (event) => event.payload.orderId,
+      handle: (event, state) => ({
+        state: { status: "paid" },
+      }),
+    },
   },
 });
 
@@ -128,13 +130,15 @@ describe("SagaExecutor", () => {
     const MySaga = defineSaga<MySagaTypes>({
       initialState: { started: false },
       startedBy: ["Started"],
-      associations: {
-        Started: (event) => event.payload.id,
-        Continued: (event) => event.payload.id,
-      },
-      handlers: {
-        Started: () => ({ state: { started: true } }),
-        Continued: (event, state) => ({ state }),
+      on: {
+        Started: {
+          id: (event) => event.payload.id,
+          handle: () => ({ state: { started: true } }),
+        },
+        Continued: {
+          id: (event) => event.payload.id,
+          handle: (event, state) => ({ state }),
+        },
       },
     });
 
@@ -167,11 +171,11 @@ describe("SagaExecutor", () => {
     const MinSaga = defineSaga<MinSagaTypes>({
       initialState: {},
       startedBy: ["Known"],
-      associations: {
-        Known: (event) => event.payload.id,
-      },
-      handlers: {
-        Known: () => ({ state: {} }),
+      on: {
+        Known: {
+          id: (event) => event.payload.id,
+          handle: () => ({ state: {} }),
+        },
       },
     });
 
@@ -207,18 +211,18 @@ describe("SagaExecutor", () => {
     const DispatchSaga = defineSaga<DispatchSagaTypes>({
       initialState: { dispatched: false },
       startedBy: ["TriggerReceived"],
-      associations: {
-        TriggerReceived: (event) => event.payload.id,
-      },
-      handlers: {
-        TriggerReceived: () => ({
-          state: { dispatched: true },
-          commands: {
-            name: "DoSomething",
-            payload: { value: 42 },
-            targetAggregateId: "target-1",
-          },
-        }),
+      on: {
+        TriggerReceived: {
+          id: (event) => event.payload.id,
+          handle: () => ({
+            state: { dispatched: true },
+            commands: {
+              name: "DoSomething",
+              payload: { value: 42 },
+              targetAggregateId: "target-1",
+            },
+          }),
+        },
       },
     });
 
@@ -261,18 +265,18 @@ describe("SagaExecutor", () => {
     const CorrSaga = defineSaga<CorrSagaTypes>({
       initialState: {},
       startedBy: ["CorrEvent"],
-      associations: {
-        CorrEvent: (event) => event.payload.id,
-      },
-      handlers: {
-        CorrEvent: () => ({
-          state: {},
-          commands: {
-            name: "DownstreamCmd",
-            payload: {},
-            targetAggregateId: "ds1",
-          },
-        }),
+      on: {
+        CorrEvent: {
+          id: (event) => event.payload.id,
+          handle: () => ({
+            state: {},
+            commands: {
+              name: "DownstreamCmd",
+              payload: {},
+              targetAggregateId: "ds1",
+            },
+          }),
+        },
       },
     });
 
@@ -335,18 +339,18 @@ describe("SagaExecutor", () => {
     const RbSaga = defineSaga<RbSagaTypes>({
       initialState: { ran: false },
       startedBy: ["RbTrigger"],
-      associations: {
-        RbTrigger: (event) => event.payload.id,
-      },
-      handlers: {
-        RbTrigger: () => ({
-          state: { ran: true },
-          commands: {
-            name: "FailingCmd",
-            payload: {},
-            targetAggregateId: "fail-1",
-          },
-        }),
+      on: {
+        RbTrigger: {
+          id: (event) => event.payload.id,
+          handle: () => ({
+            state: { ran: true },
+            commands: {
+              name: "FailingCmd",
+              payload: {},
+              targetAggregateId: "fail-1",
+            },
+          }),
+        },
       },
     });
 
@@ -386,14 +390,14 @@ describe("SagaExecutor", () => {
     const NoCmdSaga = defineSaga<NoCmdSagaTypes>({
       initialState: { step: 0 },
       startedBy: ["StepEvent"],
-      associations: {
-        StepEvent: (event) => event.payload.id,
-      },
-      handlers: {
-        StepEvent: (event, state) => ({
-          state: { step: state.step + 1 },
-          // No commands
-        }),
+      on: {
+        StepEvent: {
+          id: (event) => event.payload.id,
+          handle: (event, state) => ({
+            state: { step: state.step + 1 },
+            // No commands
+          }),
+        },
       },
     });
 
@@ -431,17 +435,19 @@ describe("SagaExecutor", () => {
     const FlowSaga = defineSaga<FlowSagaTypes>({
       initialState: { steps: [] },
       startedBy: ["FlowStarted"],
-      associations: {
-        FlowStarted: (event) => event.payload.id,
-        FlowContinued: (event) => event.payload.id,
-      },
-      handlers: {
-        FlowStarted: (event, state) => ({
-          state: { steps: [...state.steps, "started"] },
-        }),
-        FlowContinued: (event, state) => ({
-          state: { steps: [...state.steps, "continued"] },
-        }),
+      on: {
+        FlowStarted: {
+          id: (event) => event.payload.id,
+          handle: (event, state) => ({
+            state: { steps: [...state.steps, "started"] },
+          }),
+        },
+        FlowContinued: {
+          id: (event) => event.payload.id,
+          handle: (event, state) => ({
+            state: { steps: [...state.steps, "continued"] },
+          }),
+        },
       },
     });
 

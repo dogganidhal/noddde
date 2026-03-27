@@ -335,7 +335,7 @@ buses: () => ({
 }),
 ```
 
-During `wireDomain`, the framework reads the `on` map from each projection and the `handlers` map from each saga, then registers them with the event bus via `bus.on(eventName, handler)`. You do not subscribe manually.
+During `wireDomain`, the framework reads the `on` map from each projection and the `on` map from each saga, then registers them with the event bus via `bus.on(eventName, handler)`. You do not subscribe manually.
 
 | Property    | Behavior                                                    |
 | ----------- | ----------------------------------------------------------- |

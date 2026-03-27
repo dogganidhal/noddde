@@ -22,11 +22,11 @@ docs:
 
 # Saga Orchestration
 
-> Validates the full saga orchestration lifecycle: when a domain event is published on the EventBus, the framework uses the saga's `associations` map to extract the saga instance ID from the event, loads the saga state from persistence, invokes the matching handler with `(event, state, infrastructure & CQRSInfrastructure)`, persists the new saga state, and dispatches any returned commands via the CommandBus. This spec covers saga creation via `startedBy` events, state transitions across multiple events, and command dispatch.
+> Validates the full saga orchestration lifecycle: when a domain event is published on the EventBus, the framework uses the saga's `on` map to extract the saga instance ID from the event (via the `id` function), loads the saga state from persistence, invokes the matching handler (via the `handle` function) with `(event, state, infrastructure & CQRSInfrastructure)`, persists the new saga state, and dispatches any returned commands via the CommandBus. This spec covers saga creation via `startedBy` events, state transitions across multiple events, and command dispatch.
 
 ## Involved Components
 
-- **`Saga`** -- defines `initialState`, `startedBy`, `associations`, and `handlers`.
+- **`Saga`** -- defines `initialState`, `startedBy`, and `on` (a map of event name to `{ id, handle }` entries).
 - **`SagaPersistence`** (`InMemorySagaPersistence`) -- loads/saves saga instance state by `(sagaName, sagaId)`.
 - **`EventBus`** (`EventEmitterEventBus`) -- sagas subscribe to events by name during `domain.init()`.
 - **`CommandBus`** -- receives commands returned by saga handlers.
@@ -34,8 +34,8 @@ docs:
 
 ## Behavioral Requirements
 
-1. **Subscription wiring**: During `domain.init()`, for each saga, for each event name in its `handlers` map, the framework subscribes a listener on the EventBus.
-2. **Association resolution**: When an event arrives, the framework calls `saga.associations[event.name](event)` to extract the saga instance ID.
+1. **Subscription wiring**: During `domain.init()`, for each saga, for each event name in its `on` map, the framework subscribes a listener on the EventBus.
+2. **Association resolution**: When an event arrives, the framework calls `saga.on[event.name].id(event)` to extract the saga instance ID.
 3. **State loading**: The framework calls `sagaPersistence.load(sagaName, sagaId)` to retrieve the current saga state.
 4. **Saga creation (`startedBy`)**: If the event name is in `saga.startedBy` AND no saga state exists (load returns `undefined`/`null`), a new saga instance is created with `saga.initialState`.
 5. **Non-starter event with no instance**: If the event name is NOT in `saga.startedBy` AND no saga state exists, the event is silently ignored (no handler invocation, no error).
@@ -49,8 +49,8 @@ docs:
 - The saga's `initialState` is never mutated.
 - Saga state changes are persisted before commands are dispatched (to avoid dispatching commands for a state transition that was not durably recorded).
 - Each saga instance is independent -- two instances of the same saga with different IDs maintain separate state.
-- Events not handled by the saga (no entry in `handlers`) are ignored.
-- The `associations` map must have an entry for every event in `handlers`.
+- Events not handled by the saga (no entry in `on`) are ignored.
+- Every event the saga reacts to must have an entry in the `on` map (with both `id` and `handle`).
 
 ## Edge Cases
 
@@ -123,36 +123,40 @@ type FulfillmentSagaDef = {
 const OrderFulfillmentSaga = defineSaga<FulfillmentSagaDef>({
   initialState: { status: "pending", orderId: null },
   startedBy: ["OrderPlaced"],
-  associations: {
-    OrderPlaced: (event) => event.payload.orderId,
-    PaymentReceived: (event) => event.payload.orderId,
-    OrderFulfilled: (event) => event.payload.orderId,
-  },
-  handlers: {
-    OrderPlaced: (event, state) => ({
-      state: {
-        status: "awaiting_payment",
-        orderId: event.payload.orderId,
-      },
-      commands: {
-        name: "RequestPayment",
-        targetAggregateId: event.payload.orderId,
-        payload: {
+  on: {
+    OrderPlaced: {
+      id: (event) => event.payload.orderId,
+      handle: (event, state) => ({
+        state: {
+          status: "awaiting_payment",
           orderId: event.payload.orderId,
-          amount: event.payload.amount,
         },
-      },
-    }),
-    PaymentReceived: (event, state) => ({
-      state: { ...state, status: "fulfilled" },
-      commands: {
-        name: "FulfillOrder",
-        targetAggregateId: event.payload.orderId,
-      },
-    }),
-    OrderFulfilled: (event, state) => ({
-      state, // no state change, saga complete
-    }),
+        commands: {
+          name: "RequestPayment",
+          targetAggregateId: event.payload.orderId,
+          payload: {
+            orderId: event.payload.orderId,
+            amount: event.payload.amount,
+          },
+        },
+      }),
+    },
+    PaymentReceived: {
+      id: (event) => event.payload.orderId,
+      handle: (event, state) => ({
+        state: { ...state, status: "fulfilled" },
+        commands: {
+          name: "FulfillOrder",
+          targetAggregateId: event.payload.orderId,
+        },
+      }),
+    },
+    OrderFulfilled: {
+      id: (event) => event.payload.orderId,
+      handle: (event, state) => ({
+        state, // no state change, saga complete
+      }),
+    },
   },
 });
 
@@ -343,19 +347,21 @@ type AckSagaDef = {
 const AckSaga = defineSaga<AckSagaDef>({
   initialState: { acknowledged: false },
   startedBy: ["TaskStarted"],
-  associations: {
-    TaskStarted: (event) => event.payload.taskId,
-    TaskAcknowledged: (event) => event.payload.taskId,
-  },
-  handlers: {
-    TaskStarted: (event, state) => ({
-      state: { acknowledged: false },
-      // no commands
-    }),
-    TaskAcknowledged: (event, state) => ({
-      state: { acknowledged: true },
-      // no commands
-    }),
+  on: {
+    TaskStarted: {
+      id: (event) => event.payload.taskId,
+      handle: (event, state) => ({
+        state: { acknowledged: false },
+        // no commands
+      }),
+    },
+    TaskAcknowledged: {
+      id: (event) => event.payload.taskId,
+      handle: (event, state) => ({
+        state: { acknowledged: true },
+        // no commands
+      }),
+    },
   },
 });
 
@@ -432,13 +438,13 @@ type RetrySagaDef = {
 const RetrySaga = defineSaga<RetrySagaDef>({
   initialState: { attempts: 0 },
   startedBy: ["JobStarted"],
-  associations: {
-    JobStarted: (event) => event.payload.jobId,
-  },
-  handlers: {
-    JobStarted: (event, state) => ({
-      state: { attempts: state.attempts + 1 },
-    }),
+  on: {
+    JobStarted: {
+      id: (event) => event.payload.jobId,
+      handle: (event, state) => ({
+        state: { attempts: state.attempts + 1 },
+      }),
+    },
   },
 });
 
