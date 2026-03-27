@@ -81,7 +81,7 @@ Before `implemented`: all exports present, all requirements tested, invariants e
 
 ## CLI Template Maintenance
 
-When a spec changes or a new spec is added that affects aggregate, projection, or saga patterns (types, handler signatures, folder structure), reassess whether `packages/cli/` templates need updating. Check if the generated boilerplate still matches the current framework conventions. Update templates and snapshot tests if needed.
+When a spec changes or a new spec is added that affects aggregate, projection, or saga patterns (types, handler signatures, folder structure), reassess whether `packages/cli/` templates need updating. The `/spec` pipeline (step 5) enforces this automatically — see `.claude/skills/spec/SKILL.md`.
 
 ## Non-Spec Work
 

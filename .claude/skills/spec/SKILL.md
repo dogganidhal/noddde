@@ -288,6 +288,14 @@ Wait for developer choice, then:
 4. **Edge cases**: For each edge case, check: handled? Tested?
 5. **Stub check**: `grep -n "throw new Error" <source-file>` — must be zero.
 6. **Final test run**: Run tests one more time to confirm GREEN.
+7. **CLI template check**: If the spec changed any of these, CLI templates in `packages/cli/src/templates/` MUST be updated:
+
+   - `defineAggregate`, `defineProjection`, `defineSaga`, `defineDomain`, `wireDomain` signatures or config shape
+   - `DefineEvents`, `DefineCommands`, `DefineQueries` type helpers
+   - Handler signatures (command, apply, saga `on` map `{ id, handle }`, projection `on` map `{ id?, reduce }`)
+   - Persistence, bus, or infrastructure interfaces referenced by generated code
+
+   If affected: update templates, run `cd packages/cli && npx vitest run` to verify, and flag CLI docs for step 6.
 
 Update spec frontmatter: `status: implemented`
 
@@ -305,7 +313,8 @@ Update spec frontmatter: `status: implemented`
    - Add deprecation notices if applicable
 4. If this is a new spec (new module), create stub documentation pages in the appropriate category under `docs/content/docs/` and update the category's `meta.json`.
 5. Flag auto-generated API reference pages (in `docs/src/content/docs/api/`) for regeneration if exports changed — do NOT manually edit them.
-6. Report briefly and continue to the Final Report:
+6. If CLI templates were updated in step 5, also update `docs/content/docs/getting-started/cli.mdx` and `docs/content/docs/getting-started/project-structure.mdx` to reflect any changes to generated file structure, handler patterns, or command output.
+7. Report briefly and continue to the Final Report:
    ```
    📖 Step 6 complete: Documentation updated
      Pages updated: <N>

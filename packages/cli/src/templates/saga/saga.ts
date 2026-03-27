@@ -1,23 +1,15 @@
 import type { TemplateContext } from "../../utils/context.js";
 
-/** Template for the saga definition file (includes state inline). */
+/** Template for the saga definition file (state in separate file, handlers extracted). */
 export function sagaTemplate(ctx: TemplateContext): string {
   return `import { defineSaga } from "@noddde/core";
+import type { ${ctx.name}SagaState } from "./state.js";
+import { initial${ctx.name}SagaState } from "./state.js";
+import { onStartEvent } from "./transition-handlers/index.js";
 
 // TODO: import event and command types from related aggregates
 // import type { SomeEvent } from "../some-aggregate/events.js";
 // import type { SomeCommand } from "../some-aggregate/commands.js";
-
-// ── Saga state ──────────────────────────────────────────────────
-
-export interface ${ctx.name}SagaState {
-  status: string | null;
-  // TODO: add saga state fields for tracking workflow progress
-}
-
-const initial${ctx.name}SagaState: ${ctx.name}SagaState = {
-  status: null,
-};
 
 // ── Types bundle ────────────────────────────────────────────────
 
@@ -39,17 +31,10 @@ export const ${ctx.name}Saga = defineSaga<${ctx.name}SagaDef>({
   ],
 
   on: {
-    // TODO: wire event handlers with identity extraction
+    // TODO: wire transition handlers with identity extraction
     // SomeEventName: {
     //   id: (event) => event.payload.someId,
-    //   handle: async (event, _state, _infrastructure) => ({
-    //     state: { status: "started" },
-    //     commands: {
-    //       name: "SomeCommand",
-    //       targetAggregateId: event.payload.someId,
-    //       payload: { ... },
-    //     },
-    //   }),
+    //   handle: onStartEvent,
     // },
   },
 });

@@ -1,0 +1,152 @@
+---
+title: CLI
+description: Scaffold noddde projects, domains, aggregates, projections, and sagas from the command line
+---
+
+The `@noddde/cli` package provides generators that scaffold noddde modules with the correct folder structure, type definitions, and wiring code.
+
+## Installation
+
+```bash
+npm install -g @noddde/cli
+```
+
+Or use it without installing via `npx`:
+
+```bash
+npx @noddde/cli new project my-app
+```
+
+## Commands
+
+All generators are under `noddde new` (alias `noddde n`).
+
+### `noddde new project <name>`
+
+Scaffolds a complete runnable project with `package.json`, TypeScript config, a sample test, and the full domain structure inside `src/`.
+
+```bash
+noddde new project hotel-booking
+```
+
+The command prompts you to choose a persistence adapter:
+
+```
+? Which persistence adapter?
+❯ In-memory (no external dependencies)
+  Prisma (SQLite via @noddde/prisma)
+  Drizzle (SQLite via @noddde/drizzle)
+  TypeORM (@noddde/typeorm)
+```
+
+Your choice determines which dependencies are added to `package.json`. You can always change this later.
+
+After scaffolding:
+
+```bash
+cd hotel-booking
+npm install
+npm test    # runs the sample test
+npm start   # runs src/main.ts
+```
+
+See [Project Structure](/docs/getting-started/project-structure) for a full breakdown of the generated layout.
+
+### `noddde new domain <name>`
+
+Scaffolds the domain layer only — no `package.json` or config files. Use this when adding a domain to an existing project.
+
+```bash
+cd src
+noddde new domain hotel-booking
+```
+
+Generates `event-model/`, `write-model/`, `read-model/`, `domain.ts`, `infrastructure/`, and `main.ts` in the current directory.
+
+### `noddde new aggregate <name>`
+
+Scaffolds a single aggregate with extracted command handlers. Run from the project root — the CLI automatically places files at `src/domain/write-model/aggregates/<name>/`.
+
+```bash
+noddde new aggregate BankAccount
+```
+
+Generates:
+
+```
+bank-account/
+├── index.ts                              # barrel exports
+├── state.ts                              # BankAccountState interface + initial state
+├── bank-account.ts                       # defineAggregate + DefineEvents/DefineCommands
+├── commands/
+│   ├── index.ts
+│   └── create-bank-account.ts            # command payload interface
+└── command-handlers/
+    ├── index.ts
+    └── handle-create-bank-account.ts     # standalone handler function
+```
+
+Command handlers are standalone exported functions imported into the `defineAggregate` `commands` map. This keeps handlers testable in isolation and aggregates readable.
+
+### `noddde new projection <name>`
+
+Scaffolds a single projection with extracted query handlers and view reducers. Run from the project root — the CLI automatically places files at `src/domain/read-model/projections/<name>/`.
+
+```bash
+noddde new projection OrderSummary
+```
+
+Generates:
+
+```
+order-summary/
+├── index.ts                                      # barrel exports
+├── order-summary.ts                              # defineProjection with on map
+├── queries/
+│   ├── index.ts                                  # View interface + DefineQueries
+│   └── get-order-summary.ts                      # query payload interface
+├── query-handlers/
+│   ├── index.ts
+│   └── handle-get-order-summary.ts               # standalone query handler
+└── view-reducers/
+    ├── index.ts
+    └── on-order-summary-created.ts               # standalone reduce function
+```
+
+View reducers and query handlers are standalone functions imported into the `defineProjection` `on` and `queryHandlers` maps respectively.
+
+### `noddde new saga <name>`
+
+Scaffolds a saga with extracted transition handlers. Run from the project root — the CLI automatically places files at `src/domain/process-model/<name>/`.
+
+```bash
+noddde new saga PaymentProcessing
+```
+
+Generates:
+
+```
+payment-processing/
+├── index.ts                          # barrel exports
+├── state.ts                          # PaymentProcessingSagaState + initial state
+├── saga.ts                           # defineSaga with on map, imports handlers
+└── transition-handlers/
+    ├── index.ts
+    └── on-start-event.ts             # standalone transition handler function
+```
+
+Transition handlers are standalone exported functions imported into the `defineSaga` `on` map. Each handler receives an event and the current saga state, and returns the new state plus optional commands to dispatch.
+
+## Name Handling
+
+Names can be provided in any casing — the CLI normalizes them:
+
+```bash
+noddde new aggregate BankAccount     # PascalCase
+noddde new aggregate bank-account    # kebab-case
+noddde new aggregate bank_account    # snake_case
+```
+
+All three produce the same output: a `bank-account/` directory with `BankAccount` as the PascalCase identifier in code.
+
+Names must produce a valid TypeScript identifier (start with a letter). The CLI rejects invalid names with a clear error.

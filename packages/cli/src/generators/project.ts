@@ -21,6 +21,7 @@ import {
   domainAggregateIndexTemplate,
   domainAggregateTemplate,
 } from "../templates/domain/aggregate.js";
+import { aggregateStateTemplate } from "../templates/domain/aggregate-state.js";
 import {
   commandsIndexTemplate,
   commandPayloadTemplate,
@@ -100,6 +101,10 @@ export async function generateProject(
       content: domainAggregateIndexTemplate(ctx),
     },
     {
+      relativePath: `${agg}/state.ts`,
+      content: aggregateStateTemplate(ctx),
+    },
+    {
       relativePath: `${agg}/${ctx.kebabName}.ts`,
       content: domainAggregateTemplate(ctx),
     },
@@ -152,6 +157,12 @@ export async function generateProject(
     {
       relativePath: `${proj}/view-reducers/on-${ctx.kebabName}-created.ts`,
       content: viewReducerTemplate(ctx),
+    },
+
+    // ── Process model (empty — ready for sagas) ──────────────────
+    {
+      relativePath: "src/domain/process-model/.gitkeep",
+      content: "",
     },
 
     // ── Domain definition ───────────────────────────────────────

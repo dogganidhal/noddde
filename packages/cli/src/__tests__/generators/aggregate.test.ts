@@ -15,12 +15,13 @@ describe("generateAggregate", () => {
     await rm(tmpDir, { recursive: true, force: true });
   });
 
-  it("creates all 6 files in the correct subdirectory structure", async () => {
+  it("creates all 7 files in the correct subdirectory structure", async () => {
     await generateAggregate("BankAccount", tmpDir);
 
     const base = path.join(tmpDir, "bank-account");
     const expectedFiles = [
       "index.ts",
+      "state.ts",
       "bank-account.ts",
       "commands/index.ts",
       "commands/create-bank-account.ts",

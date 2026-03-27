@@ -15,7 +15,7 @@ describe("generateDomain", () => {
     await rm(tmpDir, { recursive: true, force: true });
   });
 
-  it("creates all 20 files in the correct structure", async () => {
+  it("creates all files in the correct structure", async () => {
     await generateDomain("BankAccount", tmpDir);
 
     const base = path.join(tmpDir, "bank-account");
@@ -26,6 +26,7 @@ describe("generateDomain", () => {
       // Write model
       "domain/write-model/index.ts",
       "domain/write-model/aggregates/bank-account/index.ts",
+      "domain/write-model/aggregates/bank-account/state.ts",
       "domain/write-model/aggregates/bank-account/bank-account.ts",
       "domain/write-model/aggregates/bank-account/commands/index.ts",
       "domain/write-model/aggregates/bank-account/commands/create-bank-account.ts",

@@ -15,11 +15,17 @@ describe("generateSaga", () => {
     await rm(tmpDir, { recursive: true, force: true });
   });
 
-  it("creates all 2 files in a flat structure", async () => {
+  it("creates all 5 files in the correct structure", async () => {
     await generateSaga("OrderFulfillment", tmpDir);
 
     const base = path.join(tmpDir, "order-fulfillment");
-    const expectedFiles = ["index.ts", "saga.ts"];
+    const expectedFiles = [
+      "index.ts",
+      "state.ts",
+      "saga.ts",
+      "transition-handlers/index.ts",
+      "transition-handlers/on-start-event.ts",
+    ];
 
     for (const file of expectedFiles) {
       await expect(access(path.join(base, file))).resolves.toBeUndefined();
@@ -42,15 +48,46 @@ describe("generateSaga", () => {
     expect(sagaContent).not.toContain("handlers:");
   });
 
-  it("includes state inline in saga.ts", async () => {
+  it("generates state in separate state.ts", async () => {
+    await generateSaga("OrderFulfillment", tmpDir);
+
+    const stateContent = await readFile(
+      path.join(tmpDir, "order-fulfillment", "state.ts"),
+      "utf-8",
+    );
+    expect(stateContent).toContain("interface OrderFulfillmentSagaState");
+    expect(stateContent).toContain("initialOrderFulfillmentSagaState");
+
+    const sagaContent = await readFile(
+      path.join(tmpDir, "order-fulfillment", "saga.ts"),
+      "utf-8",
+    );
+    expect(sagaContent).toContain('from "./state.js"');
+  });
+
+  it("generates standalone transition handler", async () => {
+    await generateSaga("OrderFulfillment", tmpDir);
+
+    const handlerContent = await readFile(
+      path.join(
+        tmpDir,
+        "order-fulfillment/transition-handlers/on-start-event.ts",
+      ),
+      "utf-8",
+    );
+    expect(handlerContent).toContain("export function onStartEvent");
+    expect(handlerContent).toContain("OrderFulfillmentSagaState");
+  });
+
+  it("saga.ts imports from transition-handlers", async () => {
     await generateSaga("OrderFulfillment", tmpDir);
 
     const sagaContent = await readFile(
       path.join(tmpDir, "order-fulfillment", "saga.ts"),
       "utf-8",
     );
-    expect(sagaContent).toContain("interface OrderFulfillmentSagaState");
-    expect(sagaContent).toContain("initialOrderFulfillmentSagaState");
+    expect(sagaContent).toContain('from "./transition-handlers/index.js"');
+    expect(sagaContent).toContain("onStartEvent");
   });
 
   it("does not overwrite existing files", async () => {

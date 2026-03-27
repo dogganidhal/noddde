@@ -4,6 +4,11 @@ import { writeFileIfNotExists } from "../utils/fs.js";
 import { validateName } from "../utils/naming.js";
 import { sagaIndexTemplate } from "../templates/saga/index.js";
 import { sagaTemplate } from "../templates/saga/saga.js";
+import { sagaStateTemplate } from "../templates/domain/saga-state.js";
+import {
+  transitionHandlersIndexTemplate,
+  transitionHandlerTemplate,
+} from "../templates/domain/saga-transition-handlers.js";
 
 /** Generates a saga folder with all required files. */
 export async function generateSaga(
@@ -16,7 +21,16 @@ export async function generateSaga(
 
   const files: Array<{ relativePath: string; content: string }> = [
     { relativePath: "index.ts", content: sagaIndexTemplate(ctx) },
+    { relativePath: "state.ts", content: sagaStateTemplate(ctx) },
     { relativePath: "saga.ts", content: sagaTemplate(ctx) },
+    {
+      relativePath: "transition-handlers/index.ts",
+      content: transitionHandlersIndexTemplate(),
+    },
+    {
+      relativePath: "transition-handlers/on-start-event.ts",
+      content: transitionHandlerTemplate(ctx),
+    },
   ];
 
   for (const file of files) {

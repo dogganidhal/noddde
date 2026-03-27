@@ -5,6 +5,7 @@ import { generateSaga } from "../generators/saga.js";
 import { generateDomain } from "../generators/domain.js";
 import { generateProject } from "../generators/project.js";
 import { promptPersistenceAdapter } from "../utils/persistence.js";
+import { resolveProjectPath } from "../utils/project.js";
 
 /** Registers the `new` command and its subcommands. */
 export function registerNewCommand(program: Command): void {
@@ -16,32 +17,30 @@ export function registerNewCommand(program: Command): void {
   newCmd
     .command("aggregate <name>")
     .alias("a")
-    .description(
-      "Generate an aggregate with events, commands, state, and infrastructure",
-    )
-    .option("-p, --path <dir>", "Target directory", ".")
-    .action(async (name: string, opts: { path: string }) => {
-      await generateAggregate(name, opts.path);
+    .description("Generate an aggregate with commands and command handlers")
+    .action(async (name: string) => {
+      const basePath = await resolveProjectPath("aggregate");
+      await generateAggregate(name, basePath);
     });
 
   newCmd
     .command("projection <name>")
     .alias("p")
     .description(
-      "Generate a projection with view, queries, and projection definition",
+      "Generate a projection with queries, query handlers, and view reducers",
     )
-    .option("-p, --path <dir>", "Target directory", ".")
-    .action(async (name: string, opts: { path: string }) => {
-      await generateProjection(name, opts.path);
+    .action(async (name: string) => {
+      const basePath = await resolveProjectPath("projection");
+      await generateProjection(name, basePath);
     });
 
   newCmd
     .command("saga <name>")
     .alias("s")
-    .description("Generate a saga with state, handlers, and saga definition")
-    .option("-p, --path <dir>", "Target directory", ".")
-    .action(async (name: string, opts: { path: string }) => {
-      await generateSaga(name, opts.path);
+    .description("Generate a saga with state and event handlers")
+    .action(async (name: string) => {
+      const basePath = await resolveProjectPath("saga");
+      await generateSaga(name, basePath);
     });
 
   newCmd
@@ -50,9 +49,8 @@ export function registerNewCommand(program: Command): void {
     .description(
       "Generate a complete domain with aggregate, projection, infrastructure, and wiring",
     )
-    .option("-p, --path <dir>", "Target directory", ".")
-    .action(async (name: string, opts: { path: string }) => {
-      await generateDomain(name, opts.path);
+    .action(async (name: string) => {
+      await generateDomain(name, ".");
     });
 
   newCmd
@@ -61,9 +59,8 @@ export function registerNewCommand(program: Command): void {
     .description(
       "Generate a full project with package.json, tsconfig, tests, and domain scaffold",
     )
-    .option("-p, --path <dir>", "Target directory", ".")
-    .action(async (name: string, opts: { path: string }) => {
+    .action(async (name: string) => {
       const adapter = await promptPersistenceAdapter();
-      await generateProject(name, opts.path, adapter);
+      await generateProject(name, ".", adapter);
     });
 }

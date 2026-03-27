@@ -1,21 +1,12 @@
 import type { TemplateContext } from "../../utils/context.js";
 
-/** Template for standalone aggregate definition (events inline, local infrastructure). */
+/** Template for standalone aggregate definition (state in separate file). */
 export function aggregateTemplate(ctx: TemplateContext): string {
   return `import { defineAggregate, DefineEvents, DefineCommands, Infrastructure } from "@noddde/core";
+import type { ${ctx.name}State } from "./state.js";
+import { initial${ctx.name}State } from "./state.js";
 import type { Create${ctx.name}Payload } from "./commands/create-${ctx.kebabName}.js";
 import { handleCreate${ctx.name} } from "./command-handlers/index.js";
-
-// ── State ───────────────────────────────────────────────────────
-
-/** The state of the ${ctx.name} aggregate. */
-export interface ${ctx.name}State {
-  // TODO: define aggregate state
-}
-
-const initial${ctx.name}State: ${ctx.name}State = {
-  // TODO: set initial values
-};
 
 // ── Type unions ─────────────────────────────────────────────────
 

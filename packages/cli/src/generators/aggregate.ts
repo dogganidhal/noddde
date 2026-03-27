@@ -4,6 +4,7 @@ import { writeFileIfNotExists } from "../utils/fs.js";
 import { validateName } from "../utils/naming.js";
 import { aggregateIndexTemplate } from "../templates/aggregate/index.js";
 import { aggregateTemplate } from "../templates/aggregate/aggregate.js";
+import { aggregateStateTemplate } from "../templates/domain/aggregate-state.js";
 import {
   commandsIndexTemplate,
   commandPayloadTemplate,
@@ -24,6 +25,7 @@ export async function generateAggregate(
 
   const files: Array<{ relativePath: string; content: string }> = [
     { relativePath: "index.ts", content: aggregateIndexTemplate(ctx) },
+    { relativePath: "state.ts", content: aggregateStateTemplate(ctx) },
     { relativePath: `${ctx.kebabName}.ts`, content: aggregateTemplate(ctx) },
     {
       relativePath: "commands/index.ts",

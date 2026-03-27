@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { buildContext } from "../../utils/context.js";
 import { aggregateIndexTemplate } from "../../templates/aggregate/index.js";
 import { aggregateTemplate } from "../../templates/aggregate/aggregate.js";
+import { aggregateStateTemplate } from "../../templates/domain/aggregate-state.js";
 import {
   commandsIndexTemplate,
   commandPayloadTemplate,
@@ -17,9 +18,16 @@ describe("aggregate templates", () => {
   it("generates barrel index.ts", () => {
     const result = aggregateIndexTemplate(ctx);
     expect(result).toContain('export { BankAccount } from "./bank-account.js"');
+    expect(result).toContain('from "./state.js"');
     expect(result).toContain("BankAccountState");
     expect(result).toContain("BankAccountEvent");
     expect(result).toContain("BankAccountCommand");
+  });
+
+  it("generates state.ts with interface and initial state", () => {
+    const result = aggregateStateTemplate(ctx);
+    expect(result).toContain("interface BankAccountState");
+    expect(result).toContain("initialBankAccountState: BankAccountState");
   });
 
   it("generates aggregate with DefineEvents/DefineCommands and imported handler", () => {
