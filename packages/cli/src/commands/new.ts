@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { generateAggregate } from "../generators/aggregate.js";
 import { generateProjection } from "../generators/projection.js";
 import { generateSaga } from "../generators/saga.js";
+import { generateDomain } from "../generators/domain.js";
 
 /** Registers the `new` command and its subcommands. */
 export function registerNewCommand(program: Command): void {
@@ -39,5 +40,16 @@ export function registerNewCommand(program: Command): void {
     .option("-p, --path <dir>", "Target directory", ".")
     .action(async (name: string, opts: { path: string }) => {
       await generateSaga(name, opts.path);
+    });
+
+  newCmd
+    .command("domain <name>")
+    .alias("d")
+    .description(
+      "Generate a complete domain with aggregate, projection, infrastructure, and wiring",
+    )
+    .option("-p, --path <dir>", "Target directory", ".")
+    .action(async (name: string, opts: { path: string }) => {
+      await generateDomain(name, opts.path);
     });
 }

@@ -15,24 +15,18 @@ describe("generateSaga", () => {
     await rm(tmpDir, { recursive: true, force: true });
   });
 
-  it("creates all 5 files in the correct structure", async () => {
+  it("creates all 2 files in a flat structure", async () => {
     await generateSaga("OrderFulfillment", tmpDir);
 
     const base = path.join(tmpDir, "order-fulfillment");
-    const expectedFiles = [
-      "index.ts",
-      "state.ts",
-      "saga.ts",
-      "handlers/index.ts",
-      "handlers/on-start-event.ts",
-    ];
+    const expectedFiles = ["index.ts", "saga.ts"];
 
     for (const file of expectedFiles) {
       await expect(access(path.join(base, file))).resolves.toBeUndefined();
     }
   });
 
-  it("generates valid saga content", async () => {
+  it("generates saga.ts with on map (not associations/handlers)", async () => {
     await generateSaga("OrderFulfillment", tmpDir);
 
     const sagaContent = await readFile(
@@ -41,32 +35,39 @@ describe("generateSaga", () => {
     );
     expect(sagaContent).toContain("defineSaga");
     expect(sagaContent).toContain("OrderFulfillmentSagaDef");
-    expect(sagaContent).toContain("initialOrderFulfillmentSagaState");
-    expect(sagaContent).toContain(
-      'import { onStartEvent } from "./handlers/index.js"',
-    );
+    expect(sagaContent).toContain("OrderFulfillmentSagaState");
+    expect(sagaContent).toContain("startedBy:");
+    expect(sagaContent).toContain("on:");
+    expect(sagaContent).not.toContain("associations:");
+    expect(sagaContent).not.toContain("handlers:");
   });
 
-  it("generates handler file with correct state type", async () => {
+  it("includes state inline in saga.ts", async () => {
     await generateSaga("OrderFulfillment", tmpDir);
 
-    const handlerContent = await readFile(
-      path.join(tmpDir, "order-fulfillment", "handlers", "on-start-event.ts"),
+    const sagaContent = await readFile(
+      path.join(tmpDir, "order-fulfillment", "saga.ts"),
       "utf-8",
     );
-    expect(handlerContent).toContain("export function onStartEvent");
-    expect(handlerContent).toContain("OrderFulfillmentSagaState");
+    expect(sagaContent).toContain("interface OrderFulfillmentSagaState");
+    expect(sagaContent).toContain("initialOrderFulfillmentSagaState");
   });
 
   it("does not overwrite existing files", async () => {
     await generateSaga("OrderFulfillment", tmpDir);
 
-    const statePath = path.join(tmpDir, "order-fulfillment", "state.ts");
-    const originalContent = await readFile(statePath, "utf-8");
+    const sagaPath = path.join(tmpDir, "order-fulfillment", "saga.ts");
+    const originalContent = await readFile(sagaPath, "utf-8");
 
     await generateSaga("OrderFulfillment", tmpDir);
 
-    const afterContent = await readFile(statePath, "utf-8");
+    const afterContent = await readFile(sagaPath, "utf-8");
     expect(afterContent).toBe(originalContent);
+  });
+
+  it("rejects invalid names", async () => {
+    await expect(generateSaga("123Invalid", tmpDir)).rejects.toThrow(
+      "Invalid name",
+    );
   });
 });

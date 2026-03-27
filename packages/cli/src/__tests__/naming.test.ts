@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { toPascalCase, toCamelCase, toKebabCase } from "../utils/naming.js";
+import {
+  toPascalCase,
+  toCamelCase,
+  toKebabCase,
+  validateName,
+} from "../utils/naming.js";
 
 describe("naming utils", () => {
   describe("toPascalCase", () => {
@@ -65,6 +70,32 @@ describe("naming utils", () => {
 
     it("handles single word", () => {
       expect(toKebabCase("Order")).toBe("order");
+    });
+  });
+
+  describe("validateName", () => {
+    it("accepts valid PascalCase names", () => {
+      expect(() => validateName("BankAccount")).not.toThrow();
+    });
+
+    it("accepts valid kebab-case names", () => {
+      expect(() => validateName("bank-account")).not.toThrow();
+    });
+
+    it("accepts single-word names", () => {
+      expect(() => validateName("Order")).not.toThrow();
+    });
+
+    it("rejects names starting with a number", () => {
+      expect(() => validateName("123Invalid")).toThrow("Invalid name");
+    });
+
+    it("rejects empty names", () => {
+      expect(() => validateName("")).toThrow("Invalid name");
+    });
+
+    it("rejects names that are only separators", () => {
+      expect(() => validateName("---")).toThrow("Invalid name");
     });
   });
 });

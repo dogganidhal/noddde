@@ -17,7 +17,8 @@ export async function writeFileIfNotExists(
   try {
     await access(filePath);
     return false;
-  } catch {
+  } catch (error: any) {
+    if (error.code !== "ENOENT") throw error;
     await ensureDir(path.dirname(filePath));
     await writeFile(filePath, content, "utf-8");
     return true;

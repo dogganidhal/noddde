@@ -31,3 +31,19 @@ export function toKebabCase(input: string): string {
     .map((w) => w.toLowerCase())
     .join("-");
 }
+
+/**
+ * Validates that the name produces a valid TypeScript identifier.
+ * Throws if the PascalCase result does not start with a letter.
+ */
+export function validateName(name: string): void {
+  const pascal = toPascalCase(name);
+  if (pascal.length === 0) {
+    throw new Error(`Invalid name: "${name}" produces an empty identifier.`);
+  }
+  if (!/^[A-Z]/.test(pascal)) {
+    throw new Error(
+      `Invalid name: "${name}" must start with a letter (got "${pascal}").`,
+    );
+  }
+}
