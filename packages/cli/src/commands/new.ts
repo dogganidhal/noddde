@@ -3,6 +3,8 @@ import { generateAggregate } from "../generators/aggregate.js";
 import { generateProjection } from "../generators/projection.js";
 import { generateSaga } from "../generators/saga.js";
 import { generateDomain } from "../generators/domain.js";
+import { generateProject } from "../generators/project.js";
+import { promptPersistenceAdapter } from "../utils/persistence.js";
 
 /** Registers the `new` command and its subcommands. */
 export function registerNewCommand(program: Command): void {
@@ -51,5 +53,17 @@ export function registerNewCommand(program: Command): void {
     .option("-p, --path <dir>", "Target directory", ".")
     .action(async (name: string, opts: { path: string }) => {
       await generateDomain(name, opts.path);
+    });
+
+  newCmd
+    .command("project <name>")
+    .alias("pr")
+    .description(
+      "Generate a full project with package.json, tsconfig, tests, and domain scaffold",
+    )
+    .option("-p, --path <dir>", "Target directory", ".")
+    .action(async (name: string, opts: { path: string }) => {
+      const adapter = await promptPersistenceAdapter();
+      await generateProject(name, opts.path, adapter);
     });
 }
