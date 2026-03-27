@@ -57,18 +57,22 @@ const UserProfile = defineAggregate<UserDef>({
 });
 
 // 2. An Event-Sourced Aggregate (Emit events, replay history)
-const Wallet = defineEventSourcedAggregate<WalletDef>({
+// Same defineAggregate — the persistence strategy is chosen at wiring time
+const Wallet = defineAggregate<WalletDef>({
   // ...
 });
 
 // 3. Wire up the right persistence strategy for each aggregate
 const db = drizzle(sqlite);
 const { stateStoredPersistence, eventSourcedPersistence } =
-  createDrizzlePersistence(db);
+  createDrizzlePersistence(db, schema);
 
 const myDomain = defineDomain({
   writeModel: {
     aggregates: { UserProfile, Wallet },
+  },
+  readModel: {
+    projections: {},
   },
 });
 
@@ -125,6 +129,14 @@ Most frameworks require Sagas (Process Managers) to inject an event bus and manu
 
 ```typescript
 export const OrderFulfillmentSaga = defineSaga<OrderSagaDef>({
+  initialState: { orderId: "", status: "pending" },
+
+  startedBy: ["PaymentCompleted"],
+
+  associations: {
+    PaymentCompleted: (event) => event.payload.orderId,
+  },
+
   handlers: {
     PaymentCompleted: (event, state) => ({
       // Update saga state
