@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import type {
   Aggregate,
   Projection,
@@ -29,8 +30,12 @@ export type TestDomainConfig<
 > = {
   /** Aggregate definitions keyed by name. */
   aggregates?: Record<string, Aggregate<any>>;
-  /** Projection definitions keyed by name. */
-  projections?: Record<string, Projection<any>>;
+  /** Projection definitions keyed by name. Entries can be bare projections or wrapped with a viewStore. */
+  projections?: Record<
+    string,
+    | Projection<any>
+    | { projection: Projection<any>; viewStore: (infrastructure: any) => any }
+  >;
   /** Saga definitions keyed by name. */
   sagas?: Record<string, Saga<any, any>>;
   /** Optional custom infrastructure to provide to handlers. */

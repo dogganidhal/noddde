@@ -83,7 +83,7 @@ type [ProjectionName]Query = DefineQueries<{
 
 <!--
   Define external dependencies for query handlers (e.g., database connections).
-  Reducers do not receive infrastructure -- only query handlers do.
+  Reduce handlers do not receive infrastructure -- only query handlers do.
 -->
 
 ```ts
@@ -109,13 +109,15 @@ type [ProjectionName]Types = {
 
 ## Behavioral Requirements
 
-### Reducers
+### On Map Handlers
 
 <!--
   For each event, describe how the view is updated.
-  Reducers receive the full event object (not just payload) and the current view.
-  They return the new view (or a Promise of it).
+  Each entry in the `on` map has a `reduce` function that receives the full event object (not just payload) and the current view.
+  It returns the new view (or a Promise of it).
+  Each entry may also have an optional `id` function to derive a view identity from the event.
   Note: The first invocation may receive `undefined` as the view if no initial view is set.
+  The `on` map is partial -- not all events need to be handled.
 -->
 
 - **[EventName]**: [How the view changes. What fields are updated/added/removed.]
@@ -132,7 +134,7 @@ type [ProjectionName]Types = {
 ## Invariants
 
 <!--
-  List properties that must always hold for the view after any reducer runs.
+  List properties that must always hold for the view after any reduce handler runs.
 -->
 
 - [ ] [Invariant 1: e.g., "The items array never contains duplicates by id."]
@@ -144,8 +146,8 @@ type [ProjectionName]Types = {
   Describe unusual scenarios and how the projection handles them.
 -->
 
-- **View is undefined on first event**: Reducers must handle `undefined` view (e.g., provide defaults).
-- **Duplicate events**: [How duplicate event delivery is handled (idempotent reducers, etc.).]
+- **View is undefined on first event**: Reduce handlers must handle `undefined` view (e.g., provide defaults).
+- **Duplicate events**: [How duplicate event delivery is handled (idempotent reduce handlers, etc.).]
 - **[Edge case]**: [How it is handled.]
 
 ## Integration Points
@@ -163,13 +165,16 @@ type [ProjectionName]Types = {
 import { defineProjection } from "@noddde/core";
 
 const [ProjectionName] = defineProjection<[ProjectionName]Types>({
-  reducers: {
-    // TODO: Implement reducers
-    // [EventName]: (event, view) => {
-    //   return {
-    //     ...view,
-    //     // update view based on event
-    //   };
+  on: {
+    // TODO: Implement on map handlers
+    // [EventName]: {
+    //   id: (event) => event.payload.id,  // optional: derive view identity from event
+    //   reduce: (event, view) => {
+    //     return {
+    //       ...view,
+    //       // update view based on event
+    //     };
+    //   },
     // },
   },
   queryHandlers: {
@@ -183,20 +188,20 @@ const [ProjectionName] = defineProjection<[ProjectionName]Types>({
 
 ## Test Scenarios
 
-### Reducer produces correct view update
+### Reduce handler produces correct view update
 
 ```ts
 import { describe, it, expect } from "vitest";
 import { defineProjection } from "@noddde/core";
 
-describe("[ProjectionName] reducers", () => {
+describe("[ProjectionName] on map handlers", () => {
   // TODO: Import or inline your projection definition
 
   it("should update view when [EventName] is received", () => {
     const projection = /* your projection definition */;
     const initialView = undefined; // or a starting view
 
-    const updatedView = projection.reducers.[EventName](
+    const updatedView = projection.on.[EventName]!.reduce(
       {
         name: "[EventName]",
         payload: { /* TODO */ },
@@ -220,12 +225,12 @@ describe("[ProjectionName] cumulative updates", () => {
 
     let view = undefined;
 
-    view = projection.reducers.[EventName1](
+    view = projection.on.[EventName1]!.reduce(
       { name: "[EventName1]", payload: { /* TODO */ } },
       view,
     );
 
-    view = projection.reducers.[EventName2](
+    view = projection.on.[EventName2]!.reduce(
       { name: "[EventName2]", payload: { /* TODO */ } },
       view,
     );
@@ -254,7 +259,7 @@ describe("[ProjectionName] query handlers", () => {
 });
 ```
 
-### Reducer handles undefined view on first event
+### Reduce handler handles undefined view on first event
 
 ```ts
 import { describe, it, expect } from "vitest";
@@ -263,7 +268,7 @@ describe("[ProjectionName] first event handling", () => {
   it("should handle undefined view gracefully", () => {
     const projection = /* your projection definition */;
 
-    const view = projection.reducers.[EventName](
+    const view = projection.on.[EventName]!.reduce(
       { name: "[EventName]", payload: { /* TODO */ } },
       undefined as any,
     );

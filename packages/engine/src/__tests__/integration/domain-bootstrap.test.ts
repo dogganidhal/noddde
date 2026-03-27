@@ -189,13 +189,17 @@ describe("Domain bootstrap - full configuration", () => {
     view: { openCount: number };
     infrastructure: {};
   }>({
-    reducers: {
-      TicketCreated: (event, view) => ({
-        openCount: (view?.openCount ?? 0) + 1,
-      }),
-      TicketResolved: (event, view) => ({
-        openCount: (view?.openCount ?? 0) - 1,
-      }),
+    on: {
+      TicketCreated: {
+        reduce: (event, view) => ({
+          openCount: (view?.openCount ?? 0) + 1,
+        }),
+      },
+      TicketResolved: {
+        reduce: (event, view) => ({
+          openCount: (view?.openCount ?? 0) - 1,
+        }),
+      },
     },
     queryHandlers: {},
   });

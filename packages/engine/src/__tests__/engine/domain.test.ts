@@ -309,10 +309,12 @@ type ItemProjectionTypes = ProjectionTypes & {
 };
 
 const ItemProjection = defineProjection<ItemProjectionTypes>({
-  reducers: {
-    ItemAdded: (event, view) => {
-      view.set(event.payload.id, event.payload);
-      return view;
+  on: {
+    ItemAdded: {
+      reduce: (event, view) => {
+        view.set(event.payload.id, event.payload);
+        return view;
+      },
     },
   },
   queryHandlers: {
@@ -694,10 +696,12 @@ type ProductProjectionTypes = ProjectionTypes & {
 };
 
 const ProductProjection = defineProjection<ProductProjectionTypes>({
-  reducers: {
-    ProductAdded: (event, view) => {
-      view.set(event.payload.id, event.payload);
-      return view;
+  on: {
+    ProductAdded: {
+      reduce: (event, view) => {
+        view.set(event.payload.id, event.payload);
+        return view;
+      },
     },
   },
   queryHandlers: {

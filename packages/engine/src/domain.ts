@@ -68,7 +68,27 @@ import type { AggregatePersistenceResolver } from "./aggregate-persistence-resol
 
 type AggregateMap = Record<string | symbol, Aggregate<any>>;
 
-type ProjectionMap = Record<string | symbol, Projection<any>>;
+/** A projection entry in domain config — bare projection or with viewStore. */
+type ProjectionEntry =
+  | Projection<any>
+  | {
+      projection: Projection<any>;
+      viewStore: (infrastructure: any) => ViewStore;
+    };
+
+type ProjectionMap = Record<string | symbol, ProjectionEntry>;
+
+/** Normalize a ProjectionEntry to extract the projection and optional viewStore factory. */
+function resolveProjectionEntry(entry: ProjectionEntry): {
+  projection: Projection<any>;
+  viewStore?: (infrastructure: any) => ViewStore;
+} {
+  if ("projection" in entry && "viewStore" in entry) {
+    return { projection: entry.projection, viewStore: entry.viewStore as any };
+  }
+  // Bare projection (has 'on' field)
+  return { projection: entry as Projection<any> };
+}
 
 type SagaMap = Record<string | symbol, Saga<any, any>>;
 
@@ -474,22 +494,28 @@ export class Domain<
       configuration.metadataProvider,
     );
 
-    // Step 5.9: Resolve view stores for projections with identity
+    // Step 5.9: Resolve view stores for projections
     const resolvedViewStores = new Map<string, ViewStore>();
-    for (const [name, projection] of Object.entries(
+    const resolvedProjections = new Map<string, Projection<any>>();
+    for (const [name, entry] of Object.entries(
       configuration.readModel.projections,
     )) {
-      if (projection.identity && !projection.viewStore) {
-        throw new Error(
-          `Projection "${name}" has identity but no viewStore. ` +
-            `Provide a viewStore factory or remove identity.`,
-        );
-      }
-      if (projection.viewStore) {
-        resolvedViewStores.set(
-          name,
-          (projection.viewStore as any)(this._infrastructure),
-        );
+      const { projection, viewStore: viewStoreFactory } =
+        resolveProjectionEntry(entry);
+      resolvedProjections.set(name, projection);
+      if (viewStoreFactory) {
+        const storeInstance = viewStoreFactory(this._infrastructure);
+        resolvedViewStores.set(name, storeInstance);
+        // Validate: every on entry must have id when viewStore is present
+        for (const [eventName, handler] of Object.entries(projection.on)) {
+          if (handler && !(handler as any).id) {
+            throw new Error(
+              `Projection "${String(name)}" has a viewStore but the "${eventName}" handler ` +
+                `in "on" is missing an "id" function. All event handlers must provide ` +
+                `an identity extractor when viewStore is present.`,
+            );
+          }
+        }
       }
     }
 
@@ -499,10 +525,8 @@ export class Domain<
     }
 
     // Step 5.10: Build strong-consistency callback for projections
-    const strongProjections = Object.entries(
-      configuration.readModel.projections,
-    ).filter(
-      ([_, p]) => p.consistency === "strong" && p.identity && p.viewStore,
+    const strongProjections = [...resolvedProjections.entries()].filter(
+      ([name, p]) => p.consistency === "strong" && resolvedViewStores.has(name),
     );
 
     // Compose onEventsProduced: strong-consistency projections + outbox writes
@@ -518,14 +542,13 @@ export class Domain<
               for (const [_projName, projection] of strongProjections) {
                 const viewStoreInstance = resolvedViewStores.get(_projName)!;
                 for (const event of events) {
-                  const reducerFn = (projection.reducers as any)[event.name];
-                  const identityFn = (projection.identity as any)?.[event.name];
-                  if (reducerFn && identityFn) {
-                    const viewId = identityFn(event);
+                  const handler = (projection.on as any)[event.name];
+                  if (handler?.id && handler?.reduce) {
+                    const viewId = handler.id(event);
                     const currentView =
                       (await viewStoreInstance.load(viewId)) ??
                       projection.initialView;
-                    const newView = await reducerFn(event, currentView);
+                    const newView = await handler.reduce(event, currentView);
                     uow.enlist(() => viewStoreInstance.save(viewId, newView));
                   }
                 }
@@ -654,9 +677,10 @@ export class Domain<
     }
 
     // Step 8: Register projection query handlers on the query bus
-    for (const [projectionName, projection] of Object.entries(
+    for (const [projectionName, entry] of Object.entries(
       configuration.readModel.projections,
     )) {
+      const { projection } = resolveProjectionEntry(entry);
       if (projection.queryHandlers) {
         const viewStoreInstance = resolvedViewStores.get(projectionName);
         for (const [queryName, handler] of Object.entries(
@@ -694,26 +718,24 @@ export class Domain<
     }
 
     // Step 10: Register event listeners for projections
-    for (const [projectionName, projection] of Object.entries(
+    for (const [projectionName, entry] of Object.entries(
       configuration.readModel.projections,
     )) {
+      const { projection } = resolveProjectionEntry(entry);
       // Skip strong-consistency projections — they're handled via onEventsProduced
       if (projection.consistency === "strong") continue;
 
       const viewStoreInstance = resolvedViewStores.get(projectionName);
+      if (!viewStoreInstance) continue;
 
-      if (!projection.identity || !viewStoreInstance) continue;
-
-      for (const eventName of Object.keys(projection.reducers)) {
-        const identityFn = (projection.identity as any)[eventName];
+      for (const eventName of Object.keys(projection.on)) {
+        const handler = (projection.on as any)[eventName];
+        if (!handler?.id) continue;
         this.subscribeToEvent(eventBus, eventName, async (event: Event) => {
-          const viewId = identityFn(event);
+          const viewId = handler.id(event);
           const currentView =
             (await viewStoreInstance.load(viewId)) ?? projection.initialView;
-          const newView = await (projection.reducers as any)[eventName](
-            event,
-            currentView,
-          );
+          const newView = await handler.reduce(event, currentView);
           await viewStoreInstance.save(viewId, newView);
         });
       }

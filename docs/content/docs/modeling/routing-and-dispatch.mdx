@@ -331,7 +331,7 @@ cqrsInfrastructure: () => ({
 }),
 ```
 
-During `configureDomain`, the framework reads the `reducers` map from each projection and the `handlers` map from each saga, then registers them with the event bus via `on(eventName, handler)`. You do not subscribe manually.
+During `configureDomain`, the framework reads the `on` map from each projection and the `handlers` map from each saga, then registers them with the event bus via `bus.on(eventName, handler)`. You do not subscribe manually.
 
 | Property    | Behavior                                                    |
 | ----------- | ----------------------------------------------------------- |

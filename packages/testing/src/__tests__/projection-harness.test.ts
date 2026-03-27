@@ -25,15 +25,19 @@ type CounterProjectionDef = {
 };
 
 const CounterProjection = defineProjection<CounterProjectionDef>({
-  reducers: {
-    Incremented: (event, view) => ({
-      total: (view?.total ?? 0) + event.payload.amount,
-      eventCount: (view?.eventCount ?? 0) + 1,
-    }),
-    Decremented: (event, view) => ({
-      total: (view?.total ?? 0) - event.payload.amount,
-      eventCount: (view?.eventCount ?? 0) + 1,
-    }),
+  on: {
+    Incremented: {
+      reduce: (event, view) => ({
+        total: (view?.total ?? 0) + event.payload.amount,
+        eventCount: (view?.eventCount ?? 0) + 1,
+      }),
+    },
+    Decremented: {
+      reduce: (event, view) => ({
+        total: (view?.total ?? 0) - event.payload.amount,
+        eventCount: (view?.eventCount ?? 0) + 1,
+      }),
+    },
   },
   queryHandlers: {},
 });
@@ -54,12 +58,14 @@ type AsyncProjectionDef = {
 };
 
 const AsyncProjection = defineProjection<AsyncProjectionDef>({
-  reducers: {
-    ItemAdded: async (event, view) => {
-      await new Promise((resolve) => setTimeout(resolve, 1));
-      return {
-        items: [...(view?.items ?? []), event.payload.item],
-      };
+  on: {
+    ItemAdded: {
+      reduce: async (event, view) => {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        return {
+          items: [...(view?.items ?? []), event.payload.item],
+        };
+      },
     },
   },
   queryHandlers: {},
@@ -79,9 +85,11 @@ type ErrorProjectionDef = {
 };
 
 const ErrorProjection = defineProjection<ErrorProjectionDef>({
-  reducers: {
-    Bad: () => {
-      throw new Error("Reducer failed");
+  on: {
+    Bad: {
+      reduce: () => {
+        throw new Error("Reducer failed");
+      },
     },
   },
   queryHandlers: {},
@@ -102,9 +110,10 @@ type PartialProjectionDef = {
 };
 
 const PartialProjection = defineProjection<PartialProjectionDef>({
-  reducers: {
-    Handled: (event, view) => ({ x: (view?.x ?? 0) + event.payload.x }),
-    Unhandled: (_event, view) => view,
+  on: {
+    Handled: {
+      reduce: (event, view) => ({ x: (view?.x ?? 0) + event.payload.x }),
+    },
   },
   queryHandlers: {},
 });

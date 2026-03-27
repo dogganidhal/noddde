@@ -60,7 +60,7 @@ type DomainConfiguration<TInfrastructure extends Infrastructure> = {
     standaloneCommandHandlers?: Record<string, StandaloneCommandHandler<...>>;
   };
   readModel: {
-    projections: Record<string, Projection<any>>;
+    projections: Record<string, Projection<any> | { projection: Projection<any>; viewStore: (infra: TInfrastructure) => ViewStore }>;
     standaloneQueryHandlers?: Record<string, QueryHandler<...>>;
   };
   processModel?: {
@@ -161,11 +161,18 @@ import { TransactionHistoryProjection } from "./transaction-history";
 
 readModel: {
   projections: {
-    BankAccount: BankAccountProjection,
+    // With view store — enables auto-persistence
+    BankAccount: {
+      projection: BankAccountProjection,
+      viewStore: (infra) => infra.bankAccountViewStore,
+    },
+    // Without view store — query-only or manually persisted
     TransactionHistory: TransactionHistoryProjection,
   },
 },
 ```
+
+Each projection entry can be a bare projection definition or an object wrapping the projection with a `viewStore` factory. When a `viewStore` is provided, the engine auto-persists views using the `id` and `reduce` functions in the projection's `on` map. See [View Persistence](/docs/read-model/view-persistence) for details.
 
 Each [projection](/docs/read-model/projections) receives events from the `EventBus` and updates its view accordingly. Multiple projections can consume the same events to build different views. The key in the map is the projection name -- used for identification and logging. It does not need to match any aggregate name.
 
@@ -365,7 +372,12 @@ const domain = await configureDomain<BankingInfrastructure>({
   },
   readModel: {
     projections: {
-      BankAccount: BankAccountProjection,
+      // With view store — engine auto-persists views on each event
+      BankAccount: {
+        projection: BankAccountProjection,
+        viewStore: (infra) => infra.bankAccountViewStore,
+      },
+      // Without view store — query-only or manually persisted
       TransactionHistory: TransactionHistoryProjection,
     },
   },

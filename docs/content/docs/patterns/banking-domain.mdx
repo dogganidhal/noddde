@@ -190,7 +190,7 @@ export const BankAccount = defineAggregate<BankAccountDef>({
 
 ## Step 6: Define Projections
 
-A projection builds a query-optimized view from events using `defineProjection`. Each event gets its own reducer — no switch statements:
+A projection builds a query-optimized view from events using `defineProjection`. Each event gets its own handler in the `on` map — no switch statements:
 
 ```ts
 import { defineProjection, DefineQueries } from "@noddde/core";
@@ -218,27 +218,30 @@ type BankAccountProjectionDef = {
 };
 
 export const BankAccountProjection = defineProjection<BankAccountProjectionDef>({
-  reducers: {
-    BankAccountCreated: (event) => ({
-      id: event.payload.id,
-      balance: 0,
-      transactions: [],
-    }),
-    TransactionAuthorized: (event, view) => ({
-      ...view,
-      balance: view.balance + event.payload.amount,
-      transactions: [
-        ...view.transactions,
-        {
-          id: event.payload.id,
-          timestamp: event.payload.timestamp,
-          amount: event.payload.amount,
-          status: "processed",
-        },
-      ],
-    }),
-    TransactionProcessed: (_, view) => view,
-    TransactionDeclined: (_, view) => view,
+  on: {
+    BankAccountCreated: {
+      reduce: (event) => ({
+        id: event.payload.id,
+        balance: 0,
+        transactions: [],
+      }),
+    },
+    TransactionAuthorized: {
+      reduce: (event, view) => ({
+        ...view,
+        balance: view.balance + event.payload.amount,
+        transactions: [
+          ...view.transactions,
+          {
+            id: event.payload.id,
+            timestamp: event.payload.timestamp,
+            amount: event.payload.amount,
+            status: "processed",
+          },
+        ],
+      }),
+    },
+    // TransactionProcessed and TransactionDeclined not needed — omitted
   },
   queryHandlers: {
     GetBankAccountById: async (query, { bankAccountViewRepository }) =>
@@ -247,7 +250,7 @@ export const BankAccountProjection = defineProjection<BankAccountProjectionDef>(
 });
 ```
 
-The `reducers` map provides one handler per event name — the framework narrows the event type for each key. Events that don't affect the view return it unchanged (pass-through). Query handlers are co-located with the projection that builds the view they serve.
+The `on` map provides one handler per event — the framework narrows the event type for each key. Only events that affect the view need entries; `TransactionProcessed` and `TransactionDeclined` are omitted since they don't change this view. Query handlers are co-located with the projection that builds the view they serve.
 
 ## Step 7: Configure and Run
 

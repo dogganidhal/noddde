@@ -72,11 +72,9 @@ export function testProjection<T extends ProjectionTypes>(
         let currentView = startView as T["view"];
 
         for (const event of events) {
-          const reducer = (projection.reducers as Record<string, any>)[
-            event.name
-          ];
-          if (reducer) {
-            currentView = await reducer(event, currentView);
+          const handler = (projection.on as Record<string, any>)[event.name];
+          if (handler?.reduce) {
+            currentView = await handler.reduce(event, currentView);
           }
         }
 

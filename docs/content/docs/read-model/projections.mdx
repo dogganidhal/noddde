@@ -1,6 +1,6 @@
 ---
 title: Projections
-description: Building read-optimized views from event streams using reducer maps, query handlers, and defineProjection.
+description: Building read-optimized views from event streams using the `on` map, query handlers, and defineProjection.
 ---
 
 Projections are the read side of your domain. They consume events produced by aggregates and transform them into purpose-specific data structures called **views** (or **read models**) that are optimized for querying. For background on why the read and write sides are separated, see [CQRS and Event Sourcing](/docs/core-concepts/cqrs-and-event-sourcing).
@@ -18,13 +18,13 @@ When a command is dispatched, the following sequence connects the write side to 
 1. The aggregate's command handler processes the command and returns events
 2. Events are persisted (via `EventSourcedAggregatePersistence` or equivalent)
 3. Each event is published to the `EventBus`
-4. Registered projections receive the events and update their views via reducers
+4. Registered projections receive the events and update their views via event handlers
 5. Queries read from the projection views via query handlers
 
 ```
-Command --> Aggregate --> Events --> EventBus --> Projection Reducers --> View
-                                                                         |
-                                                            Query --> QueryHandler
+Command --> Aggregate --> Events --> EventBus --> Projection on Handlers --> View
+                                                                            |
+                                                             Query --> QueryHandler
 ```
 
 ## The ProjectionTypes Bundle
@@ -37,11 +37,11 @@ type MyProjectionDef = {
   queries: MyQuery; // The query union this projection answers
   view: MyView; // The view model this projection builds
   infrastructure: MyInfra; // Dependencies available to query handlers
-  viewStore: MyViewStore; // (optional) Typed view store for persistence and queries
+  viewStore: MyViewStore; // (optional) Type hint for { views } injection into query handlers
 };
 ```
 
-The first four fields are required. The `viewStore` field is optional -- when present, it enables automatic view persistence and typed `{ views }` injection into query handlers. See [View Persistence](/docs/read-model/view-persistence) for details.
+The first four fields are required. The `viewStore` field is a **type-level hint only** — it is not used at runtime inside the projection definition itself. The actual view store instance is provided in the domain configuration via `configureDomain`. When present, it enables typed `{ views }` injection into query handlers. See [View Persistence](/docs/read-model/view-persistence) for details.
 
 This follows the same pattern as `AggregateTypes` in [defining aggregates](/docs/modeling/defining-aggregates) -- instead of threading positional generics, you declare a single named type.
 
@@ -84,101 +84,109 @@ type BankAccountProjectionDef = {
   queries: BankAccountQuery;
   view: BankAccountView;
   infrastructure: BankingInfrastructure;
-  viewStore: ViewStore<BankAccountView>;
+  viewStore: ViewStore<BankAccountView>; // type hint for { views } injection
 };
 
 export const BankAccountProjection = defineProjection<BankAccountProjectionDef>(
   {
-    reducers: {
-      BankAccountCreated: (event) => ({
-        id: event.payload.id,
-        balance: 0,
-        transactions: [],
-      }),
+    on: {
+      BankAccountCreated: {
+        id: (event) => event.payload.id,
+        reduce: (event) => ({
+          id: event.payload.id,
+          balance: 0,
+          transactions: [],
+        }),
+      },
 
-      TransactionProcessed: (event, view) => ({
-        ...view,
-        balance: view.balance + event.payload.amount,
-        transactions: [
-          ...view.transactions,
-          {
-            id: event.payload.id,
-            timestamp: event.payload.timestamp,
-            amount: event.payload.amount,
-            status: "processed" as const,
-          },
-        ],
-      }),
+      TransactionProcessed: {
+        id: (event) => event.payload.accountId,
+        reduce: (event, view) => ({
+          ...view,
+          balance: view.balance + event.payload.amount,
+          transactions: [
+            ...view.transactions,
+            {
+              id: event.payload.id,
+              timestamp: event.payload.timestamp,
+              amount: event.payload.amount,
+              status: "processed" as const,
+            },
+          ],
+        }),
+      },
 
-      TransactionDeclined: (event, view) => ({
-        ...view,
-        transactions: [
-          ...view.transactions,
-          {
-            id: event.payload.id,
-            timestamp: event.payload.timestamp,
-            amount: event.payload.amount,
-            status: "declined" as const,
-          },
-        ],
-      }),
+      TransactionDeclined: {
+        id: (event) => event.payload.accountId,
+        reduce: (event, view) => ({
+          ...view,
+          transactions: [
+            ...view.transactions,
+            {
+              id: event.payload.id,
+              timestamp: event.payload.timestamp,
+              amount: event.payload.amount,
+              status: "declined" as const,
+            },
+          ],
+        }),
+      },
     },
-
-    identity: {
-      BankAccountCreated: (event) => event.payload.id,
-      TransactionProcessed: (event) => event.payload.accountId,
-      TransactionDeclined: (event) => event.payload.accountId,
-    },
-
-    viewStore: (infra) => infra.bankAccountViewStore,
 
     queryHandlers: {
-      GetBankAccountById: (query, { views }) => views.load(query.id),
+      GetBankAccountById: async (query, { views }) =>
+        (await views.load(query.id)) ?? null,
     },
   },
 );
 ```
 
-`defineProjection` is an identity function -- it returns the same object you pass in, but with full type inference applied. The framework uses the `ProjectionTypes` bundle to narrow event types inside each reducer and validate query handler return types.
+`defineProjection` is an identity function -- it returns the same object you pass in, but with full type inference applied. The framework uses the `ProjectionTypes` bundle to narrow event types inside each handler and validate query handler return types.
 
-## Reducers
+## Event Handlers (the `on` Map)
 
-The `reducers` map contains one handler per event name. Each reducer receives the **full event** (not just the payload) and the current view, then returns the updated view.
+The `on` map contains one entry per event the projection cares about. Each entry is an object with two fields:
+
+- **`id`** (optional) -- A function that extracts the view instance ID from the event. Required when the projection uses automatic view persistence.
+- **`reduce`** -- Receives the **full event** (not just the payload) and the current view, then returns the updated view.
 
 ```ts
-reducers: {
+on: {
   // `event` is narrowed to the specific event variant, not the full union
-  BankAccountCreated: (event, view) => ({
-    ...view,
-    id: event.payload.id,
-  }),
+  BankAccountCreated: {
+    id: (event) => event.payload.id,
+    reduce: (event, view) => ({
+      ...view,
+      id: event.payload.id,
+    }),
+  },
 }
 ```
 
-Key properties of reducers:
+Key properties of event handlers:
 
 - **Automatic type narrowing** -- Inside each handler, `event` is narrowed to the specific event variant (e.g., `Extract<BankAccountEvent, { name: "BankAccountCreated" }>`). No switch statements or type guards needed.
-- **Exhaustiveness checking** -- TypeScript ensures you handle every event in the union. Missing an event name is a compile error.
-- **Can be async** -- Reducers may return `Promise<View>` when they need to perform asynchronous work.
+- **Partial event mapping** -- Only include events the projection cares about. Unhandled events are silently ignored. No more noop pass-throughs.
+- **Can be async** -- `reduce` may return `Promise<View>` when it needs to perform asynchronous work.
 - **Receive full events** -- Unlike aggregate apply handlers that receive just the payload, projection reducers receive the complete event object (with `name` and `payload`).
 
-### Why a Map Instead of a Single Reducer?
+### Why an `on` Map?
 
 A map of per-event functions has two advantages over a single `(view, event) => view` function:
 
 1. **Automatic type narrowing** -- Each handler gets the specific event type, not the union.
-2. **Exhaustiveness** -- TypeScript catches missing event handlers at compile time.
+2. **Event filtering** -- Only subscribe to events you care about. Unhandled events are silently ignored.
 
 ### Similarity to Apply Handlers
 
-The reducer pattern mirrors the apply handler pattern used in aggregates. Both are maps of functions that transform state based on events. The difference is purpose:
+The `on` map pattern mirrors the apply handler pattern used in aggregates. Both are maps of functions that transform state based on events. The difference is purpose:
 
 - **Apply handlers** rebuild the aggregate's internal state for command processing
 - **Projection reducers** build a query-optimized view for the read model
 
 ## Query Handlers
 
-The `queryHandlers` map contains handlers for serving queries from the projection's view. When the projection has a `viewStore`, handlers automatically receive `{ views }` -- a typed view store instance -- in their infrastructure parameter:
+The `queryHandlers` map contains handlers for serving queries from the projection's view. When the projection's `ProjectionTypes` bundle includes a `viewStore` type hint and the domain configuration provides the corresponding view store, handlers automatically receive `{ views }` -- a typed view store instance -- in their infrastructure parameter:
 
 ```ts
 queryHandlers: {
@@ -217,12 +225,13 @@ A single stream of events can feed multiple projections, each optimized for a di
 ```ts
 // Projection 1: Account balance view
 const AccountBalanceProjection = defineProjection<BalanceDef>({
-  reducers: {
-    TransactionProcessed: (event, view) => ({
-      ...view,
-      balance: view.balance + event.payload.amount,
-    }),
-    // ...
+  on: {
+    TransactionProcessed: {
+      reduce: (event, view) => ({
+        ...view,
+        balance: view.balance + event.payload.amount,
+      }),
+    },
   },
   queryHandlers: {
     /* ... */
@@ -231,19 +240,20 @@ const AccountBalanceProjection = defineProjection<BalanceDef>({
 
 // Projection 2: Transaction history view
 const TransactionHistoryProjection = defineProjection<HistoryDef>({
-  reducers: {
-    TransactionProcessed: (event, view) => ({
-      ...view,
-      transactions: [
-        ...view.transactions,
-        {
-          id: event.payload.id,
-          amount: event.payload.amount,
-          merchant: event.payload.merchant,
-        },
-      ],
-    }),
-    // ...
+  on: {
+    TransactionProcessed: {
+      reduce: (event, view) => ({
+        ...view,
+        transactions: [
+          ...view.transactions,
+          {
+            id: event.payload.id,
+            amount: event.payload.amount,
+            merchant: event.payload.merchant,
+          },
+        ],
+      }),
+    },
   },
   queryHandlers: {
     /* ... */
@@ -281,7 +291,12 @@ const domain = await configureDomain<BankingInfrastructure>({
   },
   readModel: {
     projections: {
-      AccountBalance: AccountBalanceProjection,
+      // With view store — enables auto-persistence and { views } injection
+      AccountBalance: {
+        projection: AccountBalanceProjection,
+        viewStore: (infra) => infra.accountViewStore,
+      },
+      // Without view store — query-only or uses custom infra
       TransactionHistory: TransactionHistoryProjection,
     },
   },
@@ -291,7 +306,7 @@ const domain = await configureDomain<BankingInfrastructure>({
 });
 ```
 
-The key in the projections map (e.g., `"AccountBalance"`) is the projection's name. It does not need to match the aggregate name.
+The key in the projections map (e.g., `"AccountBalance"`) is the projection's name. It does not need to match the aggregate name. Passing `{ projection, viewStore }` connects the projection to a view store from your infrastructure, enabling automatic view persistence and `{ views }` injection into query handlers.
 
 ## Event Delivery Guarantees
 
@@ -312,7 +327,7 @@ describe("BankAccountProjection", () => {
   const emptyView = { id: "", balance: 0, transactions: [] };
 
   it("initializes the view on BankAccountCreated", () => {
-    const result = BankAccountProjection.reducers.BankAccountCreated(
+    const result = BankAccountProjection.on.BankAccountCreated!.reduce(
       { name: "BankAccountCreated", payload: { id: "acc-123" } },
       emptyView,
     );
@@ -324,7 +339,7 @@ describe("BankAccountProjection", () => {
   it("adds to balance on TransactionProcessed", () => {
     const view = { id: "acc-123", balance: 100, transactions: [] };
 
-    const result = BankAccountProjection.reducers.TransactionProcessed(
+    const result = BankAccountProjection.on.TransactionProcessed!.reduce(
       {
         name: "TransactionProcessed",
         payload: {
@@ -347,7 +362,7 @@ No mocks needed. No infrastructure setup. Just inputs and outputs.
 
 ## View Persistence
 
-noddde provides **view stores** — typed persistence interfaces for per-entity view management. Projections use `identity` maps and `viewStore` factories to automatically persist views when events arrive.
+noddde provides **view stores** — typed persistence interfaces for per-entity view management. Projections use `id` extractors inside each `on` entry to identify which view instance to update, and the view store is provided via the domain configuration to automatically persist views when events arrive.
 
 A `ViewStore<TView>` provides `save(viewId, view)` and `load(viewId)` methods. You can extend it with custom query methods for advanced filtering:
 
@@ -359,51 +374,36 @@ interface BankAccountViewStore extends ViewStore<BankAccountView> {
 }
 ```
 
-### Identity Maps
+### Identity Extractors
 
-To enable automatic view persistence, declare an `identity` map that extracts the view instance ID from each event:
+To enable automatic view persistence, provide an `id` function inside each relevant `on` entry. The `id` function extracts the view instance ID from the event so the engine knows which view to load and update:
 
 ```ts
-type BankAccountProjectionDef = {
-  events: BankAccountEvent;
-  queries: BankAccountQuery;
-  view: BankAccountView;
-  infrastructure: BankingInfrastructure;
-  viewStore: BankAccountViewStore;
-};
-
-const BankAccountProjection = defineProjection<BankAccountProjectionDef>({
-  reducers: {
-    BankAccountCreated: (event) => ({
-      id: event.payload.id,
-      balance: 0,
-      transactions: [],
-    }),
-    TransactionProcessed: (event, view) => ({
+on: {
+  BankAccountCreated: {
+    id: (event) => event.payload.id,  // view instance ID
+    reduce: (event) => ({ id: event.payload.id, balance: 0, transactions: [] }),
+  },
+  TransactionProcessed: {
+    id: (event) => event.payload.accountId,  // same view, different event
+    reduce: (event, view) => ({
       ...view,
       balance: view.balance + event.payload.amount,
     }),
   },
-  identity: {
-    BankAccountCreated: (event) => event.payload.id,
-    TransactionProcessed: (event) => event.payload.accountId,
-  },
-  viewStore: (infra) => infra.bankAccountViewStore,
-  queryHandlers: {
-    GetBankAccountById: (query, { views }) => views.load(query.id),
-  },
-});
+},
 ```
 
-When both `identity` and `viewStore` are present, the engine automatically:
-1. Extracts the view ID from the event via `identity[eventName](event)`
+The view store itself is provided in the domain configuration (not in the projection definition). When the engine handles an event, it automatically:
+
+1. Extracts the view ID from `on[eventName].id(event)`
 2. Loads the current view from the view store (falling back to `initialView` if not found)
-3. Runs the reducer to produce the new view
+3. Runs `on[eventName].reduce(event, view)` to produce the new view
 4. Saves the new view to the view store
 
 ### Query Handler Views Injection
 
-When a projection has a `viewStore`, query handlers automatically receive `{ views }` in their infrastructure parameter, typed to the projection's view store:
+When a projection's `ProjectionTypes` bundle declares a `viewStore` type hint and the domain configuration provides the corresponding view store, query handlers automatically receive `{ views }` in their infrastructure parameter, typed to the projection's view store:
 
 ```ts
 queryHandlers: {

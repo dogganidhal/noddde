@@ -125,7 +125,7 @@ const events = BankAccount.commands.AuthorizeTransaction(
 const newState = BankAccount.apply.TransactionAuthorized(payload, state);
 
 // Call a projection reducer directly
-const newView = BankProjection.reducers.TransactionAuthorized(event, view);
+const newView = BankProjection.on.TransactionAuthorized!.reduce(event, view);
 ```
 
 The harnesses add value by managing state reconstruction from events, normalizing results, and capturing errors -- but they are optional.

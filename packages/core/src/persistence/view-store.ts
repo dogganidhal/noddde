@@ -7,7 +7,8 @@ import type { ID } from "../id";
  * (findByX, listByY, aggregate queries).
  *
  * The framework calls `save()` and `load()` for automatic view persistence
- * when the projection has an {@link Projection.identity | identity} map.
+ * when the projection has `id` functions in its `on` map and a `viewStore`
+ * is configured in the domain configuration.
  *
  * @typeParam TView - The view model type this store persists and retrieves.
  *   Defaults to `any` for use in non-generic contexts (e.g., the runtime engine).

@@ -39,7 +39,7 @@ docs:
    - `infrastructure.aggregatePersistence()` -- resolve the persistence strategy.
    - `infrastructure.sagaPersistence()` -- resolve saga persistence (only if `processModel` is provided).
 2. **Infrastructure merging**: The `domain.infrastructure` property must return the custom infrastructure merged with `CQRSInfrastructure` (commandBus, eventBus, queryBus).
-3. **Projection wiring**: For each projection in `readModel.projections`, for each event name in its `reducers`, a subscription is registered on the EventBus.
+3. **Projection wiring**: For each projection in `readModel.projections`, for each event name in its `on` map, a subscription is registered on the EventBus.
 4. **Saga wiring**: For each saga in `processModel.sagas`, for each event name in its `handlers`, a subscription is registered on the EventBus.
 5. **Query handler registration**: For each projection with `queryHandlers`, and for each standalone query handler, the handler must be registered on the QueryBus.
 6. **Standalone command handler registration**: For each entry in `writeModel.standaloneCommandHandlers`, the handler must be registered on the CommandBus.
@@ -305,13 +305,17 @@ const TicketListProjection = defineProjection<{
   view: { openCount: number };
   infrastructure: {};
 }>({
-  reducers: {
-    TicketCreated: (event, view) => ({
-      openCount: (view?.openCount ?? 0) + 1,
-    }),
-    TicketResolved: (event, view) => ({
-      openCount: (view?.openCount ?? 0) - 1,
-    }),
+  on: {
+    TicketCreated: {
+      reduce: (event, view) => ({
+        openCount: (view?.openCount ?? 0) + 1,
+      }),
+    },
+    TicketResolved: {
+      reduce: (event, view) => ({
+        openCount: (view?.openCount ?? 0) - 1,
+      }),
+    },
   },
   queryHandlers: {},
 });

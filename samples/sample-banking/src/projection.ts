@@ -12,27 +12,29 @@ type BankAccountProjectionDef = {
 
 export const BankAccountProjection = defineProjection<BankAccountProjectionDef>(
   {
-    reducers: {
-      BankAccountCreated: (event) => ({
-        id: event.payload.id,
-        balance: 0,
-        transactions: [],
-      }),
-      TransactionAuthorized: (event, view) => ({
-        ...view,
-        balance: view.balance + event.payload.amount,
-        transactions: [
-          ...view.transactions,
-          {
-            id: event.payload.id,
-            timestamp: event.payload.timestamp,
-            amount: event.payload.amount,
-            status: "processed",
-          },
-        ],
-      }),
-      TransactionProcessed: (_, view) => view,
-      TransactionDeclined: (_, view) => view,
+    on: {
+      BankAccountCreated: {
+        reduce: (event) => ({
+          id: event.payload.id,
+          balance: 0,
+          transactions: [],
+        }),
+      },
+      TransactionAuthorized: {
+        reduce: (event, view) => ({
+          ...view,
+          balance: view.balance + event.payload.amount,
+          transactions: [
+            ...view.transactions,
+            {
+              id: event.payload.id,
+              timestamp: event.payload.timestamp,
+              amount: event.payload.amount,
+              status: "processed",
+            },
+          ],
+        }),
+      },
     },
     queryHandlers: {
       GetBankAccountById: async (query, { bankAccountViewRepository }) =>
