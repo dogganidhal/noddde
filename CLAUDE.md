@@ -83,6 +83,16 @@ Before `implemented`: all exports present, all requirements tested, invariants e
 
 When a spec changes or a new spec is added that affects aggregate, projection, or saga patterns (types, handler signatures, folder structure), reassess whether `packages/cli/` templates need updating. The `/spec` pipeline (step 5) enforces this automatically — see `.claude/skills/spec/SKILL.md`.
 
+## Pre-Push Checklist
+
+**Before every `git push`, run these checks and fix any issues:**
+
+1. **Prettier**: `npx prettier --check "**/*.{ts,tsx,md}"` — fix with `npx prettier --write "**/*.{ts,tsx,md}"`
+2. **ESLint**: `yarn lint` (or `npx turbo lint`) — must pass with zero warnings (`--max-warnings 0`)
+3. **TypeScript**: `npx tsc --noEmit` in each affected package
+
+Never push code that fails formatting or lint. CI runs `yarn format:check` and `yarn lint` — both must pass.
+
 ## Non-Spec Work
 
 For tasks outside the spec pipeline (debugging, CI, docs-only, code review): follow coding conventions above. No spec needed for config changes, CI, or docs-only edits.
