@@ -1,13 +1,16 @@
 # Hotel Booking Sample
 
-A comprehensive reference project demonstrating the noddde framework's DDD, CQRS, and Event Sourcing capabilities through a hotel booking domain.
+A comprehensive full-stack reference project demonstrating the noddde framework's DDD, CQRS, and Event Sourcing capabilities through a hotel booking domain.
+
+**Stack**: Drizzle + PostgreSQL | `@noddde/drizzle` | Fastify HTTP | RabbitMQ
 
 ## Quick Start
 
 ```bash
 yarn install
-npx vitest run      # 74 tests (72 pass, 2 skipped — RabbitMQ requires Docker)
-npx tsx src/main.ts # Start Fastify server on :3000
+docker compose up -d             # Start PostgreSQL (required for main.ts)
+npx vitest run                   # Run all tests (uses in-memory SQLite — no Docker needed)
+npx tsx src/main.ts              # Start Fastify server on :3000
 ```
 
 ## Domain Overview
@@ -130,7 +133,7 @@ Tracks room type availability counts. Uses state-stored persistence (not event-s
 
 ### RoomAvailability (Strong Consistency)
 
-Updated within the same Unit of Work as the command that produced the event. Backed by a Drizzle `ViewStore` persisted to SQLite.
+Updated within the same Unit of Work as the command that produced the event. Backed by a Drizzle `ViewStore` persisted to PostgreSQL.
 
 **View:** `{ roomId, roomNumber, type, floor, pricePerNight, status, currentGuestId }`
 
@@ -258,13 +261,13 @@ The error handler plugin maps domain errors to HTTP status codes:
 
 ### Persistence Configuration
 
-| Aggregate | Strategy      | Backing Store                        |
-| --------- | ------------- | ------------------------------------ |
-| Room      | Event-sourced | Drizzle + SQLite                     |
-| Booking   | Event-sourced | Drizzle + SQLite                     |
-| Inventory | State-stored  | Drizzle + SQLite                     |
-| Sagas     | State-stored  | Drizzle + SQLite                     |
-| Snapshots | Room only     | Drizzle + SQLite, `everyNEvents(50)` |
+| Aggregate | Strategy      | Backing Store                             |
+| --------- | ------------- | ----------------------------------------- |
+| Room      | Event-sourced | Drizzle + PostgreSQL                      |
+| Booking   | Event-sourced | Drizzle + PostgreSQL                      |
+| Inventory | State-stored  | Drizzle + PostgreSQL                      |
+| Sagas     | State-stored  | Drizzle + PostgreSQL                      |
+| Snapshots | Room only     | Drizzle + PostgreSQL, `everyNEvents(50)`  |
 
 ### Service Implementations
 
@@ -278,7 +281,7 @@ The error handler plugin maps domain errors to HTTP status codes:
 ### Custom Implementations
 
 - **RabbitMQ EventBus** — `amqplib`-based event bus with topic exchange (requires Docker for tests)
-- **Drizzle ViewStore** — generic `ViewStore<T>` backed by a `hotel_views` SQLite table with JSON serialization
+- **Drizzle ViewStore** — generic `ViewStore<T>` backed by a `hotel_views` PostgreSQL table with JSONB serialization
 
 ## Framework Features Demonstrated
 
@@ -313,53 +316,83 @@ The error handler plugin maps domain errors to HTTP status codes:
 
 ## Tests
 
+Tests use `@noddde/testing` harnesses which are adapter-agnostic. Unit and slice tests need no database. Integration tests use in-memory SQLite for speed (production uses PostgreSQL).
+
 ```
 __tests__/
   unit/                                    # Isolated component tests
-    room-aggregate.test.ts                 # 10 tests — state transitions, guards
-    booking-aggregate.test.ts              # 12 tests — payment state machine
-    inventory-aggregate.test.ts            # 7 tests — state-stored aggregate
-    room-availability-projection.test.ts   # 4 tests — strong consistency view
-    guest-history-projection.test.ts       # 2 tests — booking history accumulation
-    revenue-projection.test.ts             # 2 tests — daily revenue aggregation
-    booking-fulfillment-saga.test.ts       # 7 tests — orchestration + compensation
-    payment-processing-saga.test.ts        # 3 tests — gateway charge + error handling
-    checkout-reminder-saga.test.ts         # 3 tests — SMS notifications
+    room-aggregate.test.ts                 # testAggregate — state transitions, guards
+    booking-aggregate.test.ts              # testAggregate — payment state machine
+    inventory-aggregate.test.ts            # testAggregate — state-stored aggregate
+    room-state.test.ts                     # evolveAggregate — room state reconstruction
+    booking-state.test.ts                  # evolveAggregate — booking state reconstruction
+    room-availability-projection.test.ts   # testProjection — strong consistency view
+    guest-history-projection.test.ts       # testProjection — booking history accumulation
+    revenue-projection.test.ts             # testProjection — daily revenue aggregation
+    booking-fulfillment-saga.test.ts       # testSaga — orchestration + compensation
+    payment-processing-saga.test.ts        # testSaga — gateway charge + error handling
+    checkout-reminder-saga.test.ts         # testSaga — SMS notifications
   slice/                                   # Multi-component integration
-    booking-flow.test.ts                   # 3 tests — full lifecycle via testDomain
-    cancellation-flow.test.ts              # 3 tests — saga compensation chains
-    group-booking.test.ts                  # 2 tests — atomic UoW operations
-    idempotency.test.ts                    # 2 tests — duplicate command rejection
+    booking-flow.test.ts                   # testDomain — full lifecycle + projection verification
+    cancellation-flow.test.ts              # testDomain — saga compensation chains
+    payment-failure-flow.test.ts           # testDomain + stripMetadata — saga compensation
+    group-booking.test.ts                  # testDomain — atomic UoW operations
+    idempotency.test.ts                    # testDomain — duplicate command rejection
+  metadata/                                # Metadata assertion helpers
+    event-metadata.test.ts                 # expectValidMetadata, expectSameCorrelation,
+                                           #   expectCausationChain, stripMetadata
   integration/                             # Real DB + HTTP
-    http-rooms.test.ts                     # 4 tests — room CRUD via Fastify inject
-    http-booking.test.ts                   # 5 tests — end-to-end saga flow via HTTP
-    full-stack.test.ts                     # 3 tests — SQLite persistence + metadata
-    rabbitmq-event-bus.test.ts             # 2 tests — (skipped, requires Docker)
+    setup.ts                               # Test environment factory (in-memory SQLite)
+    full-stack.test.ts                     # Persistence + metadata validation
+    http-rooms.test.ts                     # Room CRUD via Fastify inject
+    http-booking.test.ts                   # End-to-end saga flow via HTTP
+    rabbitmq-event-bus.test.ts             # (skipped, requires Docker)
 ```
 
 ## Project Structure
 
+Follows the CLI-generated layout with extracted handlers and barrel exports:
+
 ```
 src/
-  domain/                          # Pure domain — no I/O dependencies
+  main.ts                                  # Bootstrap: PostgreSQL + Domain + Fastify
+  domain/
+    domain.ts                              # defineDomain — aggregates, projections, sagas
+    event-model/                           # One file per event payload (18 events)
     write-model/
-      room/                        # Event-sourced, snapshots
-      booking/                     # Event-sourced, idempotency
-      inventory/                   # State-stored
+      aggregates/
+        room/                              # Event-sourced, snapshots
+          room.ts                          # defineAggregate (refs extracted handlers)
+          state.ts                         # RoomState + initialRoomState
+          commands/                        # One file per command payload
+          command-handlers/                # One file per handler (standalone fn)
+        booking/                           # Event-sourced, idempotency
+          booking.ts, state.ts, commands/, command-handlers/
+        inventory/                         # State-stored
+          inventory.ts, state.ts, commands/, command-handlers/
     read-model/
-      projections/                 # 3 projections (1 strong, 2 eventual)
-      queries.ts                   # View + query type definitions
-      query-handlers.ts            # Standalone query handler
+      projections/
+        room-availability/                 # Strong consistency
+          room-availability.ts, queries/, query-handlers/, view-reducers/
+        guest-history/                     # Eventual consistency
+          guest-history.ts, queries/, query-handlers/, view-reducers/
+        revenue/                           # Eventual consistency
+          revenue.ts, queries/, query-handlers/, view-reducers/
+      queries.ts                           # Shared view types + SearchQuery
+      query-handlers.ts                    # Standalone SearchAvailableRooms handler
     process-model/
-      booking-fulfillment.ts       # Cross-aggregate orchestration
-      payment-processing.ts        # Payment gateway bridge
-      checkout-reminder.ts         # Guest notification workflow
-  infrastructure/                  # All I/O and framework wiring
-    types.ts                       # HotelInfrastructure + service interfaces
-    services/                      # Clock, email, SMS, payment implementations
-    persistence/                   # Drizzle schema + custom ViewStore
-    messaging/                     # RabbitMQ EventBus
-    handlers/                      # Standalone event + command handlers
-    http/                          # Fastify app, plugins, routes
-  main.ts                          # Bootstrap: DB + Domain + Fastify
+      booking-fulfillment/                 # Cross-aggregate orchestration
+        saga.ts, state.ts, transition-handlers/
+      payment-processing/                  # Payment gateway bridge
+        saga.ts, state.ts, transition-handlers/
+      checkout-reminder/                   # Guest notification workflow
+        saga.ts, state.ts, transition-handlers/
+  infrastructure/                          # All I/O and framework wiring
+    types.ts                               # HotelInfrastructure + service interfaces
+    services/                              # Clock, email, SMS, payment implementations
+    persistence/                           # Drizzle schema + custom ViewStore (PostgreSQL)
+    messaging/                             # RabbitMQ EventBus
+    handlers/                              # Standalone event + command handlers
+    http/                                  # Fastify app, plugins, routes
+docker-compose.yml                         # PostgreSQL 16 service
 ```
