@@ -12,6 +12,10 @@ The API is split into two phases:
 
 This separation allows domain definitions to be shared, tested, and analyzed independently of runtime concerns.
 
+<Callout type="info">
+  You can scaffold a full project with `noddde new project my-app`, or add a domain layer to an existing project with `noddde new domain my-domain`. See [CLI Reference](/docs/getting-started/cli) for details.
+</Callout>
+
 ## Defining the Domain
 
 `defineDomain` is a sync identity function -- it returns the input unchanged with full type inference. Consistent with `defineAggregate`, `defineProjection`, `defineSaga`.

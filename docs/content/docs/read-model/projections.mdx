@@ -11,6 +11,10 @@ An aggregate's state is structured to enforce business rules -- not to serve que
 
 Projections solve this by building query-specific views from the event stream. Adding a new read model means writing a new projection. The write model is never touched.
 
+<Callout type="info">
+  You can scaffold a projection with the CLI: `noddde new projection OrderSummary`. See [CLI Reference](/docs/getting-started/cli#noddde-new-projection-name) for details.
+</Callout>
+
 ## The Event Flow
 
 When a command is dispatched, the following sequence connects the write side to projections:

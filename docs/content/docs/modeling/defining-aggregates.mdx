@@ -13,6 +13,10 @@ An aggregate definition is a **blueprint**, not a singleton. You define the beha
 
 The rest of this page walks through building a complete aggregate from scratch using the banking domain as a running example.
 
+<Callout type="info">
+  You can scaffold this entire structure with the CLI: `noddde new aggregate BankAccount`. See [CLI Reference](/docs/getting-started/cli#noddde-new-aggregate-name) for details.
+</Callout>
+
 ## Step 1: Define Events
 
 Events represent facts that have already occurred. Define them as a payload map using `DefineEvents`:
