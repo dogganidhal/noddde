@@ -1,3 +1,8 @@
+/**
+ * Integration test environment uses in-memory SQLite for speed.
+ * The production main.ts uses PostgreSQL via docker-compose.
+ * Unit and slice tests are adapter-agnostic (use @noddde/testing harnesses).
+ */
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { createDrizzlePersistence } from "@noddde/drizzle";
@@ -28,9 +33,9 @@ import { InMemoryEmailService } from "../../infrastructure/services/email-servic
 import { InMemorySmsService } from "../../infrastructure/services/sms-service";
 import { InMemoryPaymentGateway } from "../../infrastructure/services/payment-gateway";
 import { InMemoryRoomAvailabilityViewStore } from "../../infrastructure/services/room-availability-view-store";
-import { Room } from "../../domain/write-model/room/aggregate";
-import { Booking } from "../../domain/write-model/booking/aggregate";
-import { Inventory } from "../../domain/write-model/inventory/aggregate";
+import { Room } from "../../domain/write-model/aggregates/room";
+import { Booking } from "../../domain/write-model/aggregates/booking";
+import { Inventory } from "../../domain/write-model/aggregates/inventory";
 import { RoomAvailabilityProjection } from "../../domain/read-model/projections/room-availability";
 import { GuestHistoryProjection } from "../../domain/read-model/projections/guest-history";
 import { RevenueProjection } from "../../domain/read-model/projections/revenue";

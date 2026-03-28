@@ -1,8 +1,8 @@
 /**
- * Auction Sample — Drizzle Adapter
+ * Auction Sample
  *
- * Demonstrates @noddde/drizzle with SQLite for persistence.
- * A simple auction domain with a single aggregate.
+ * Demonstrates @noddde with Prisma Adapter + SQLite for persistence,
+ * including a projection and upcasters.
  */
 import {
   defineDomain,
@@ -10,55 +10,25 @@ import {
   EventEmitterEventBus,
   InMemoryCommandBus,
   InMemoryQueryBus,
+  InMemoryViewStore,
 } from "@noddde/engine";
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import { createDrizzlePersistence } from "@noddde/drizzle";
-import { events, aggregateStates, sagaStates } from "@noddde/drizzle/sqlite";
-import { Auction } from "./aggregate";
-import { AuctionInfrastructure, SystemClock } from "./infrastructure";
+import { PrismaClient } from "@prisma/client";
+import { createPrismaPersistence } from "@noddde/prisma";
 import { randomUUID } from "crypto";
 
+import type { AuctionInfrastructure } from "./infrastructure";
+import { SystemClock } from "./infrastructure";
+import { aggregates, projections } from "./domain/domain";
+
 const main = async () => {
-  // ── Set up Drizzle with SQLite ───────────────────────────────
-  const sqlite = new Database("auction.db");
-  sqlite.exec(`
-    CREATE TABLE noddde_events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      aggregate_name TEXT NOT NULL,
-      aggregate_id TEXT NOT NULL,
-      sequence_number INTEGER NOT NULL,
-      event_name TEXT NOT NULL,
-      payload TEXT NOT NULL
-    );
-    CREATE TABLE noddde_aggregate_states (
-      aggregate_name TEXT NOT NULL,
-      aggregate_id TEXT NOT NULL,
-      state TEXT NOT NULL,
-      PRIMARY KEY (aggregate_name, aggregate_id)
-    );
-    CREATE TABLE noddde_saga_states (
-      saga_name TEXT NOT NULL,
-      saga_id TEXT NOT NULL,
-      state TEXT NOT NULL,
-      PRIMARY KEY (saga_name, saga_id)
-    );
-  `);
-  const db = drizzle(sqlite);
-  const drizzleInfra = createDrizzlePersistence(db, {
-    events,
-    aggregateStates,
-    sagaStates,
-  });
+  // ── Set up Prisma with SQLite ────────────────────────────────
+  const prisma = new PrismaClient();
+  const prismaInfra = createPrismaPersistence(prisma);
 
   // ── Define the domain structure (pure, sync) ────────────────
   const auctionDomain = defineDomain<AuctionInfrastructure>({
-    writeModel: {
-      aggregates: { Auction },
-    },
-    readModel: {
-      projections: {},
-    },
+    writeModel: { aggregates },
+    readModel: { projections },
   });
 
   // ── Wire with infrastructure (async) ───────────────────────
@@ -67,14 +37,19 @@ const main = async () => {
       clock: new SystemClock(),
     }),
     aggregates: {
-      persistence: () => drizzleInfra.eventSourcedPersistence,
+      persistence: () => prismaInfra.eventSourcedPersistence,
     },
     buses: () => ({
       commandBus: new InMemoryCommandBus(),
       eventBus: new EventEmitterEventBus(),
       queryBus: new InMemoryQueryBus(),
     }),
-    unitOfWork: () => drizzleInfra.unitOfWorkFactory,
+    projections: {
+      AuctionSummary: {
+        viewStore: () => new InMemoryViewStore(),
+      },
+    },
+    unitOfWork: () => prismaInfra.unitOfWorkFactory,
   });
 
   // ── Run the auction scenario ─────────────────────────────────
@@ -114,7 +89,7 @@ const main = async () => {
     targetAggregateId: auctionId,
   });
 
-  console.log("✅ Auction sample completed (Drizzle + SQLite)");
+  console.log("Auction sample completed (Prisma + SQLite)");
 };
 
 main();

@@ -9,17 +9,17 @@
  * - Standalone event/command/query handlers
  * - MetadataProvider via AsyncLocalStorage
  * - Fastify HTTP layer
- * - Drizzle + SQLite persistence
+ * - Drizzle + PostgreSQL persistence (via docker-compose)
  */
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
+import pg from "pg";
+import { drizzle } from "drizzle-orm/node-postgres";
 import { createDrizzlePersistence } from "@noddde/drizzle";
 import {
   events,
   aggregateStates,
   sagaStates,
   snapshots,
-} from "@noddde/drizzle/sqlite";
+} from "@noddde/drizzle/pg";
 import {
   defineDomain,
   wireDomain,
@@ -37,9 +37,9 @@ import { ConsoleEmailService } from "./infrastructure/services/email-service";
 import { ConsoleSmsService } from "./infrastructure/services/sms-service";
 import { FakePaymentGateway } from "./infrastructure/services/payment-gateway";
 
-import { Room } from "./domain/write-model/room/aggregate";
-import { Booking } from "./domain/write-model/booking/aggregate";
-import { Inventory } from "./domain/write-model/inventory/aggregate";
+import { Room } from "./domain/write-model/aggregates/room";
+import { Booking } from "./domain/write-model/aggregates/booking";
+import { Inventory } from "./domain/write-model/aggregates/inventory";
 
 import { RoomAvailabilityProjection } from "./domain/read-model/projections/room-availability";
 import { GuestHistoryProjection } from "./domain/read-model/projections/guest-history";
@@ -70,17 +70,22 @@ import type {
 } from "./domain/read-model/queries";
 
 async function main() {
-  // ── Database setup ──────────────────────────────────────────────
-  const sqlite = new Database(":memory:");
-  sqlite.exec(`
+  // -- Database setup --
+  const pool = new pg.Pool({
+    connectionString:
+      process.env.DATABASE_URL ??
+      "postgres://noddde:noddde@localhost:5432/hotel_booking",
+  });
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS noddde_events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       aggregate_name TEXT NOT NULL,
       aggregate_id TEXT NOT NULL,
       sequence_number INTEGER NOT NULL,
       event_name TEXT NOT NULL,
-      payload TEXT NOT NULL,
-      metadata TEXT
+      payload JSONB NOT NULL,
+      metadata JSONB
     );
     CREATE UNIQUE INDEX IF NOT EXISTS noddde_events_stream_version_idx
       ON noddde_events(aggregate_name, aggregate_id, sequence_number);
@@ -88,7 +93,7 @@ async function main() {
     CREATE TABLE IF NOT EXISTS noddde_aggregate_states (
       aggregate_name TEXT NOT NULL,
       aggregate_id TEXT NOT NULL,
-      state TEXT NOT NULL,
+      state JSONB NOT NULL,
       version INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (aggregate_name, aggregate_id)
     );
@@ -96,14 +101,14 @@ async function main() {
     CREATE TABLE IF NOT EXISTS noddde_saga_states (
       saga_name TEXT NOT NULL,
       saga_id TEXT NOT NULL,
-      state TEXT NOT NULL,
+      state JSONB NOT NULL,
       PRIMARY KEY (saga_name, saga_id)
     );
 
     CREATE TABLE IF NOT EXISTS noddde_snapshots (
       aggregate_name TEXT NOT NULL,
       aggregate_id TEXT NOT NULL,
-      state TEXT NOT NULL,
+      state JSONB NOT NULL,
       version INTEGER NOT NULL,
       PRIMARY KEY (aggregate_name, aggregate_id)
     );
@@ -111,12 +116,12 @@ async function main() {
     CREATE TABLE IF NOT EXISTS hotel_views (
       view_type TEXT NOT NULL,
       view_id TEXT NOT NULL,
-      data TEXT NOT NULL,
+      data JSONB NOT NULL,
       PRIMARY KEY (view_type, view_id)
     );
   `);
 
-  const db = drizzle(sqlite);
+  const db = drizzle(pool);
   const drizzleInfra = createDrizzlePersistence(db, {
     events,
     aggregateStates,
@@ -124,7 +129,7 @@ async function main() {
     snapshots,
   });
 
-  // ── Define the domain structure (pure, sync) ───────────────────
+  // -- Define the domain structure (pure, sync) --
   const hotelDomain = defineDomain<
     HotelInfrastructure,
     RunNightlyAuditCommand,
@@ -157,7 +162,7 @@ async function main() {
     },
   });
 
-  // ── Wire with infrastructure (async) ───────────────────────────
+  // -- Wire with infrastructure (async) --
   const domain = await wireDomain(hotelDomain, {
     // Custom infrastructure services (what handlers receive)
     infrastructure: (): HotelInfrastructure => ({
@@ -224,7 +229,7 @@ async function main() {
     metadataProvider: () => requestMetadataStorage.getStore() ?? {},
   });
 
-  // ── Register standalone event handlers on the event bus ─────────
+  // -- Register standalone event handlers on the event bus --
   const eventBus = domain.infrastructure.eventBus as EventEmitterEventBus;
   const infra = domain.infrastructure;
 
@@ -236,7 +241,7 @@ async function main() {
     await SendCheckInNotification(event as any, infra);
   });
 
-  // ── Start Fastify HTTP server ──────────────────────────────────
+  // -- Start Fastify HTTP server --
   const app = createApp(domain);
   const address = await app.listen({ port: 3000, host: "0.0.0.0" });
   console.log(`Hotel Booking API listening on ${address}`);

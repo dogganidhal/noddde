@@ -189,12 +189,11 @@ yarn add --dev @noddde/testing
 
 Head to the [Quick Start Guide](https://noddde.dev/docs/getting-started/quick-start) to build your first domain, or explore our production-ready sample applications:
 
-| Sample Domain                                             | Infrastructure Focus | Concepts Demonstrated                                  |
-| :-------------------------------------------------------- | :------------------- | :----------------------------------------------------- |
-| **[Hotel Booking](./samples/sample-hotel-booking)**       | Drizzle + SQLite     | Full-stack: 3 Aggregates, Sagas, Projections, HTTP API |
-| **[Banking](./samples/sample-banking)**                   | Prisma + SQLite      | Projections, Queries, View Stores, Custom Loggers      |
-| **[Flash Sale](./samples/sample-flash-sale)**             | Drizzle + Postgres   | High Contention, Optimistic Concurrency Control        |
-| **[Seat Reservation](./samples/sample-seat-reservation)** | Prisma + MySQL       | Pessimistic Locking, Database Advisory Locks           |
+| Sample Domain                                       | ORM + Database       | Concepts Demonstrated                                            |
+| :-------------------------------------------------- | :------------------- | :--------------------------------------------------------------- |
+| **[Hotel Booking](./samples/sample-hotel-booking)** | Drizzle + PostgreSQL | Full-stack: 3 Aggregates, Sagas, Projections, Metadata, HTTP API |
+| **[Auction](./samples/sample-auction)**             | Prisma + SQLite      | Event Upcasting, Projections + ViewStore, CQRS Queries           |
+| **[Flash Sale](./samples/sample-flash-sale)**       | TypeORM + PostgreSQL | Optimistic & Pessimistic Concurrency, Snapshots, Idempotency     |
 
 ## Contributing & Architecture
 

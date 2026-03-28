@@ -7,8 +7,8 @@ import { InMemoryEmailService } from "../../infrastructure/services/email-servic
 import { InMemorySmsService } from "../../infrastructure/services/sms-service";
 import { InMemoryPaymentGateway } from "../../infrastructure/services/payment-gateway";
 import { InMemoryRoomAvailabilityViewStore } from "../../infrastructure/services/room-availability-view-store";
-import { Room } from "../../domain/write-model/room/aggregate";
-import { Booking } from "../../domain/write-model/booking/aggregate";
+import { Room } from "../../domain/write-model/aggregates/room";
+import { Booking } from "../../domain/write-model/aggregates/booking";
 
 function createTestInfrastructure(): HotelInfrastructure {
   return {

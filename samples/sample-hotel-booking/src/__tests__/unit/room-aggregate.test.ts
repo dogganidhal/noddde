@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { testAggregate } from "@noddde/testing";
 import { InMemoryViewStore } from "@noddde/engine";
-import { Room } from "../../domain/write-model/room/aggregate";
+import { Room } from "../../domain/write-model/aggregates/room";
 import { FixedClock } from "../../infrastructure/services/clock";
 import type { HotelInfrastructure } from "../../infrastructure/types";
 import { InMemoryEmailService } from "../../infrastructure/services/email-service";

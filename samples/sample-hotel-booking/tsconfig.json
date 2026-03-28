@@ -2,7 +2,9 @@
   "extends": "@noddde/typescript-config/base.json",
   "compilerOptions": {
     "target": "es2017",
-    "outDir": "dist"
+    "outDir": "dist",
+    "declaration": false,
+    "declarationMap": false
   },
   "include": ["src"],
   "exclude": ["node_modules", "dist", "src/__tests__"]

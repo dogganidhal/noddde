@@ -3,6 +3,8 @@
   "compilerOptions": {
     "target": "es2017",
     "outDir": "dist",
+    "declaration": false,
+    "declarationMap": false,
   },
   "include": ["src"],
   "exclude": ["node_modules", "dist"],

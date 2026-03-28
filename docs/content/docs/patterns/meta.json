@@ -3,9 +3,7 @@
   "pages": [
     "clock-pattern",
     "auction-domain",
-    "banking-domain",
     "flash-sale",
-    "seat-reservation",
     "hotel-booking"
   ]
 }

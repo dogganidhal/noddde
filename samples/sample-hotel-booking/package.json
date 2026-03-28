@@ -10,7 +10,7 @@
     "test:unit": "vitest run --testPathPattern=unit",
     "test:slice": "vitest run --testPathPattern=slice",
     "test:integration": "vitest run --testPathPattern=integration",
-    "start": "tsx src/main.ts"
+    "start": "docker compose up -d && tsx src/main.ts"
   },
   "dependencies": {
     "@noddde/core": "0.0.0",
@@ -18,14 +18,14 @@
     "@noddde/drizzle": "0.0.0",
     "@noddde/testing": "0.0.0",
     "drizzle-orm": "^0.30.0",
-    "better-sqlite3": "^11.0.0",
+    "pg": "^8.13.0",
     "fastify": "^5.0.0",
     "fastify-plugin": "^5.0.0",
     "amqplib": "^0.10.0"
   },
   "devDependencies": {
     "@noddde/typescript-config": "0.0.0",
-    "@types/better-sqlite3": "^7.6.13",
+    "@types/pg": "^8.11.0",
     "@types/amqplib": "^0.10.0",
     "@types/node": "^20.11.17",
     "@testcontainers/rabbitmq": "^10.0.0",
