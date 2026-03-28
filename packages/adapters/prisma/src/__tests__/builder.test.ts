@@ -105,7 +105,10 @@ describe("PrismaDedicatedStateStoredPersistence (unit)", () => {
   // at test time, we test the dedicated persistence with a mock delegate.
 
   function createMockDelegate() {
-    const store = new Map<string, { aggregateId: string; state: string; version: number }>();
+    const store = new Map<
+      string,
+      { aggregateId: string; state: string; version: number }
+    >();
     return {
       create: vi.fn(async ({ data }: any) => {
         if (store.has(data.aggregateId)) {
