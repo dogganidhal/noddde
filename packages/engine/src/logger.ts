@@ -29,6 +29,8 @@ function severity(level: LogLevel): number {
  *
  * The namespace prefix follows the pattern `[noddde]` or
  * `[noddde:sub:namespace]` for child loggers.
+ *
+ * Suitable for development; for production use {@link StructuredLogger}.
  */
 export class ConsoleLogger implements Logger {
   private readonly severityThreshold: number;
@@ -78,6 +80,80 @@ export class ConsoleLogger implements Logger {
       console[level](prefix, message, data);
     } else {
       console[level](prefix, message);
+    }
+  }
+}
+
+/**
+ * Production-ready Logger that emits newline-delimited JSON (NDJSON)
+ * to `process.stdout` (debug, info) and `process.stderr` (warn, error).
+ *
+ * Each log line is a single JSON object:
+ * ```json
+ * {"timestamp":"2026-03-28T12:00:00.000Z","level":"info","namespace":"noddde:command","message":"Command dispatched","aggregateId":"123"}
+ * ```
+ *
+ * Designed for container environments, log aggregators (Datadog, ELK,
+ * CloudWatch), and 12-factor apps. This is the default logger when
+ * `DomainWiring.logger` is omitted.
+ */
+export class StructuredLogger implements Logger {
+  private readonly severityThreshold: number;
+
+  constructor(
+    private readonly level: LogLevel = "warn",
+    private readonly namespace: string = "noddde",
+  ) {
+    this.severityThreshold = severity(this.level);
+  }
+
+  debug(message: string, data?: Record<string, unknown>): void {
+    if (this.severityThreshold <= DEBUG) {
+      this.emit("debug", message, data);
+    }
+  }
+
+  info(message: string, data?: Record<string, unknown>): void {
+    if (this.severityThreshold <= INFO) {
+      this.emit("info", message, data);
+    }
+  }
+
+  warn(message: string, data?: Record<string, unknown>): void {
+    if (this.severityThreshold <= WARN) {
+      this.emit("warn", message, data);
+    }
+  }
+
+  error(message: string, data?: Record<string, unknown>): void {
+    if (this.severityThreshold <= ERROR) {
+      this.emit("error", message, data);
+    }
+  }
+
+  child(namespace: string): Logger {
+    return new StructuredLogger(this.level, `${this.namespace}:${namespace}`);
+  }
+
+  private emit(
+    level: "debug" | "info" | "warn" | "error",
+    message: string,
+    data?: Record<string, unknown>,
+  ): void {
+    const entry: Record<string, unknown> = {
+      timestamp: new Date().toISOString(),
+      level,
+      namespace: this.namespace,
+      message,
+    };
+    if (data !== undefined && Object.keys(data).length > 0) {
+      Object.assign(entry, data);
+    }
+    const line = JSON.stringify(entry) + "\n";
+    if (level === "warn" || level === "error") {
+      process.stderr.write(line);
+    } else {
+      process.stdout.write(line);
     }
   }
 }

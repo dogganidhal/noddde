@@ -89,12 +89,12 @@ const domain = await wireDomain(bankingDomain, {
 
 ### In-Memory Default Warnings
 
-When infrastructure components fall back to in-memory defaults, the framework logs startup warnings via the configured logger:
+When infrastructure components fall back to in-memory defaults, the framework logs startup warnings via the configured logger. With the default `StructuredLogger`, output is NDJSON:
 
-```
-[noddde:domain] Using in-memory aggregate persistence. This is not suitable for production.
-[noddde:domain] Using in-memory CQRS buses. This is not suitable for production.
-[noddde:domain] Using in-memory saga persistence. This is not suitable for production.
+```json
+{"timestamp":"2026-03-28T12:00:00.000Z","level":"warn","namespace":"noddde:domain","message":"Using in-memory aggregate persistence. This is not suitable for production."}
+{"timestamp":"2026-03-28T12:00:00.000Z","level":"warn","namespace":"noddde:domain","message":"Using in-memory CQRS buses. This is not suitable for production."}
+{"timestamp":"2026-03-28T12:00:00.000Z","level":"warn","namespace":"noddde:domain","message":"Using in-memory saga persistence. This is not suitable for production."}
 ```
 
 These warnings only appear when the framework itself supplies the default -- not when you explicitly provide a factory (even if it happens to return an in-memory implementation). Optional components like snapshots, idempotency, and outbox do not trigger warnings when omitted, since omitting them is a valid production choice.
@@ -112,26 +112,38 @@ These warnings only appear when the framework itself supplies the default -- not
 | `idempotency`      | Factory for idempotency store (command dedup by commandId).                                  |
 | `outbox`           | Transactional outbox configuration.                                                          |
 | `metadataProvider` | Function called on every command dispatch for event metadata context.                        |
-| `logger`           | Framework logger instance. Defaults to `ConsoleLogger` at `'warn'` level.                    |
+| `logger`           | Framework logger instance. Defaults to `StructuredLogger` at `'warn'` level.                 |
 
 All fields are optional. Both `wireDomain(definition)` and `wireDomain(definition, {})` use in-memory defaults for everything.
 
 ### Logging
 
-The framework uses a `Logger` interface for all internal logging -- domain initialization, command dispatch, saga execution, concurrency control, and outbox processing. By default, a `ConsoleLogger` at `'warn'` level is used, which only shows warnings about in-memory fallbacks.
+The framework uses a `Logger` interface for all internal logging -- domain initialization, command dispatch, saga execution, concurrency control, and outbox processing.
+
+By default, a `StructuredLogger` at `'warn'` level is used. It emits newline-delimited JSON (NDJSON) to `process.stdout` (debug/info) and `process.stderr` (warn/error), making it suitable for production environments, container deployments, and log aggregators (Datadog, ELK, CloudWatch).
 
 To see more detail, provide a logger with a lower level:
 
 ```ts
-import { wireDomain, ConsoleLogger } from "@noddde/engine";
+import { wireDomain, StructuredLogger } from "@noddde/engine";
 
 const domain = await wireDomain(bankingDomain, {
-  logger: new ConsoleLogger("debug"), // Show all framework messages
+  logger: new StructuredLogger("debug"), // Show all framework messages as NDJSON
   // ...other wiring
 });
 ```
 
 Available log levels (ordered by severity): `'debug'`, `'info'`, `'warn'`, `'error'`, `'silent'`.
+
+For human-readable console output during development, use `ConsoleLogger`:
+
+```ts
+import { wireDomain, ConsoleLogger } from "@noddde/engine";
+
+const domain = await wireDomain(bankingDomain, {
+  logger: new ConsoleLogger("debug"), // Human-readable [namespace] prefixed output
+});
+```
 
 To suppress all framework logging:
 

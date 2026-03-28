@@ -1,17 +1,17 @@
 ---
-title: "ConsoleLogger & NoopLogger"
+title: "StructuredLogger, ConsoleLogger & NoopLogger"
 module: engine/logger
 source_file: packages/engine/src/logger.ts
 status: implemented
-exports: [ConsoleLogger, NoopLogger]
+exports: [StructuredLogger, ConsoleLogger, NoopLogger]
 depends_on: [infrastructure/logger]
 docs:
   - infrastructure/logging.mdx
 ---
 
-# ConsoleLogger & NoopLogger
+# StructuredLogger, ConsoleLogger & NoopLogger
 
-> Default `Logger` implementations provided by `@noddde/engine`. `ConsoleLogger` outputs to the global `console` with level filtering and namespace prefixing. `NoopLogger` silently discards all messages. The Domain uses `ConsoleLogger` at `'warn'` level by default, preserving the framework's current behavior of only showing in-memory fallback warnings.
+> Default `Logger` implementations provided by `@noddde/engine`. `StructuredLogger` emits newline-delimited JSON (NDJSON) to stdout/stderr with timestamps — the production-ready default. `ConsoleLogger` outputs to the global `console` with level filtering and namespace prefixing — useful for development. `NoopLogger` silently discards all messages. The Domain uses `StructuredLogger` at `'warn'` level by default.
 
 ## Type Contract
 
@@ -19,10 +19,29 @@ docs:
 import type { Logger, LogLevel } from "@noddde/core";
 
 /**
+ * Production-ready Logger that emits newline-delimited JSON (NDJSON)
+ * to process.stdout (debug, info) and process.stderr (warn, error).
+ * This is the default logger when DomainWiring.logger is omitted.
+ */
+class StructuredLogger implements Logger {
+  /**
+   * @param level - Minimum severity to emit. Defaults to 'warn'.
+   * @param namespace - Namespace for log entries. Defaults to 'noddde'.
+   */
+  constructor(level?: LogLevel, namespace?: string);
+
+  debug(message: string, data?: Record<string, unknown>): void;
+  info(message: string, data?: Record<string, unknown>): void;
+  warn(message: string, data?: Record<string, unknown>): void;
+  error(message: string, data?: Record<string, unknown>): void;
+  child(namespace: string): Logger;
+}
+
+/**
  * Console-based Logger implementation with level filtering and
  * namespace prefixing. Output goes through the global `console`
  * object using the matching method (console.debug, console.info,
- * console.warn, console.error).
+ * console.warn, console.error). Suitable for development.
  */
 class ConsoleLogger implements Logger {
   /**
@@ -53,36 +72,58 @@ class NoopLogger implements Logger {
 
 ## Behavioral Requirements
 
-1. **Level filtering**: `ConsoleLogger` uses numeric severity (debug=0, info=1, warn=2, error=3, silent=4). A message is emitted only if its severity >= the configured level's severity.
-2. **Default level is `'warn'`**: Matches the framework's current behavior where only `console.warn` calls are visible.
-3. **Default namespace is `'noddde'`**: Root logger prefix is `[noddde]`.
-4. **Namespace prefixing**: All output is prefixed with `[namespace]`. Example: `[noddde] Using in-memory CQRS buses.`
-5. **Console method mapping**: `debug` → `console.debug`, `info` → `console.info`, `warn` → `console.warn`, `error` → `console.error`.
-6. **Structured data forwarding**: When `data` is provided and non-empty, it is passed as an additional argument to the console method.
-7. **`child` composes namespaces**: `new ConsoleLogger('info', 'noddde').child('command')` produces a logger with namespace `'noddde:command'`. The child inherits the parent's level.
-8. **NoopLogger discards all messages**: All four level methods are empty no-ops.
-9. **NoopLogger.child returns itself**: Since all operations are no-ops, child loggers are the same instance (avoids unnecessary allocation).
-10. **`'silent'` level suppresses everything**: A `ConsoleLogger` constructed with `'silent'` emits no output.
+### StructuredLogger
+
+1. **NDJSON output**: Each log entry is a single-line JSON object written to stdout or stderr, terminated by `\n`.
+2. **JSON fields**: Every entry contains `timestamp` (ISO 8601), `level`, `namespace`, and `message`. Structured `data` fields are merged as top-level keys.
+3. **Stream routing**: `debug` and `info` write to `process.stdout`. `warn` and `error` write to `process.stderr`.
+4. **Level filtering**: Uses the same numeric severity as `ConsoleLogger` (debug=0, info=1, warn=2, error=3, silent=4). A message is emitted only if its severity >= the configured level's severity.
+5. **Default level is `'warn'`**: Only warnings and errors are emitted by default.
+6. **Default namespace is `'noddde'`**: Root logger namespace.
+7. **`child` composes namespaces**: `new StructuredLogger('info').child('command')` produces entries with `"namespace":"noddde:command"`. The child inherits the parent's level.
+8. **Empty data object**: `logger.info('msg', {})` should NOT include extra fields in the JSON (treat as no data).
+
+### ConsoleLogger
+
+9. **Console method mapping**: `debug` → `console.debug`, `info` → `console.info`, `warn` → `console.warn`, `error` → `console.error`.
+10. **Namespace prefixing**: All output is prefixed with `[namespace]`. Example: `[noddde] Using in-memory CQRS buses.`
+11. **Structured data forwarding**: When `data` is provided and non-empty, it is passed as an additional argument to the console method.
+12. **Level filtering**: Same numeric severity as `StructuredLogger`.
+13. **`child` composes namespaces**: Same behavior as `StructuredLogger`.
+
+### NoopLogger
+
+14. **NoopLogger discards all messages**: All four level methods are empty no-ops.
+15. **NoopLogger.child returns itself**: Since all operations are no-ops, child loggers are the same instance (avoids unnecessary allocation).
+
+### Shared
+
+16. **`'silent'` level suppresses everything**: Any logger constructed with `'silent'` emits no output.
 
 ## Invariants
 
+- `StructuredLogger` never writes below its configured level.
+- `StructuredLogger` always produces valid JSON.
+- `StructuredLogger.child` always returns a new `StructuredLogger` instance (not the same reference).
 - `ConsoleLogger` never calls a console method below its configured level.
 - `ConsoleLogger.child` always returns a new `ConsoleLogger` instance (not the same reference).
 - `NoopLogger.child` always returns `this` (the same reference).
-- Both implementations satisfy the `Logger` interface.
+- All three implementations satisfy the `Logger` interface.
 
 ## Edge Cases
 
-- **`ConsoleLogger('silent')`**: Functionally equivalent to `NoopLogger` but still performs level-check branching.
-- **Deeply nested children**: `logger.child('a').child('b').child('c')` produces `[noddde:a:b:c]` — no depth limit.
-- **Empty data object**: `logger.info('msg', {})` should NOT pass the empty object to console (treat as no data).
-- **`data` with non-serializable values**: The Logger passes `data` through as-is — serialization is the consumer's responsibility.
+- **`StructuredLogger('silent')`**: Functionally equivalent to `NoopLogger` but still performs level-check branching.
+- **`ConsoleLogger('silent')`**: Same as above.
+- **Deeply nested children**: `logger.child('a').child('b').child('c')` produces namespace `noddde:a:b:c` — no depth limit.
+- **Empty data object**: `logger.info('msg', {})` should NOT include extra fields or pass the empty object (treat as no data).
+- **`data` with non-serializable values**: `StructuredLogger` passes `data` through `JSON.stringify` — non-serializable values may throw or be omitted. `ConsoleLogger` passes `data` through as-is.
 
 ## Integration Points
 
-- `ConsoleLogger` is the default logger created by `Domain.init()` when `DomainWiring.logger` is omitted.
+- `StructuredLogger` is the default logger created by `Domain.init()` when `DomainWiring.logger` is omitted.
+- `ConsoleLogger` is available for development use where human-readable console output is preferred.
 - `NoopLogger` is useful in tests to suppress framework output.
-- Both are exported from `@noddde/engine` for direct use by consumers.
+- All three are exported from `@noddde/engine` for direct use by consumers.
 
 ## Test Scenarios
 

@@ -89,7 +89,7 @@ import {
 import { MetadataEnricher } from "./executors/metadata-enricher";
 import { CommandLifecycleExecutor } from "./executors/command-lifecycle-executor";
 import { SagaExecutor } from "./executors/saga-executor";
-import { ConsoleLogger } from "./logger";
+import { StructuredLogger } from "./logger";
 import {
   GlobalAggregatePersistenceResolver,
   PerAggregatePersistenceResolver,
@@ -271,7 +271,7 @@ export type DomainWiring<
   };
   /** Metadata provider called on every command dispatch. */
   metadataProvider?: MetadataProvider;
-  /** Framework logger. Defaults to ConsoleLogger at 'warn' level. */
+  /** Framework logger. Defaults to StructuredLogger at 'warn' level. */
   logger?: Logger;
 };
 
@@ -366,7 +366,7 @@ export class Domain<
     const { definition, wiring } = this;
 
     // Step 0: Resolve logger (before everything else, so all init steps can log)
-    const logger = wiring.logger ?? new ConsoleLogger();
+    const logger = wiring.logger ?? new StructuredLogger();
     const domainLog = logger.child("domain");
 
     // Step 1: Resolve custom infrastructure
@@ -566,7 +566,10 @@ export class Domain<
           }
         }
       }
-      const defaultStrategy = new OptimisticConcurrencyStrategy(0, concurrencyLog);
+      const defaultStrategy = new OptimisticConcurrencyStrategy(
+        0,
+        concurrencyLog,
+      );
       concurrencyStrategy =
         strategies.size > 0
           ? new PerAggregateConcurrencyStrategy(strategies, defaultStrategy)
