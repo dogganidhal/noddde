@@ -3,6 +3,7 @@
   "pages": [
     "domain-configuration",
     "infrastructure",
+    "logging",
     "persistence",
     "idempotent-commands",
     "outbox-pattern",
