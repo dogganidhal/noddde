@@ -5,7 +5,7 @@
  */
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import { createDrizzlePersistence } from "@noddde/drizzle";
+import { DrizzleAdapter } from "@noddde/drizzle";
 import {
   events,
   aggregateStates,
@@ -93,12 +93,12 @@ export async function createTestEnvironment() {
   `);
 
   const db = drizzle(sqlite);
-  const drizzleInfra = createDrizzlePersistence(db, {
-    events,
-    aggregateStates,
-    sagaStates,
-    snapshots,
-  });
+  const drizzleInfra = new DrizzleAdapter(db)
+    .withEventStore(events)
+    .withStateStore(aggregateStates)
+    .withSagaStore(sagaStates)
+    .withSnapshotStore(snapshots)
+    .build();
 
   const emailService = new InMemoryEmailService();
   const smsService = new InMemorySmsService();

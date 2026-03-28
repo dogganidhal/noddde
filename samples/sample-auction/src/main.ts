@@ -13,7 +13,7 @@ import {
   InMemoryViewStore,
 } from "@noddde/engine";
 import { PrismaClient } from "@prisma/client";
-import { createPrismaPersistence } from "@noddde/prisma";
+import { PrismaAdapter } from "@noddde/prisma";
 import { randomUUID } from "crypto";
 
 import type { AuctionInfrastructure } from "./infrastructure";
@@ -23,7 +23,10 @@ import { aggregates, projections } from "./domain/domain";
 const main = async () => {
   // ── Set up Prisma with SQLite ────────────────────────────────
   const prisma = new PrismaClient();
-  const prismaInfra = createPrismaPersistence(prisma);
+  const prismaInfra = new PrismaAdapter(prisma)
+    .withEventStore()
+    .withSagaStore()
+    .build();
 
   // ── Define the domain structure (pure, sync) ────────────────
   const auctionDomain = defineDomain<AuctionInfrastructure>({
