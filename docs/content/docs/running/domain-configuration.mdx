@@ -502,6 +502,76 @@ const account = await domain.dispatchQuery({
 });
 ```
 
+## Graceful Shutdown
+
+When your application needs to stop — whether for a deployment, scaling event, or process signal — call `domain.shutdown()` to safely wind down the domain:
+
+```ts
+const domain = await wireDomain(bankingDomain, {
+  /* wiring */
+});
+
+// Later, on SIGTERM or application teardown:
+await domain.shutdown();
+```
+
+### What Happens During Shutdown
+
+Shutdown proceeds through four sequential phases:
+
+1. **Reject** — New calls to `dispatchCommand()`, `dispatchQuery()`, and `withUnitOfWork()` immediately throw a `DomainShutdownError`.
+2. **Drain operations** — The domain waits for all in-flight commands, queries, and their cascading saga reactions to complete.
+3. **Drain outbox relay** — If configured, the outbox relay stops polling and processes any remaining unpublished entries until the outbox is empty.
+4. **Auto-close infrastructure** — The domain scans all registered infrastructure components and calls `close()` on any that implement the `Closeable` interface.
+
+### Timeout
+
+You can set a maximum duration for the drain phases:
+
+```ts
+await domain.shutdown({ timeoutMs: 10_000 }); // 10 seconds
+```
+
+The default timeout is 30 seconds. If in-flight operations do not complete within the timeout, shutdown proceeds to the next phase. The auto-close phase always runs regardless of timeout.
+
+### `DomainShutdownError`
+
+Commands and queries dispatched after shutdown has started receive a `DomainShutdownError`:
+
+```ts
+import { DomainShutdownError } from "@noddde/engine";
+
+try {
+  await domain.dispatchCommand(command);
+} catch (error) {
+  if (error instanceof DomainShutdownError) {
+    // Domain is shutting down — reject the request upstream
+  }
+}
+```
+
+### Idempotent
+
+Calling `shutdown()` multiple times returns the same promise. The shutdown sequence only runs once.
+
+### Making Infrastructure Closeable
+
+If your custom infrastructure holds resources (database connections, file handles, network sockets), implement the `Closeable` interface so the domain releases them automatically:
+
+```ts
+import type { Closeable } from "@noddde/core";
+
+class MyDatabasePool implements Closeable {
+  async close(): Promise<void> {
+    await this.pool.end();
+  }
+}
+```
+
+The domain auto-detects `Closeable` implementations across all infrastructure you provide — custom infrastructure values, buses, persistence stores, and ORM adapters. No additional configuration is needed.
+
+`close()` must be idempotent: calling it more than once should have no additional effect.
+
 ## Next Steps
 
 - [Infrastructure](/docs/running/infrastructure) -- The infrastructure providers in detail

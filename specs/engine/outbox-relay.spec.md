@@ -9,6 +9,7 @@ exports:
 depends_on:
   - persistence/outbox
   - edd/event-bus
+  - infrastructure/closeable
 docs:
   - domain-configuration/infrastructure.mdx
 ---
@@ -20,7 +21,7 @@ docs:
 ## Type Contract
 
 ```ts
-import type { OutboxStore, EventBus } from "@noddde/core";
+import type { OutboxStore, EventBus, BackgroundProcess } from "@noddde/core";
 
 /**
  * Configuration options for the OutboxRelay.
@@ -38,7 +39,7 @@ interface OutboxRelayOptions {
  *
  * @internal Created and managed by the Domain. Not exported to consumers directly.
  */
-class OutboxRelay {
+class OutboxRelay implements BackgroundProcess {
   constructor(
     outboxStore: OutboxStore,
     eventBus: EventBus,
@@ -50,6 +51,13 @@ class OutboxRelay {
 
   /** Stop polling. Idempotent: calling stop() when not running is a no-op. */
   stop(): void;
+
+  /**
+   * Stops polling and processes remaining unpublished entries until
+   * the outbox is empty. Implements BackgroundProcess.drain.
+   * Idempotent: subsequent calls resolve immediately.
+   */
+  drain(): Promise<void>;
 
   /**
    * Process one batch of unpublished entries synchronously (no timer).
@@ -73,6 +81,7 @@ class OutboxRelay {
 4. **stop clears the polling timer** -- Clears the interval created by `start()`. Idempotent: if not running, calling `stop()` is a no-op.
 5. **concurrent processOnce calls are serialized** -- If `processOnce()` is already running (e.g., a poll fires while a previous batch is still processing), the new call returns immediately with 0.
 6. **processOnce returns 0 for empty batches** -- If `loadUnpublished` returns an empty array, returns 0 without further work.
+7. **drain stops polling and processes until empty** -- `drain()` calls `stop()` to clear the polling timer, then loops `processOnce()` until it returns 0. Implements `BackgroundProcess.drain`. Idempotent: subsequent calls resolve immediately.
 
 ## Invariants
 

@@ -24,6 +24,8 @@ class EventEmitterEventBus implements EventBus {
   on(eventName: string, handler: AsyncEventHandler): void;
   /** Dispatches an event to all registered handlers and awaits their completion. */
   dispatch<TEvent extends Event>(event: TEvent): Promise<void>;
+  /** Removes all registered handlers for all event names. Called during domain shutdown. */
+  removeAllListeners(): void;
 }
 ```
 
@@ -41,6 +43,7 @@ class EventEmitterEventBus implements EventBus {
 4. **Multiple handlers** -- Multiple handlers on the same event name all receive the event, in registration order.
 5. **No handlers** -- If no handler is registered for the event name, `dispatch` resolves successfully (no-op).
 6. **Internal handler registry** -- Handlers are tracked in a private `Map<string, AsyncEventHandler[]>`. The underlying `EventEmitter` instance is retained for backward compatibility but is not used for handler dispatch.
+7. **removeAllListeners clears the registry** -- `removeAllListeners()` clears all entries from the internal handler `Map`. After calling it, dispatching any event is a no-op (no handlers invoked). Used during domain shutdown to prevent stale event delivery.
 
 ## Invariants
 

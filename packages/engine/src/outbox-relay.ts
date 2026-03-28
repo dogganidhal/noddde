@@ -1,5 +1,5 @@
 /* eslint-disable no-unused-vars */
-import type { OutboxStore, EventBus } from "@noddde/core";
+import type { OutboxStore, EventBus, BackgroundProcess } from "@noddde/core";
 
 /**
  * Configuration options for the OutboxRelay.
@@ -22,9 +22,10 @@ export interface OutboxRelayOptions {
  * Created and managed by the Domain. Not exported to consumers directly
  * (but exported from `@noddde/engine` for testing).
  */
-export class OutboxRelay {
+export class OutboxRelay implements BackgroundProcess {
   private timer: ReturnType<typeof setInterval> | null = null;
   private processing = false;
+  private _drained = false;
 
   constructor(
     private readonly outboxStore: OutboxStore,
@@ -53,6 +54,24 @@ export class OutboxRelay {
       clearInterval(this.timer);
       this.timer = null;
     }
+  }
+
+  /**
+   * Stops polling and processes remaining unpublished entries until
+   * the outbox is empty. Implements {@link BackgroundProcess.drain}.
+   *
+   * Idempotent: subsequent calls resolve immediately.
+   */
+  async drain(): Promise<void> {
+    if (this._drained) return;
+    this._drained = true;
+    this.stop();
+
+    // Process remaining entries until empty
+    let processed: number;
+    do {
+      processed = await this.processOnce();
+    } while (processed > 0);
   }
 
   /**
