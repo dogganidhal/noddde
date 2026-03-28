@@ -11,7 +11,7 @@ docs:
 
 # StructuredLogger, ConsoleLogger & NoopLogger
 
-> Default `Logger` implementations provided by `@noddde/engine`. `StructuredLogger` emits newline-delimited JSON (NDJSON) to stdout/stderr with timestamps — the production-ready default. `ConsoleLogger` outputs to the global `console` with level filtering and namespace prefixing — useful for development. `NoopLogger` silently discards all messages. The Domain uses `StructuredLogger` at `'warn'` level by default.
+> Default `Logger` implementations provided by `@noddde/engine`. `StructuredLogger` auto-detects the environment: colored human-readable output in development (TTY), newline-delimited JSON (NDJSON) in production or non-TTY environments (containers, CI, piped output). `ConsoleLogger` is a simpler dev-oriented logger using `console.*` methods (deprecated in favor of `StructuredLogger`). `NoopLogger` silently discards all messages. The Domain uses `StructuredLogger` at `'warn'` level by default.
 
 ## Type Contract
 
@@ -19,16 +19,18 @@ docs:
 import type { Logger, LogLevel } from "@noddde/core";
 
 /**
- * Production-ready Logger that emits newline-delimited JSON (NDJSON)
- * to process.stdout (debug, info) and process.stderr (warn, error).
+ * Environment-aware Logger with auto-detected output format.
+ * Pretty mode (colored text) in development TTYs, JSON mode (NDJSON)
+ * in production or non-TTY environments.
  * This is the default logger when DomainWiring.logger is omitted.
  */
 class StructuredLogger implements Logger {
   /**
    * @param level - Minimum severity to emit. Defaults to 'warn'.
    * @param namespace - Namespace for log entries. Defaults to 'noddde'.
+   * @param pretty - Force pretty (true) or JSON (false) mode. Auto-detected if omitted.
    */
-  constructor(level?: LogLevel, namespace?: string);
+  constructor(level?: LogLevel, namespace?: string, pretty?: boolean);
 
   debug(message: string, data?: Record<string, unknown>): void;
   info(message: string, data?: Record<string, unknown>): void;
@@ -74,14 +76,15 @@ class NoopLogger implements Logger {
 
 ### StructuredLogger
 
-1. **NDJSON output**: Each log entry is a single-line JSON object written to stdout or stderr, terminated by `\n`.
-2. **JSON fields**: Every entry contains `timestamp` (ISO 8601), `level`, `namespace`, and `message`. Structured `data` fields are merged as top-level keys.
-3. **Stream routing**: `debug` and `info` write to `process.stdout`. `warn` and `error` write to `process.stderr`.
-4. **Level filtering**: Uses the same numeric severity as `ConsoleLogger` (debug=0, info=1, warn=2, error=3, silent=4). A message is emitted only if its severity >= the configured level's severity.
-5. **Default level is `'warn'`**: Only warnings and errors are emitted by default.
-6. **Default namespace is `'noddde'`**: Root logger namespace.
-7. **`child` composes namespaces**: `new StructuredLogger('info').child('command')` produces entries with `"namespace":"noddde:command"`. The child inherits the parent's level.
-8. **Empty data object**: `logger.info('msg', {})` should NOT include extra fields in the JSON (treat as no data).
+1. **Environment auto-detection**: Detects output format automatically. Pretty mode when `NODE_ENV` is not `'production'` AND `process.stdout.isTTY` is `true`. JSON mode otherwise (production, containers, CI, piped output). Can be overridden via the `pretty` constructor parameter.
+2. **JSON mode (NDJSON)**: Each log entry is a single-line JSON object terminated by `\n`. Fields: `timestamp` (ISO 8601), `level`, `namespace`, `message`, plus structured `data` merged as top-level keys.
+3. **Pretty mode (colored text)**: Each log entry is a human-readable line with ANSI color codes. Format: `<dim timestamp> <colored LEVEL> <cyan [namespace]> message <dim data>`. Colors: DEBUG=magenta, INFO=green, WARN=yellow, ERROR=red.
+4. **Stream routing**: In both modes, `debug` and `info` write to `process.stdout`. `warn` and `error` write to `process.stderr`.
+5. **Level filtering**: Numeric severity (debug=0, info=1, warn=2, error=3, silent=4). A message is emitted only if its severity >= the configured level's severity.
+6. **Default level is `'warn'`**: Only warnings and errors are emitted by default.
+7. **Default namespace is `'noddde'`**: Root logger namespace.
+8. **`child` composes namespaces**: `new StructuredLogger('info').child('command')` produces entries with namespace `noddde:command`. The child inherits the parent's level and output mode.
+9. **Empty data object**: `logger.info('msg', {})` should NOT include extra fields in JSON or trailing data in pretty mode (treat as no data).
 
 ### ConsoleLogger
 

@@ -5,6 +5,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+// --- ConsoleLogger ---
+
 describe("ConsoleLogger level filtering", () => {
   it("should suppress debug and info at warn level", () => {
     const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
@@ -154,6 +156,22 @@ describe("ConsoleLogger.child", () => {
   });
 });
 
+describe("ConsoleLogger defaults", () => {
+  it("should default to warn level and noddde namespace", () => {
+    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const logger = new ConsoleLogger();
+    logger.debug("should not appear");
+    logger.warn("should appear");
+
+    expect(debugSpy).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith("[noddde]", "should appear");
+  });
+});
+
+// --- NoopLogger ---
+
 describe("NoopLogger", () => {
   it("should not call any console methods", () => {
     const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
@@ -188,21 +206,10 @@ describe("NoopLogger.child", () => {
   });
 });
 
-describe("ConsoleLogger defaults", () => {
-  it("should default to warn level and noddde namespace", () => {
-    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+// --- StructuredLogger (JSON mode) ---
+// Force JSON mode with pretty=false to keep tests deterministic.
 
-    const logger = new ConsoleLogger();
-    logger.debug("should not appear");
-    logger.warn("should appear");
-
-    expect(debugSpy).not.toHaveBeenCalled();
-    expect(warnSpy).toHaveBeenCalledWith("[noddde]", "should appear");
-  });
-});
-
-describe("StructuredLogger level filtering", () => {
+describe("StructuredLogger level filtering (JSON mode)", () => {
   it("should suppress debug and info at warn level", () => {
     const stdoutSpy = vi
       .spyOn(process.stdout, "write")
@@ -211,7 +218,7 @@ describe("StructuredLogger level filtering", () => {
       .spyOn(process.stderr, "write")
       .mockImplementation(() => true);
 
-    const logger = new StructuredLogger("warn");
+    const logger = new StructuredLogger("warn", "noddde", false);
     logger.debug("d");
     logger.info("i");
     logger.warn("w");
@@ -229,7 +236,7 @@ describe("StructuredLogger level filtering", () => {
       .spyOn(process.stderr, "write")
       .mockImplementation(() => true);
 
-    const logger = new StructuredLogger("debug");
+    const logger = new StructuredLogger("debug", "noddde", false);
     logger.debug("d");
     logger.info("i");
     logger.warn("w");
@@ -247,7 +254,7 @@ describe("StructuredLogger level filtering", () => {
       .spyOn(process.stderr, "write")
       .mockImplementation(() => true);
 
-    const logger = new StructuredLogger("silent");
+    const logger = new StructuredLogger("silent", "noddde", false);
     logger.debug("d");
     logger.info("i");
     logger.warn("w");
@@ -264,7 +271,7 @@ describe("StructuredLogger JSON output", () => {
       .spyOn(process.stdout, "write")
       .mockImplementation(() => true);
 
-    const logger = new StructuredLogger("info");
+    const logger = new StructuredLogger("info", "noddde", false);
     logger.info("test message");
 
     expect(stdoutSpy).toHaveBeenCalledTimes(1);
@@ -286,7 +293,7 @@ describe("StructuredLogger JSON output", () => {
       .spyOn(process.stdout, "write")
       .mockImplementation(() => true);
 
-    const logger = new StructuredLogger("info");
+    const logger = new StructuredLogger("info", "noddde", false);
     logger.info("loaded", { aggregateId: "123", version: 5 });
 
     const parsed = JSON.parse(stdoutSpy.mock.calls[0]![0] as string);
@@ -304,7 +311,7 @@ describe("StructuredLogger JSON output", () => {
       .spyOn(process.stdout, "write")
       .mockImplementation(() => true);
 
-    const logger = new StructuredLogger("info");
+    const logger = new StructuredLogger("info", "noddde", false);
     logger.info("loaded", {});
 
     const parsed = JSON.parse(stdoutSpy.mock.calls[0]![0] as string);
@@ -321,7 +328,7 @@ describe("StructuredLogger JSON output", () => {
       .spyOn(process.stderr, "write")
       .mockImplementation(() => true);
 
-    const logger = new StructuredLogger("warn");
+    const logger = new StructuredLogger("warn", "noddde", false);
     logger.warn("warning");
     logger.error("failure");
 
@@ -335,13 +342,13 @@ describe("StructuredLogger JSON output", () => {
   });
 });
 
-describe("StructuredLogger.child", () => {
+describe("StructuredLogger.child (JSON mode)", () => {
   it("should create child with composed namespace", () => {
     const stdoutSpy = vi
       .spyOn(process.stdout, "write")
       .mockImplementation(() => true);
 
-    const root = new StructuredLogger("info");
+    const root = new StructuredLogger("info", "noddde", false);
     const child = root.child("command");
     child.info("dispatching");
 
@@ -357,7 +364,7 @@ describe("StructuredLogger.child", () => {
       .spyOn(process.stderr, "write")
       .mockImplementation(() => true);
 
-    const child = new StructuredLogger("warn").child("saga");
+    const child = new StructuredLogger("warn", "noddde", false).child("saga");
     child.debug("should not appear");
     child.warn("should appear");
 
@@ -369,8 +376,121 @@ describe("StructuredLogger.child", () => {
   });
 
   it("should return a new instance (not the same reference)", () => {
-    const logger = new StructuredLogger("info");
+    const logger = new StructuredLogger("info", "noddde", false);
     const child = logger.child("test");
     expect(child).not.toBe(logger);
+  });
+});
+
+// --- StructuredLogger (pretty mode) ---
+// Force pretty mode with pretty=true.
+
+describe("StructuredLogger pretty output", () => {
+  it("should write colored text with timestamp, level, namespace, and message", () => {
+    const stdoutSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+
+    const logger = new StructuredLogger("info", "noddde", true);
+    logger.info("test message");
+
+    expect(stdoutSpy).toHaveBeenCalledTimes(1);
+    const line = stdoutSpy.mock.calls[0]![0] as string;
+    expect(line.endsWith("\n")).toBe(true);
+
+    // Should contain the key parts (with ANSI codes around them)
+    expect(line).toContain("INFO");
+    expect(line).toContain("[noddde]");
+    expect(line).toContain("test message");
+    // Should contain a timestamp (ISO format substring)
+    expect(line).toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+    // Should NOT be valid JSON (it's human-readable)
+    expect(() => JSON.parse(line)).toThrow();
+  });
+
+  it("should include structured data in output", () => {
+    const stdoutSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+
+    const logger = new StructuredLogger("info", "noddde", true);
+    logger.info("loaded", { aggregateId: "123" });
+
+    const line = stdoutSpy.mock.calls[0]![0] as string;
+    expect(line).toContain("aggregateId");
+    expect(line).toContain("123");
+  });
+
+  it("should not include data when empty", () => {
+    const stdoutSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+
+    const logger = new StructuredLogger("info", "noddde", true);
+    logger.info("loaded", {});
+
+    const line = stdoutSpy.mock.calls[0]![0] as string;
+    // Message ends with "loaded" and a newline (no trailing data)
+    expect(line).toContain("loaded");
+    expect(line).not.toContain("{}");
+  });
+
+  it("should use color codes for different levels", () => {
+    const stdoutSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    const stderrSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+
+    const logger = new StructuredLogger("debug", "noddde", true);
+
+    logger.debug("d");
+    logger.info("i");
+    logger.warn("w");
+    logger.error("e");
+
+    // debug and info go to stdout
+    expect(stdoutSpy).toHaveBeenCalledTimes(2);
+    // warn and error go to stderr
+    expect(stderrSpy).toHaveBeenCalledTimes(2);
+
+    const debugLine = stdoutSpy.mock.calls[0]![0] as string;
+    const infoLine = stdoutSpy.mock.calls[1]![0] as string;
+    const warnLine = stderrSpy.mock.calls[0]![0] as string;
+    const errorLine = stderrSpy.mock.calls[1]![0] as string;
+
+    // Each level has a different ANSI color code
+    expect(debugLine).toContain("\x1b[35m"); // magenta
+    expect(infoLine).toContain("\x1b[32m"); // green
+    expect(warnLine).toContain("\x1b[33m"); // yellow
+    expect(errorLine).toContain("\x1b[31m"); // red
+  });
+
+  it("should compose namespace in child loggers", () => {
+    const stdoutSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+
+    const logger = new StructuredLogger("info", "noddde", true);
+    const child = logger.child("command");
+    child.info("dispatching");
+
+    const line = stdoutSpy.mock.calls[0]![0] as string;
+    expect(line).toContain("[noddde:command]");
+  });
+
+  it("should inherit pretty mode in child loggers", () => {
+    const stdoutSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+
+    const logger = new StructuredLogger("info", "noddde", true);
+    const child = logger.child("saga");
+    child.info("msg");
+
+    const line = stdoutSpy.mock.calls[0]![0] as string;
+    // Pretty mode: contains ANSI codes, not JSON
+    expect(() => JSON.parse(line)).toThrow();
   });
 });

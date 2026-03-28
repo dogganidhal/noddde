@@ -89,12 +89,18 @@ const domain = await wireDomain(bankingDomain, {
 
 ### In-Memory Default Warnings
 
-When infrastructure components fall back to in-memory defaults, the framework logs startup warnings via the configured logger. With the default `StructuredLogger`, output is NDJSON:
+When infrastructure components fall back to in-memory defaults, the framework logs startup warnings via the configured logger. In development (TTY), you'll see colored output:
+
+```
+2026-03-28T12:00:00.000Z  WARN [noddde:domain] Using in-memory aggregate persistence. This is not suitable for production.
+2026-03-28T12:00:00.000Z  WARN [noddde:domain] Using in-memory CQRS buses. This is not suitable for production.
+2026-03-28T12:00:00.000Z  WARN [noddde:domain] Using in-memory saga persistence. This is not suitable for production.
+```
+
+In production or non-TTY environments, the same messages appear as NDJSON:
 
 ```json
 {"timestamp":"2026-03-28T12:00:00.000Z","level":"warn","namespace":"noddde:domain","message":"Using in-memory aggregate persistence. This is not suitable for production."}
-{"timestamp":"2026-03-28T12:00:00.000Z","level":"warn","namespace":"noddde:domain","message":"Using in-memory CQRS buses. This is not suitable for production."}
-{"timestamp":"2026-03-28T12:00:00.000Z","level":"warn","namespace":"noddde:domain","message":"Using in-memory saga persistence. This is not suitable for production."}
 ```
 
 These warnings only appear when the framework itself supplies the default -- not when you explicitly provide a factory (even if it happens to return an in-memory implementation). Optional components like snapshots, idempotency, and outbox do not trigger warnings when omitted, since omitting them is a valid production choice.
@@ -120,7 +126,23 @@ All fields are optional. Both `wireDomain(definition)` and `wireDomain(definitio
 
 The framework uses a `Logger` interface for all internal logging -- domain initialization, command dispatch, saga execution, concurrency control, and outbox processing.
 
-By default, a `StructuredLogger` at `'warn'` level is used. It emits newline-delimited JSON (NDJSON) to `process.stdout` (debug/info) and `process.stderr` (warn/error), making it suitable for production environments, container deployments, and log aggregators (Datadog, ELK, CloudWatch).
+By default, a `StructuredLogger` at `'warn'` level is used. It **auto-detects the environment** and picks the right output format:
+
+- **Development** (interactive terminal): colored, human-readable output
+  ```
+  2026-03-28T12:00:00.000Z  WARN [noddde:domain] Using in-memory CQRS buses.
+  ```
+- **Production** (`NODE_ENV=production`, containers, CI, piped output): newline-delimited JSON (NDJSON)
+  ```json
+  {
+    "timestamp": "2026-03-28T12:00:00.000Z",
+    "level": "warn",
+    "namespace": "noddde:domain",
+    "message": "Using in-memory CQRS buses."
+  }
+  ```
+
+Detection logic: pretty mode is used when `NODE_ENV` is not `'production'` **and** `stdout` is a TTY. Everything else gets JSON -- no configuration needed.
 
 To see more detail, provide a logger with a lower level:
 
@@ -128,22 +150,12 @@ To see more detail, provide a logger with a lower level:
 import { wireDomain, StructuredLogger } from "@noddde/engine";
 
 const domain = await wireDomain(bankingDomain, {
-  logger: new StructuredLogger("debug"), // Show all framework messages as NDJSON
+  logger: new StructuredLogger("debug"), // Show all framework messages
   // ...other wiring
 });
 ```
 
 Available log levels (ordered by severity): `'debug'`, `'info'`, `'warn'`, `'error'`, `'silent'`.
-
-For human-readable console output during development, use `ConsoleLogger`:
-
-```ts
-import { wireDomain, ConsoleLogger } from "@noddde/engine";
-
-const domain = await wireDomain(bankingDomain, {
-  logger: new ConsoleLogger("debug"), // Human-readable [namespace] prefixed output
-});
-```
 
 To suppress all framework logging:
 
