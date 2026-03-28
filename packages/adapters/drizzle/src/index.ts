@@ -8,16 +8,19 @@ import type {
   SnapshotStore,
   OutboxStore,
 } from "@noddde/core";
-import {
-  DrizzleEventSourcedAggregatePersistence,
-  DrizzleStateStoredAggregatePersistence,
-  DrizzleSagaPersistence,
-  DrizzleSnapshotStore,
-  DrizzleOutboxStore,
-} from "./persistence";
-import { createDrizzleUnitOfWorkFactory } from "./unit-of-work";
+import { DrizzleAdapter } from "./builder";
 
 export { DrizzleSnapshotStore, DrizzleOutboxStore } from "./persistence";
+export {
+  DrizzleAdapter,
+  type DrizzleAdapterResult,
+  type AggregateStateTableConfig,
+  type StateTableColumnMap,
+} from "./builder";
+export {
+  generateDrizzleMigration,
+  type DrizzleMigrationOptions,
+} from "./migrations";
 
 /**
  * Schema tables the developer passes to the factory.
@@ -79,7 +82,9 @@ export interface DrizzlePersistenceInfrastructure {
  * (SQLite, PostgreSQL, MySQL) — the dialect is determined by the `db`
  * instance and `schema` tables you provide.
  *
- * Pass the returned objects to {@link wireDomain} alongside a {@link defineDomain} definition.
+ * @deprecated Use {@link DrizzleAdapter} builder instead for new code.
+ * This function is preserved for backwards compatibility and delegates
+ * to the builder internally.
  *
  * @param db - A Drizzle database instance (any dialect).
  * @param schema - Table definitions matching the expected column structure.
@@ -118,30 +123,26 @@ export function createDrizzlePersistence(
   db: any,
   schema: DrizzleNodddeSchema,
 ): DrizzlePersistenceInfrastructure {
-  const txStore: DrizzleTransactionStore = { current: null };
-
-  const result: DrizzlePersistenceInfrastructure = {
-    eventSourcedPersistence: new DrizzleEventSourcedAggregatePersistence(
-      db,
-      txStore,
-      schema,
-    ),
-    stateStoredPersistence: new DrizzleStateStoredAggregatePersistence(
-      db,
-      txStore,
-      schema,
-    ),
-    sagaPersistence: new DrizzleSagaPersistence(db, txStore, schema),
-    unitOfWorkFactory: createDrizzleUnitOfWorkFactory(db, txStore),
-  };
+  let builder = new DrizzleAdapter(db)
+    .withEventStore(schema.events)
+    .withStateStore(schema.aggregateStates)
+    .withSagaStore(schema.sagaStates);
 
   if (schema.snapshots) {
-    result.snapshotStore = new DrizzleSnapshotStore(db, txStore, schema);
+    builder = builder.withSnapshotStore(schema.snapshots);
   }
-
   if (schema.outbox) {
-    result.outboxStore = new DrizzleOutboxStore(db, txStore, schema);
+    builder = builder.withOutboxStore(schema.outbox);
   }
 
-  return result;
+  const result = builder.build();
+
+  return {
+    eventSourcedPersistence: result.eventSourcedPersistence,
+    stateStoredPersistence: result.stateStoredPersistence!,
+    sagaPersistence: result.sagaPersistence,
+    unitOfWorkFactory: result.unitOfWorkFactory,
+    snapshotStore: result.snapshotStore,
+    outboxStore: result.outboxStore,
+  };
 }

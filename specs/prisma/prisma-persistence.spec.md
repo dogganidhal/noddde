@@ -14,6 +14,12 @@ exports:
   - PrismaUnitOfWork
   - PrismaTransactionStore
   - PrismaOutboxStore
+  - PrismaAdapter
+  - PrismaAdapterResult
+  - PrismaAggregateStateTableConfig
+  - PrismaStateTableColumnMap
+  - generatePrismaMigration
+  - PrismaMigrationOptions
 depends_on:
   - core/persistence/persistence
   - core/persistence/unit-of-work
@@ -244,6 +250,46 @@ export class PrismaOutboxStore implements OutboxStore {
 36. Factory always includes `outboxStore` in returned infrastructure (same as `snapshotStore`).
 37. Outbox operations route through `txStore.current` like all other persistence operations.
 
+### Builder
+
+38. `new PrismaAdapter(prisma)` creates a builder with no stores configured.
+39. `.withEventStore()` configures the shared events table (NodddeEvent model). Required for `build()`.
+40. `.withSagaStore()` configures the shared saga states table (NodddeSagaState model). Required for `build()`.
+41. `.withStateStore()` configures the shared aggregate states table (NodddeAggregateState model). Optional — only needed if some aggregates use the shared table.
+42. `.withSnapshotStore()` and `.withOutboxStore()` are optional.
+43. `.withAggregateStateTable(name, config)` registers a dedicated state table for a named aggregate. Config includes `model` (Prisma model name) and optional `columns` mapping.
+44. `.build()` throws if `withEventStore` or `withSagaStore` was not called.
+45. `.build()` validates that each configured model delegate exists on the PrismaClient instance.
+46. `.build()` returns a `PrismaAdapterResult` with all configured stores.
+47. All persistence instances from a single builder share the same `PrismaTransactionStore` so that operations inside a UoW participate in the same transaction.
+
+### Per-Aggregate State Persistence
+
+48. `stateStoreFor(aggregateName)` returns a `StateStoredAggregatePersistence` bound to that aggregate's dedicated Prisma model.
+49. `stateStoreFor(aggregateName)` throws if no dedicated table was configured for that aggregate via `.withAggregateStateTable()`.
+50. The dedicated state persistence ignores the `aggregateName` parameter passed to `save()`/`load()` — the model itself is the namespace.
+51. The dedicated state persistence uses the column mapping to read/write the correct properties on the Prisma model.
+52. When `columns` is omitted from `PrismaAggregateStateTableConfig`, defaults to `{ aggregateId: "aggregateId", state: "state", version: "version" }`.
+53. Dedicated state persistence participates in the same UoW transaction as shared persistence via the shared `PrismaTransactionStore`.
+54. `save()` with `expectedVersion === 0` uses `create()`; catches Prisma `P2002` (unique constraint violation) and rethrows as `ConcurrencyError`.
+55. `save()` with `expectedVersion > 0` uses `updateMany()` with version match; throws `ConcurrencyError` if `count === 0`.
+
+### Migration Generation
+
+56. `generatePrismaMigration(dialect)` returns a SQL string with `CREATE TABLE IF NOT EXISTS` and `CREATE UNIQUE INDEX IF NOT EXISTS` statements.
+57. Default (no options) includes shared tables: `noddde_events`, `noddde_aggregate_states`, `noddde_saga_states`.
+58. When `options.sharedTables.snapshots` or `.outbox` is `true`, the corresponding table is included.
+59. When `options.aggregateStateTables` is provided, generates `CREATE TABLE IF NOT EXISTS` for each custom table with `aggregate_id TEXT NOT NULL PRIMARY KEY`, `state` (dialect-appropriate JSON type), `version INTEGER NOT NULL DEFAULT 0` columns (or custom column names from config).
+60. Output is dialect-aware: PostgreSQL uses `SERIAL`/`JSONB`/`TEXT`, MySQL uses `INT AUTO_INCREMENT`/`JSON`/`VARCHAR(255)`, SQLite uses `INTEGER`/`TEXT`.
+61. All DDL statements use `IF NOT EXISTS` for idempotent migrations.
+
+### Backwards Compatibility
+
+62. `createPrismaPersistence(prisma)` continues to work with the same signature and return type (`PrismaPersistenceInfrastructure`).
+63. `createPrismaPersistence` delegates to `PrismaAdapter` internally (builder wraps the old behavior).
+64. The `PrismaPersistenceInfrastructure` return type is unchanged.
+65. `createPrismaPersistence` is marked `@deprecated` in JSDoc, recommending `PrismaAdapter` instead.
+
 ## Invariants
 
 - [ ] Events saved and loaded maintain FIFO order (sequenceNumber ordering).
@@ -253,6 +299,9 @@ export class PrismaOutboxStore implements OutboxStore {
 - [ ] All persistence operations within a UoW execute in the same Prisma interactive transaction.
 - [ ] State-stored version increments by exactly 1 on each successful save.
 - [ ] Event-sourced save detects concurrent writes via the `@@unique` constraint.
+- [ ] Dedicated state persistence instances share the same txStore as shared persistence.
+- [ ] `build()` fails fast if required stores (event, saga) are not configured.
+- [ ] `stateStoreFor()` fails fast if aggregate name was not registered.
 
 ## Edge Cases
 
@@ -267,6 +316,12 @@ export class PrismaOutboxStore implements OutboxStore {
 - **Double commit/rollback**: Throws `"UnitOfWork already completed"`.
 - **Transaction store cleared after commit/rollback**: `txStore.current` is always reset to `null` in the `finally` block.
 - **Concurrent saves with same expectedVersion**: One succeeds, the other throws `ConcurrencyError` (via `P2002` for event-sourced or `count === 0` for state-stored).
+- **Builder with no event store**: `.build()` throws `"PrismaAdapter requires withEventStore() to be called before build()"`.
+- **Builder with no saga store**: `.build()` throws `"PrismaAdapter requires withSagaStore() to be called before build()"`.
+- **stateStoreFor unknown aggregate**: Throws `"No dedicated state table configured for aggregate \"Foo\". Call .withAggregateStateTable(\"Foo\", ...) before build()."`.
+- **Dedicated and shared persistence in same UoW**: Both participate in the same transaction via shared txStore.
+- **Multiple dedicated tables in same UoW**: All share the same transaction.
+- **Migration generation with empty options**: Returns SQL for all three shared tables.
 
 ## Integration Points
 

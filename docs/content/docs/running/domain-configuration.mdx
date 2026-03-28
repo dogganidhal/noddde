@@ -159,6 +159,8 @@ aggregates: {
 },
 ```
 
+> **Strict validation**: When using per-aggregate wiring (a record of aggregate names), `wireDomain` requires **every** aggregate in the domain definition to have an explicit `persistence` factory. If any aggregate is missing from the record, `wireDomain` throws at startup with an error listing the unconfigured aggregates. This prevents silent in-memory fallbacks and ensures 1 aggregate = 1 explicit persistence. Global mode (a single `AggregateWiring` object) is unaffected -- all aggregates share the same config.
+
 Each `AggregateWiring` groups three concerns:
 
 - **`persistence`** -- Factory returning `EventSourcedAggregatePersistence` or `StateStoredAggregatePersistence`

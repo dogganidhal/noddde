@@ -422,14 +422,7 @@ export class Domain<
         }
       }
       if (hasPersistence) {
-        // Fill in defaults for aggregates that didn't specify persistence
-        for (const name of Object.keys(definition.writeModel.aggregates)) {
-          if (!(name in persistenceRecord)) {
-            persistenceRecord[name] = () =>
-              new InMemoryEventSourcedAggregatePersistence();
-          }
-        }
-        // Runtime validation
+        // Runtime validation: every aggregate must have explicit persistence
         const aggregateNames = new Set(
           Object.keys(definition.writeModel.aggregates),
         );

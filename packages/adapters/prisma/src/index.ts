@@ -11,6 +11,16 @@ export {
   createPrismaUnitOfWorkFactory,
 } from "./unit-of-work";
 export type { PrismaTransactionStore } from "./unit-of-work";
+export {
+  PrismaAdapter,
+  type PrismaAdapterResult,
+  type PrismaAggregateStateTableConfig,
+  type PrismaStateTableColumnMap,
+} from "./builder";
+export {
+  generatePrismaMigration,
+  type PrismaMigrationOptions,
+} from "./migrations";
 
 import type { PrismaClient } from "@prisma/client";
 import type {
@@ -23,15 +33,7 @@ import type {
   StateStoredAggregatePersistence,
   SagaPersistence,
 } from "@noddde/core";
-import {
-  PrismaEventSourcedAggregatePersistence,
-  PrismaStateStoredAggregatePersistence,
-  PrismaSagaPersistence,
-  PrismaSnapshotStore,
-  PrismaOutboxStore,
-} from "./persistence";
-import { createPrismaUnitOfWorkFactory } from "./unit-of-work";
-import type { PrismaTransactionStore } from "./unit-of-work";
+import { PrismaAdapter } from "./builder";
 
 /**
  * Result of {@link createPrismaPersistence}.
@@ -47,6 +49,10 @@ export interface PrismaPersistenceInfrastructure {
 
 /**
  * Creates a complete set of Prisma-backed persistence implementations.
+ *
+ * @deprecated Use {@link PrismaAdapter} builder instead for new code.
+ * This function is preserved for backwards compatibility and delegates
+ * to the builder internally.
  *
  * @param prisma - A PrismaClient instance.
  * @returns Persistence implementations and a UoW factory.
@@ -79,20 +85,20 @@ export interface PrismaPersistenceInfrastructure {
 export function createPrismaPersistence(
   prisma: PrismaClient,
 ): PrismaPersistenceInfrastructure {
-  const txStore: PrismaTransactionStore = { current: null };
+  const result = new PrismaAdapter(prisma)
+    .withEventStore()
+    .withStateStore()
+    .withSagaStore()
+    .withSnapshotStore()
+    .withOutboxStore()
+    .build();
 
   return {
-    eventSourcedPersistence: new PrismaEventSourcedAggregatePersistence(
-      prisma,
-      txStore,
-    ),
-    stateStoredPersistence: new PrismaStateStoredAggregatePersistence(
-      prisma,
-      txStore,
-    ),
-    sagaPersistence: new PrismaSagaPersistence(prisma, txStore),
-    snapshotStore: new PrismaSnapshotStore(prisma, txStore),
-    outboxStore: new PrismaOutboxStore(prisma, txStore),
-    unitOfWorkFactory: createPrismaUnitOfWorkFactory(prisma, txStore),
+    eventSourcedPersistence: result.eventSourcedPersistence,
+    stateStoredPersistence: result.stateStoredPersistence!,
+    sagaPersistence: result.sagaPersistence,
+    snapshotStore: result.snapshotStore!,
+    outboxStore: result.outboxStore!,
+    unitOfWorkFactory: result.unitOfWorkFactory,
   };
 }

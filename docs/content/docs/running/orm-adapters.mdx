@@ -27,7 +27,7 @@ Persistence (event store, state store, saga store, snapshot store, [outbox store
 
 For SQLite or any dialect without advisory lock support, use `InMemoryAggregateLocker` from `@noddde/engine` for single-process deployments, or choose the optimistic strategy instead.
 
-Each package exports a single factory function that returns all persistence implementations wired to share a transaction context:
+Each package exports factory functions or builder APIs that return all persistence implementations wired to share a transaction context:
 
 ```ts
 import {
@@ -53,6 +53,8 @@ const infra = createDrizzlePersistence(db, {
 // infra.outboxStore              -- OutboxStore (Drizzle: only when outbox schema provided)
 // infra.unitOfWorkFactory        -- UnitOfWorkFactory (real DB transactions)
 ```
+
+For advanced use cases like per-aggregate state tables, each adapter also provides a [Builder API](#builder-api) (`DrizzleAdapter`, `PrismaAdapter`, `TypeORMAdapter`).
 
 ## Drizzle
 
@@ -144,6 +146,137 @@ const domain = await wireDomain(bankingDomain, {
 The adapter detects the dialect automatically. For SQLite (sync drivers like `better-sqlite3`), it uses explicit `BEGIN`/`COMMIT`/`ROLLBACK` SQL statements. For PostgreSQL and MySQL, it uses the native `db.transaction()` callback, which ensures connection affinity in pooled environments.
 
 The persistence classes and `UnitOfWork` share a transaction store. When a transaction is active, all queries automatically route through it.
+
+### Builder API
+
+For advanced configuration -- per-aggregate state tables, custom column mappings, or selective store setup -- use the `DrizzleAdapter` builder instead of `createDrizzlePersistence`:
+
+```ts
+import { DrizzleAdapter } from "@noddde/drizzle";
+import { events, sagaStates, snapshots, outbox } from "@noddde/drizzle/pg";
+import { orders, bankAccounts } from "./schema"; // your own Drizzle tables
+
+const db = drizzle(pool);
+
+const adapter = new DrizzleAdapter(db)
+  .withEventStore(events)
+  .withSagaStore(sagaStates)
+  .withSnapshotStore(snapshots)
+  .withOutboxStore(outbox)
+  .withAggregateStateTable("Order", {
+    table: orders,
+    columns: {
+      aggregateId: orders.id,
+      state: orders.data,
+      version: orders.version,
+    },
+  })
+  .withAggregateStateTable("BankAccount", { table: bankAccounts }) // convention-based
+  .build();
+```
+
+The builder returns a `DrizzleAdapterResult` with all configured stores plus a `stateStoreFor()` accessor for per-aggregate tables:
+
+```ts
+adapter.eventSourcedPersistence; // shared event store
+adapter.stateStoredPersistence; // shared state store (if configured)
+adapter.sagaPersistence; // shared saga store
+adapter.unitOfWorkFactory; // UoW factory
+adapter.snapshotStore; // optional
+adapter.outboxStore; // optional
+adapter.stateStoreFor("Order"); // dedicated state persistence for Order
+```
+
+All persistence instances from a single builder share the same transaction store, ensuring UoW atomicity across shared and dedicated tables.
+
+The `createDrizzlePersistence` factory still works and delegates to the builder internally -- it's the simpler choice when all aggregates share the same tables.
+
+### Per-Aggregate State Tables
+
+By default, all state-stored aggregates share a single `noddde_aggregate_states` table, discriminated by an `aggregate_name` column. For production workloads, you may want each aggregate to have its own dedicated table with a domain-specific schema.
+
+Use `.withAggregateStateTable()` on the builder to map an aggregate to its own table:
+
+```ts
+const adapter = new DrizzleAdapter(db)
+  .withEventStore(events)
+  .withSagaStore(sagaStates)
+  .withAggregateStateTable("Order", { table: orders })
+  .withAggregateStateTable("BankAccount", { table: bankAccounts })
+  .build();
+```
+
+**Column resolution** works in two modes:
+
+1. **Convention-based** (default): The builder scans the Drizzle table definition for columns named `aggregate_id`, `state`, and `version`. If your table follows this naming, no explicit mapping is needed.
+
+2. **Explicit mapping**: For tables with custom column names, provide a `columns` object mapping logical names to Drizzle column references:
+
+```ts
+.withAggregateStateTable("Order", {
+  table: orders,
+  columns: {
+    aggregateId: orders.orderId,
+    state: orders.orderData,
+    version: orders.rev,
+  },
+})
+```
+
+If convention-based resolution fails (columns not found), `.build()` throws with a clear error listing the available columns in the table.
+
+**Wiring with `wireDomain`**: Use per-aggregate mode to assign each aggregate its own persistence:
+
+```ts
+const domain = await wireDomain(definition, {
+  aggregates: {
+    Payment: { persistence: () => adapter.eventSourcedPersistence },
+    Order: { persistence: () => adapter.stateStoreFor("Order") },
+    BankAccount: { persistence: () => adapter.stateStoreFor("BankAccount") },
+  },
+  sagas: { persistence: () => adapter.sagaPersistence },
+  unitOfWork: () => adapter.unitOfWorkFactory,
+});
+```
+
+> **Important**: When using per-aggregate wiring, `wireDomain` requires **every** aggregate in the domain definition to have an explicit `persistence` factory. There are no silent in-memory defaults -- if an aggregate is missing, `wireDomain` throws at startup listing the unconfigured aggregates. This ensures 1 aggregate = 1 explicit persistence configuration.
+
+### Migration Generation
+
+The `generateDrizzleMigration` function produces Drizzle-Kit compatible SQL for all noddde tables. Write the output to a migration file for `drizzle-kit push` or `drizzle-kit migrate`:
+
+```ts
+import { generateDrizzleMigration } from "@noddde/drizzle";
+import fs from "fs";
+
+const sql = generateDrizzleMigration("postgresql", {
+  sharedTables: { snapshots: true, outbox: true },
+  aggregateStateTables: {
+    Order: { tableName: "orders" },
+    BankAccount: {
+      tableName: "bank_accounts",
+      columns: { aggregateId: "account_id" },
+    },
+  },
+});
+
+fs.writeFileSync("migrations/0001_noddde_init.sql", sql);
+```
+
+**Options**:
+
+| Field                          | Description                                                           |
+| ------------------------------ | --------------------------------------------------------------------- |
+| `sharedTables.events`          | Include `noddde_events` table (default: `true`)                       |
+| `sharedTables.aggregateStates` | Include `noddde_aggregate_states` table (default: `true`)             |
+| `sharedTables.sagaStates`      | Include `noddde_saga_states` table (default: `true`)                  |
+| `sharedTables.snapshots`       | Include `noddde_snapshots` table (default: `false`)                   |
+| `sharedTables.outbox`          | Include `noddde_outbox` table (default: `false`)                      |
+| `aggregateStateTables`         | Per-aggregate tables with custom table name and optional column names |
+
+**Supported dialects**: `"postgresql"`, `"mysql"`, `"sqlite"`. The output is dialect-aware -- PostgreSQL uses `SERIAL`/`JSONB`, MySQL uses `AUTO_INCREMENT`/`JSON`/`VARCHAR(255)`, SQLite uses `INTEGER`/`TEXT`. All statements use `IF NOT EXISTS` for idempotent migrations.
+
+All three adapters provide equivalent migration generation functions: `generateDrizzleMigration`, `generatePrismaMigration`, and `generateTypeORMMigration`. Each produces raw SQL tailored to the adapter's supported dialects (TypeORM additionally supports `"mssql"`).
 
 ## Prisma
 
@@ -239,6 +372,69 @@ const domain = await wireDomain(bankingDomain, {
 
 The Prisma adapter uses interactive transactions via `prisma.$transaction(async (tx) => { ... })`. When a unit of work commits, it sets `txStore.current` to the transactional client `tx`, and all persistence classes route their queries through it. Prisma automatically rolls back the transaction if any operation throws.
 
+### Prisma Builder API
+
+For advanced configuration -- per-aggregate state tables or selective store setup -- use the `PrismaAdapter` builder instead of `createPrismaPersistence`:
+
+```ts
+import { PrismaAdapter } from "@noddde/prisma";
+
+const prisma = new PrismaClient();
+
+const adapter = new PrismaAdapter(prisma)
+  .withEventStore()
+  .withSagaStore()
+  .withSnapshotStore()
+  .withOutboxStore()
+  .withAggregateStateTable("Order", {
+    model: "nodddeAggregateState", // or your own Prisma model name
+    columns: {
+      aggregateId: "aggregateId",
+      state: "state",
+      version: "version",
+    },
+  })
+  .build();
+```
+
+The builder returns a `PrismaAdapterResult` with all configured stores plus a `stateStoreFor()` accessor for per-aggregate tables:
+
+```ts
+adapter.eventSourcedPersistence; // shared event store
+adapter.stateStoredPersistence; // shared state store (if configured)
+adapter.sagaPersistence; // shared saga store
+adapter.unitOfWorkFactory; // UoW factory
+adapter.snapshotStore; // optional
+adapter.outboxStore; // optional
+adapter.stateStoreFor("Order"); // dedicated state persistence for Order
+```
+
+Since Prisma uses generated model delegates (e.g., `prisma.order`), the `model` field in the config must match the camelCase delegate name on your PrismaClient. The builder validates that the model exists at `build()` time.
+
+The `createPrismaPersistence` factory still works and delegates to the builder internally -- it's the simpler choice when all aggregates share the same tables.
+
+### Prisma Migration Generation
+
+```ts
+import { generatePrismaMigration } from "@noddde/prisma";
+import fs from "fs";
+
+const sql = generatePrismaMigration("postgresql", {
+  sharedTables: { snapshots: true, outbox: true },
+  aggregateStateTables: {
+    Order: { tableName: "orders" },
+    BankAccount: {
+      tableName: "bank_accounts",
+      columns: { aggregateId: "account_id" },
+    },
+  },
+});
+
+fs.writeFileSync("prisma/migrations/0001_noddde_init/migration.sql", sql);
+```
+
+**Supported dialects**: `"postgresql"`, `"mysql"`, `"sqlite"`.
+
 ## TypeORM
 
 ### Installation
@@ -309,6 +505,72 @@ const domain = await wireDomain(bankingDomain, {
 ### How TypeORM Transactions Work
 
 The TypeORM adapter uses `dataSource.manager.transaction()` to wrap operations. When a unit of work commits, it sets `txStore.current` to the transactional `EntityManager`, and all persistence classes use it for their repository operations.
+
+### TypeORM Builder API
+
+For advanced configuration -- per-aggregate state tables, custom entities, or selective store setup -- use the `TypeORMAdapter` builder instead of `createTypeORMPersistence`:
+
+```ts
+import {
+  TypeORMAdapter,
+  NodddeEventEntity,
+  NodddeSagaStateEntity,
+} from "@noddde/typeorm";
+import { OrderEntity } from "./entities"; // your own TypeORM entity
+
+const adapter = new TypeORMAdapter(dataSource)
+  .withEventStore() // defaults to NodddeEventEntity
+  .withSagaStore() // defaults to NodddeSagaStateEntity
+  .withSnapshotStore() // defaults to NodddeSnapshotEntity
+  .withOutboxStore() // defaults to NodddeOutboxEntryEntity
+  .withAggregateStateTable("Order", {
+    entity: OrderEntity,
+    columns: {
+      aggregateId: "aggregateId", // entity property names
+      state: "state",
+      version: "version",
+    },
+  })
+  .build();
+```
+
+Each `with*Store()` method accepts an optional entity class parameter to override the default -- useful if you've customized the noddde entity decorators for your database.
+
+The builder returns a `TypeORMAdapterResult` with all configured stores plus a `stateStoreFor()` accessor for per-aggregate tables:
+
+```ts
+adapter.eventSourcedPersistence; // shared event store
+adapter.stateStoredPersistence; // shared state store (if configured)
+adapter.sagaPersistence; // shared saga store
+adapter.unitOfWorkFactory; // UoW factory
+adapter.snapshotStore; // optional
+adapter.outboxStore; // optional
+adapter.stateStoreFor("Order"); // dedicated state persistence for Order
+```
+
+The `createTypeORMPersistence` factory still works and delegates to the builder internally -- it's the simpler choice when all aggregates share the same tables.
+
+### TypeORM Migration Generation
+
+```ts
+import { generateTypeORMMigration } from "@noddde/typeorm";
+import fs from "fs";
+
+const sql = generateTypeORMMigration("postgresql", {
+  sharedTables: { snapshots: true, outbox: true },
+  aggregateStateTables: {
+    Order: { tableName: "orders" },
+    BankAccount: {
+      tableName: "bank_accounts",
+      columns: { aggregateId: "account_id" },
+    },
+  },
+});
+
+// Use in a TypeORM migration's up() method, or write to a file
+```
+
+**Supported dialects**: `"postgresql"`, `"mysql"`, `"sqlite"`, `"mssql"`.
 
 ## How Transactions Work
 
