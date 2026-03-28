@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { generateTypeORMMigration } from "@noddde/typeorm";
+import { generateTypeORMMigration } from "../migrations";
 
 describe("generateTypeORMMigration", () => {
   it("should generate default shared tables for sqlite", () => {

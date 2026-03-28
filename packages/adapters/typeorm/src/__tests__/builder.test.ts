@@ -10,7 +10,7 @@ import {
   NodddeSagaStateEntity,
   NodddeSnapshotEntity,
   NodddeOutboxEntryEntity,
-} from "@noddde/typeorm";
+} from "../index";
 
 // Custom entity for per-aggregate state table testing
 @Entity("orders")

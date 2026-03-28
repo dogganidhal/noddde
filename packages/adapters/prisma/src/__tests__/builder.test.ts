@@ -4,7 +4,7 @@ import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import { ConcurrencyError } from "@noddde/core";
-import { PrismaAdapter, createPrismaPersistence } from "@noddde/prisma";
+import { PrismaAdapter, createPrismaPersistence } from "../index";
 
 const TEST_DB = path.resolve(__dirname, "../../prisma/test-builder.db");
 const DATABASE_URL = `file:${TEST_DB}`;

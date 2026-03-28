@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { generatePrismaMigration } from "@noddde/prisma";
+import { generatePrismaMigration } from "../migrations";
 
 describe("generatePrismaMigration", () => {
   it("should generate default shared tables for sqlite", () => {
