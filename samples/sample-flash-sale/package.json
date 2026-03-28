@@ -12,9 +12,9 @@
   "dependencies": {
     "@noddde/core": "0.0.0",
     "@noddde/engine": "0.0.0",
-    "@noddde/drizzle": "0.0.0",
+    "@noddde/typeorm": "0.0.0",
     "@noddde/testing": "0.0.0",
-    "drizzle-orm": "^0.30.0",
+    "typeorm": "^0.3.20",
     "pg": "^8.13.0",
     "@testcontainers/postgresql": "^10.0.0",
     "testcontainers": "^10.0.0",

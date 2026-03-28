@@ -1,8 +1,13 @@
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
-import pg from "pg";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { createDrizzlePersistence } from "@noddde/drizzle";
-import { events, aggregateStates, sagaStates } from "@noddde/drizzle/pg";
+import { DataSource } from "typeorm";
+import {
+  createTypeORMPersistence,
+  NodddeEventEntity,
+  NodddeAggregateStateEntity,
+  NodddeSagaStateEntity,
+  NodddeSnapshotEntity,
+  NodddeOutboxEntryEntity,
+} from "@noddde/typeorm";
 import {
   defineDomain,
   wireDomain,
@@ -14,10 +19,10 @@ import type { Infrastructure } from "@noddde/core";
 import { FlashSaleItem } from "./domain/write-model/aggregates/flash-sale-item";
 
 /**
- * Flash Sale Sample -- Optimistic Concurrency with Drizzle + PostgreSQL.
+ * Flash Sale Sample -- Optimistic Concurrency with TypeORM + PostgreSQL.
  *
  * Demonstrates:
- * - Event-sourced aggregate persistence via Drizzle
+ * - Event-sourced aggregate persistence via TypeORM
  * - Optimistic concurrency control with configurable retries
  * - Concurrent command dispatching under contention
  *
@@ -28,7 +33,7 @@ import { FlashSaleItem } from "./domain/write-model/aggregates/flash-sale-item";
  */
 async function main() {
   console.log(
-    "Flash Sale Sample -- Optimistic Concurrency with Drizzle + PostgreSQL\n",
+    "Flash Sale Sample -- Optimistic Concurrency with TypeORM + PostgreSQL\n",
   );
 
   // Step 1: Start PostgreSQL container
@@ -39,73 +44,24 @@ async function main() {
   );
 
   try {
-    // Step 2: Create tables
-    const pool = new pg.Pool({
-      connectionString: container.getConnectionUri(),
+    // Step 2: Create TypeORM DataSource (synchronize: true auto-creates tables)
+    const dataSource = new DataSource({
+      type: "postgres",
+      url: container.getConnectionUri(),
+      entities: [
+        NodddeEventEntity,
+        NodddeAggregateStateEntity,
+        NodddeSagaStateEntity,
+        NodddeSnapshotEntity,
+        NodddeOutboxEntryEntity,
+      ],
+      synchronize: true,
     });
-    await pool.query(`
-      CREATE TABLE noddde_events (
-        id SERIAL PRIMARY KEY,
-        aggregate_name TEXT NOT NULL,
-        aggregate_id TEXT NOT NULL,
-        sequence_number INTEGER NOT NULL,
-        event_name TEXT NOT NULL,
-        payload JSONB NOT NULL,
-        UNIQUE (aggregate_name, aggregate_id, sequence_number)
-      );
-      CREATE TABLE noddde_aggregate_states (
-        aggregate_name TEXT NOT NULL,
-        aggregate_id TEXT NOT NULL,
-        state JSONB NOT NULL,
-        version INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY (aggregate_name, aggregate_id)
-      );
-      CREATE TABLE noddde_saga_states (
-        saga_name TEXT NOT NULL,
-        saga_id TEXT NOT NULL,
-        state JSONB NOT NULL,
-        PRIMARY KEY (saga_name, saga_id)
-      );
-    `);
-    console.log("Database tables created (with unique constraint on events)\n");
-
-    // TODO: Create snapshot table for periodic aggregate snapshots
-    // await pool.query(`
-    //   CREATE TABLE noddde_snapshots (
-    //     aggregate_name TEXT NOT NULL,
-    //     aggregate_id TEXT NOT NULL,
-    //     version INTEGER NOT NULL,
-    //     state JSONB NOT NULL,
-    //     PRIMARY KEY (aggregate_name, aggregate_id)
-    //   );
-    // `);
-
-    // TODO: Create idempotency table for command deduplication
-    // await pool.query(`
-    //   CREATE TABLE noddde_idempotency (
-    //     command_id TEXT PRIMARY KEY,
-    //     processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    //   );
-    // `);
-
-    // TODO: Create outbox table for transactional event publishing
-    // await pool.query(`
-    //   CREATE TABLE noddde_outbox (
-    //     id SERIAL PRIMARY KEY,
-    //     event_name TEXT NOT NULL,
-    //     payload JSONB NOT NULL,
-    //     published BOOLEAN NOT NULL DEFAULT FALSE,
-    //     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    //   );
-    // `);
+    await dataSource.initialize();
+    console.log("Database tables created via TypeORM synchronize\n");
 
     // Step 3: Configure domain with optimistic concurrency
-    const db = drizzle(pool);
-    const drizzleInfra = createDrizzlePersistence(db, {
-      events,
-      aggregateStates,
-      sagaStates,
-    });
+    const typeormInfra = createTypeORMPersistence(dataSource);
 
     // Define the domain structure (pure, sync)
     const flashSaleDomain = defineDomain<Infrastructure>({
@@ -115,14 +71,14 @@ async function main() {
 
     // Wire with infrastructure (async)
     // TODO: Wire snapshot store when available:
-    //   snapshots: () => drizzleInfra.snapshotStore,
+    //   snapshots: () => typeormInfra.snapshotStore,
     // TODO: Wire idempotency store when available:
-    //   idempotency: () => drizzleInfra.idempotencyStore,
+    //   idempotency: () => typeormInfra.idempotencyStore,
     // TODO: Wire outbox when available:
-    //   outbox: () => drizzleInfra.outboxStore,
+    //   outbox: () => typeormInfra.outboxStore,
     const domain = await wireDomain(flashSaleDomain, {
       aggregates: {
-        persistence: () => drizzleInfra.eventSourcedPersistence,
+        persistence: () => typeormInfra.eventSourcedPersistence,
         concurrency: { maxRetries: 5 },
       },
       buses: () => ({
@@ -130,7 +86,7 @@ async function main() {
         eventBus: new EventEmitterEventBus(),
         queryBus: new InMemoryQueryBus(),
       }),
-      unitOfWork: () => drizzleInfra.unitOfWorkFactory,
+      unitOfWork: () => typeormInfra.unitOfWorkFactory,
     });
     console.log(
       "Domain configured: optimistic concurrency with maxRetries: 5\n",
@@ -177,7 +133,7 @@ async function main() {
     );
 
     // Step 7: Verify final state by loading events
-    const finalEvents = await drizzleInfra.eventSourcedPersistence.load(
+    const finalEvents = await typeormInfra.eventSourcedPersistence.load(
       "FlashSaleItem",
       "limited-edition-sneakers",
     );
@@ -207,7 +163,7 @@ async function main() {
     );
     console.log(`Stock remaining: ${5 - purchased.length}`);
 
-    await pool.end();
+    await dataSource.destroy();
   } finally {
     // Step 8: Cleanup
     console.log("\nStopping PostgreSQL container...");

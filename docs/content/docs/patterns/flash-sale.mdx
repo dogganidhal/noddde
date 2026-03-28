@@ -3,11 +3,11 @@ title: "Flash Sale — Concurrency Strategies"
 description: Handling concurrent purchases with optimistic and pessimistic concurrency, snapshots, idempotency, and the outbox pattern.
 ---
 
-A flash sale where limited stock sells first-come-first-served. Multiple buyers purchase the same item concurrently. This sample demonstrates both **optimistic concurrency with retry** (Drizzle + PostgreSQL) and **pessimistic concurrency with advisory locks** (Prisma + MySQL) — showing when to choose each strategy.
+A flash sale where limited stock sells first-come-first-served. Multiple buyers purchase the same item concurrently. This sample demonstrates both **optimistic concurrency with retry** and **pessimistic concurrency with advisory locks** — showing when to choose each strategy.
 
 > **Full source**: [samples/sample-flash-sale](https://github.com/dogganidhal/noddde/tree/main/samples/sample-flash-sale) — clone and run locally with `npm start`.
 
-**Stack**: Drizzle + PostgreSQL (optimistic) | Prisma + MySQL (pessimistic)
+**Stack**: TypeORM + PostgreSQL (both optimistic and pessimistic entry points)
 
 ## Why Optimistic
 

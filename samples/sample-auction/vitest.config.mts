@@ -7,6 +7,7 @@ export default defineConfig({
       "@noddde/testing": path.resolve(__dirname, "../../packages/testing/src/index.ts"),
       "@noddde/engine": path.resolve(__dirname, "../../packages/engine/src/index.ts"),
       "@noddde/core": path.resolve(__dirname, "../../packages/core/src/index.ts"),
+      "@noddde/prisma": path.resolve(__dirname, "../../packages/adapters/prisma/src/index.ts"),
     },
   },
   test: {
