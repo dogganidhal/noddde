@@ -16,9 +16,11 @@ const fixedDate = new Date("2025-01-15T10:00:00Z");
 const fixedClock = new FixedClock(fixedDate);
 
 const mockLogger = {
+  debug: vi.fn(),
   info: vi.fn(),
-  error: vi.fn(),
   warn: vi.fn(),
+  error: vi.fn(),
+  child: () => mockLogger,
 };
 
 const mockInfra = {
@@ -302,7 +304,13 @@ describe("Banking domain — slice test", () => {
       projections: { BankAccountProjection },
       infrastructure: {
         clock: fixedClock,
-        logger: { info: () => {}, error: () => {}, warn: () => {} },
+        logger: {
+          debug: () => {},
+          info: () => {},
+          warn: () => {},
+          error: () => {},
+          child: () => mockLogger,
+        },
         bankAccountViewRepository: {} as any,
         transactionViewRepository: {} as any,
       },

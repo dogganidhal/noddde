@@ -9,6 +9,7 @@ import type {
   IdempotencyStore,
   Infrastructure,
   CQRSInfrastructure,
+  Logger,
   PartialEventLoad,
   PersistenceConfiguration,
   Snapshot,
@@ -50,6 +51,7 @@ export class CommandLifecycleExecutor {
       uow: UnitOfWork,
     ) => Promise<void>,
     private readonly onEventsDispatched?: (events: Event[]) => Promise<void>,
+    private readonly logger?: Logger,
   ) {}
 
   /**
@@ -69,12 +71,22 @@ export class CommandLifecycleExecutor {
     aggregate: Aggregate<any>,
     command: AggregateCommand,
   ): Promise<void> {
+    this.logger?.debug("Executing command.", {
+      aggregateName,
+      commandName: command.name,
+      aggregateId: String(command.targetAggregateId),
+    });
+
     // Idempotency check (before any other work)
     if (command.commandId != null && this.idempotencyStore) {
       const alreadyProcessed = await this.idempotencyStore.exists(
         command.commandId,
       );
       if (alreadyProcessed) {
+        this.logger?.info("Idempotent command skipped.", {
+          commandId: command.commandId,
+          aggregateName,
+        });
         return; // Duplicate command — skip execution entirely
       }
     }
@@ -252,6 +264,14 @@ export class CommandLifecycleExecutor {
       }
     }
 
+    this.logger?.debug("Aggregate state loaded.", {
+      aggregateName,
+      aggregateId: String(command.targetAggregateId),
+      version,
+      isEventSourced,
+      fromSnapshot: snapshot != null,
+    });
+
     // Step 2: Execute command handler
     const handler = aggregate.commands[command.name];
     if (!handler) {
@@ -285,6 +305,12 @@ export class CommandLifecycleExecutor {
       command.name,
       eventVersionResolver,
     );
+
+    this.logger?.debug("Events produced.", {
+      aggregateName,
+      aggregateId: String(command.targetAggregateId),
+      events: enrichedEvents.map((e) => e.name),
+    });
 
     // Step 5: Enlist persistence in UoW with version (deferred until commit)
     if (isEventSourced) {
@@ -340,6 +366,11 @@ export class CommandLifecycleExecutor {
           eventsSinceSnapshot,
         })
       ) {
+        this.logger?.info("Snapshot scheduled.", {
+          aggregateName,
+          aggregateId: String(command.targetAggregateId),
+          version: newVersion,
+        });
         return {
           aggregateName,
           aggregateId: command.targetAggregateId,

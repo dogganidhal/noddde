@@ -19,12 +19,6 @@ export class FixedClock implements Clock {
   }
 }
 
-export type Logger = {
-  info: (message: string) => void;
-  error: (message: string) => void;
-  warn: (message: string) => void;
-};
-
 export interface BankAccountViewRepository {
   getById(id: string): Promise<BankAccountView>;
   insert(bankAccount: BankAccountView): Promise<void>;
@@ -63,23 +57,8 @@ export class InMemoryTransactionViewRepository
   }
 }
 
-export class ConsoleLogger implements Logger {
-  info(message: string) {
-    console.log(message);
-  }
-
-  error(message: string) {
-    console.error(message);
-  }
-
-  warn(message: string) {
-    console.warn(message);
-  }
-}
-
 export interface BankingInfrastructure {
   clock: Clock;
-  logger: Logger;
 
   bankAccountViewRepository: BankAccountViewRepository;
   transactionViewRepository: TransactionViewRepository;

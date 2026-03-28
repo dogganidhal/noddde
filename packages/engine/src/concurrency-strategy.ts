@@ -1,5 +1,5 @@
 /* eslint-disable no-unused-vars */
-import type { AggregateLocker, Event, ID } from "@noddde/core";
+import type { AggregateLocker, Event, ID, Logger } from "@noddde/core";
 import { ConcurrencyError } from "@noddde/core";
 
 /**
@@ -44,11 +44,14 @@ export interface ConcurrencyStrategy {
  * @internal
  */
 export class OptimisticConcurrencyStrategy implements ConcurrencyStrategy {
-  constructor(private readonly maxRetries: number) {}
+  constructor(
+    private readonly maxRetries: number,
+    private readonly logger?: Logger,
+  ) {}
 
   async execute(
     _aggregateName: string,
-    _aggregateId: string,
+    _aggregateId: ID,
     attempt: () => Promise<Event[]>,
   ): Promise<Event[]> {
     for (let i = 0; i <= this.maxRetries; i++) {
@@ -56,6 +59,12 @@ export class OptimisticConcurrencyStrategy implements ConcurrencyStrategy {
         return await attempt();
       } catch (error) {
         if (error instanceof ConcurrencyError && i < this.maxRetries) {
+          this.logger?.info("Retrying after concurrency conflict.", {
+            aggregateName: _aggregateName,
+            aggregateId: String(_aggregateId),
+            attempt: i + 1,
+            maxRetries: this.maxRetries,
+          });
           continue;
         }
         throw error;
@@ -80,6 +89,7 @@ export class PessimisticConcurrencyStrategy implements ConcurrencyStrategy {
   constructor(
     private readonly locker: AggregateLocker,
     private readonly timeoutMs?: number,
+    private readonly logger?: Logger,
   ) {}
 
   async execute(
@@ -87,11 +97,23 @@ export class PessimisticConcurrencyStrategy implements ConcurrencyStrategy {
     aggregateId: ID,
     attempt: () => Promise<Event[]>,
   ): Promise<Event[]> {
+    this.logger?.debug("Acquiring lock.", {
+      aggregateName,
+      aggregateId: String(aggregateId),
+    });
     await this.locker.acquire(aggregateName, aggregateId, this.timeoutMs);
+    this.logger?.debug("Lock acquired.", {
+      aggregateName,
+      aggregateId: String(aggregateId),
+    });
     try {
       return await attempt();
     } finally {
       await this.locker.release(aggregateName, aggregateId);
+      this.logger?.debug("Lock released.", {
+        aggregateName,
+        aggregateId: String(aggregateId),
+      });
     }
   }
 }

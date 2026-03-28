@@ -1,5 +1,10 @@
 /* eslint-disable no-unused-vars */
-import type { OutboxStore, EventBus, BackgroundProcess } from "@noddde/core";
+import type {
+  OutboxStore,
+  EventBus,
+  BackgroundProcess,
+  Logger,
+} from "@noddde/core";
 
 /**
  * Configuration options for the OutboxRelay.
@@ -31,6 +36,7 @@ export class OutboxRelay implements BackgroundProcess {
     private readonly outboxStore: OutboxStore,
     private readonly eventBus: EventBus,
     private readonly options: OutboxRelayOptions = {},
+    private readonly logger?: Logger,
   ) {}
 
   /**
@@ -85,9 +91,11 @@ export class OutboxRelay implements BackgroundProcess {
 
     try {
       const batchSize = this.options.batchSize ?? 100;
+      this.logger?.debug("Polling outbox.", { batchSize });
       const entries = await this.outboxStore.loadUnpublished(batchSize);
       if (entries.length === 0) return 0;
 
+      this.logger?.debug("Outbox entries loaded.", { count: entries.length });
       let dispatched = 0;
       for (const entry of entries) {
         try {
@@ -95,8 +103,16 @@ export class OutboxRelay implements BackgroundProcess {
           await this.outboxStore.markPublished([entry.id]);
           dispatched++;
         } catch {
-          // Skip failed entries — they'll be retried on next poll
+          this.logger?.warn("Outbox entry dispatch failed, will retry.", {
+            entryId: entry.id,
+          });
         }
+      }
+      if (dispatched > 0) {
+        this.logger?.info("Outbox batch processed.", {
+          dispatched,
+          total: entries.length,
+        });
       }
       return dispatched;
     } finally {

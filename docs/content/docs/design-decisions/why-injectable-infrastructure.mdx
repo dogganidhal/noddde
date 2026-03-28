@@ -133,7 +133,7 @@ commands: {
 
 // Provide it in wiring
 infrastructure: () => ({
-  logger: new ConsoleLogger(),
+  clock: new SystemClock(),
   bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
   transactionViewRepository: new InMemoryTransactionViewRepository(),
 }),

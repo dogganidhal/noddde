@@ -1,6 +1,6 @@
 /* eslint-disable no-unused-vars */
 import { Event } from "./event";
-import { Infrastructure } from "../infrastructure";
+import { Infrastructure, FrameworkInfrastructure } from "../infrastructure";
 
 /**
  * An impure, async-capable handler that reacts to domain events.
@@ -21,4 +21,7 @@ import { Infrastructure } from "../infrastructure";
 export type EventHandler<
   TEvent extends Event,
   TInfrastructure extends Infrastructure,
-> = (event: TEvent, infrastructure: TInfrastructure) => void | Promise<void>;
+> = (
+  event: TEvent,
+  infrastructure: TInfrastructure & FrameworkInfrastructure,
+) => void | Promise<void>;

@@ -8,8 +8,10 @@ import type {
   Event,
   EventBus,
   EventHandler,
+  FrameworkInfrastructure,
   ID,
   Infrastructure,
+  Logger,
   PersistenceConfiguration,
   Projection,
   Query,
@@ -88,6 +90,7 @@ import {
 import { MetadataEnricher } from "./executors/metadata-enricher";
 import { CommandLifecycleExecutor } from "./executors/command-lifecycle-executor";
 import { SagaExecutor } from "./executors/saga-executor";
+import { NodddeLogger } from "./logger";
 import {
   GlobalAggregatePersistenceResolver,
   PerAggregatePersistenceResolver,
@@ -242,8 +245,13 @@ export type DomainWiring<
   TInfrastructure extends Infrastructure = Infrastructure,
   TAggregates extends AggregateMap = AggregateMap,
 > = {
-  /** Factory for user-provided infrastructure services. */
-  infrastructure?: () => TInfrastructure | Promise<TInfrastructure>;
+  /**
+   * Factory for user-provided infrastructure services.
+   * Receives the framework logger so custom services can use it.
+   */
+  infrastructure?: (
+    logger: Logger,
+  ) => TInfrastructure | Promise<TInfrastructure>;
   /** Aggregate runtime config — global {@link AggregateWiring} OR per-aggregate record. */
   aggregates?:
     | AggregateWiring
@@ -269,6 +277,8 @@ export type DomainWiring<
   };
   /** Metadata provider called on every command dispatch. */
   metadataProvider?: MetadataProvider;
+  /** Framework logger. Defaults to NodddeLogger at 'warn' level. */
+  logger?: Logger;
 };
 
 /**
@@ -323,7 +333,9 @@ export class Domain<
   TStandaloneCommand extends Command = Command,
   TStandaloneQuery extends Query<any> = Query<any>,
 > {
-  private _infrastructure!: TInfrastructure & CQRSInfrastructure;
+  private _infrastructure!: TInfrastructure &
+    CQRSInfrastructure &
+    FrameworkInfrastructure;
   private _unitOfWorkFactory!: UnitOfWorkFactory;
   private readonly _uowStorage = new AsyncLocalStorage<UnitOfWork>();
   private readonly _metadataStorage = new AsyncLocalStorage<MetadataContext>();
@@ -337,8 +349,10 @@ export class Domain<
   private _drainResolve: (() => void) | null = null;
   /** All resolved infrastructure components for auto-close discovery. */
   private _allComponents: unknown[] = [];
-  /** The fully resolved infrastructure (custom + CQRS buses). */
-  public get infrastructure(): TInfrastructure & CQRSInfrastructure {
+  /** The fully resolved infrastructure (custom + CQRS buses + framework logger). */
+  public get infrastructure(): TInfrastructure &
+    CQRSInfrastructure &
+    FrameworkInfrastructure {
     return this._infrastructure;
   }
 
@@ -361,18 +375,23 @@ export class Domain<
   public async init(): Promise<void> {
     const { definition, wiring } = this;
 
+    // Step 0: Resolve logger (before everything else, so all init steps can log)
+    const logger = wiring.logger ?? new NodddeLogger();
+    const domainLog = logger.child("domain");
+
     // Step 1: Resolve custom infrastructure
     const customInfra = wiring.infrastructure
-      ? await wiring.infrastructure()
+      ? await wiring.infrastructure(logger)
       : ({} as TInfrastructure);
+    domainLog.info("Custom infrastructure resolved.");
 
     // Step 2: Resolve CQRS infrastructure
     let cqrsInfra: CQRSInfrastructure;
     if (wiring.buses) {
       cqrsInfra = await wiring.buses(customInfra);
     } else {
-      console.warn(
-        "[noddde] Using in-memory CQRS buses. This is not suitable for production.",
+      domainLog.warn(
+        "Using in-memory CQRS buses. This is not suitable for production.",
       );
       cqrsInfra = {
         commandBus: new InMemoryCommandBus(),
@@ -381,11 +400,12 @@ export class Domain<
       };
     }
 
-    // Step 3: Merge infrastructure
+    // Step 3: Merge infrastructure (custom + CQRS buses + framework logger)
     this._infrastructure = {
       ...customInfra,
       ...cqrsInfra,
-    } as TInfrastructure & CQRSInfrastructure;
+      logger,
+    } as TInfrastructure & CQRSInfrastructure & FrameworkInfrastructure;
 
     // Step 4: Resolve aggregate persistence → AggregatePersistenceResolver
     const perAggregateWirings = this._resolvedContext?.perAggregateWirings;
@@ -437,8 +457,8 @@ export class Domain<
         persistenceResolver = new PerAggregatePersistenceResolver(resolved);
       } else {
         // Per-aggregate mode but no persistence specified — use in-memory default
-        console.warn(
-          "[noddde] Using in-memory aggregate persistence. This is not suitable for production.",
+        domainLog.warn(
+          "Using in-memory aggregate persistence. This is not suitable for production.",
         );
         persistenceResolver = new GlobalAggregatePersistenceResolver(
           new InMemoryEventSourcedAggregatePersistence(),
@@ -451,8 +471,8 @@ export class Domain<
 
       if (!globalPersistence) {
         // Omitted — in-memory default for all
-        console.warn(
-          "[noddde] Using in-memory aggregate persistence. This is not suitable for production.",
+        domainLog.warn(
+          "Using in-memory aggregate persistence. This is not suitable for production.",
         );
         persistenceResolver = new GlobalAggregatePersistenceResolver(
           new InMemoryEventSourcedAggregatePersistence(),
@@ -513,8 +533,8 @@ export class Domain<
       if (wiring.sagas?.persistence) {
         sagaPersistence = await wiring.sagas.persistence();
       } else {
-        console.warn(
-          "[noddde] Using in-memory saga persistence. This is not suitable for production.",
+        domainLog.warn(
+          "Using in-memory saga persistence. This is not suitable for production.",
         );
         sagaPersistence = new InMemorySagaPersistence();
       }
@@ -526,6 +546,7 @@ export class Domain<
       : createInMemoryUnitOfWork;
 
     // Step 5.6: Resolve concurrency strategy
+    const concurrencyLog = logger.child("concurrency");
     let concurrencyStrategy: ConcurrencyStrategy;
 
     if (perAggregateWirings) {
@@ -542,6 +563,7 @@ export class Domain<
               new PessimisticConcurrencyStrategy(
                 aw.concurrency.locker,
                 aw.concurrency.lockTimeoutMs,
+                concurrencyLog,
               ),
             );
           } else {
@@ -549,12 +571,16 @@ export class Domain<
               name,
               new OptimisticConcurrencyStrategy(
                 (aw.concurrency as { maxRetries?: number })?.maxRetries ?? 0,
+                concurrencyLog,
               ),
             );
           }
         }
       }
-      const defaultStrategy = new OptimisticConcurrencyStrategy(0);
+      const defaultStrategy = new OptimisticConcurrencyStrategy(
+        0,
+        concurrencyLog,
+      );
       concurrencyStrategy =
         strategies.size > 0
           ? new PerAggregateConcurrencyStrategy(strategies, defaultStrategy)
@@ -571,10 +597,12 @@ export class Domain<
         concurrencyStrategy = new PessimisticConcurrencyStrategy(
           concurrency.locker,
           concurrency.lockTimeoutMs,
+          concurrencyLog,
         );
       } else {
         concurrencyStrategy = new OptimisticConcurrencyStrategy(
           (concurrency as { maxRetries?: number } | undefined)?.maxRetries ?? 0,
+          concurrencyLog,
         );
       }
     }
@@ -698,6 +726,7 @@ export class Domain<
       idempotencyStore,
       onEventsProduced,
       onEventsDispatched,
+      logger.child("command"),
     );
 
     if (sagaPersistence) {
@@ -708,6 +737,7 @@ export class Domain<
         this._uowStorage,
         this._metadataStorage,
         onEventsDispatched,
+        logger.child("saga"),
       );
     }
 
@@ -717,6 +747,7 @@ export class Domain<
         this._outboxStore,
         this._infrastructure.eventBus,
         wiring.outbox?.relayOptions,
+        logger.child("outbox"),
       );
     }
 
@@ -862,6 +893,14 @@ export class Domain<
         });
       }
     }
+
+    domainLog.info("Domain initialized.", {
+      aggregates: Object.keys(definition.writeModel.aggregates),
+      projections: Object.keys(definition.readModel.projections),
+      sagas: definition.processModel?.sagas
+        ? Object.keys(definition.processModel.sagas)
+        : [],
+    });
 
     // Step 13: Collect all infrastructure components for auto-close discovery
     // Custom infrastructure values come first (discovery order)

@@ -4,6 +4,7 @@ import type {
   CQRSInfrastructure,
   Event,
   Infrastructure,
+  Logger,
   Saga,
   SagaPersistence,
   UnitOfWork,
@@ -30,6 +31,7 @@ export class SagaExecutor {
     private readonly uowStorage: AsyncLocalStorage<UnitOfWork>,
     private readonly metadataStorage: AsyncLocalStorage<MetadataContext>,
     private readonly onEventsDispatched?: (events: Event[]) => Promise<void>,
+    private readonly logger?: Logger,
   ) {}
 
   /**
@@ -53,6 +55,12 @@ export class SagaExecutor {
     // Step 2: Derive saga instance ID
     const sagaId = onEntry.id(event);
 
+    this.logger?.debug("Saga event received.", {
+      sagaName,
+      eventName: event.name,
+      sagaId: String(sagaId),
+    });
+
     // Step 3: Load saga state
     let currentState = await this.sagaPersistence.load(sagaName, sagaId);
 
@@ -60,8 +68,18 @@ export class SagaExecutor {
     if (currentState == null) {
       if ((saga.startedBy as string[]).includes(event.name)) {
         currentState = saga.initialState;
+        this.logger?.info("Saga instance started.", {
+          sagaName,
+          sagaId: String(sagaId),
+          triggerEvent: event.name,
+        });
       } else {
         // Saga not started yet, ignore this event
+        this.logger?.debug("Saga not started, ignoring event.", {
+          sagaName,
+          sagaId: String(sagaId),
+          eventName: event.name,
+        });
         return;
       }
     }
@@ -72,6 +90,17 @@ export class SagaExecutor {
       currentState,
       this.infrastructure,
     );
+
+    const commandCount = reaction.commands
+      ? Array.isArray(reaction.commands)
+        ? reaction.commands.length
+        : 1
+      : 0;
+    this.logger?.debug("Saga reaction computed.", {
+      sagaName,
+      sagaId: String(sagaId),
+      commandCount,
+    });
 
     // Step 6: Propagate correlation context from triggering event
     const sagaCtx: MetadataContext = {
@@ -119,6 +148,12 @@ export class SagaExecutor {
             }
           }
         } catch (error) {
+          this.logger?.error("Saga execution failed.", {
+            sagaName,
+            sagaId: String(sagaId),
+            eventName: event.name,
+            error: String(error),
+          });
           try {
             await uow.rollback();
           } catch {

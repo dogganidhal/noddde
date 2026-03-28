@@ -68,7 +68,6 @@ When you're ready for production, provide explicit wiring:
 const domain = await wireDomain(bankingDomain, {
   // User-provided services (what handlers receive as `infrastructure`)
   infrastructure: () => ({
-    logger: new ConsoleLogger(),
     bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
   }),
 
@@ -89,12 +88,23 @@ const domain = await wireDomain(bankingDomain, {
 
 ### In-Memory Default Warnings
 
-When infrastructure components fall back to in-memory defaults, the framework logs startup warnings to the console:
+When infrastructure components fall back to in-memory defaults, the framework logs startup warnings via the configured logger. In development (TTY), you'll see colored output:
 
 ```
-[noddde] Using in-memory aggregate persistence. This is not suitable for production.
-[noddde] Using in-memory CQRS buses. This is not suitable for production.
-[noddde] Using in-memory saga persistence. This is not suitable for production.
+2026-03-28T12:00:00.000Z  WARN 12345 --- [noddde:domain] Using in-memory aggregate persistence. This is not suitable for production.
+2026-03-28T12:00:00.000Z  WARN 12345 --- [noddde:domain] Using in-memory CQRS buses. This is not suitable for production.
+2026-03-28T12:00:00.000Z  WARN 12345 --- [noddde:domain] Using in-memory saga persistence. This is not suitable for production.
+```
+
+In production or non-TTY environments, the same messages appear as NDJSON:
+
+```json
+{
+  "timestamp": "2026-03-28T12:00:00.000Z",
+  "level": "warn",
+  "namespace": "noddde:domain",
+  "message": "Using in-memory aggregate persistence. This is not suitable for production."
+}
 ```
 
 These warnings only appear when the framework itself supplies the default -- not when you explicitly provide a factory (even if it happens to return an in-memory implementation). Optional components like snapshots, idempotency, and outbox do not trigger warnings when omitted, since omitting them is a valid production choice.
@@ -112,8 +122,15 @@ These warnings only appear when the framework itself supplies the default -- not
 | `idempotency`      | Factory for idempotency store (command dedup by commandId).                                  |
 | `outbox`           | Transactional outbox configuration.                                                          |
 | `metadataProvider` | Function called on every command dispatch for event metadata context.                        |
+| `logger`           | Framework logger instance. Defaults to `NodddeLogger` at `'warn'` level.                 |
 
 All fields are optional. Both `wireDomain(definition)` and `wireDomain(definition, {})` use in-memory defaults for everything.
+
+### Logging
+
+The framework uses a `Logger` interface for all internal logging. By default, a `NodddeLogger` at `'warn'` level is used -- it auto-detects the environment (colored output in dev, NDJSON in production). The logger is also automatically available as `infrastructure.logger` in all handlers, and passed to the `infrastructure` factory so your custom services can use it too.
+
+See [Logging](/docs/running/logging) for full details on output formats, log levels, using the logger in handlers and custom infrastructure, and bringing your own logger.
 
 ### Aggregate Wiring
 
@@ -466,7 +483,6 @@ const bankingDomain = defineDomain<BankingInfrastructure>({
 // Step 2: Wire with infrastructure (async)
 const domain = await wireDomain(bankingDomain, {
   infrastructure: () => ({
-    logger: new ConsoleLogger(),
     bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
     transactionViewRepository: new InMemoryTransactionViewRepository(),
   }),

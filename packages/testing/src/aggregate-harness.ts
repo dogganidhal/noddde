@@ -1,5 +1,6 @@
 /* eslint-disable no-unused-vars */
 import type { Aggregate, AggregateTypes } from "@noddde/core";
+import { NoopLogger } from "@noddde/engine";
 import type { AggregateTestResult } from "./types";
 
 /**
@@ -137,11 +138,11 @@ export function testAggregate<T extends AggregateTypes>(
           const handler = (aggregate.commands as Record<string, any>)[
             command!.name
           ];
-          const rawResult = await handler(
-            command,
-            priorState,
-            infrastructure ?? ({} as T["infrastructure"]),
-          );
+          const infra = {
+            logger: new NoopLogger(),
+            ...(infrastructure ?? ({} as T["infrastructure"])),
+          };
+          const rawResult = await handler(command, priorState, infra);
 
           const events: T["events"][] = Array.isArray(rawResult)
             ? rawResult

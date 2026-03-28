@@ -22,7 +22,7 @@ commands: {
 },
 ```
 
-The handler depends on the `Logger` interface, not a concrete `ConsoleLogger`. This separation makes the entire framework testable without mocks for infrastructure internals.
+The handler depends on the `Logger` interface, not a concrete `SystemClock`. This separation makes the entire framework testable without mocks for infrastructure internals.
 
 ## The Infrastructure Type
 
@@ -49,25 +49,23 @@ This type becomes the `infrastructure` member of your [AggregateTypes](/docs/mod
 Each member of your infrastructure type should be an interface with concrete implementations:
 
 ```ts
-interface Logger {
-  info(message: string): void;
-  error(message: string): void;
+interface Clock {
+  now(): Date;
 }
 
 // Production
-class ConsoleLogger implements Logger {
-  info(message: string) {
-    console.log(message);
-  }
-  error(message: string) {
-    console.error(message);
+class SystemClock implements Clock {
+  now(): Date {
+    return new Date();
   }
 }
 
 // Test
-class SilentLogger implements Logger {
-  info(_message: string) {}
-  error(_message: string) {}
+class FixedClock implements Clock {
+  constructor(private readonly date: Date) {}
+  now(): Date {
+    return this.date;
+  }
 }
 ```
 
@@ -113,12 +111,12 @@ With `wireDomain`, infrastructure is provided via the `DomainWiring` object. The
 
 ### User Infrastructure
 
-The `infrastructure` factory provides your custom domain services -- loggers, repositories, clients:
+The `infrastructure` factory provides your custom domain services -- repositories, clients, clocks:
 
 ```ts
 const domain = await wireDomain(bankingDomain, {
   infrastructure: () => ({
-    logger: new ConsoleLogger(),
+    clock: new SystemClock(),
     bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
     transactionViewRepository: new InMemoryTransactionViewRepository(),
   }),
@@ -197,7 +195,6 @@ All providers are factory functions (not raw values). This is intentional:
 infrastructure: async () => {
   const dbConnection = await connectToDatabase();
   return {
-    logger: new ConsoleLogger(),
     bankAccountRepo: new PostgresBankAccountRepository(dbConnection),
   };
 },
@@ -274,8 +271,9 @@ const prodDomain = await wireDomain(bankingDomain, {
 
 // Test wiring
 const testDomain = await wireDomain(bankingDomain, {
+  logger: new NoopLogger(), // Suppress framework logging in tests
   infrastructure: () => ({
-    logger: new SilentLogger(),
+    clock: new FixedClock(new Date("2026-01-01")),
     bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
     transactionViewRepository: new InMemoryTransactionViewRepository(),
   }),

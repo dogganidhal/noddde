@@ -1,5 +1,6 @@
 /* eslint-disable no-unused-vars */
 import type { ID, Saga, SagaTypes, CQRSInfrastructure } from "@noddde/core";
+import { NoopLogger } from "@noddde/engine";
 import type { SagaTestResult } from "./types";
 
 /**
@@ -128,6 +129,7 @@ export function testSaga<T extends SagaTypes, TSagaId extends ID = string>(
 
         const noopCqrs = createNoopCQRSInfrastructure();
         const mergedInfra = {
+          logger: new NoopLogger(),
           ...(infrastructure ?? ({} as T["infrastructure"])),
           ...noopCqrs,
           ...cqrsOverride,

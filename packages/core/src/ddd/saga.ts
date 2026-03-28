@@ -2,7 +2,11 @@
 import type { ID } from "../id";
 import { Event } from "../edd/event";
 import { Command } from "../cqrs/command/command";
-import { Infrastructure, CQRSInfrastructure } from "../infrastructure";
+import {
+  Infrastructure,
+  CQRSInfrastructure,
+  FrameworkInfrastructure,
+} from "../infrastructure";
 
 // ---- Types bundle ----
 
@@ -89,7 +93,9 @@ export type SagaEventHandler<
 > = (
   event: TEvent,
   state: TState,
-  infrastructure: TInfrastructure & CQRSInfrastructure,
+  infrastructure: TInfrastructure &
+    CQRSInfrastructure &
+    FrameworkInfrastructure,
 ) => SagaReaction<TState, TCommands> | Promise<SagaReaction<TState, TCommands>>;
 
 // ---- On-map entry ----

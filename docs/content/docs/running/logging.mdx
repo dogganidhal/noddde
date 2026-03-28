@@ -1,0 +1,259 @@
+---
+title: Logging
+description: How noddde logs internally, how to configure log levels, and how to use the framework logger in your own handlers and infrastructure.
+---
+
+noddde has a built-in structured logging system that works out of the box with zero configuration. The framework logs its own lifecycle events (domain init, command dispatch, saga execution, concurrency, outbox) and makes the same logger available to your handlers and custom infrastructure.
+
+## How noddde Logs
+
+By default, noddde creates a `NodddeLogger` at `'warn'` level. It **auto-detects the environment** and picks the right output format:
+
+### Development (TTY)
+
+When running in an interactive terminal with `NODE_ENV` not set to `'production'`, logs are colored and human-readable -- inspired by Spring Boot:
+
+```
+2026-03-28T12:00:00.000Z  WARN 12345 --- [noddde:domain] Using in-memory CQRS buses.
+2026-03-28T12:00:00.000Z DEBUG 12345 --- [noddde:command] Command dispatched.  name="CreateAccount" aggregateId="acc-1"
+```
+
+Each line includes:
+
+- **Timestamp** (ISO 8601, dim gray)
+- **Level** (colored and bold -- green for INFO, yellow for WARN, red for ERROR, magenta for DEBUG)
+- **PID** (process ID, dim gray)
+- **`---` separator**
+- **Namespace** (cyan, in brackets -- e.g. `[noddde:command]`)
+- **Message**
+- **Structured data** as logfmt `key=value` pairs (strings quoted, numbers raw)
+
+### Production (non-TTY)
+
+In production (`NODE_ENV=production`), containers, CI, or piped output, the same information is emitted as newline-delimited JSON (NDJSON):
+
+```json
+{"timestamp":"2026-03-28T12:00:00.000Z","level":"warn","namespace":"noddde:domain","message":"Using in-memory CQRS buses."}
+{"timestamp":"2026-03-28T12:00:00.000Z","level":"debug","namespace":"noddde:command","message":"Command dispatched.","name":"CreateAccount","aggregateId":"acc-1"}
+```
+
+Structured data fields are merged as top-level keys in the JSON object -- no nested `data` wrapper.
+
+### Stream Routing
+
+- `debug` and `info` write to **stdout**
+- `warn` and `error` write to **stderr**
+
+This lets you separate normal output from error output in log aggregators and container runtimes.
+
+### Detection Logic
+
+Pretty mode is used when **both** conditions are true:
+
+1. `NODE_ENV` is not `'production'`
+2. `process.stdout.isTTY` is `true`
+
+Everything else gets JSON. No environment variables to set, no config flags to toggle.
+
+## Configuring the Log Level
+
+The default level is `'warn'` -- only warnings and errors are visible. To see more detail, pass a `NodddeLogger` with a lower level:
+
+```ts
+import { wireDomain, NodddeLogger } from "@noddde/engine";
+
+const domain = await wireDomain(bankingDomain, {
+  logger: new NodddeLogger("debug"), // Show all framework messages
+});
+```
+
+Available levels, ordered by severity:
+
+| Level      | Severity | What you see                                       |
+| ---------- | -------- | -------------------------------------------------- |
+| `'debug'`  | 0        | Everything -- dispatch details, state loads, locks |
+| `'info'`   | 1        | Lifecycle events, handler registration             |
+| `'warn'`   | 2        | In-memory fallback warnings (default)              |
+| `'error'`  | 3        | Only errors                                        |
+| `'silent'` | 4        | Nothing                                            |
+
+A message is emitted only when its severity is **>=** the configured level.
+
+To suppress all framework logging:
+
+```ts
+import { NoopLogger } from "@noddde/engine";
+
+const domain = await wireDomain(bankingDomain, {
+  logger: new NoopLogger(),
+});
+```
+
+## Using the Logger in Handlers
+
+The framework logger is automatically available as `infrastructure.logger` in **every handler** -- aggregate command handlers, event handlers, saga handlers, query handlers, and standalone handlers.
+
+### In Aggregate Command Handlers
+
+```ts
+const BankAccount = defineAggregate<BankAccountTypes>({
+  initialState: { balance: 0 },
+  commands: {
+    Deposit: (command, state, infrastructure) => {
+      infrastructure.logger.info("Processing deposit", {
+        amount: command.payload.amount,
+        currentBalance: state.balance,
+      });
+      return { name: "Deposited", payload: { amount: command.payload.amount } };
+    },
+  },
+  apply: {
+    Deposited: (payload, state) => ({
+      ...state,
+      balance: state.balance + payload.amount,
+    }),
+  },
+});
+```
+
+### In Saga Handlers
+
+```ts
+const OrderFulfillment = defineSaga<OrderFulfillmentTypes>({
+  initialState: { status: "pending" },
+  startedBy: ["OrderPlaced"],
+  on: {
+    OrderPlaced: {
+      id: (event) => event.payload.orderId,
+      handle: (event, state, infrastructure) => {
+        infrastructure.logger.info("Starting fulfillment", {
+          orderId: event.payload.orderId,
+        });
+        return {
+          state: { ...state, status: "processing" },
+          commands: {
+            name: "ReserveInventory",
+            targetAggregateId: event.payload.orderId,
+          },
+        };
+      },
+    },
+  },
+});
+```
+
+### In Query Handlers
+
+```ts
+const getAccountById: QueryHandler<BankingInfrastructure, GetAccountQuery> = (
+  query,
+  infrastructure,
+) => {
+  infrastructure.logger.debug("Loading account", { id: query.id });
+  return infrastructure.accountRepository.findById(query.id);
+};
+```
+
+### Creating Scoped Loggers
+
+Use `child()` to create loggers with a more specific namespace:
+
+```ts
+Deposit: (command, state, infrastructure) => {
+  const log = infrastructure.logger.child("deposit");
+  log.info("Processing"); // logs as [noddde:deposit]
+  // ...
+},
+```
+
+The framework itself uses child loggers with namespaces like `domain`, `command`, `saga`, `concurrency`, and `outbox`.
+
+## Using the Logger in Custom Infrastructure
+
+The `infrastructure` factory in `DomainWiring` receives the framework logger as its first argument. Use it to inject logging into your custom services at construction time:
+
+```ts
+const domain = await wireDomain(bankingDomain, {
+  infrastructure: (logger) => ({
+    paymentGateway: new StripeGateway(logger.child("stripe")),
+    emailService: new SmtpEmailService(logger.child("email")),
+    accountRepository: new PostgresAccountRepository(logger.child("repo")),
+  }),
+});
+```
+
+This gives your services properly-scoped child loggers that share the same level and output format as the framework logger. A `StripeGateway` logging at `info` level would produce:
+
+```
+2026-03-28T12:00:00.000Z  INFO 12345 --- [noddde:stripe] Charge created.  chargeId="ch_abc" amount=4999
+```
+
+## Bringing Your Own Logger
+
+You can replace the built-in logger entirely by implementing the `Logger` interface from `@noddde/core`:
+
+```ts
+import type { Logger } from "@noddde/core";
+
+function createPinoLogger(pino: PinoInstance, ns: string): Logger {
+  const child = pino.child({ namespace: ns });
+  return {
+    debug: (msg, data) => child.debug(data, msg),
+    info: (msg, data) => child.info(data, msg),
+    warn: (msg, data) => child.warn(data, msg),
+    error: (msg, data) => child.error(data, msg),
+    child: (childNs) => createPinoLogger(pino, `${ns}:${childNs}`),
+  };
+}
+
+const domain = await wireDomain(bankingDomain, {
+  logger: createPinoLogger(pino, "noddde"),
+});
+```
+
+The `Logger` interface is minimal:
+
+```ts
+interface Logger {
+  debug(message: string, data?: Record<string, unknown>): void;
+  info(message: string, data?: Record<string, unknown>): void;
+  warn(message: string, data?: Record<string, unknown>): void;
+  error(message: string, data?: Record<string, unknown>): void;
+  child(namespace: string): Logger;
+}
+```
+
+All methods are synchronous and return `void` -- logging must never block the command pipeline.
+
+## What the Framework Logs
+
+Here is what the framework logs at each level, so you can decide which level to use:
+
+### `debug`
+
+- Command dispatch start (name, aggregate, ID)
+- Aggregate state loaded (version, from snapshot or not)
+- Events produced (names)
+- Snapshot scheduled
+- Pessimistic lock acquire/release
+- Saga event received, reaction computed
+- Outbox polling, entries loaded, entry dispatched
+
+### `info`
+
+- Custom infrastructure resolved
+- Idempotent command skipped
+- Saga instance bootstrapped
+- Optimistic concurrency retry (attempt N of M)
+- Domain initialized (aggregate, projection, saga counts)
+- Outbox batch summary
+
+### `warn`
+
+- In-memory fallback warnings (aggregate persistence, CQRS buses, saga persistence)
+
+### `error`
+
+- Command handler failure
+- Saga execution failure
+- Outbox dispatch failure

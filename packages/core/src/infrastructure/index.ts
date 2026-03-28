@@ -1,9 +1,11 @@
 import { CommandBus, QueryBus } from "../cqrs";
 import { EventBus } from "../edd";
+import type { Logger } from "./logger";
 
 export type { Closeable } from "./closeable";
 export { isCloseable } from "./closeable";
 export type { BackgroundProcess } from "./background-process";
+export type { Logger, LogLevel } from "./logger";
 
 /**
  * Base infrastructure type. Extend this interface to declare the external
@@ -18,6 +20,19 @@ export type { BackgroundProcess } from "./background-process";
  * ```
  */
 export type Infrastructure = {};
+
+/**
+ * Framework-provided infrastructure automatically available to all handlers.
+ * Contains the framework logger and any future framework-level services.
+ *
+ * Merged into every handler's `infrastructure` parameter by the engine.
+ * Handlers can use `infrastructure.logger` without declaring it in their
+ * custom infrastructure type.
+ */
+export interface FrameworkInfrastructure {
+  /** Framework logger instance. Use `child()` to create scoped loggers. */
+  logger: Logger;
+}
 
 /**
  * Infrastructure provided by the framework containing the three CQRS buses.
