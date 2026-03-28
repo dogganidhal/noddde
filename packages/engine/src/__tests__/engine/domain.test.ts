@@ -2073,7 +2073,9 @@ describe("wireDomain hello world", () => {
       },
     });
 
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const stderrSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
 
     const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: { Pinger } },
@@ -2082,15 +2084,13 @@ describe("wireDomain hello world", () => {
 
     await wireDomain(definition);
 
+    const output = stderrSpy.mock.calls.map((c) => c[0] as string).join("");
     // Should warn about in-memory persistence
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("[noddde]"));
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("aggregate persistence"),
-    );
+    expect(output).toContain("aggregate persistence");
     // Should warn about in-memory buses
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("buses"));
+    expect(output).toContain("buses");
 
-    warnSpy.mockRestore();
+    stderrSpy.mockRestore();
   });
 
   it("should not log warnings when all wiring is explicitly provided", async () => {
@@ -2114,7 +2114,9 @@ describe("wireDomain hello world", () => {
       },
     });
 
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const stderrSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
 
     const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: { Pinger } },
@@ -2132,9 +2134,9 @@ describe("wireDomain hello world", () => {
       }),
     });
 
-    expect(warnSpy).not.toHaveBeenCalled();
+    expect(stderrSpy).not.toHaveBeenCalled();
 
-    warnSpy.mockRestore();
+    stderrSpy.mockRestore();
   });
 
   it("should log saga persistence warning when sagas use default", async () => {
@@ -2186,7 +2188,9 @@ describe("wireDomain hello world", () => {
       },
     });
 
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const stderrSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
 
     const definition = defineDomain<Infrastructure>({
       writeModel: { aggregates: { Order } },
@@ -2196,12 +2200,11 @@ describe("wireDomain hello world", () => {
 
     await wireDomain(definition);
 
+    const output = stderrSpy.mock.calls.map((c) => c[0] as string).join("");
     // Should warn about in-memory saga persistence
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("saga persistence"),
-    );
+    expect(output).toContain("saga persistence");
 
-    warnSpy.mockRestore();
+    stderrSpy.mockRestore();
   });
 });
 
