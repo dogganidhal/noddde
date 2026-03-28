@@ -11,3 +11,4 @@ export * from "./implementations/in-memory-idempotency-store";
 export * from "./implementations/in-memory-view-store";
 export * from "./implementations/in-memory-outbox-store";
 export * from "./outbox-relay";
+export * from "./logger";

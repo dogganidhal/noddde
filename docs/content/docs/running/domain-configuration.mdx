@@ -89,12 +89,12 @@ const domain = await wireDomain(bankingDomain, {
 
 ### In-Memory Default Warnings
 
-When infrastructure components fall back to in-memory defaults, the framework logs startup warnings to the console:
+When infrastructure components fall back to in-memory defaults, the framework logs startup warnings via the configured logger:
 
 ```
-[noddde] Using in-memory aggregate persistence. This is not suitable for production.
-[noddde] Using in-memory CQRS buses. This is not suitable for production.
-[noddde] Using in-memory saga persistence. This is not suitable for production.
+[noddde:domain] Using in-memory aggregate persistence. This is not suitable for production.
+[noddde:domain] Using in-memory CQRS buses. This is not suitable for production.
+[noddde:domain] Using in-memory saga persistence. This is not suitable for production.
 ```
 
 These warnings only appear when the framework itself supplies the default -- not when you explicitly provide a factory (even if it happens to return an in-memory implementation). Optional components like snapshots, idempotency, and outbox do not trigger warnings when omitted, since omitting them is a valid production choice.
@@ -112,8 +112,52 @@ These warnings only appear when the framework itself supplies the default -- not
 | `idempotency`      | Factory for idempotency store (command dedup by commandId).                                  |
 | `outbox`           | Transactional outbox configuration.                                                          |
 | `metadataProvider` | Function called on every command dispatch for event metadata context.                        |
+| `logger`           | Framework logger instance. Defaults to `ConsoleLogger` at `'warn'` level.                    |
 
 All fields are optional. Both `wireDomain(definition)` and `wireDomain(definition, {})` use in-memory defaults for everything.
+
+### Logging
+
+The framework uses a `Logger` interface for all internal logging -- domain initialization, command dispatch, saga execution, concurrency control, and outbox processing. By default, a `ConsoleLogger` at `'warn'` level is used, which only shows warnings about in-memory fallbacks.
+
+To see more detail, provide a logger with a lower level:
+
+```ts
+import { wireDomain, ConsoleLogger } from "@noddde/engine";
+
+const domain = await wireDomain(bankingDomain, {
+  logger: new ConsoleLogger("debug"), // Show all framework messages
+  // ...other wiring
+});
+```
+
+Available log levels (ordered by severity): `'debug'`, `'info'`, `'warn'`, `'error'`, `'silent'`.
+
+To suppress all framework logging:
+
+```ts
+import { NoopLogger } from "@noddde/engine";
+
+const domain = await wireDomain(bankingDomain, {
+  logger: new NoopLogger(),
+});
+```
+
+You can also provide your own logger by implementing the `Logger` interface from `@noddde/core`:
+
+```ts
+import type { Logger } from "@noddde/core";
+
+const pinoLogger: Logger = {
+  debug: (msg, data) => pino.debug(data, msg),
+  info: (msg, data) => pino.info(data, msg),
+  warn: (msg, data) => pino.warn(data, msg),
+  error: (msg, data) => pino.error(data, msg),
+  child: (ns) => createPinoChild(ns),
+};
+```
+
+The framework creates child loggers with namespaces like `command`, `saga`, `domain`, `concurrency`, and `outbox` to scope log output by component.
 
 ### Aggregate Wiring
 

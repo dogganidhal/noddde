@@ -24,6 +24,7 @@ depends_on:
   - engine/executors/saga-executor
   - engine/executors/metadata-enricher
   - engine/outbox-relay
+  - engine/logger
   - ddd/aggregate-root
   - ddd/projection
   - ddd/saga
@@ -187,6 +188,8 @@ type DomainWiring<
   };
   /** Metadata provider called on every command dispatch. */
   metadataProvider?: MetadataProvider;
+  /** Framework logger. Defaults to ConsoleLogger at 'warn' level. */
+  logger?: Logger;
 };
 
 /**

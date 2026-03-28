@@ -10,6 +10,7 @@ import type {
   EventHandler,
   ID,
   Infrastructure,
+  Logger,
   PersistenceConfiguration,
   Projection,
   Query,
@@ -88,6 +89,7 @@ import {
 import { MetadataEnricher } from "./executors/metadata-enricher";
 import { CommandLifecycleExecutor } from "./executors/command-lifecycle-executor";
 import { SagaExecutor } from "./executors/saga-executor";
+import { ConsoleLogger } from "./logger";
 import {
   GlobalAggregatePersistenceResolver,
   PerAggregatePersistenceResolver,
@@ -269,6 +271,8 @@ export type DomainWiring<
   };
   /** Metadata provider called on every command dispatch. */
   metadataProvider?: MetadataProvider;
+  /** Framework logger. Defaults to ConsoleLogger at 'warn' level. */
+  logger?: Logger;
 };
 
 /**
@@ -361,18 +365,23 @@ export class Domain<
   public async init(): Promise<void> {
     const { definition, wiring } = this;
 
+    // Step 0: Resolve logger (before everything else, so all init steps can log)
+    const logger = wiring.logger ?? new ConsoleLogger();
+    const domainLog = logger.child("domain");
+
     // Step 1: Resolve custom infrastructure
     const customInfra = wiring.infrastructure
       ? await wiring.infrastructure()
       : ({} as TInfrastructure);
+    domainLog.info("Custom infrastructure resolved.");
 
     // Step 2: Resolve CQRS infrastructure
     let cqrsInfra: CQRSInfrastructure;
     if (wiring.buses) {
       cqrsInfra = await wiring.buses(customInfra);
     } else {
-      console.warn(
-        "[noddde] Using in-memory CQRS buses. This is not suitable for production.",
+      domainLog.warn(
+        "Using in-memory CQRS buses. This is not suitable for production.",
       );
       cqrsInfra = {
         commandBus: new InMemoryCommandBus(),
@@ -437,8 +446,8 @@ export class Domain<
         persistenceResolver = new PerAggregatePersistenceResolver(resolved);
       } else {
         // Per-aggregate mode but no persistence specified — use in-memory default
-        console.warn(
-          "[noddde] Using in-memory aggregate persistence. This is not suitable for production.",
+        domainLog.warn(
+          "Using in-memory aggregate persistence. This is not suitable for production.",
         );
         persistenceResolver = new GlobalAggregatePersistenceResolver(
           new InMemoryEventSourcedAggregatePersistence(),
@@ -451,8 +460,8 @@ export class Domain<
 
       if (!globalPersistence) {
         // Omitted — in-memory default for all
-        console.warn(
-          "[noddde] Using in-memory aggregate persistence. This is not suitable for production.",
+        domainLog.warn(
+          "Using in-memory aggregate persistence. This is not suitable for production.",
         );
         persistenceResolver = new GlobalAggregatePersistenceResolver(
           new InMemoryEventSourcedAggregatePersistence(),
@@ -513,8 +522,8 @@ export class Domain<
       if (wiring.sagas?.persistence) {
         sagaPersistence = await wiring.sagas.persistence();
       } else {
-        console.warn(
-          "[noddde] Using in-memory saga persistence. This is not suitable for production.",
+        domainLog.warn(
+          "Using in-memory saga persistence. This is not suitable for production.",
         );
         sagaPersistence = new InMemorySagaPersistence();
       }
@@ -526,6 +535,7 @@ export class Domain<
       : createInMemoryUnitOfWork;
 
     // Step 5.6: Resolve concurrency strategy
+    const concurrencyLog = logger.child("concurrency");
     let concurrencyStrategy: ConcurrencyStrategy;
 
     if (perAggregateWirings) {
@@ -542,6 +552,7 @@ export class Domain<
               new PessimisticConcurrencyStrategy(
                 aw.concurrency.locker,
                 aw.concurrency.lockTimeoutMs,
+                concurrencyLog,
               ),
             );
           } else {
@@ -549,12 +560,13 @@ export class Domain<
               name,
               new OptimisticConcurrencyStrategy(
                 (aw.concurrency as { maxRetries?: number })?.maxRetries ?? 0,
+                concurrencyLog,
               ),
             );
           }
         }
       }
-      const defaultStrategy = new OptimisticConcurrencyStrategy(0);
+      const defaultStrategy = new OptimisticConcurrencyStrategy(0, concurrencyLog);
       concurrencyStrategy =
         strategies.size > 0
           ? new PerAggregateConcurrencyStrategy(strategies, defaultStrategy)
@@ -571,10 +583,12 @@ export class Domain<
         concurrencyStrategy = new PessimisticConcurrencyStrategy(
           concurrency.locker,
           concurrency.lockTimeoutMs,
+          concurrencyLog,
         );
       } else {
         concurrencyStrategy = new OptimisticConcurrencyStrategy(
           (concurrency as { maxRetries?: number } | undefined)?.maxRetries ?? 0,
+          concurrencyLog,
         );
       }
     }
@@ -698,6 +712,7 @@ export class Domain<
       idempotencyStore,
       onEventsProduced,
       onEventsDispatched,
+      logger.child("command"),
     );
 
     if (sagaPersistence) {
@@ -708,6 +723,7 @@ export class Domain<
         this._uowStorage,
         this._metadataStorage,
         onEventsDispatched,
+        logger.child("saga"),
       );
     }
 
@@ -717,6 +733,7 @@ export class Domain<
         this._outboxStore,
         this._infrastructure.eventBus,
         wiring.outbox?.relayOptions,
+        logger.child("outbox"),
       );
     }
 
@@ -862,6 +879,14 @@ export class Domain<
         });
       }
     }
+
+    domainLog.info("Domain initialized.", {
+      aggregates: Object.keys(definition.writeModel.aggregates),
+      projections: Object.keys(definition.readModel.projections),
+      sagas: definition.processModel?.sagas
+        ? Object.keys(definition.processModel.sagas)
+        : [],
+    });
 
     // Step 13: Collect all infrastructure components for auto-close discovery
     // Custom infrastructure values come first (discovery order)

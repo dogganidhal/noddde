@@ -4,6 +4,7 @@ import { EventBus } from "../edd";
 export type { Closeable } from "./closeable";
 export { isCloseable } from "./closeable";
 export type { BackgroundProcess } from "./background-process";
+export type { Logger, LogLevel } from "./logger";
 
 /**
  * Base infrastructure type. Extend this interface to declare the external
