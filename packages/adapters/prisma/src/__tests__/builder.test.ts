@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import { ConcurrencyError } from "@noddde/core";
 import { PrismaAdapter, createPrismaPersistence } from "../index";
+import { PrismaDedicatedStateStoredPersistence } from "../dedicated-state-persistence";
 
 const TEST_DB = path.resolve(__dirname, "../../prisma/test-builder.db");
 const DATABASE_URL = `file:${TEST_DB}`;
@@ -99,111 +100,123 @@ describe("PrismaAdapter Builder", () => {
   });
 });
 
-describe("PrismaAdapter Per-Aggregate State Tables", () => {
-  beforeEach(setupDb);
-  afterEach(teardownDb);
+describe("PrismaDedicatedStateStoredPersistence (unit)", () => {
+  // Since Prisma models are code-generated and we can't define custom ones
+  // at test time, we test the dedicated persistence with a mock delegate.
 
-  it("should save and load via dedicated table using shared model", async () => {
-    // Use the nodddeAggregateState model as a stand-in for a dedicated table
-    const result = new PrismaAdapter(prisma)
-      .withEventStore()
-      .withSagaStore()
-      .withAggregateStateTable("Order", {
-        model: "nodddeAggregateState",
-        columns: {
-          aggregateId: "aggregateId",
-          state: "state",
-          version: "version",
-        },
-      })
-      .build();
+  function createMockDelegate() {
+    const store = new Map<string, { aggregateId: string; state: string; version: number }>();
+    return {
+      create: vi.fn(async ({ data }: any) => {
+        if (store.has(data.aggregateId)) {
+          const error: any = new Error("Unique constraint failed");
+          error.code = "P2002";
+          throw error;
+        }
+        store.set(data.aggregateId, { ...data });
+        return data;
+      }),
+      findFirst: vi.fn(async ({ where }: any) => {
+        return store.get(where.aggregateId) ?? null;
+      }),
+      updateMany: vi.fn(async ({ where, data }: any) => {
+        const existing = store.get(where.aggregateId);
+        if (!existing || existing.version !== where.version) {
+          return { count: 0 };
+        }
+        Object.assign(existing, data);
+        return { count: 1 };
+      }),
+    };
+  }
 
-    const orderStore = result.stateStoreFor("Order");
+  it("save and load roundtrip", async () => {
+    const delegate = createMockDelegate();
+    const mockPrisma = { order: delegate } as any;
+    const txStore = { current: null };
+    const persistence = new PrismaDedicatedStateStoredPersistence(
+      mockPrisma,
+      txStore,
+      "order",
+      { aggregateId: "aggregateId", state: "state", version: "version" },
+    );
 
-    await orderStore.save("Order", "order-1", { total: 100 }, 0);
-    const loaded = await orderStore.load("Order", "order-1");
+    await persistence.save("Order", "order-1", { total: 100 }, 0);
+    const loaded = await persistence.load("Order", "order-1");
 
     expect(loaded).toEqual({ state: { total: 100 }, version: 1 });
   });
 
   it("should return null for nonexistent aggregate", async () => {
-    const result = new PrismaAdapter(prisma)
-      .withEventStore()
-      .withSagaStore()
-      .withAggregateStateTable("Order", {
-        model: "nodddeAggregateState",
-        columns: {
-          aggregateId: "aggregateId",
-          state: "state",
-          version: "version",
-        },
-      })
-      .build();
+    const delegate = createMockDelegate();
+    const mockPrisma = { order: delegate } as any;
+    const txStore = { current: null };
+    const persistence = new PrismaDedicatedStateStoredPersistence(
+      mockPrisma,
+      txStore,
+      "order",
+      { aggregateId: "aggregateId", state: "state", version: "version" },
+    );
 
-    const loaded = await result
-      .stateStoreFor("Order")
-      .load("Order", "nonexistent");
+    const loaded = await persistence.load("Order", "nonexistent");
     expect(loaded).toBeNull();
   });
 
   it("should throw ConcurrencyError on version mismatch", async () => {
-    const result = new PrismaAdapter(prisma)
-      .withEventStore()
-      .withSagaStore()
-      .withAggregateStateTable("Order", {
-        model: "nodddeAggregateState",
-        columns: {
-          aggregateId: "aggregateId",
-          state: "state",
-          version: "version",
-        },
-      })
-      .build();
+    const delegate = createMockDelegate();
+    const mockPrisma = { order: delegate } as any;
+    const txStore = { current: null };
+    const persistence = new PrismaDedicatedStateStoredPersistence(
+      mockPrisma,
+      txStore,
+      "order",
+      { aggregateId: "aggregateId", state: "state", version: "version" },
+    );
 
-    const orderStore = result.stateStoreFor("Order");
-
-    await orderStore.save("Order", "order-1", { total: 100 }, 0);
+    await persistence.save("Order", "order-1", { total: 100 }, 0);
     await expect(
-      orderStore.save("Order", "order-1", { total: 200 }, 0),
+      persistence.save("Order", "order-1", { total: 200 }, 0),
     ).rejects.toThrow(ConcurrencyError);
   });
 
-  it("should participate in UoW transaction", async () => {
-    const result = new PrismaAdapter(prisma)
-      .withEventStore()
-      .withSagaStore()
-      .withAggregateStateTable("Order", {
-        model: "nodddeAggregateState",
-        columns: {
-          aggregateId: "aggregateId",
-          state: "state",
-          version: "version",
-        },
-      })
-      .build();
-
-    const orderStore = result.stateStoreFor("Order");
-    const uow = result.unitOfWorkFactory();
-
-    uow.enlist(() => orderStore.save("Order", "order-1", { total: 100 }, 0));
-    uow.enlist(() =>
-      result.eventSourcedPersistence.save(
-        "Order",
-        "order-1",
-        [{ name: "OrderPlaced", payload: { total: 100 } }],
-        0,
-      ),
+  it("should throw ConcurrencyError on update with wrong version", async () => {
+    const delegate = createMockDelegate();
+    const mockPrisma = { order: delegate } as any;
+    const txStore = { current: null };
+    const persistence = new PrismaDedicatedStateStoredPersistence(
+      mockPrisma,
+      txStore,
+      "order",
+      { aggregateId: "aggregateId", state: "state", version: "version" },
     );
 
-    await uow.commit();
+    await persistence.save("Order", "order-1", { total: 100 }, 0);
+    await expect(
+      persistence.save("Order", "order-1", { total: 200 }, 5),
+    ).rejects.toThrow(ConcurrencyError);
+  });
 
-    const loaded = await orderStore.load("Order", "order-1");
-    expect(loaded).toEqual({ state: { total: 100 }, version: 1 });
-
-    const events = await result.eventSourcedPersistence.load(
-      "Order",
-      "order-1",
+  it("should use txStore.current when inside a transaction", async () => {
+    const delegate = createMockDelegate();
+    const txDelegate = createMockDelegate();
+    const mockPrisma = { order: delegate } as any;
+    const txStore: { current: any } = { current: null };
+    const persistence = new PrismaDedicatedStateStoredPersistence(
+      mockPrisma,
+      txStore,
+      "order",
+      { aggregateId: "aggregateId", state: "state", version: "version" },
     );
-    expect(events).toHaveLength(1);
+
+    // Simulate a transaction context
+    txStore.current = { order: txDelegate };
+
+    await persistence.save("Order", "order-1", { total: 100 }, 0);
+
+    // txDelegate should have been called, not the main delegate
+    expect(txDelegate.create).toHaveBeenCalled();
+    expect(delegate.create).not.toHaveBeenCalled();
+
+    txStore.current = null;
   });
 });
