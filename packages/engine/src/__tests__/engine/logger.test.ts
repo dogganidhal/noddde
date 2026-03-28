@@ -386,7 +386,7 @@ describe("StructuredLogger.child (JSON mode)", () => {
 // Force pretty mode with pretty=true.
 
 describe("StructuredLogger pretty output", () => {
-  it("should write colored text with timestamp, level, namespace, and message", () => {
+  it("should include timestamp, PID, separator, level, namespace, and message", () => {
     const stdoutSpy = vi
       .spyOn(process.stdout, "write")
       .mockImplementation(() => true);
@@ -398,27 +398,33 @@ describe("StructuredLogger pretty output", () => {
     const line = stdoutSpy.mock.calls[0]![0] as string;
     expect(line.endsWith("\n")).toBe(true);
 
-    // Should contain the key parts (with ANSI codes around them)
+    // Should contain all contextual parts
     expect(line).toContain("INFO");
     expect(line).toContain("[noddde]");
     expect(line).toContain("test message");
+    expect(line).toContain("---");
+    expect(line).toContain(String(process.pid));
     // Should contain a timestamp (ISO format substring)
     expect(line).toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
     // Should NOT be valid JSON (it's human-readable)
     expect(() => JSON.parse(line)).toThrow();
   });
 
-  it("should include structured data in output", () => {
+  it("should format structured data as logfmt key=value pairs", () => {
     const stdoutSpy = vi
       .spyOn(process.stdout, "write")
       .mockImplementation(() => true);
 
     const logger = new StructuredLogger("info", "noddde", true);
-    logger.info("loaded", { aggregateId: "123" });
+    logger.info("loaded", { aggregateId: "123", version: 5 });
 
     const line = stdoutSpy.mock.calls[0]![0] as string;
-    expect(line).toContain("aggregateId");
-    expect(line).toContain("123");
+    // String values should be quoted
+    expect(line).toContain("aggregateId=");
+    expect(line).toContain('"123"');
+    // Numeric values should be raw
+    expect(line).toContain("version=");
+    expect(line).toContain("5");
   });
 
   it("should not include data when empty", () => {
@@ -430,7 +436,6 @@ describe("StructuredLogger pretty output", () => {
     logger.info("loaded", {});
 
     const line = stdoutSpy.mock.calls[0]![0] as string;
-    // Message ends with "loaded" and a newline (no trailing data)
     expect(line).toContain("loaded");
     expect(line).not.toContain("{}");
   });

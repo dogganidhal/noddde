@@ -25,6 +25,7 @@ function severity(level: LogLevel): number {
 const RESET = "\x1b[0m";
 const DIM = "\x1b[90m";
 const CYAN = "\x1b[36m";
+const BOLD = "\x1b[1m";
 
 const LEVEL_COLORS: Record<string, string> = {
   debug: "\x1b[35m",
@@ -39,6 +40,17 @@ const LEVEL_LABELS: Record<string, string> = {
   warn: " WARN",
   error: "ERROR",
 };
+
+/** PID cached once at module load. */
+const PID = String(process.pid);
+
+/** Formats a value for logfmt output. Strings are quoted, others are raw. */
+function formatValue(v: unknown): string {
+  if (typeof v === "string") return `"${v}"`;
+  if (Array.isArray(v)) return JSON.stringify(v);
+  if (typeof v === "object" && v !== null) return JSON.stringify(v);
+  return String(v);
+}
 
 /**
  * Detects whether logs should be formatted as human-readable colored
@@ -60,10 +72,12 @@ function detectPretty(): boolean {
  *
  * **Pretty mode** (development, TTY):
  * ```
- * 2026-03-28T12:00:00.000Z  WARN [noddde:domain] Using in-memory CQRS buses. { aggregateId: "123" }
+ * 2026-03-28T12:00:00.000Z  WARN 12345 --- [noddde:domain] Using in-memory CQRS buses.  aggregateId="123" version=5
  * ```
+ * Spring Boot-inspired format with PID and `---` separator.
  * Colored by level — green for INFO, yellow for WARN, red for ERROR,
- * magenta for DEBUG. Namespace in cyan, timestamp and data in dim gray.
+ * magenta for DEBUG. Namespace in cyan, timestamp in dim gray, data as
+ * logfmt `key=value` pairs.
  *
  * **JSON mode** (production, non-TTY, CI, containers):
  * ```json
@@ -168,8 +182,13 @@ export class StructuredLogger implements Logger {
   ): void {
     const color = LEVEL_COLORS[level] ?? "";
     const label = LEVEL_LABELS[level] ?? level.toUpperCase();
-    const dataStr = data ? ` ${DIM}${JSON.stringify(data)}${RESET}` : "";
-    const line = `${DIM}${timestamp}${RESET} ${color}${label}${RESET} ${CYAN}[${this.namespace}]${RESET} ${message}${dataStr}\n`;
+    const kvPairs = data
+      ? " " +
+        Object.entries(data)
+          .map(([k, v]) => `${DIM}${k}=${RESET}${formatValue(v)}`)
+          .join(" ")
+      : "";
+    const line = `${DIM}${timestamp}${RESET} ${color}${BOLD}${label}${RESET} ${DIM}${PID} ---${RESET} ${CYAN}[${this.namespace}]${RESET} ${message}${kvPairs}\n`;
     if (level === "warn" || level === "error") {
       process.stderr.write(line);
     } else {
