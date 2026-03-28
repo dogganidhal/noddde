@@ -9,6 +9,10 @@ A **saga** (also called a process manager) is a stateful, event-driven workflow 
 
 A saga is the structural inverse of an aggregate: an aggregate receives commands and produces events; a saga receives events and produces commands.
 
+<Callout type="info">
+  You can scaffold a saga with the CLI: `noddde new saga PaymentProcessing`. See [CLI Reference](/docs/getting-started/cli#noddde-new-saga-name) for details.
+</Callout>
+
 ```
   Aggregate                          Saga
   =========                          ====
