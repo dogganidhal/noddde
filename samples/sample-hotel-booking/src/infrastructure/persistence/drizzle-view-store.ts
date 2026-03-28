@@ -100,9 +100,7 @@ export class DrizzleRoomAvailabilityViewStore
     ];
 
     if (type) {
-      conditions.push(
-        sql`${hotelViews.data}->>'type' = ${type}`,
-      );
+      conditions.push(sql`${hotelViews.data}->>'type' = ${type}`);
     }
 
     const rows = await this.db
@@ -111,6 +109,8 @@ export class DrizzleRoomAvailabilityViewStore
       .where(and(...conditions))
       .execute();
 
-    return rows.map((row) => JSON.parse(row.data as string) as RoomAvailabilityView);
+    return rows.map(
+      (row) => JSON.parse(row.data as string) as RoomAvailabilityView,
+    );
   }
 }

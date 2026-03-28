@@ -27,13 +27,14 @@ A flash sale where limited stock sells first-come-first-served. Multiple buyers 
 
 ### FlashSaleItem Aggregate (Event-Sourced)
 
-| Command          | Payload                  | Produces           | Guard        |
-| ---------------- | ------------------------ | ------------------ | ------------ |
-| `CreateFlashSale`| `initialStock`           | `FlashSaleCreated` | —            |
-| `PurchaseItem`   | `buyerId, quantity`      | `ItemPurchased`    | stock > 0    |
-|                  |                          | `PurchaseRejected` | stock = 0    |
+| Command           | Payload             | Produces           | Guard     |
+| ----------------- | ------------------- | ------------------ | --------- |
+| `CreateFlashSale` | `initialStock`      | `FlashSaleCreated` | —         |
+| `PurchaseItem`    | `buyerId, quantity` | `ItemPurchased`    | stock > 0 |
+|                   |                     | `PurchaseRejected` | stock = 0 |
 
 **Key patterns:**
+
 - **Rejection events** (`PurchaseRejected`) — records out-of-stock attempts as domain events, not exceptions
 - **No-op apply** — `PurchaseRejected` leaves state unchanged
 
@@ -93,7 +94,13 @@ import {
 const dataSource = new DataSource({
   type: "postgres",
   url: connectionUri,
-  entities: [NodddeEventEntity, NodddeAggregateStateEntity, NodddeSagaStateEntity, NodddeSnapshotEntity, NodddeOutboxEntryEntity],
+  entities: [
+    NodddeEventEntity,
+    NodddeAggregateStateEntity,
+    NodddeSagaStateEntity,
+    NodddeSnapshotEntity,
+    NodddeOutboxEntryEntity,
+  ],
   synchronize: true,
 });
 await dataSource.initialize();
@@ -104,14 +111,14 @@ TypeORM's `synchronize: true` auto-creates all tables — no manual DDL needed.
 
 ## Framework Features Demonstrated
 
-| Feature | Where |
-| --- | --- |
-| `defineAggregate` (event-sourced) | FlashSaleItem |
-| Optimistic concurrency | `main-optimistic.ts` with `maxRetries: 5` |
-| Pessimistic concurrency | `main-pessimistic.ts` with `TypeORMAdvisoryLocker` |
-| Rejection events | PurchaseRejected (no-op apply) |
-| TypeORM adapter | `createTypeORMPersistence` + PostgreSQL |
-| CLI-conformant structure | event-model/, write-model/ |
+| Feature                           | Where                                              |
+| --------------------------------- | -------------------------------------------------- |
+| `defineAggregate` (event-sourced) | FlashSaleItem                                      |
+| Optimistic concurrency            | `main-optimistic.ts` with `maxRetries: 5`          |
+| Pessimistic concurrency           | `main-pessimistic.ts` with `TypeORMAdvisoryLocker` |
+| Rejection events                  | PurchaseRejected (no-op apply)                     |
+| TypeORM adapter                   | `createTypeORMPersistence` + PostgreSQL            |
+| CLI-conformant structure          | event-model/, write-model/                         |
 
 ## Tests
 

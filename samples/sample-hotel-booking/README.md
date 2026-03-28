@@ -261,13 +261,13 @@ The error handler plugin maps domain errors to HTTP status codes:
 
 ### Persistence Configuration
 
-| Aggregate | Strategy      | Backing Store                             |
-| --------- | ------------- | ----------------------------------------- |
-| Room      | Event-sourced | Drizzle + PostgreSQL                      |
-| Booking   | Event-sourced | Drizzle + PostgreSQL                      |
-| Inventory | State-stored  | Drizzle + PostgreSQL                      |
-| Sagas     | State-stored  | Drizzle + PostgreSQL                      |
-| Snapshots | Room only     | Drizzle + PostgreSQL, `everyNEvents(50)`  |
+| Aggregate | Strategy      | Backing Store                            |
+| --------- | ------------- | ---------------------------------------- |
+| Room      | Event-sourced | Drizzle + PostgreSQL                     |
+| Booking   | Event-sourced | Drizzle + PostgreSQL                     |
+| Inventory | State-stored  | Drizzle + PostgreSQL                     |
+| Sagas     | State-stored  | Drizzle + PostgreSQL                     |
+| Snapshots | Room only     | Drizzle + PostgreSQL, `everyNEvents(50)` |
 
 ### Service Implementations
 

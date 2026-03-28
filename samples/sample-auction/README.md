@@ -31,14 +31,15 @@ open ──CloseAuction──> closed
 
 ### Auction Aggregate (Event-Sourced)
 
-| Command        | Payload                             | Produces         | Guard                                              |
-| -------------- | ----------------------------------- | ---------------- | -------------------------------------------------- |
-| `CreateAuction`| `item, startingPrice, endsAt`       | `AuctionCreated` | —                                                  |
-| `PlaceBid`     | `bidderId, amount`                  | `BidPlaced`      | Auction open, not expired, amount > current highest |
-|                |                                     | `BidRejected`    | Any validation failure (recorded as event)         |
-| `CloseAuction` | —                                   | `AuctionClosed`  | —                                                  |
+| Command         | Payload                       | Produces         | Guard                                               |
+| --------------- | ----------------------------- | ---------------- | --------------------------------------------------- |
+| `CreateAuction` | `item, startingPrice, endsAt` | `AuctionCreated` | —                                                   |
+| `PlaceBid`      | `bidderId, amount`            | `BidPlaced`      | Auction open, not expired, amount > current highest |
+|                 |                               | `BidRejected`    | Any validation failure (recorded as event)          |
+| `CloseAuction`  | —                             | `AuctionClosed`  | —                                                   |
 
 **Key patterns:**
+
 - **Rejection events** (`BidRejected`) — the domain records failed attempts as events, not exceptions
 - **No-op apply** — `BidRejected` produces no state change (`(_, state) => state`)
 - **Infrastructure injection** — `Clock` injected via the third parameter for time-based validation
@@ -49,9 +50,9 @@ open ──CloseAuction──> closed
 The aggregate includes an upcaster chain demonstrating schema evolution:
 
 ```ts
-const bidPlacedUpcasters = defineEventUpcasterChain<[BidPlacedV1, BidPlacedV2]>([
-  (v1) => ({ ...v1, timestamp: new Date(0) }),
-]);
+const bidPlacedUpcasters = defineEventUpcasterChain<[BidPlacedV1, BidPlacedV2]>(
+  [(v1) => ({ ...v1, timestamp: new Date(0) })],
+);
 
 export const auctionUpcasters = defineUpcasters<AuctionEvent>({
   BidPlaced: bidPlacedUpcasters,
@@ -71,6 +72,7 @@ Builds a query-optimized view of auction state, updated as events arrive.
 **Query:** `GetAuctionSummary(auctionId)` — returns the current auction summary or null
 
 **View reducers** are extracted to standalone functions following the CLI pattern:
+
 - `onAuctionCreated` — initializes view
 - `onBidPlaced` — updates high bid, leader, increments count
 - `onAuctionClosed` — sets status to closed
@@ -91,16 +93,16 @@ Schema defined in `prisma/schema.prisma` with SQLite as the datasource. Tables a
 
 ## Framework Features Demonstrated
 
-| Feature | Where |
-| --- | --- |
-| `defineAggregate` | Auction aggregate with Decider pattern |
-| `defineProjection` + ViewStore | AuctionSummary with query handler |
-| Event upcasting (`defineEventUpcasterChain`) | BidPlaced v1 to v2 |
-| CQRS typed queries (`DefineQueries`) | GetAuctionSummary |
-| Rejection events | BidRejected (no-op apply) |
-| Infrastructure injection | Clock pattern |
-| Prisma adapter | `createPrismaPersistence` + SQLite |
-| CLI-conformant structure | event-model/, write-model/, read-model/ |
+| Feature                                      | Where                                   |
+| -------------------------------------------- | --------------------------------------- |
+| `defineAggregate`                            | Auction aggregate with Decider pattern  |
+| `defineProjection` + ViewStore               | AuctionSummary with query handler       |
+| Event upcasting (`defineEventUpcasterChain`) | BidPlaced v1 to v2                      |
+| CQRS typed queries (`DefineQueries`)         | GetAuctionSummary                       |
+| Rejection events                             | BidRejected (no-op apply)               |
+| Infrastructure injection                     | Clock pattern                           |
+| Prisma adapter                               | `createPrismaPersistence` + SQLite      |
+| CLI-conformant structure                     | event-model/, write-model/, read-model/ |
 
 ## Tests
 
