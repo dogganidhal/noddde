@@ -129,10 +129,10 @@ export function testSaga<T extends SagaTypes, TSagaId extends ID = string>(
 
         const noopCqrs = createNoopCQRSInfrastructure();
         const mergedInfra = {
+          logger: new NoopLogger(),
           ...(infrastructure ?? ({} as T["infrastructure"])),
           ...noopCqrs,
           ...cqrsOverride,
-          logger: new NoopLogger(),
         };
 
         const reaction = await handler(event, state, mergedInfra);

@@ -139,8 +139,8 @@ export function testAggregate<T extends AggregateTypes>(
             command!.name
           ];
           const infra = {
-            ...(infrastructure ?? ({} as T["infrastructure"])),
             logger: new NoopLogger(),
+            ...(infrastructure ?? ({} as T["infrastructure"])),
           };
           const rawResult = await handler(command, priorState, infra);
 

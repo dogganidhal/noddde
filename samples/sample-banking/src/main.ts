@@ -16,7 +16,6 @@ import { createPrismaPersistence } from "@noddde/prisma";
 import { BankAccount } from "./aggregate";
 import {
   BankingInfrastructure,
-  ConsoleLogger,
   InMemoryBankAccountViewRepository,
   InMemoryTransactionViewRepository,
   SystemClock,
@@ -47,7 +46,7 @@ const main = async () => {
   const domain = await wireDomain(bankingDomain, {
     infrastructure: () => ({
       clock: new SystemClock(),
-      logger: new ConsoleLogger(),
+
       bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
       transactionViewRepository: new InMemoryTransactionViewRepository(),
     }),

@@ -74,7 +74,7 @@ interface Logger {
 ## Integration Points
 
 - `Logger` is used by `DomainWiring.logger` in `@noddde/engine` to configure framework logging.
-- `LogLevel` is used by `ConsoleLogger` constructor in `@noddde/engine` to set the severity threshold.
+- `LogLevel` is used by `NodddeLogger` constructor in `@noddde/engine` to set the severity threshold.
 - `Logger.child` is called by the Domain during init to create scoped loggers for sub-components (command executor, saga executor, outbox relay).
 
 ## Test Scenarios

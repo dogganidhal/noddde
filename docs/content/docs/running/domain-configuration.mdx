@@ -68,7 +68,6 @@ When you're ready for production, provide explicit wiring:
 const domain = await wireDomain(bankingDomain, {
   // User-provided services (what handlers receive as `infrastructure`)
   infrastructure: () => ({
-    logger: new ConsoleLogger(),
     bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
   }),
 
@@ -123,13 +122,13 @@ These warnings only appear when the framework itself supplies the default -- not
 | `idempotency`      | Factory for idempotency store (command dedup by commandId).                                  |
 | `outbox`           | Transactional outbox configuration.                                                          |
 | `metadataProvider` | Function called on every command dispatch for event metadata context.                        |
-| `logger`           | Framework logger instance. Defaults to `StructuredLogger` at `'warn'` level.                 |
+| `logger`           | Framework logger instance. Defaults to `NodddeLogger` at `'warn'` level.                 |
 
 All fields are optional. Both `wireDomain(definition)` and `wireDomain(definition, {})` use in-memory defaults for everything.
 
 ### Logging
 
-The framework uses a `Logger` interface for all internal logging. By default, a `StructuredLogger` at `'warn'` level is used -- it auto-detects the environment (colored output in dev, NDJSON in production). The logger is also automatically available as `infrastructure.logger` in all handlers, and passed to the `infrastructure` factory so your custom services can use it too.
+The framework uses a `Logger` interface for all internal logging. By default, a `NodddeLogger` at `'warn'` level is used -- it auto-detects the environment (colored output in dev, NDJSON in production). The logger is also automatically available as `infrastructure.logger` in all handlers, and passed to the `infrastructure` factory so your custom services can use it too.
 
 See [Logging](/docs/running/logging) for full details on output formats, log levels, using the logger in handlers and custom infrastructure, and bringing your own logger.
 
@@ -484,7 +483,6 @@ const bankingDomain = defineDomain<BankingInfrastructure>({
 // Step 2: Wire with infrastructure (async)
 const domain = await wireDomain(bankingDomain, {
   infrastructure: () => ({
-    logger: new ConsoleLogger(),
     bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
     transactionViewRepository: new InMemoryTransactionViewRepository(),
   }),

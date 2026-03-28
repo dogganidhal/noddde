@@ -90,7 +90,7 @@ import {
 import { MetadataEnricher } from "./executors/metadata-enricher";
 import { CommandLifecycleExecutor } from "./executors/command-lifecycle-executor";
 import { SagaExecutor } from "./executors/saga-executor";
-import { StructuredLogger } from "./logger";
+import { NodddeLogger } from "./logger";
 import {
   GlobalAggregatePersistenceResolver,
   PerAggregatePersistenceResolver,
@@ -277,7 +277,7 @@ export type DomainWiring<
   };
   /** Metadata provider called on every command dispatch. */
   metadataProvider?: MetadataProvider;
-  /** Framework logger. Defaults to StructuredLogger at 'warn' level. */
+  /** Framework logger. Defaults to NodddeLogger at 'warn' level. */
   logger?: Logger;
 };
 
@@ -376,7 +376,7 @@ export class Domain<
     const { definition, wiring } = this;
 
     // Step 0: Resolve logger (before everything else, so all init steps can log)
-    const logger = wiring.logger ?? new StructuredLogger();
+    const logger = wiring.logger ?? new NodddeLogger();
     const domainLog = logger.child("domain");
 
     // Step 1: Resolve custom infrastructure

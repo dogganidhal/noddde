@@ -96,7 +96,7 @@ async function main() {
       //   eventBus: new EventEmitterEventBus(),
       //   queryBus: new InMemoryQueryBus(),
       // }),
-      // logger: new StructuredLogger("debug"),
+      // logger: new NodddeLogger("debug"),
       // unitOfWork: () => prismaInfra.unitOfWorkFactory,
       unitOfWork: () => createInMemoryUnitOfWork,
     });

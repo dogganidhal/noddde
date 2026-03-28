@@ -91,7 +91,7 @@ function detectPretty(): boolean {
  *
  * This is the default logger when `DomainWiring.logger` is omitted.
  */
-export class StructuredLogger implements Logger {
+export class NodddeLogger implements Logger {
   private readonly severityThreshold: number;
   private readonly pretty: boolean;
 
@@ -129,7 +129,7 @@ export class StructuredLogger implements Logger {
   }
 
   child(namespace: string): Logger {
-    return new StructuredLogger(
+    return new NodddeLogger(
       this.level,
       `${this.namespace}:${namespace}`,
       this.pretty,
@@ -193,67 +193,6 @@ export class StructuredLogger implements Logger {
       process.stderr.write(line);
     } else {
       process.stdout.write(line);
-    }
-  }
-}
-
-/**
- * Console-based Logger implementation with level filtering and
- * namespace prefixing. All output goes through the global `console`
- * object using the matching method (console.debug, console.info,
- * console.warn, console.error).
- *
- * @deprecated Use {@link StructuredLogger} instead — it auto-detects
- * the environment and produces colored output in development.
- */
-export class ConsoleLogger implements Logger {
-  private readonly severityThreshold: number;
-
-  constructor(
-    private readonly level: LogLevel = "warn",
-    private readonly namespace: string = "noddde",
-  ) {
-    this.severityThreshold = severity(this.level);
-  }
-
-  debug(message: string, data?: Record<string, unknown>): void {
-    if (this.severityThreshold <= DEBUG) {
-      this.log("debug", message, data);
-    }
-  }
-
-  info(message: string, data?: Record<string, unknown>): void {
-    if (this.severityThreshold <= INFO) {
-      this.log("info", message, data);
-    }
-  }
-
-  warn(message: string, data?: Record<string, unknown>): void {
-    if (this.severityThreshold <= WARN) {
-      this.log("warn", message, data);
-    }
-  }
-
-  error(message: string, data?: Record<string, unknown>): void {
-    if (this.severityThreshold <= ERROR) {
-      this.log("error", message, data);
-    }
-  }
-
-  child(namespace: string): Logger {
-    return new ConsoleLogger(this.level, `${this.namespace}:${namespace}`);
-  }
-
-  private log(
-    level: "debug" | "info" | "warn" | "error",
-    message: string,
-    data?: Record<string, unknown>,
-  ): void {
-    const prefix = `[${this.namespace}]`;
-    if (data !== undefined && Object.keys(data).length > 0) {
-      console[level](prefix, message, data);
-    } else {
-      console[level](prefix, message);
     }
   }
 }

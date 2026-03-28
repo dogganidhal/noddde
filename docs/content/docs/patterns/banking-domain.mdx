@@ -272,7 +272,7 @@ const bankingDomain = defineDomain<BankingInfrastructure>({
 
 const domain = await wireDomain(bankingDomain, {
   infrastructure: () => ({
-    logger: new ConsoleLogger(),
+    clock: new SystemClock(),
     bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
     transactionViewRepository: new InMemoryTransactionViewRepository(),
   }),

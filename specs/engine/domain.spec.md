@@ -188,7 +188,7 @@ type DomainWiring<
   };
   /** Metadata provider called on every command dispatch. */
   metadataProvider?: MetadataProvider;
-  /** Framework logger. Defaults to StructuredLogger at 'warn' level. */
+  /** Framework logger. Defaults to NodddeLogger at 'warn' level. */
   logger?: Logger;
 };
 
