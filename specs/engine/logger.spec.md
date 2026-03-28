@@ -132,26 +132,47 @@ import { NodddeLogger } from "@noddde/engine";
 
 describe("NodddeLogger level filtering (JSON mode)", () => {
   it("should suppress debug and info at warn level", () => {
-    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const stdoutSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    const stderrSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
     const logger = new NodddeLogger("warn", "noddde", false);
-    logger.debug("d"); logger.info("i"); logger.warn("w"); logger.error("e");
+    logger.debug("d");
+    logger.info("i");
+    logger.warn("w");
+    logger.error("e");
     expect(stdoutSpy).not.toHaveBeenCalled();
     expect(stderrSpy).toHaveBeenCalledTimes(2);
   });
   it("should emit all levels at debug level", () => {
-    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const stdoutSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    const stderrSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
     const logger = new NodddeLogger("debug", "noddde", false);
-    logger.debug("d"); logger.info("i"); logger.warn("w"); logger.error("e");
+    logger.debug("d");
+    logger.info("i");
+    logger.warn("w");
+    logger.error("e");
     expect(stdoutSpy).toHaveBeenCalledTimes(2);
     expect(stderrSpy).toHaveBeenCalledTimes(2);
   });
   it("should emit nothing at silent level", () => {
-    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const stdoutSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    const stderrSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
     const logger = new NodddeLogger("silent", "noddde", false);
-    logger.debug("d"); logger.info("i"); logger.warn("w"); logger.error("e");
+    logger.debug("d");
+    logger.info("i");
+    logger.warn("w");
+    logger.error("e");
     expect(stdoutSpy).not.toHaveBeenCalled();
     expect(stderrSpy).not.toHaveBeenCalled();
   });
@@ -166,24 +187,35 @@ import { NodddeLogger } from "@noddde/engine";
 
 describe("NodddeLogger JSON output", () => {
   it("should write NDJSON with required fields", () => {
-    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stdoutSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
     const logger = new NodddeLogger("info", "noddde", false);
     logger.info("test message");
     const parsed = JSON.parse(stdoutSpy.mock.calls[0]![0] as string);
-    expect(parsed).toMatchObject({ level: "info", namespace: "noddde", message: "test message" });
+    expect(parsed).toMatchObject({
+      level: "info",
+      namespace: "noddde",
+      message: "test message",
+    });
     expect(parsed.timestamp).toBeDefined();
   });
   it("should include structured data as top-level fields", () => {
-    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stdoutSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
     const logger = new NodddeLogger("info", "noddde", false);
     logger.info("loaded", { aggregateId: "123", version: 5 });
     const parsed = JSON.parse(stdoutSpy.mock.calls[0]![0] as string);
     expect(parsed).toMatchObject({ aggregateId: "123", version: 5 });
   });
   it("should write warn and error to stderr", () => {
-    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const stderrSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
     const logger = new NodddeLogger("warn", "noddde", false);
-    logger.warn("w"); logger.error("e");
+    logger.warn("w");
+    logger.error("e");
     expect(stderrSpy).toHaveBeenCalledTimes(2);
   });
 });
@@ -197,7 +229,9 @@ import { NodddeLogger } from "@noddde/engine";
 
 describe("NodddeLogger pretty output", () => {
   it("should include PID, separator, level, namespace", () => {
-    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stdoutSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
     const logger = new NodddeLogger("info", "noddde", true);
     logger.info("test message");
     const line = stdoutSpy.mock.calls[0]![0] as string;
@@ -208,7 +242,9 @@ describe("NodddeLogger pretty output", () => {
     expect(() => JSON.parse(line)).toThrow();
   });
   it("should format data as logfmt key=value", () => {
-    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stdoutSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
     const logger = new NodddeLogger("info", "noddde", true);
     logger.info("loaded", { aggregateId: "123", version: 5 });
     const line = stdoutSpy.mock.calls[0]![0] as string;
@@ -227,20 +263,26 @@ import { NodddeLogger } from "@noddde/engine";
 
 describe("NodddeLogger.child", () => {
   it("should compose namespace (JSON)", () => {
-    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stdoutSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
     const child = new NodddeLogger("info", "noddde", false).child("command");
     child.info("dispatching");
     const parsed = JSON.parse(stdoutSpy.mock.calls[0]![0] as string);
     expect(parsed.namespace).toBe("noddde:command");
   });
   it("should compose namespace (pretty)", () => {
-    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stdoutSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
     const child = new NodddeLogger("info", "noddde", true).child("command");
     child.info("dispatching");
-    expect((stdoutSpy.mock.calls[0]![0] as string)).toContain("[noddde:command]");
+    expect(stdoutSpy.mock.calls[0]![0] as string).toContain("[noddde:command]");
   });
   it("should inherit pretty mode", () => {
-    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stdoutSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
     const child = new NodddeLogger("info", "noddde", true).child("saga");
     child.info("msg");
     expect(() => JSON.parse(stdoutSpy.mock.calls[0]![0] as string)).toThrow();

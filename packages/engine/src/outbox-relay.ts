@@ -1,5 +1,10 @@
 /* eslint-disable no-unused-vars */
-import type { OutboxStore, EventBus, BackgroundProcess, Logger } from "@noddde/core";
+import type {
+  OutboxStore,
+  EventBus,
+  BackgroundProcess,
+  Logger,
+} from "@noddde/core";
 
 /**
  * Configuration options for the OutboxRelay.
