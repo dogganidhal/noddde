@@ -297,10 +297,36 @@ Same domain definition, different wiring. The domain logic does not change -- on
 After configuration, buses are available on `domain.infrastructure`:
 
 ```ts
-const domain = await wireDomain(bankingDomain, { /* ... */ });
+const domain = await wireDomain(bankingDomain, {
+  /* ... */
+});
 
 const { commandBus, eventBus, queryBus } = domain.infrastructure;
 ```
+
+## Resource Cleanup with `Closeable`
+
+If your custom infrastructure holds resources that need cleanup on shutdown (database pools, file handles, network connections), implement the `Closeable` interface:
+
+```ts
+import type { Closeable } from "@noddde/core";
+
+class PostgresBankAccountRepository
+  implements BankAccountViewRepository, Closeable
+{
+  constructor(private readonly pool: Pool) {}
+
+  async close(): Promise<void> {
+    await this.pool.end();
+  }
+
+  // ... repository methods
+}
+```
+
+When `domain.shutdown()` is called, the domain automatically discovers all infrastructure components that implement `Closeable` and calls `close()` on each one. No additional registration is needed — just implement the interface.
+
+See [Graceful Shutdown](/docs/running/domain-configuration#graceful-shutdown) for the full shutdown lifecycle.
 
 ## Next Steps
 

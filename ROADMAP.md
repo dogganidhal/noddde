@@ -26,8 +26,8 @@ Where noddde is headed: what is shipped, what is required for v1.0, and our visi
 
 _These items must be completed to guarantee state consistency and developer ergonomics before we stamp v1.0._
 
-- [ ] **Graceful Shutdown & Connection Draining**
-  - Implement SIGTERM handlers to drain in-flight commands, wait for active Sagas/Outbox relays to finish, and safely close database connections.
+- [x] **Graceful Shutdown & Connection Draining**
+  - `Domain.shutdown()` drains in-flight commands, waits for active Sagas/Outbox relays to finish, and auto-closes infrastructure implementing `Closeable`.
 - [ ] **Projection & Handler Error Isolation**
   - Granular error boundaries so a single failing read-model reducer does not crash the event bus or block other successful projections.
 - [x] **The CLI & "Golden Path" Scaffolding**

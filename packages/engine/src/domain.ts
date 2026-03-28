@@ -27,10 +27,36 @@ import type {
   OutboxStore,
   OutboxEntry,
 } from "@noddde/core";
-import type { AggregateLocker } from "@noddde/core";
+import type { AggregateLocker, Closeable } from "@noddde/core";
+import { isCloseable } from "@noddde/core";
 import { OutboxRelay } from "./outbox-relay";
 import type { OutboxRelayOptions } from "./outbox-relay";
 import { uuidv7 } from "./uuid";
+
+/**
+ * Error thrown when a command or query is dispatched after
+ * {@link Domain.shutdown} has been called.
+ */
+export class DomainShutdownError extends Error {
+  override readonly name = "DomainShutdownError" as const;
+  constructor() {
+    super("Domain is shutting down and no longer accepts commands or queries");
+  }
+}
+
+/**
+ * Configuration options for {@link Domain.shutdown}.
+ */
+export interface ShutdownOptions {
+  /**
+   * Maximum time in milliseconds to wait for in-flight operations
+   * and background processes to complete. After this timeout,
+   * shutdown proceeds to resource cleanup regardless.
+   *
+   * @default 30_000 (30 seconds)
+   */
+  timeoutMs?: number;
+}
 
 /**
  * Context for metadata propagation. Values from `withMetadataContext`
@@ -305,6 +331,12 @@ export class Domain<
   private _sagaExecutor?: SagaExecutor;
   private _outboxStore?: OutboxStore;
   private _outboxRelay?: OutboxRelay;
+  private _shuttingDown = false;
+  private _shutdownPromise: Promise<void> | null = null;
+  private _activeOperations = 0;
+  private _drainResolve: (() => void) | null = null;
+  /** All resolved infrastructure components for auto-close discovery. */
+  private _allComponents: unknown[] = [];
   /** The fully resolved infrastructure (custom + CQRS buses). */
   public get infrastructure(): TInfrastructure & CQRSInfrastructure {
     return this._infrastructure;
@@ -830,6 +862,18 @@ export class Domain<
         });
       }
     }
+
+    // Step 13: Collect all infrastructure components for auto-close discovery
+    // Custom infrastructure values come first (discovery order)
+    for (const value of Object.values(customInfra as Record<string, unknown>)) {
+      this._allComponents.push(value);
+    }
+    // CQRS buses
+    this._allComponents.push(commandBus, eventBus, queryBus);
+    // Persistence, stores
+    if (sagaPersistence) this._allComponents.push(sagaPersistence);
+    if (this._outboxStore) this._allComponents.push(this._outboxStore);
+    if (idempotencyStore) this._allComponents.push(idempotencyStore);
   }
 
   /**
@@ -844,6 +888,88 @@ export class Domain<
     // The EventBus interface only exposes dispatch (publish),
     // so we use a type assertion to reach the on() method.
     (eventBus as EventEmitterEventBus).on(eventName, handler);
+  }
+
+  private _acquireOperation(): void {
+    if (this._shuttingDown) {
+      throw new DomainShutdownError();
+    }
+    this._activeOperations++;
+  }
+
+  private _releaseOperation(): void {
+    this._activeOperations--;
+    if (this._activeOperations === 0 && this._drainResolve) {
+      this._drainResolve();
+    }
+  }
+
+  /**
+   * Gracefully shuts down the domain:
+   * 1. Stops accepting new commands and queries ({@link DomainShutdownError}).
+   * 2. Waits for in-flight command executions and saga reactions to complete.
+   * 3. Drains the outbox relay (if configured).
+   * 4. Removes all event bus listeners.
+   * 5. Auto-closes infrastructure implementing {@link Closeable}.
+   *
+   * Idempotent: calling `shutdown()` multiple times returns the same promise.
+   *
+   * @param options - Optional shutdown configuration.
+   */
+  public shutdown(options?: ShutdownOptions): Promise<void> {
+    if (this._shutdownPromise) {
+      return this._shutdownPromise;
+    }
+
+    this._shuttingDown = true;
+    const timeoutMs = options?.timeoutMs ?? 30_000;
+
+    this._shutdownPromise = this._performShutdown(timeoutMs);
+    return this._shutdownPromise;
+  }
+
+  private async _performShutdown(timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+
+    // Phase 1: Wait for in-flight operations to drain
+    if (this._activeOperations > 0) {
+      const drainPromise = new Promise<void>((resolve) => {
+        this._drainResolve = resolve;
+      });
+
+      const remaining = Math.max(0, deadline - Date.now());
+      const timeoutRace = new Promise<void>((resolve) =>
+        setTimeout(resolve, remaining),
+      );
+      await Promise.race([drainPromise, timeoutRace]);
+    }
+
+    // Phase 2: Drain outbox relay
+    if (this._outboxRelay) {
+      const remaining = Math.max(0, deadline - Date.now());
+      const drainRelay = this._outboxRelay.drain();
+      const timeoutRace = new Promise<void>((resolve) =>
+        setTimeout(resolve, remaining),
+      );
+      await Promise.race([drainRelay, timeoutRace]);
+    }
+
+    // Phase 3: Remove event bus listeners
+    const eventBus = this._infrastructure.eventBus;
+    if ("removeAllListeners" in eventBus) {
+      (eventBus as EventEmitterEventBus).removeAllListeners();
+    }
+
+    // Phase 4: Auto-close Closeable infrastructure (reverse order)
+    const closeables = this._allComponents.filter(isCloseable).reverse();
+
+    for (const closeable of closeables) {
+      try {
+        await closeable.close();
+      } catch {
+        // Best-effort: close errors are swallowed during shutdown
+      }
+    }
   }
 
   /**
@@ -869,44 +995,49 @@ export class Domain<
    * ```
    */
   public async withUnitOfWork<T>(fn: () => Promise<T>): Promise<T> {
-    if (this._uowStorage.getStore()) {
-      throw new Error("Nested units of work are not supported");
-    }
-
-    const uow = this._unitOfWorkFactory();
-
-    return this._uowStorage.run(uow, async () => {
-      try {
-        const result = await fn();
-        const events = await uow.commit();
-        for (const event of events) {
-          await this._infrastructure.eventBus.dispatch(event);
-        }
-
-        // Best-effort post-dispatch outbox marking
-        if (this._outboxStore && events.length > 0) {
-          try {
-            const eventIds = events
-              .map((e) => e.metadata?.eventId)
-              .filter((id): id is string => id != null);
-            if (eventIds.length > 0) {
-              await this._outboxStore.markPublishedByEventIds(eventIds);
-            }
-          } catch {
-            // Best-effort: relay will catch unpublished entries
-          }
-        }
-
-        return result;
-      } catch (error) {
-        try {
-          await uow.rollback();
-        } catch {
-          // UoW may already be completed if commit failed
-        }
-        throw error;
+    this._acquireOperation();
+    try {
+      if (this._uowStorage.getStore()) {
+        throw new Error("Nested units of work are not supported");
       }
-    });
+
+      const uow = this._unitOfWorkFactory();
+
+      return await this._uowStorage.run(uow, async () => {
+        try {
+          const result = await fn();
+          const events = await uow.commit();
+          for (const event of events) {
+            await this._infrastructure.eventBus.dispatch(event);
+          }
+
+          // Best-effort post-dispatch outbox marking
+          if (this._outboxStore && events.length > 0) {
+            try {
+              const eventIds = events
+                .map((e) => e.metadata?.eventId)
+                .filter((id): id is string => id != null);
+              if (eventIds.length > 0) {
+                await this._outboxStore.markPublishedByEventIds(eventIds);
+              }
+            } catch {
+              // Best-effort: relay will catch unpublished entries
+            }
+          }
+
+          return result;
+        } catch (error) {
+          try {
+            await uow.rollback();
+          } catch {
+            // UoW may already be completed if commit failed
+          }
+          throw error;
+        }
+      });
+    } finally {
+      this._releaseOperation();
+    }
   }
 
   /**
@@ -975,19 +1106,28 @@ export class Domain<
   public async dispatchCommand<TCommand extends AggregateCommand<any>>(
     command: TCommand,
   ): Promise<TCommand["targetAggregateId"]> {
-    // Route: find the aggregate that handles this command
-    for (const [aggregateName, aggregate] of Object.entries(
-      this.definition.writeModel.aggregates,
-    )) {
-      if (command.name in aggregate.commands) {
-        await this._commandExecutor.execute(aggregateName, aggregate, command);
-        return command.targetAggregateId;
+    this._acquireOperation();
+    try {
+      // Route: find the aggregate that handles this command
+      for (const [aggregateName, aggregate] of Object.entries(
+        this.definition.writeModel.aggregates,
+      )) {
+        if (command.name in aggregate.commands) {
+          await this._commandExecutor.execute(
+            aggregateName,
+            aggregate,
+            command,
+          );
+          return command.targetAggregateId;
+        }
       }
-    }
 
-    // If no aggregate handles it, try the command bus (standalone handlers)
-    await this._infrastructure.commandBus.dispatch(command);
-    return command.targetAggregateId;
+      // If no aggregate handles it, try the command bus (standalone handlers)
+      await this._infrastructure.commandBus.dispatch(command);
+      return command.targetAggregateId;
+    } finally {
+      this._releaseOperation();
+    }
   }
 
   /**
@@ -1001,7 +1141,12 @@ export class Domain<
   public async dispatchQuery<TQuery extends Query<any>>(
     query: TQuery,
   ): Promise<QueryResult<TQuery>> {
-    return this._infrastructure.queryBus.dispatch(query);
+    this._acquireOperation();
+    try {
+      return await this._infrastructure.queryBus.dispatch(query);
+    } finally {
+      this._releaseOperation();
+    }
   }
 }
 

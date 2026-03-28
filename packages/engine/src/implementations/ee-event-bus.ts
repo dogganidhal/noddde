@@ -56,4 +56,13 @@ export class EventEmitterEventBus implements EventBus {
       }
     }
   }
+
+  /**
+   * Removes all registered handlers for all event names.
+   * Called during domain shutdown to prevent event delivery
+   * to stale handlers after infrastructure is closed.
+   */
+  public removeAllListeners(): void {
+    this.handlers.clear();
+  }
 }
