@@ -156,7 +156,7 @@ export async function createTestEnvironment() {
         concurrency: { maxRetries: 3 },
       },
       Inventory: {
-        persistence: () => drizzleInfra.stateStoredPersistence,
+        persistence: () => drizzleInfra.stateStoredPersistence!,
       },
     },
     projections: {

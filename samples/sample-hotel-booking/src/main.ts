@@ -160,7 +160,7 @@ async function main() {
         concurrency: { maxRetries: 3 },
       },
       Inventory: {
-        persistence: () => drizzleInfra.stateStoredPersistence,
+        persistence: () => drizzleInfra.stateStoredPersistence!,
       },
     },
 
