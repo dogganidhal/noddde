@@ -19,12 +19,23 @@ import type { StateTableColumnMap } from "./builder";
 export class DrizzleDedicatedStateStoredPersistence
   implements StateStoredAggregatePersistence
 {
+  private readonly idKey: string;
+  private readonly stateKey: string;
+  private readonly versionKey: string;
+
   constructor(
     private readonly db: any,
     private readonly txStore: DrizzleTransactionStore,
     private readonly table: any,
     private readonly columns: StateTableColumnMap,
-  ) {}
+  ) {
+    // Resolve the JS property key for each column by matching the column
+    // reference against the table definition entries. Drizzle's values()
+    // and result rows use JS property keys, not DB column names.
+    this.idKey = findKeyForColumn(table, columns.aggregateId);
+    this.stateKey = findKeyForColumn(table, columns.state);
+    this.versionKey = findKeyForColumn(table, columns.version);
+  }
 
   private getExecutor() {
     return this.txStore.current ?? this.db;
@@ -43,9 +54,9 @@ export class DrizzleDedicatedStateStoredPersistence
       // Insert path: new aggregate
       try {
         await executor.insert(this.table).values({
-          [this.columns.aggregateId.name]: aggregateId,
-          [this.columns.state.name]: serialized,
-          [this.columns.version.name]: 1,
+          [this.idKey]: aggregateId,
+          [this.stateKey]: serialized,
+          [this.versionKey]: 1,
         });
       } catch (error: any) {
         const message = error?.message ?? "";
@@ -69,8 +80,8 @@ export class DrizzleDedicatedStateStoredPersistence
       const result = await executor
         .update(this.table)
         .set({
-          [this.columns.state.name]: serialized,
-          [this.columns.version.name]: expectedVersion + 1,
+          [this.stateKey]: serialized,
+          [this.versionKey]: expectedVersion + 1,
         })
         .where(
           and(
@@ -106,8 +117,8 @@ export class DrizzleDedicatedStateStoredPersistence
     if (rows.length === 0) return null;
     const row = rows[0]!;
 
-    const stateValue = row[this.columns.state.name];
-    const versionValue = row[this.columns.version.name];
+    const stateValue = row[this.stateKey];
+    const versionValue = row[this.versionKey];
 
     return {
       state:
@@ -115,4 +126,15 @@ export class DrizzleDedicatedStateStoredPersistence
       version: versionValue,
     };
   }
+}
+
+/**
+ * Finds the JS property key in a Drizzle table definition for a given column reference.
+ */
+function findKeyForColumn(table: any, column: any): string {
+  for (const [key, value] of Object.entries(table)) {
+    if (value === column) return key;
+  }
+  // Fallback to column.name (DB column name) — shouldn't happen if column came from the table
+  return column.name;
 }

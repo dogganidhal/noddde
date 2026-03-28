@@ -280,7 +280,7 @@ describe("defineAggregate identity", () => {
         }),
       },
       apply: {
-        X: (payload: any, state: any) => ({ v: payload.v }),
+        X: (payload: any, _state: any) => ({ v: payload.v }),
       },
     };
     const result = defineAggregate<T>(config as any);

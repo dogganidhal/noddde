@@ -1437,7 +1437,7 @@ describe("Per-aggregate persistence", () => {
 });
 
 describe("Per-aggregate persistence via wireDomain", () => {
-  it("should fill in-memory defaults for aggregates without explicit persistence", async () => {
+  it("should throw when per-aggregate persistence is missing entries", async () => {
     const esPersistence = new InMemoryEventSourcedAggregatePersistence();
 
     const definition = defineDomain<Infrastructure>({
@@ -1445,38 +1445,24 @@ describe("Per-aggregate persistence via wireDomain", () => {
       readModel: { projections: {} },
     });
 
-    // Only provide persistence for Counter — BankAccount should get in-memory default
-    const domain = await wireDomain(definition, {
-      aggregates: {
-        Counter: {
-          persistence: () => esPersistence,
+    // Only provide persistence for Counter — BankAccount is missing
+    await expect(
+      wireDomain(definition, {
+        aggregates: {
+          Counter: {
+            persistence: () => esPersistence,
+          },
+          BankAccount: {},
         },
-        BankAccount: {},
-      },
-      buses: () => ({
-        commandBus: new InMemoryCommandBus(),
-        eventBus: new EventEmitterEventBus(),
-        queryBus: new InMemoryQueryBus(),
+        buses: () => ({
+          commandBus: new InMemoryCommandBus(),
+          eventBus: new EventEmitterEventBus(),
+          queryBus: new InMemoryQueryBus(),
+        }),
       }),
-    });
-
-    // Counter uses the provided persistence
-    await domain.dispatchCommand({
-      name: "Increment",
-      targetAggregateId: "c-1",
-      payload: { by: 5 },
-    });
-    const counterEvents = await esPersistence.load("Counter", "c-1");
-    expect(counterEvents).toHaveLength(1);
-
-    // BankAccount works with in-memory default
-    await domain.dispatchCommand({
-      name: "Deposit",
-      targetAggregateId: "acc-1",
-      payload: { amount: 100 },
-    });
-
-    expect(domain).toBeInstanceOf(Domain);
+    ).rejects.toThrow(
+      "Per-aggregate persistence is missing entries for: BankAccount",
+    );
   });
 });
 
