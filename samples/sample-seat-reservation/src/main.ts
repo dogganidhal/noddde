@@ -5,22 +5,25 @@
  * concurrent seat reservations. Uses Testcontainers for an
  * ephemeral MySQL instance.
  */
+import { MySqlContainer } from "@testcontainers/mysql";
+import { execSync } from "child_process";
 import {
-  createInMemoryUnitOfWork,
   defineDomain,
-  InMemoryEventSourcedAggregatePersistence,
   wireDomain,
+  EventEmitterEventBus,
+  InMemoryCommandBus,
+  InMemoryQueryBus,
 } from "@noddde/engine";
 import type { VenueInfrastructure } from "./infrastructure";
 import { SystemClock } from "./infrastructure";
 import { Venue } from "./aggregate";
+import path from "path";
 
 async function main() {
   console.log(
     "Seat Reservation Sample — Pessimistic Concurrency with Prisma + MySQL\n",
   );
-  try {
-    /*
+
   // Step 1: Start MySQL container
   console.log("Starting MySQL container...");
   const container = await new MySqlContainer("mysql:8")
@@ -37,22 +40,13 @@ async function main() {
     // because the monorepo root generates it for SQLite, not MySQL.
     console.log("Running Prisma generate + schema push...");
     const sampleRoot = path.resolve(__dirname, "..");
-    execSync(`npx prisma generate --schema=prisma/schema.prisma`, {
-      cwd: sampleRoot,
-      stdio: "pipe",
-      env: {
-        DATABASE_URL: connectionUri,
-      },
-    });
     execSync(
-      `npx prisma db push --skip-generate --schema=prisma/schema.prisma`,
-      {
-        cwd: sampleRoot,
-        stdio: "pipe",
-        env: {
-          DATABASE_URL: connectionUri,
-        },
-      },
+      `DATABASE_URL="${connectionUri}" npx prisma generate --schema=prisma/schema.prisma`,
+      { cwd: sampleRoot, stdio: "pipe" },
+    );
+    execSync(
+      `DATABASE_URL="${connectionUri}" npx prisma db push --skip-generate --schema=prisma/schema.prisma`,
+      { cwd: sampleRoot, stdio: "pipe" },
     );
     console.log("  Database schema created\n");
 
@@ -68,8 +62,6 @@ async function main() {
     });
     const prismaInfra = createPrismaPersistence(prisma);
     const locker = new PrismaAdvisoryLocker(prisma, "mysql");
-   */
-    const aggregatePersistence = new InMemoryEventSourcedAggregatePersistence();
 
     // Step 4: Define domain structure (pure, sync)
     const venueDomain = defineDomain<VenueInfrastructure>({
@@ -83,22 +75,19 @@ async function main() {
         clock: new SystemClock(),
       }),
       aggregates: {
-        // persistence: () => new InMemoryEventSourcedAggregatePersistence(),
-        persistence: () => aggregatePersistence,
-        // concurrency: {
-        //   strategy: "pessimistic",
-        //   locker,
-        //   lockTimeoutMs: 5000,
-        // },
+        persistence: () => prismaInfra.eventSourcedPersistence,
+        concurrency: {
+          strategy: "pessimistic",
+          locker,
+          lockTimeoutMs: 5000,
+        },
       },
-      // buses: () => ({
-      //   commandBus: new InMemoryCommandBus(),
-      //   eventBus: new EventEmitterEventBus(),
-      //   queryBus: new InMemoryQueryBus(),
-      // }),
-      // logger: new NodddeLogger("debug"),
-      // unitOfWork: () => prismaInfra.unitOfWorkFactory,
-      unitOfWork: () => createInMemoryUnitOfWork,
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+      unitOfWork: () => prismaInfra.unitOfWorkFactory,
     });
     console.log(
       "Domain configured: pessimistic concurrency with MySQL GET_LOCK (timeout: 5s)\n",
@@ -143,7 +132,7 @@ async function main() {
     console.log(`Results: ${fulfilled} commands completed, ${failed} failed\n`);
 
     // Step 8: Verify final state
-    const finalEvents = await aggregatePersistence.load(
+    const finalEvents = await prismaInfra.eventSourcedPersistence.load(
       "Venue",
       "concert-hall",
     );
@@ -191,11 +180,11 @@ async function main() {
       console.log("  Seat A1 released — now available for re-reservation");
     }
 
-    // await prisma.$disconnect();
+    await prisma.$disconnect();
   } finally {
     // Step 10: Cleanup
     console.log("\nStopping MySQL container...");
-    // await container.stop();
+    await container.stop();
     console.log("  Done!");
   }
 }
