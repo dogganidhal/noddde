@@ -1,0 +1,43 @@
+// Prisma schema for Flash Sale sample -- MySQL backend
+// Used by main-pessimistic.ts for pessimistic concurrency demonstration.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+/// Event store table for event-sourced aggregates.
+model noddde_events {
+  id              Int    @id @default(autoincrement())
+  aggregate_name  String @db.VarChar(255)
+  aggregate_id    String @db.VarChar(255)
+  sequence_number Int
+  event_name      String @db.VarChar(255)
+  payload         Json
+
+  @@unique([aggregate_name, aggregate_id, sequence_number])
+  @@index([aggregate_name, aggregate_id])
+}
+
+/// Snapshot table for state-stored aggregates and periodic snapshots.
+model noddde_aggregate_states {
+  aggregate_name String @db.VarChar(255)
+  aggregate_id   String @db.VarChar(255)
+  state          Json
+  version        Int    @default(0)
+
+  @@id([aggregate_name, aggregate_id])
+}
+
+/// Saga state persistence table.
+model noddde_saga_states {
+  saga_name String @db.VarChar(255)
+  saga_id   String @db.VarChar(255)
+  state     Json
+
+  @@id([saga_name, saga_id])
+}

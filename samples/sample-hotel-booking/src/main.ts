@@ -37,9 +37,9 @@ import { ConsoleEmailService } from "./infrastructure/services/email-service";
 import { ConsoleSmsService } from "./infrastructure/services/sms-service";
 import { FakePaymentGateway } from "./infrastructure/services/payment-gateway";
 
-import { Room } from "./domain/write-model/room/aggregate";
-import { Booking } from "./domain/write-model/booking/aggregate";
-import { Inventory } from "./domain/write-model/inventory/aggregate";
+import { Room } from "./domain/write-model/aggregates/room";
+import { Booking } from "./domain/write-model/aggregates/booking";
+import { Inventory } from "./domain/write-model/aggregates/inventory";
 
 import { RoomAvailabilityProjection } from "./domain/read-model/projections/room-availability";
 import { GuestHistoryProjection } from "./domain/read-model/projections/guest-history";
@@ -70,7 +70,7 @@ import type {
 } from "./domain/read-model/queries";
 
 async function main() {
-  // ── Database setup ──────────────────────────────────────────────
+  // -- Database setup --
   const sqlite = new Database(":memory:");
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS noddde_events (
@@ -124,7 +124,7 @@ async function main() {
     snapshots,
   });
 
-  // ── Define the domain structure (pure, sync) ───────────────────
+  // -- Define the domain structure (pure, sync) --
   const hotelDomain = defineDomain<
     HotelInfrastructure,
     RunNightlyAuditCommand,
@@ -157,7 +157,7 @@ async function main() {
     },
   });
 
-  // ── Wire with infrastructure (async) ───────────────────────────
+  // -- Wire with infrastructure (async) --
   const domain = await wireDomain(hotelDomain, {
     // Custom infrastructure services (what handlers receive)
     infrastructure: (): HotelInfrastructure => ({
@@ -224,7 +224,7 @@ async function main() {
     metadataProvider: () => requestMetadataStorage.getStore() ?? {},
   });
 
-  // ── Register standalone event handlers on the event bus ─────────
+  // -- Register standalone event handlers on the event bus --
   const eventBus = domain.infrastructure.eventBus as EventEmitterEventBus;
   const infra = domain.infrastructure;
 
@@ -236,7 +236,7 @@ async function main() {
     await SendCheckInNotification(event as any, infra);
   });
 
-  // ── Start Fastify HTTP server ──────────────────────────────────
+  // -- Start Fastify HTTP server --
   const app = createApp(domain);
   const address = await app.listen({ port: 3000, host: "0.0.0.0" });
   console.log(`Hotel Booking API listening on ${address}`);

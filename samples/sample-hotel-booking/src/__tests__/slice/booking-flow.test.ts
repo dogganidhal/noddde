@@ -7,8 +7,8 @@ import { InMemoryEmailService } from "../../infrastructure/services/email-servic
 import { InMemorySmsService } from "../../infrastructure/services/sms-service";
 import { InMemoryPaymentGateway } from "../../infrastructure/services/payment-gateway";
 import { InMemoryRoomAvailabilityViewStore } from "../../infrastructure/services/room-availability-view-store";
-import { Room } from "../../domain/write-model/room/aggregate";
-import { Booking } from "../../domain/write-model/booking/aggregate";
+import { Room } from "../../domain/write-model/aggregates/room";
+import { Booking } from "../../domain/write-model/aggregates/booking";
 import { BookingFulfillmentSaga } from "../../domain/process-model/booking-fulfillment";
 
 function createTestInfrastructure(): HotelInfrastructure {
@@ -129,5 +129,49 @@ describe("Booking flow (slice)", () => {
         payload: expect.objectContaining({ roomId: "room-101" }),
       }),
     );
+  });
+
+  it("should update room availability projection after reservation", async () => {
+    const infra = createTestInfrastructure();
+    const { domain, spy } = await testDomain<HotelInfrastructure>({
+      aggregates: { Room },
+      infrastructure: infra,
+    });
+
+    // Create a room, make it available, then reserve it
+    await domain.dispatchCommand({
+      name: "CreateRoom",
+      targetAggregateId: "room-201",
+      payload: {
+        roomNumber: "201",
+        type: "single" as const,
+        floor: 2,
+        pricePerNight: 150,
+      },
+    });
+
+    await domain.dispatchCommand({
+      name: "MakeRoomAvailable",
+      targetAggregateId: "room-201",
+    });
+
+    await domain.dispatchCommand({
+      name: "ReserveRoom",
+      targetAggregateId: "room-201",
+      payload: {
+        bookingId: "b-2",
+        guestId: "guest-2",
+        checkIn: "2026-05-01",
+        checkOut: "2026-05-05",
+      },
+    });
+
+    // Check spy events contain the expected sequence
+    const eventNames = spy.publishedEvents.map((e) => e.name);
+    expect(eventNames).toEqual([
+      "RoomCreated",
+      "RoomMadeAvailable",
+      "RoomReserved",
+    ]);
   });
 });

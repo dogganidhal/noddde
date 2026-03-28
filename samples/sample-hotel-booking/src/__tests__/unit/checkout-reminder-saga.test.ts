@@ -85,6 +85,46 @@ describe("CheckoutReminder saga", () => {
     expect(smsService.sent[0]!.message).toContain("Thank you");
   });
 
+  it("should observe RoomCreated without state change or commands", async () => {
+    const result = await testSaga(CheckoutReminderSaga)
+      .when({
+        name: "RoomCreated",
+        payload: {
+          roomId: "room-101",
+          roomNumber: "101",
+          type: "single" as const,
+          floor: 1,
+          pricePerNight: 100,
+        },
+      })
+      .execute();
+    expect(result.commands).toHaveLength(0);
+  });
+
+  it("should observe RoomMadeAvailable without state change or commands", async () => {
+    const result = await testSaga(CheckoutReminderSaga)
+      .when({
+        name: "RoomMadeAvailable",
+        payload: { roomId: "room-101" },
+      })
+      .execute();
+    expect(result.commands).toHaveLength(0);
+  });
+
+  it("should observe RoomUnderMaintenance without state change or commands", async () => {
+    const result = await testSaga(CheckoutReminderSaga)
+      .when({
+        name: "RoomUnderMaintenance",
+        payload: {
+          roomId: "room-101",
+          reason: "Plumbing",
+          estimatedUntil: "2026-05-01",
+        },
+      })
+      .execute();
+    expect(result.commands).toHaveLength(0);
+  });
+
   it("should observe RoomReserved without dispatching commands", async () => {
     const result = await testSaga(CheckoutReminderSaga)
       .when({

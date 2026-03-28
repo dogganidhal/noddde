@@ -175,6 +175,71 @@ describe("BookingFulfillment saga", () => {
     expect(result.commands).toHaveLength(0);
   });
 
+  it("should not dispatch refund on BookingCancelled when status is awaiting_payment", async () => {
+    const result = await testSaga(BookingFulfillmentSaga)
+      .givenState({ ...awaitingPaymentState, status: "awaiting_payment" })
+      .when({
+        name: "BookingCancelled",
+        payload: {
+          bookingId: "b-1",
+          reason: "Changed mind",
+          cancelledAt: "2026-04-03T10:00:00Z",
+        },
+      })
+      .execute();
+    expect(result.state.status).toBe("cancelled");
+    expect(result.commands).toHaveLength(0); // awaiting_payment is not "confirmed", so no refund
+  });
+
+  it("should track BookingConfirmed as observation with no commands", async () => {
+    const result = await testSaga(BookingFulfillmentSaga)
+      .givenState(awaitingPaymentState)
+      .when({
+        name: "BookingConfirmed",
+        payload: {
+          bookingId: "b-1",
+          roomId: "room-1",
+          confirmedAt: "2026-04-02T10:00:00Z",
+        },
+      })
+      .execute();
+    expect(result.state.status).toBe("confirmed");
+    expect(result.commands).toHaveLength(0);
+  });
+
+  it("should track PaymentRequested as observation with no commands", async () => {
+    const result = await testSaga(BookingFulfillmentSaga)
+      .givenState(awaitingPaymentState)
+      .when({
+        name: "PaymentRequested",
+        payload: {
+          bookingId: "b-1",
+          guestId: "guest-1",
+          paymentId: "pay-1",
+          amount: 500,
+        },
+      })
+      .execute();
+    expect(result.commands).toHaveLength(0);
+  });
+
+  it("should track PaymentRefunded and transition to cancelled", async () => {
+    const result = await testSaga(BookingFulfillmentSaga)
+      .givenState({ ...awaitingPaymentState, status: "confirmed" })
+      .when({
+        name: "PaymentRefunded",
+        payload: {
+          bookingId: "b-1",
+          paymentId: "pay-1",
+          amount: 500,
+          refundedAt: "2026-04-05T10:00:00Z",
+        },
+      })
+      .execute();
+    expect(result.state.status).toBe("cancelled");
+    expect(result.commands).toHaveLength(0);
+  });
+
   it("should track BookingModified in state", async () => {
     const result = await testSaga(BookingFulfillmentSaga)
       .givenState(awaitingPaymentState)

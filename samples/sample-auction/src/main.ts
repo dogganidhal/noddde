@@ -1,8 +1,8 @@
 /**
- * Auction Sample — Drizzle Adapter
+ * Auction Sample
  *
- * Demonstrates @noddde/drizzle with SQLite for persistence.
- * A simple auction domain with a single aggregate.
+ * Demonstrates @noddde with Drizzle + SQLite for persistence,
+ * including a projection and upcasters.
  */
 import {
   defineDomain,
@@ -10,14 +10,17 @@ import {
   EventEmitterEventBus,
   InMemoryCommandBus,
   InMemoryQueryBus,
+  InMemoryViewStore,
 } from "@noddde/engine";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { createDrizzlePersistence } from "@noddde/drizzle";
 import { events, aggregateStates, sagaStates } from "@noddde/drizzle/sqlite";
-import { Auction } from "./aggregate";
-import { AuctionInfrastructure, SystemClock } from "./infrastructure";
 import { randomUUID } from "crypto";
+
+import type { AuctionInfrastructure } from "./infrastructure";
+import { SystemClock } from "./infrastructure";
+import { aggregates, projections } from "./domain/domain";
 
 const main = async () => {
   // ── Set up Drizzle with SQLite ───────────────────────────────
@@ -53,12 +56,8 @@ const main = async () => {
 
   // ── Define the domain structure (pure, sync) ────────────────
   const auctionDomain = defineDomain<AuctionInfrastructure>({
-    writeModel: {
-      aggregates: { Auction },
-    },
-    readModel: {
-      projections: {},
-    },
+    writeModel: { aggregates },
+    readModel: { projections },
   });
 
   // ── Wire with infrastructure (async) ───────────────────────
@@ -74,6 +73,11 @@ const main = async () => {
       eventBus: new EventEmitterEventBus(),
       queryBus: new InMemoryQueryBus(),
     }),
+    projections: {
+      AuctionSummary: {
+        viewStore: () => new InMemoryViewStore(),
+      },
+    },
     unitOfWork: () => drizzleInfra.unitOfWorkFactory,
   });
 
@@ -114,7 +118,7 @@ const main = async () => {
     targetAggregateId: auctionId,
   });
 
-  console.log("✅ Auction sample completed (Drizzle + SQLite)");
+  console.log("Auction sample completed (Drizzle + SQLite)");
 };
 
 main();

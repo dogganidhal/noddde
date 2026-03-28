@@ -95,6 +95,55 @@ describe("PaymentProcessing saga", () => {
     });
   });
 
+  it("should transition to failed on PaymentFailed observation", async () => {
+    const result = await testSaga(PaymentProcessingSaga)
+      .givenState(chargingState)
+      .when({
+        name: "PaymentFailed",
+        payload: {
+          bookingId: "b-1",
+          paymentId: "pay-1",
+          reason: "Declined",
+        },
+      })
+      .execute();
+    expect(result.state.status).toBe("failed");
+    expect(result.commands).toHaveLength(0);
+  });
+
+  it("should handle gateway returning undefined error message", async () => {
+    const result = await testSaga(PaymentProcessingSaga)
+      .when({
+        name: "PaymentRequested",
+        payload: {
+          bookingId: "b-1",
+          guestId: "guest-1",
+          paymentId: "pay-1",
+          amount: 500,
+        },
+      })
+      .withInfrastructure({
+        clock: { now: () => new Date() },
+        emailService: { send: async () => {} },
+        smsService: { send: async () => {} },
+        paymentGateway: {
+          charge: async () => {
+            throw { message: undefined };
+          },
+          refund: async () => {},
+        },
+        roomAvailabilityViewStore: new InMemoryRoomAvailabilityViewStore(),
+        guestHistoryViewStore: new InMemoryViewStore(),
+        revenueViewStore: new InMemoryViewStore(),
+      })
+      .execute();
+    expect(result.state.status).toBe("failed");
+    expect(result.commands[0]).toMatchObject({
+      name: "FailPayment",
+      payload: { reason: "Payment gateway error" },
+    });
+  });
+
   it("should transition to completed on PaymentCompleted (observation)", async () => {
     const result = await testSaga(PaymentProcessingSaga)
       .givenState(chargingState)
