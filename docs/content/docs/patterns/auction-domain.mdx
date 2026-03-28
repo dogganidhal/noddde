@@ -1,9 +1,9 @@
 ---
 title: "Example: Auction Domain"
-description: Complete walkthrough of an auction aggregate with time-based validation and the Clock pattern.
+description: Complete walkthrough of an auction aggregate with time-based validation, the Clock pattern, event upcasting, and projections.
 ---
 
-This example walks through the auction domain sample. It demonstrates infrastructure injection via the Clock pattern, multi-validation command handlers, rejection events, and no-op apply handlers.
+This example walks through the auction domain sample. It demonstrates infrastructure injection via the Clock pattern, multi-validation command handlers, rejection events, no-op apply handlers, event upcasting, and projections with ViewStore.
 
 > **Full source**: [samples/sample-auction](https://github.com/dogganidhal/noddde/tree/main/samples/sample-auction) — clone and run locally with `npm start`.
 
@@ -14,6 +14,8 @@ The auction domain models a simple auction that supports:
 - **Auction creation** — Creating an auction with an item, starting price, and end time
 - **Bidding** — Placing bids with multiple validation rules
 - **Closing** — Closing the auction and determining the winner
+- **Event upcasting** — Evolving the BidPlaced schema from v1 (no timestamp) to v2 (with timestamp)
+- **Auction summary projection** — A read model tracking current high bid, leader, and status
 
 ## Events
 

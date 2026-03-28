@@ -3,9 +3,9 @@ title: "Seat Reservation — Pessimistic Concurrency"
 description: Serializing concurrent seat reservations with pessimistic locking, MySQL advisory locks via Prisma, and lock timeout handling.
 ---
 
-A concert venue where customers reserve specific seats. Multiple customers attempt to reserve the same seat concurrently. This sample demonstrates **pessimistic concurrency with advisory locks** — the right strategy when command handlers involve expensive validation and wasted retries are costly.
+A concert venue where customers reserve specific seats. Multiple customers attempt to reserve the same seat concurrently. This example demonstrates **pessimistic concurrency with advisory locks** — the right strategy when command handlers involve expensive validation and wasted retries are costly.
 
-> **Full source**: [samples/sample-seat-reservation](https://github.com/dogganidhal/noddde/tree/main/samples/sample-seat-reservation) — clone and run locally with `npm start`.
+> **Note**: This is a conceptual walkthrough. For a runnable concurrency example, see the [Flash Sale sample](https://github.com/dogganidhal/noddde/tree/main/samples/sample-flash-sale) which demonstrates both optimistic (`main-optimistic.ts`) and pessimistic (`main-pessimistic.ts`) concurrency strategies.
 
 **Stack**: Prisma + MySQL + Testcontainers
 
@@ -117,14 +117,6 @@ const domain = await wireDomain(venueDomain, {
 ```
 
 Each customer runs the handler exactly once. The lock ensures they see the correct state — no stale reads.
-
-## Running the Sample
-
-```bash
-cd samples/sample-seat-reservation && yarn start
-```
-
-Requires Docker running (Testcontainers spins up MySQL automatically).
 
 ## Key Patterns Demonstrated
 
