@@ -1,5 +1,9 @@
 /* eslint-disable no-unused-vars */
-import { Infrastructure, CQRSInfrastructure } from "../../infrastructure";
+import {
+  Infrastructure,
+  CQRSInfrastructure,
+  FrameworkInfrastructure,
+} from "../../infrastructure";
 import { StandaloneCommand } from "./command";
 
 /**
@@ -13,12 +17,14 @@ import { StandaloneCommand } from "./command";
  * @typeParam TCommand - The standalone command type this handler processes.
  *
  * @param command - The full command object.
- * @param infrastructure - Custom infrastructure merged with {@link CQRSInfrastructure}.
+ * @param infrastructure - Custom infrastructure merged with {@link CQRSInfrastructure} and {@link FrameworkInfrastructure}.
  */
 export type StandaloneCommandHandler<
   TInfrastructure extends Infrastructure,
   TCommand extends StandaloneCommand,
 > = (
   command: TCommand,
-  infrastructure: TInfrastructure & CQRSInfrastructure,
+  infrastructure: TInfrastructure &
+    CQRSInfrastructure &
+    FrameworkInfrastructure,
 ) => void | Promise<void>;

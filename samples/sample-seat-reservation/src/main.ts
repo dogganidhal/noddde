@@ -8,10 +8,7 @@
 import {
   createInMemoryUnitOfWork,
   defineDomain,
-  EventEmitterEventBus,
-  InMemoryCommandBus,
   InMemoryEventSourcedAggregatePersistence,
-  InMemoryQueryBus,
   wireDomain,
 } from "@noddde/engine";
 import type { VenueInfrastructure } from "./infrastructure";
@@ -94,11 +91,11 @@ async function main() {
         //   lockTimeoutMs: 5000,
         // },
       },
-      buses: () => ({
-        commandBus: new InMemoryCommandBus(),
-        eventBus: new EventEmitterEventBus(),
-        queryBus: new InMemoryQueryBus(),
-      }),
+      // buses: () => ({
+      //   commandBus: new InMemoryCommandBus(),
+      //   eventBus: new EventEmitterEventBus(),
+      //   queryBus: new InMemoryQueryBus(),
+      // }),
       // logger: new StructuredLogger("debug"),
       // unitOfWork: () => prismaInfra.unitOfWorkFactory,
       unitOfWork: () => createInMemoryUnitOfWork,

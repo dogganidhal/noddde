@@ -4,7 +4,7 @@ import { Event } from "../edd/event";
 import { ApplyHandler } from "../edd/event-sourcing-handler";
 import type { UpcasterMap } from "../edd/upcaster";
 import { AggregateCommand } from "../cqrs/command/command";
-import { Infrastructure } from "../infrastructure";
+import { Infrastructure, FrameworkInfrastructure } from "../infrastructure";
 
 /**
  * A bundle of the four type parameters that define an aggregate's type universe.
@@ -57,7 +57,7 @@ export type CommandHandler<
 > = (
   command: TCommand,
   state: TState,
-  infrastructure: TInfrastructure,
+  infrastructure: TInfrastructure & FrameworkInfrastructure,
 ) => TEvents | TEvents[] | Promise<TEvents | TEvents[]>;
 
 // ---- Handler maps (internal) ----

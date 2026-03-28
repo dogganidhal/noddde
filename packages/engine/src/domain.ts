@@ -8,6 +8,7 @@ import type {
   Event,
   EventBus,
   EventHandler,
+  FrameworkInfrastructure,
   ID,
   Infrastructure,
   Logger,
@@ -244,8 +245,13 @@ export type DomainWiring<
   TInfrastructure extends Infrastructure = Infrastructure,
   TAggregates extends AggregateMap = AggregateMap,
 > = {
-  /** Factory for user-provided infrastructure services. */
-  infrastructure?: () => TInfrastructure | Promise<TInfrastructure>;
+  /**
+   * Factory for user-provided infrastructure services.
+   * Receives the framework logger so custom services can use it.
+   */
+  infrastructure?: (
+    logger: Logger,
+  ) => TInfrastructure | Promise<TInfrastructure>;
   /** Aggregate runtime config — global {@link AggregateWiring} OR per-aggregate record. */
   aggregates?:
     | AggregateWiring
@@ -327,7 +333,9 @@ export class Domain<
   TStandaloneCommand extends Command = Command,
   TStandaloneQuery extends Query<any> = Query<any>,
 > {
-  private _infrastructure!: TInfrastructure & CQRSInfrastructure;
+  private _infrastructure!: TInfrastructure &
+    CQRSInfrastructure &
+    FrameworkInfrastructure;
   private _unitOfWorkFactory!: UnitOfWorkFactory;
   private readonly _uowStorage = new AsyncLocalStorage<UnitOfWork>();
   private readonly _metadataStorage = new AsyncLocalStorage<MetadataContext>();
@@ -341,8 +349,10 @@ export class Domain<
   private _drainResolve: (() => void) | null = null;
   /** All resolved infrastructure components for auto-close discovery. */
   private _allComponents: unknown[] = [];
-  /** The fully resolved infrastructure (custom + CQRS buses). */
-  public get infrastructure(): TInfrastructure & CQRSInfrastructure {
+  /** The fully resolved infrastructure (custom + CQRS buses + framework logger). */
+  public get infrastructure(): TInfrastructure &
+    CQRSInfrastructure &
+    FrameworkInfrastructure {
     return this._infrastructure;
   }
 
@@ -371,7 +381,7 @@ export class Domain<
 
     // Step 1: Resolve custom infrastructure
     const customInfra = wiring.infrastructure
-      ? await wiring.infrastructure()
+      ? await wiring.infrastructure(logger)
       : ({} as TInfrastructure);
     domainLog.info("Custom infrastructure resolved.");
 
@@ -390,11 +400,12 @@ export class Domain<
       };
     }
 
-    // Step 3: Merge infrastructure
+    // Step 3: Merge infrastructure (custom + CQRS buses + framework logger)
     this._infrastructure = {
       ...customInfra,
       ...cqrsInfra,
-    } as TInfrastructure & CQRSInfrastructure;
+      logger,
+    } as TInfrastructure & CQRSInfrastructure & FrameworkInfrastructure;
 
     // Step 4: Resolve aggregate persistence → AggregatePersistenceResolver
     const perAggregateWirings = this._resolvedContext?.perAggregateWirings;

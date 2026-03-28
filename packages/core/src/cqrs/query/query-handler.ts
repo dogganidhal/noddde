@@ -1,5 +1,5 @@
 /* eslint-disable no-unused-vars */
-import { Infrastructure } from "../../infrastructure";
+import { Infrastructure, FrameworkInfrastructure } from "../../infrastructure";
 import { Query, QueryResult } from "./query";
 
 /**
@@ -21,5 +21,5 @@ export type QueryHandler<
   TQuery extends Query<any>,
 > = (
   query: TQuery["payload"],
-  infrastructure: TInfrastructure,
+  infrastructure: TInfrastructure & FrameworkInfrastructure,
 ) => QueryResult<TQuery> | Promise<QueryResult<TQuery>>;
