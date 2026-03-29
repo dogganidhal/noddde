@@ -4,6 +4,11 @@ module: prisma/persistence
 source_file: packages/adapters/prisma/src/index.ts
 status: implemented
 exports:
+  - createPrismaAdapter
+  - PrismaAdapterConfig
+  - PrismaAdapterResult
+  - PrismaAggregateStateTableConfig
+  - PrismaStateTableColumnMap
   - createPrismaPersistence
   - PrismaPersistenceInfrastructure
   - PrismaEventSourcedAggregatePersistence
@@ -14,10 +19,7 @@ exports:
   - PrismaUnitOfWork
   - PrismaTransactionStore
   - PrismaOutboxStore
-  - PrismaAdapter
-  - PrismaAdapterResult
-  - PrismaAggregateStateTableConfig
-  - PrismaStateTableColumnMap
+  - createPrismaUnitOfWorkFactory
   - generatePrismaMigration
   - PrismaMigrationOptions
 depends_on:
@@ -59,7 +61,86 @@ export interface PrismaTransactionStore {
 }
 
 /**
- * Result of createPrismaPersistence.
+ * Column mapping for a custom state-stored aggregate table in Prisma.
+ * Maps logical noddde columns to Prisma model property names.
+ * Defaults: `{ aggregateId: "aggregateId", state: "state", version: "version" }`.
+ */
+export interface PrismaStateTableColumnMap {
+  aggregateId: string;
+  state: string;
+  version: string;
+}
+
+/**
+ * Configuration for a per-aggregate state table in Prisma.
+ */
+export interface PrismaAggregateStateTableConfig {
+  /** Prisma model name (camelCase as used in PrismaClient, e.g., "order"). */
+  model: string;
+  /** Column mappings. If omitted, uses defaults: aggregateId, state, version. */
+  columns?: Partial<PrismaStateTableColumnMap>;
+}
+
+/**
+ * Configuration for createPrismaAdapter.
+ *
+ * Event store, state store, and saga store are always created (built-in Prisma models).
+ * Optional stores (snapshot, outbox) and per-aggregate tables are configured here.
+ */
+export interface PrismaAdapterConfig {
+  /** Enable the snapshot store (NodddeSnapshot model). Optional. */
+  snapshotStore?: true;
+  /** Enable the outbox store (NodddeOutboxEntry model). Optional. */
+  outboxStore?: true;
+  /** Per-aggregate dedicated state tables with custom column mappings. Optional. */
+  aggregateStates?: Record<string, PrismaAggregateStateTableConfig>;
+}
+
+/**
+ * Result of createPrismaAdapter. The type narrows based on which
+ * optional stores were configured — configured stores appear as non-optional.
+ *
+ * Event store, state store, saga store, and UoW are always present.
+ *
+ * @typeParam C - The adapter config, inferred from the call site.
+ */
+export type PrismaAdapterResult<C extends PrismaAdapterConfig> = {
+  eventSourcedPersistence: EventSourcedAggregatePersistence;
+  stateStoredPersistence: StateStoredAggregatePersistence;
+  sagaPersistence: SagaPersistence;
+  unitOfWorkFactory: UnitOfWorkFactory;
+} & (C extends { snapshotStore: true }
+  ? { snapshotStore: SnapshotStore }
+  : {}) &
+  (C extends { outboxStore: true } ? { outboxStore: OutboxStore } : {}) &
+  (C extends { aggregateStates: Record<string, any> }
+    ? {
+        stateStoreFor(
+          name: keyof C["aggregateStates"] & string,
+        ): StateStoredAggregatePersistence;
+      }
+    : {});
+
+/**
+ * Creates a fully-configured Prisma persistence adapter.
+ *
+ * Event store, state store, saga store, and UoW are always created (built-in
+ * Prisma models). The config controls optional stores and per-aggregate tables.
+ *
+ * @param prisma - A PrismaClient instance.
+ * @param config - Optional adapter configuration for snapshots, outbox, and per-aggregate tables.
+ * @returns Typed persistence infrastructure.
+ */
+export function createPrismaAdapter(
+  prisma: PrismaClient,
+): PrismaAdapterResult<{}>;
+export function createPrismaAdapter<const C extends PrismaAdapterConfig>(
+  prisma: PrismaClient,
+  config: C,
+): PrismaAdapterResult<C>;
+
+/**
+ * Result of createPrismaPersistence (deprecated).
  */
 export interface PrismaPersistenceInfrastructure {
   eventSourcedPersistence: EventSourcedAggregatePersistence;
@@ -71,7 +152,8 @@ export interface PrismaPersistenceInfrastructure {
 }
 
 /**
- * Single factory for all Prisma persistence components.
+ * @deprecated Use createPrismaAdapter instead.
+ * Preserved for backwards compatibility; delegates to createPrismaAdapter internally.
  *
  * @param prisma - A PrismaClient instance.
  */
@@ -186,11 +268,12 @@ export class PrismaOutboxStore implements OutboxStore {
 
 ## Behavioral Requirements
 
-### Factory
+### Factory (`createPrismaAdapter`)
 
-1. `createPrismaPersistence(prisma)` returns a `PrismaPersistenceInfrastructure` containing all four components: `eventSourcedPersistence`, `stateStoredPersistence`, `sagaPersistence`, and `unitOfWorkFactory`.
-2. All four components share a single `PrismaTransactionStore` so that persistence operations inside a UoW participate in the same transaction context.
-3. The factory does not validate schema presence at runtime — missing Prisma models will produce runtime errors on first use.
+1. `createPrismaAdapter(prisma)` (no config) returns a `PrismaAdapterResult<{}>` containing: `eventSourcedPersistence`, `stateStoredPersistence`, `sagaPersistence`, and `unitOfWorkFactory`. Event store, state store, and saga store are always created (built-in Prisma models).
+2. `createPrismaAdapter(prisma, config)` (with config) returns a `PrismaAdapterResult<C>` whose type narrows based on the config: `snapshotStore` and `outboxStore` appear only if configured as `true`; `stateStoreFor()` appears only if `aggregateStates` is provided.
+3. All persistence instances share a single `PrismaTransactionStore` so that persistence operations inside a UoW participate in the same transaction context.
+   3a. The factory does not validate schema presence for built-in models at runtime — missing Prisma models will produce runtime errors on first use.
 
 ### Event-Sourced Aggregate Persistence
 
@@ -247,26 +330,25 @@ export class PrismaOutboxStore implements OutboxStore {
 33. `PrismaOutboxStore.markPublished()` updates `publishedAt` to current ISO timestamp for entries matching the given IDs via `updateMany`.
 34. `PrismaOutboxStore.markPublishedByEventIds()` loads unpublished entries, filters by deserialized `event.metadata.eventId`, and marks matching entries as published.
 35. `PrismaOutboxStore.deletePublished()` deletes rows where `publishedAt` is not null and optionally `createdAt < olderThan` via `deleteMany`.
-36. Factory always includes `outboxStore` in returned infrastructure (same as `snapshotStore`).
+36. `outboxStore` is only present in the result when `config.outboxStore` is `true`. Same for `snapshotStore`.
 37. Outbox operations route through `txStore.current` like all other persistence operations.
 
-### Builder
+### Config-Based Adapter
 
-38. `new PrismaAdapter(prisma)` creates a builder with no stores configured.
-39. `.withEventStore()` configures the shared events table (NodddeEvent model). Required for `build()`.
-40. `.withSagaStore()` configures the shared saga states table (NodddeSagaState model). Required for `build()`.
-41. `.withStateStore()` configures the shared aggregate states table (NodddeAggregateState model). Optional — only needed if some aggregates use the shared table.
-42. `.withSnapshotStore()` and `.withOutboxStore()` are optional.
-43. `.withAggregateStateTable(name, config)` registers a dedicated state table for a named aggregate. Config includes `model` (Prisma model name) and optional `columns` mapping.
-44. `.build()` throws if `withEventStore` or `withSagaStore` was not called.
-45. `.build()` validates that each configured model delegate exists on the PrismaClient instance.
-46. `.build()` returns a `PrismaAdapterResult` with all configured stores.
-47. All persistence instances from a single builder share the same `PrismaTransactionStore` so that operations inside a UoW participate in the same transaction.
+38. `createPrismaAdapter(prisma)` with no config always returns event-sourced, state-stored, and saga persistence plus `unitOfWorkFactory`.
+39. `createPrismaAdapter(prisma, { snapshotStore: true })` includes `snapshotStore` in the result.
+40. `createPrismaAdapter(prisma, { outboxStore: true })` includes `outboxStore` in the result.
+41. `createPrismaAdapter(prisma, { aggregateStates: { ... } })` includes `stateStoreFor()` in the result.
+42. The config shape `PrismaAdapterConfig` has optional fields: `snapshotStore?: true`, `outboxStore?: true`, `aggregateStates?: Record<string, PrismaAggregateStateTableConfig>`.
+43. `PrismaAggregateStateTableConfig` has `model` (required) and `columns?: Partial<PrismaStateTableColumnMap>`.
+44. `createPrismaAdapter` validates that each configured aggregate state model delegate exists on the PrismaClient instance at creation time. Throws if not found.
+45. The return type `PrismaAdapterResult<C>` uses TypeScript conditional types to narrow based on config — configured optional stores appear as non-optional properties.
+46. All persistence instances from a single `createPrismaAdapter` call share the same `PrismaTransactionStore` so that operations inside a UoW participate in the same transaction.
 
 ### Per-Aggregate State Persistence
 
 48. `stateStoreFor(aggregateName)` returns a `StateStoredAggregatePersistence` bound to that aggregate's dedicated Prisma model.
-49. `stateStoreFor(aggregateName)` throws if no dedicated table was configured for that aggregate via `.withAggregateStateTable()`.
+49. `stateStoreFor(aggregateName)` throws if no dedicated table was configured for that aggregate in the `aggregateStates` config.
 50. The dedicated state persistence ignores the `aggregateName` parameter passed to `save()`/`load()` — the model itself is the namespace.
 51. The dedicated state persistence uses the column mapping to read/write the correct properties on the Prisma model.
 52. When `columns` is omitted from `PrismaAggregateStateTableConfig`, defaults to `{ aggregateId: "aggregateId", state: "state", version: "version" }`.
@@ -286,9 +368,9 @@ export class PrismaOutboxStore implements OutboxStore {
 ### Backwards Compatibility
 
 62. `createPrismaPersistence(prisma)` continues to work with the same signature and return type (`PrismaPersistenceInfrastructure`).
-63. `createPrismaPersistence` delegates to `PrismaAdapter` internally (builder wraps the old behavior).
+63. `createPrismaPersistence` delegates to `createPrismaAdapter` internally with `{ snapshotStore: true, outboxStore: true }`.
 64. The `PrismaPersistenceInfrastructure` return type is unchanged.
-65. `createPrismaPersistence` is marked `@deprecated` in JSDoc, recommending `PrismaAdapter` instead.
+65. `createPrismaPersistence` is marked `@deprecated` in JSDoc, recommending `createPrismaAdapter` instead.
 
 ## Invariants
 
@@ -300,8 +382,8 @@ export class PrismaOutboxStore implements OutboxStore {
 - [ ] State-stored version increments by exactly 1 on each successful save.
 - [ ] Event-sourced save detects concurrent writes via the `@@unique` constraint.
 - [ ] Dedicated state persistence instances share the same txStore as shared persistence.
-- [ ] `build()` fails fast if required stores (event, saga) are not configured.
-- [ ] `stateStoreFor()` fails fast if aggregate name was not registered.
+- [ ] `createPrismaAdapter` validates configured aggregate state model delegates at creation time.
+- [ ] `stateStoreFor()` fails fast if aggregate name was not registered in the config.
 
 ## Edge Cases
 
@@ -316,11 +398,11 @@ export class PrismaOutboxStore implements OutboxStore {
 - **Double commit/rollback**: Throws `"UnitOfWork already completed"`.
 - **Transaction store cleared after commit/rollback**: `txStore.current` is always reset to `null` in the `finally` block.
 - **Concurrent saves with same expectedVersion**: One succeeds, the other throws `ConcurrencyError` (via `P2002` for event-sourced or `count === 0` for state-stored).
-- **Builder with no event store**: `.build()` throws `"PrismaAdapter requires withEventStore() to be called before build()"`.
-- **Builder with no saga store**: `.build()` throws `"PrismaAdapter requires withSagaStore() to be called before build()"`.
-- **stateStoreFor unknown aggregate**: Throws `"No dedicated state table configured for aggregate \"Foo\". Call .withAggregateStateTable(\"Foo\", ...) before build()."`.
+- **Invalid aggregate state model**: `createPrismaAdapter(prisma, { aggregateStates: { Foo: { model: "nonexistent" } } })` throws `'Prisma model "nonexistent" not found on PrismaClient for aggregate "Foo"...'`.
+- **stateStoreFor unknown aggregate**: Throws `'No dedicated state table configured for aggregate "Foo". Add "Foo" to the aggregateStates config.'`.
 - **Dedicated and shared persistence in same UoW**: Both participate in the same transaction via shared txStore.
 - **Multiple dedicated tables in same UoW**: All share the same transaction.
+- **No config (minimal call)**: `createPrismaAdapter(prisma)` returns only always-present stores; no `snapshotStore`, `outboxStore`, or `stateStoreFor`.
 - **Migration generation with empty options**: Returns SQL for all three shared tables.
 
 ## Integration Points
@@ -401,13 +483,15 @@ import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import { ConcurrencyError } from "@noddde/core";
-import { createPrismaPersistence } from "@noddde/prisma";
+import { createPrismaAdapter } from "@noddde/prisma";
 
 const TEST_DB = path.resolve(__dirname, "../../prisma/test.db");
 const DATABASE_URL = `file:${TEST_DB}`;
 
 let prisma: PrismaClient;
-let infra: ReturnType<typeof createPrismaPersistence>;
+let infra: ReturnType<
+  typeof createPrismaAdapter<{ snapshotStore: true; outboxStore: true }>
+>;
 
 async function setupDb() {
   if (fs.existsSync(TEST_DB)) fs.unlinkSync(TEST_DB);
@@ -418,7 +502,10 @@ async function setupDb() {
   });
   prisma = new PrismaClient({ datasources: { db: { url: DATABASE_URL } } });
   await prisma.$connect();
-  infra = createPrismaPersistence(prisma);
+  infra = createPrismaAdapter(prisma, {
+    snapshotStore: true,
+    outboxStore: true,
+  });
 }
 
 async function teardownDb() {
