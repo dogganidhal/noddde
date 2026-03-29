@@ -4,14 +4,15 @@ module: drizzle/persistence
 source_file: packages/adapters/drizzle/src/index.ts
 status: implemented
 exports:
-  - createDrizzlePersistence
-  - DrizzlePersistenceInfrastructure
-  - DrizzleNodddeSchema
-  - DrizzleSnapshotStore
-  - DrizzleAdapter
+  - createDrizzleAdapter
+  - DrizzleAdapterConfig
   - DrizzleAdapterResult
   - AggregateStateTableConfig
   - StateTableColumnMap
+  - createDrizzlePersistence (deprecated)
+  - DrizzlePersistenceInfrastructure (deprecated)
+  - DrizzleNodddeSchema (deprecated)
+  - DrizzleSnapshotStore
   - generateDrizzleMigration
   - DrizzleMigrationOptions
   # @noddde/drizzle/sqlite
@@ -48,7 +49,7 @@ docs:
 
 ## Type Contract
 
-### Shared types (root `@noddde/drizzle`)
+### Primary API (root `@noddde/drizzle`)
 
 ```ts
 import type {
@@ -65,38 +66,104 @@ import type {
 } from "@noddde/core";
 
 /**
- * Schema tables the developer passes to the factory.
- * Each field is a Drizzle table definition (any dialect).
+ * Column mapping for a custom state-stored aggregate table.
+ * Maps logical noddde columns to actual Drizzle column references.
+ * If omitted from AggregateStateTableConfig, columns are resolved
+ * by convention (looks for columns named aggregate_id, state, version).
  */
-export interface DrizzleNodddeSchema {
-  events: any;
-  aggregateStates: any;
-  sagaStates: any;
-  snapshots?: any; // Optional — only needed if using snapshot store
-  outbox?: any; // Optional — only needed if using outbox store
+export interface StateTableColumnMap {
+  /** Column holding the aggregate instance ID (string PK). */
+  aggregateId: any;
+  /** Column holding the serialized aggregate state (text/jsonb). */
+  state: any;
+  /** Column holding the version number (integer). */
+  version: any;
 }
 
 /**
- * Result of createDrizzlePersistence.
+ * Configuration for a per-aggregate state table.
  */
-export interface DrizzlePersistenceInfrastructure {
-  eventSourcedPersistence: EventSourcedAggregatePersistence;
-  stateStoredPersistence: StateStoredAggregatePersistence;
-  sagaPersistence: SagaPersistence;
-  unitOfWorkFactory: UnitOfWorkFactory;
-  snapshotStore?: SnapshotStore; // Present only when schema.snapshots is provided
-  outboxStore?: OutboxStore; // Present only when schema.outbox is provided
+export interface AggregateStateTableConfig {
+  /** The Drizzle table definition. */
+  table: any;
+  /** Column mappings. If omitted, uses convention-based defaults. */
+  columns?: Partial<StateTableColumnMap>;
 }
+
+/**
+ * Configuration for createDrizzleAdapter.
+ * eventStore and sagaStore are required. All other fields are optional
+ * and their presence determines the shape of the result type.
+ */
+export interface DrizzleAdapterConfig {
+  /** Drizzle table definition for the event store. Required. */
+  eventStore: any;
+  /** Drizzle table definition for the saga state store. Required. */
+  sagaStore: any;
+  /** Drizzle table definition for the shared aggregate state store. Optional. */
+  stateStore?: any;
+  /** Drizzle table definition for the snapshot store. Optional. */
+  snapshotStore?: any;
+  /** Drizzle table definition for the outbox store. Optional. */
+  outboxStore?: any;
+  /** Per-aggregate dedicated state tables with custom column mappings. Optional. */
+  aggregateStates?: Record<string, AggregateStateTableConfig>;
+}
+
+/**
+ * Result of createDrizzleAdapter. The type narrows based on which
+ * optional stores were configured — configured stores appear as
+ * non-optional, absent stores are not present on the type at all.
+ */
+export type DrizzleAdapterResult<C extends DrizzleAdapterConfig> = {
+  /** Shared event-sourced persistence (shared noddde_events table). Always present. */
+  eventSourcedPersistence: EventSourcedAggregatePersistence;
+  /** Saga persistence (shared saga states table). Always present. */
+  sagaPersistence: SagaPersistence;
+  /** Factory for creating Drizzle-backed UnitOfWork instances. Always present. */
+  unitOfWorkFactory: UnitOfWorkFactory;
+} & (C extends { stateStore: any }
+  ? { stateStoredPersistence: StateStoredAggregatePersistence }
+  : {}) &
+  (C extends { snapshotStore: any } ? { snapshotStore: SnapshotStore } : {}) &
+  (C extends { outboxStore: any } ? { outboxStore: OutboxStore } : {}) &
+  (C extends { aggregateStates: Record<string, any> }
+    ? {
+        /**
+         * Returns a StateStoredAggregatePersistence bound to a dedicated table.
+         * Only accepts keys from the aggregateStates config.
+         */
+        stateStoreFor(
+          name: keyof C["aggregateStates"] & string,
+        ): StateStoredAggregatePersistence;
+      }
+    : {});
+
+/**
+ * Creates a fully-configured Drizzle persistence adapter.
+ * All persistence instances share the same DrizzleTransactionStore,
+ * ensuring UoW atomicity across shared and dedicated tables.
+ *
+ * The return type narrows based on the config: only configured optional
+ * stores appear in the result, eliminating the need for `!` non-null assertions.
+ *
+ * Throws at creation time (not lazily) if convention-based column resolution
+ * fails for any per-aggregate state table.
+ *
+ * @param db - A Drizzle database instance (any dialect).
+ * @param config - Adapter configuration with table definitions.
+ * @returns Typed persistence infrastructure.
+ */
+export function createDrizzleAdapter<const C extends DrizzleAdapterConfig>(
+  db: any,
+  config: C,
+): DrizzleAdapterResult<C>;
 
 /**
  * Drizzle-backed snapshot store for event-sourced aggregates.
  */
 export class DrizzleSnapshotStore implements SnapshotStore {
-  constructor(
-    db: any,
-    txStore: DrizzleTransactionStore,
-    schema: DrizzleNodddeSchema,
-  );
+  constructor(db: any, txStore: DrizzleTransactionStore, schema: any);
   load(aggregateName: string, aggregateId: string): Promise<Snapshot | null>;
   save(
     aggregateName: string,
@@ -109,11 +176,7 @@ export class DrizzleSnapshotStore implements SnapshotStore {
  * Drizzle-backed outbox store for transactional outbox pattern.
  */
 export class DrizzleOutboxStore implements OutboxStore {
-  constructor(
-    db: any,
-    txStore: DrizzleTransactionStore,
-    schema: DrizzleNodddeSchema,
-  );
+  constructor(db: any, txStore: DrizzleTransactionStore, schema: any);
   save(entries: OutboxEntry[]): Promise<void>;
   loadUnpublished(batchSize?: number): Promise<OutboxEntry[]>;
   markPublished(ids: string[]): Promise<void>;
@@ -134,13 +197,32 @@ export class DrizzleEventSourcedAggregatePersistence
     afterVersion: number,
   ): Promise<Event[]>;
 }
+```
 
+### Deprecated API
+
+```ts
 /**
- * Single factory for all Drizzle dialects.
- *
- * @param db - A Drizzle database instance (any dialect).
- * @param schema - Table definitions matching the expected column structure.
+ * @deprecated Use createDrizzleAdapter instead. Preserved for backwards
+ * compatibility; delegates to createDrizzleAdapter internally.
  */
+export interface DrizzleNodddeSchema {
+  events: any;
+  aggregateStates: any;
+  sagaStates: any;
+  snapshots?: any;
+  outbox?: any;
+}
+
+export interface DrizzlePersistenceInfrastructure {
+  eventSourcedPersistence: EventSourcedAggregatePersistence;
+  stateStoredPersistence: StateStoredAggregatePersistence;
+  sagaPersistence: SagaPersistence;
+  unitOfWorkFactory: UnitOfWorkFactory;
+  snapshotStore?: SnapshotStore;
+  outboxStore?: OutboxStore;
+}
+
 export function createDrizzlePersistence(
   db: any,
   schema: DrizzleNodddeSchema,
@@ -188,94 +270,6 @@ export const outbox: MySqlTableWithColumns<...>;
 ```
 
 All three dialects define the same logical schema with the same table names (`noddde_events`, `noddde_aggregate_states`, `noddde_saga_states`) and column names.
-
-### Builder API (`DrizzleAdapter`)
-
-```ts
-/**
- * Column mapping for a custom state-stored aggregate table.
- * Maps logical noddde columns to actual Drizzle column references.
- * If omitted from config, columns are resolved by convention
- * (looks for columns named aggregate_id, state, version).
- */
-export interface StateTableColumnMap {
-  /** Column holding the aggregate instance ID (string PK). */
-  aggregateId: any;
-  /** Column holding the serialized aggregate state (text/jsonb). */
-  state: any;
-  /** Column holding the version number (integer). */
-  version: any;
-}
-
-/**
- * Configuration for a per-aggregate state table.
- */
-export interface AggregateStateTableConfig {
-  /** The Drizzle table definition. */
-  table: any;
-  /** Column mappings. If omitted, uses convention-based defaults. */
-  columns?: Partial<StateTableColumnMap>;
-}
-
-/**
- * Result of DrizzleAdapter.build().
- */
-export interface DrizzleAdapterResult {
-  /** Shared event-sourced persistence (shared noddde_events table). */
-  eventSourcedPersistence: EventSourcedAggregatePersistence;
-  /** Shared state-stored persistence (shared noddde_aggregate_states). Undefined if no shared state store configured. */
-  stateStoredPersistence?: StateStoredAggregatePersistence;
-  /** Saga persistence (always shared table). */
-  sagaPersistence: SagaPersistence;
-  /** UoW factory — all persistence instances share the same txStore. */
-  unitOfWorkFactory: UnitOfWorkFactory;
-  /** Snapshot store. Present only when configured. */
-  snapshotStore?: SnapshotStore;
-  /** Outbox store. Present only when configured. */
-  outboxStore?: OutboxStore;
-  /**
-   * Returns a StateStoredAggregatePersistence bound to a specific
-   * aggregate's dedicated table. Throws if no such aggregate was
-   * configured via .withAggregateStateTable().
-   */
-  stateStoreFor(aggregateName: string): StateStoredAggregatePersistence;
-}
-
-/**
- * Builder for constructing a fully-configured Drizzle persistence layer.
- * Supports shared tables (existing behavior) plus per-aggregate
- * dedicated state tables with custom column mappings.
- */
-export class DrizzleAdapter {
-  constructor(db: any);
-  /** Configures the shared event store table. Required. */
-  withEventStore(table: any): this;
-  /** Configures the shared aggregate state table. Optional. */
-  withStateStore(table: any): this;
-  /** Configures the saga state table. Required. */
-  withSagaStore(table: any): this;
-  /** Configures the snapshot table. Optional. */
-  withSnapshotStore(table: any): this;
-  /** Configures the outbox table. Optional. */
-  withOutboxStore(table: any): this;
-  /**
-   * Maps an aggregate to a dedicated state table.
-   * The returned StateStoredAggregatePersistence from stateStoreFor()
-   * will query/write this specific table.
-   */
-  withAggregateStateTable(
-    aggregateName: string,
-    config: AggregateStateTableConfig,
-  ): this;
-  /**
-   * Builds the configured persistence infrastructure.
-   * Throws if withEventStore or withSagaStore was not called.
-   * Throws if convention-based column resolution fails for any
-   * aggregate state table.
-   */
-  build(): DrizzleAdapterResult;
-}
-```
 
 ### Migration Generation
 
@@ -326,96 +320,95 @@ export function generateDrizzleMigration(
 
 ### Factory
 
-1. `createDrizzlePersistence(db, schema)` returns a `DrizzlePersistenceInfrastructure` containing all four components.
-2. All four components share a single transaction store so that persistence operations inside a UoW participate in the same transaction context.
-3. The factory does not validate the schema structure at runtime — wrong tables will produce runtime errors on first use.
+1. `createDrizzleAdapter(db, config)` returns a `DrizzleAdapterResult<C>` with at minimum `eventSourcedPersistence`, `sagaPersistence`, and `unitOfWorkFactory`.
+2. All persistence instances share a single `DrizzleTransactionStore` so that operations inside a UoW participate in the same transaction context.
+3. `eventStore` and `sagaStore` are required fields in `DrizzleAdapterConfig` — omitting them is a TypeScript compile error.
+4. The return type narrows based on the config: `stateStoredPersistence` is present only if `stateStore` is provided, `snapshotStore` only if `snapshotStore` is provided, `outboxStore` only if `outboxStore` is provided, `stateStoreFor()` only if `aggregateStates` is provided.
 
 ### Persistence (dialect-agnostic)
 
-4. Persistence classes accept schema tables as constructor parameters instead of importing them directly.
-5. `EventSourcedAggregatePersistence.save()` appends events with incrementing sequence numbers per `(aggregateName, aggregateId)`.
-6. `EventSourcedAggregatePersistence.load()` returns events ordered by sequence number ascending, with JSON-parsed payloads.
-7. `EventSourcedAggregatePersistence.load()` returns `[]` for a nonexistent aggregate.
-8. `EventSourcedAggregatePersistence.save()` with an empty events array is a no-op.
-9. `StateStoredAggregatePersistence.save()` upserts the state (insert if new, update if exists).
-10. `StateStoredAggregatePersistence.load()` returns the JSON-parsed state, or `undefined` for a nonexistent aggregate.
-11. `SagaPersistence.save()` upserts the saga state.
-12. `SagaPersistence.load()` returns the JSON-parsed state, or `undefined` for a nonexistent saga.
-13. All persistence operations route through `txStore.current` when inside a transaction, falling back to the base `db` otherwise.
+5. Persistence classes accept schema tables as constructor parameters instead of importing them directly.
+6. `EventSourcedAggregatePersistence.save()` appends events with incrementing sequence numbers per `(aggregateName, aggregateId)`.
+7. `EventSourcedAggregatePersistence.load()` returns events ordered by sequence number ascending, with JSON-parsed payloads.
+8. `EventSourcedAggregatePersistence.load()` returns `[]` for a nonexistent aggregate.
+9. `EventSourcedAggregatePersistence.save()` with an empty events array is a no-op.
+10. `StateStoredAggregatePersistence.save()` upserts the state (insert if new, update if exists).
+11. `StateStoredAggregatePersistence.load()` returns the JSON-parsed state, or `undefined` for a nonexistent aggregate.
+12. `SagaPersistence.save()` upserts the saga state.
+13. `SagaPersistence.load()` returns the JSON-parsed state, or `undefined` for a nonexistent saga.
+14. All persistence operations route through `txStore.current` when inside a transaction, falling back to the base `db` otherwise.
 
 ### Unit of Work (dialect-aware)
 
-14. The UoW detects the dialect at construction time: if `db.run` is a function → SQLite mode (explicit `BEGIN`/`COMMIT`/`ROLLBACK` via `db.run(sql\`...\`)`); otherwise → callback mode (uses `db.transaction(async (tx) => { ... })`).
-15. `enlist(operation)` buffers an async operation for deferred execution.
-16. `deferPublish(...events)` accumulates events for post-commit publishing.
-17. `commit()` executes all enlisted operations within a database transaction and returns deferred events.
-18. `rollback()` discards all operations and events without touching the database.
-19. After `commit()` or `rollback()`, further calls to `enlist`, `deferPublish`, `commit`, or `rollback` throw `"UnitOfWork already completed"`.
-20. On commit failure, the transaction is rolled back and no events are returned.
+15. The UoW detects the dialect at construction time: if `db.run` is a function → SQLite mode (explicit `BEGIN`/`COMMIT`/`ROLLBACK` via `db.run(sql\`...\`)`); otherwise → callback mode (uses `db.transaction(async (tx) => { ... })`).
+16. `enlist(operation)` buffers an async operation for deferred execution.
+17. `deferPublish(...events)` accumulates events for post-commit publishing.
+18. `commit()` executes all enlisted operations within a database transaction and returns deferred events.
+19. `rollback()` discards all operations and events without touching the database.
+20. After `commit()` or `rollback()`, further calls to `enlist`, `deferPublish`, `commit`, or `rollback` throw `"UnitOfWork already completed"`.
+21. On commit failure, the transaction is rolled back and no events are returned.
 
 ### Schema exports
 
-21. Each dialect sub-path (`/sqlite`, `/pg`, `/mysql`) exports `events`, `aggregateStates`, `sagaStates`, `snapshots`, and `outbox` as Drizzle table definitions using the dialect's native types and column builders.
-22. All three dialects use the same table names: `noddde_events`, `noddde_aggregate_states`, `noddde_saga_states`.
-23. All three dialects use the same column names (snake_case).
-24. PostgreSQL schema uses `serial` for auto-increment PK and `jsonb` for payload/state columns.
-25. MySQL schema uses `int` with `.autoincrement()` for PK, `varchar(255)` for name columns, and `json` for payload/state columns.
-26. SQLite schema uses `integer` with `autoIncrement` for PK and `text` for all string/JSON columns.
+22. Each dialect sub-path (`/sqlite`, `/pg`, `/mysql`) exports `events`, `aggregateStates`, `sagaStates`, `snapshots`, and `outbox` as Drizzle table definitions using the dialect's native types and column builders.
+23. All three dialects use the same table names: `noddde_events`, `noddde_aggregate_states`, `noddde_saga_states`.
+24. All three dialects use the same column names (snake_case).
+25. PostgreSQL schema uses `serial` for auto-increment PK and `jsonb` for payload/state columns.
+26. MySQL schema uses `int` with `.autoincrement()` for PK, `varchar(255)` for name columns, and `json` for payload/state columns.
+27. SQLite schema uses `integer` with `autoIncrement` for PK and `text` for all string/JSON columns.
 
 ### Snapshots and Partial Event Load
 
-27. `DrizzleSnapshotStore.save()` upserts the snapshot (insert if new, update if exists) using the `snapshots` schema table.
-28. `DrizzleSnapshotStore.load()` returns the JSON-parsed state and version, or `null` if no snapshot exists.
-29. `DrizzleEventSourcedAggregatePersistence.loadAfterVersion()` loads events with `sequence_number > afterVersion` ordered by `sequence_number ASC`.
-30. `snapshotStore` is only included in the factory return when `schema.snapshots` is provided.
-31. Snapshot operations route through `txStore.current` like all other persistence operations.
+28. `DrizzleSnapshotStore.save()` upserts the snapshot (insert if new, update if exists) using the `snapshots` schema table.
+29. `DrizzleSnapshotStore.load()` returns the JSON-parsed state and version, or `null` if no snapshot exists.
+30. `DrizzleEventSourcedAggregatePersistence.loadAfterVersion()` loads events with `sequence_number > afterVersion` ordered by `sequence_number ASC`.
+31. `snapshotStore` is only included in the result when `config.snapshotStore` is provided.
+32. Snapshot operations route through `txStore.current` like all other persistence operations.
 
 ### Outbox Store
 
-32. `DrizzleOutboxStore.save()` inserts entries with `JSON.stringify(entry.event)` for the event column. Runs inside active transaction via `txStore.current`.
-33. `DrizzleOutboxStore.loadUnpublished()` returns entries where `published_at IS NULL` ordered by `created_at ASC`, limited by `batchSize` (default 100). Deserializes event from JSON.
-34. `DrizzleOutboxStore.markPublished()` updates `published_at` to current ISO timestamp for matching entry IDs.
-35. `DrizzleOutboxStore.markPublishedByEventIds()` loads unpublished entries, filters by deserialized `event.metadata.eventId`, and marks matching entries as published.
-36. `DrizzleOutboxStore.deletePublished()` removes rows where `published_at IS NOT NULL` and optionally `created_at < olderThan`.
-37. `outboxStore` is only included in the factory return when `schema.outbox` is provided (same pattern as `snapshotStore`).
-38. Outbox operations route through `txStore.current` like all other persistence operations.
+33. `DrizzleOutboxStore.save()` inserts entries with `JSON.stringify(entry.event)` for the event column. Runs inside active transaction via `txStore.current`.
+34. `DrizzleOutboxStore.loadUnpublished()` returns entries where `published_at IS NULL` ordered by `created_at ASC`, limited by `batchSize` (default 100). Deserializes event from JSON.
+35. `DrizzleOutboxStore.markPublished()` updates `published_at` to current ISO timestamp for matching entry IDs.
+36. `DrizzleOutboxStore.markPublishedByEventIds()` loads unpublished entries, filters by deserialized `event.metadata.eventId`, and marks matching entries as published.
+37. `DrizzleOutboxStore.deletePublished()` removes rows where `published_at IS NOT NULL` and optionally `created_at < olderThan`.
+38. `outboxStore` is only included in the result when `config.outboxStore` is provided (same pattern as `snapshotStore`).
+39. Outbox operations route through `txStore.current` like all other persistence operations.
 
-### Builder
+### Config-Based Adapter
 
-39. `new DrizzleAdapter(db)` creates a builder with no stores configured.
-40. `.withEventStore(table)` configures the shared events table. Required for `build()`.
-41. `.withSagaStore(table)` configures the shared saga states table. Required for `build()`.
-42. `.withStateStore(table)` configures the shared aggregate states table. Optional — only needed if some aggregates use the shared table.
-43. `.withSnapshotStore(table)` and `.withOutboxStore(table)` are optional.
-44. `.withAggregateStateTable(name, config)` registers a dedicated state table for a named aggregate.
-45. `.build()` throws if `withEventStore` or `withSagaStore` was not called.
-46. `.build()` returns a `DrizzleAdapterResult` with all configured stores.
-47. All persistence instances from a single builder share the same `DrizzleTransactionStore` so that operations inside a UoW participate in the same transaction.
+40. `createDrizzleAdapter(db, config)` accepts a `DrizzleAdapterConfig` where `eventStore` and `sagaStore` are required (enforced at the TypeScript level).
+41. `config.stateStore` configures the shared aggregate states table. Optional — only needed if some aggregates use the shared table.
+42. `config.snapshotStore` and `config.outboxStore` are optional.
+43. `config.aggregateStates` is a `Record<string, AggregateStateTableConfig>` mapping aggregate names to dedicated state table configurations.
+44. `createDrizzleAdapter` returns a `DrizzleAdapterResult<C>` with all configured stores.
+45. All persistence instances from a single `createDrizzleAdapter` call share the same `DrizzleTransactionStore` so that operations inside a UoW participate in the same transaction.
 
 ### Per-Aggregate State Persistence
 
-48. `stateStoreFor(aggregateName)` returns a `StateStoredAggregatePersistence` bound to that aggregate's dedicated table.
-49. `stateStoreFor(aggregateName)` throws if no dedicated table was configured for that aggregate via `.withAggregateStateTable()`.
-50. The dedicated state persistence ignores the `aggregateName` parameter passed to `save()`/`load()` — the table itself is the namespace.
-51. The dedicated state persistence uses the column mapping to read/write the correct columns in the dedicated table.
-52. When `columns` is omitted from `AggregateStateTableConfig`, the builder resolves columns by convention: looks for columns named `aggregate_id`, `state`, `version` in the Drizzle table definition.
-53. If convention-based column resolution fails (required columns not found), `.build()` throws with a clear error listing the available columns in the table.
-54. Dedicated state persistence participates in the same UoW transaction as shared persistence via the shared `DrizzleTransactionStore`.
+46. `stateStoreFor(aggregateName)` returns a `StateStoredAggregatePersistence` bound to that aggregate's dedicated table.
+47. `stateStoreFor(aggregateName)` is type-safe: only accepts keys from the `aggregateStates` config as valid aggregate names.
+48. `stateStoreFor(aggregateName)` throws at runtime if no dedicated table was configured for that aggregate name.
+49. The dedicated state persistence ignores the `aggregateName` parameter passed to `save()`/`load()` — the table itself is the namespace.
+50. The dedicated state persistence uses the column mapping to read/write the correct columns in the dedicated table.
+51. When `columns` is omitted from `AggregateStateTableConfig`, columns are resolved by convention: looks for columns named `aggregate_id`, `state`, `version` in the Drizzle table definition.
+52. If convention-based column resolution fails (required columns not found), `createDrizzleAdapter` throws at call time with a clear error listing the available columns in the table.
+53. Dedicated state persistence participates in the same UoW transaction as shared persistence via the shared `DrizzleTransactionStore`.
 
 ### Migration Generation
 
-55. `generateDrizzleMigration(dialect)` returns a SQL string with `CREATE TABLE IF NOT EXISTS` and `CREATE UNIQUE INDEX IF NOT EXISTS` statements.
-56. Default (no options) includes shared tables: `noddde_events`, `noddde_aggregate_states`, `noddde_saga_states`.
-57. When `options.sharedTables.snapshots` or `.outbox` is `true`, the corresponding table is included.
-58. When `options.aggregateStateTables` is provided, generates `CREATE TABLE IF NOT EXISTS` for each custom table with `aggregate_id TEXT NOT NULL PRIMARY KEY`, `state` (dialect-appropriate JSON type), `version INTEGER NOT NULL DEFAULT 0` columns (or custom column names from config).
-59. Output is dialect-aware: PostgreSQL uses `SERIAL`/`JSONB`/`TEXT`, MySQL uses `INT AUTO_INCREMENT`/`JSON`/`VARCHAR(255)`, SQLite uses `INTEGER`/`TEXT`.
-60. All DDL statements use `IF NOT EXISTS` for idempotent migrations.
+54. `generateDrizzleMigration(dialect)` returns a SQL string with `CREATE TABLE IF NOT EXISTS` and `CREATE UNIQUE INDEX IF NOT EXISTS` statements.
+55. Default (no options) includes shared tables: `noddde_events`, `noddde_aggregate_states`, `noddde_saga_states`.
+56. When `options.sharedTables.snapshots` or `.outbox` is `true`, the corresponding table is included.
+57. When `options.aggregateStateTables` is provided, generates `CREATE TABLE IF NOT EXISTS` for each custom table with `aggregate_id TEXT NOT NULL PRIMARY KEY`, `state` (dialect-appropriate JSON type), `version INTEGER NOT NULL DEFAULT 0` columns (or custom column names from config).
+58. Output is dialect-aware: PostgreSQL uses `SERIAL`/`JSONB`/`TEXT`, MySQL uses `INT AUTO_INCREMENT`/`JSON`/`VARCHAR(255)`, SQLite uses `INTEGER`/`TEXT`.
+59. All DDL statements use `IF NOT EXISTS` for idempotent migrations.
 
 ### Backwards Compatibility
 
-61. `createDrizzlePersistence(db, schema)` continues to work with the same signature and return type (`DrizzlePersistenceInfrastructure`).
-62. `createDrizzlePersistence` delegates to `DrizzleAdapter` internally (builder wraps the old behavior).
-63. The `DrizzlePersistenceInfrastructure` return type is unchanged.
+60. `createDrizzlePersistence(db, schema)` continues to work with the same signature and return type (`DrizzlePersistenceInfrastructure`).
+61. `createDrizzlePersistence` delegates to `createDrizzleAdapter` internally.
+62. The `DrizzlePersistenceInfrastructure` return type is unchanged.
 
 ## Invariants
 
@@ -425,9 +418,9 @@ export function generateDrizzleMigration(
 - [ ] Transaction store is `null` outside a UoW boundary.
 - [ ] All persistence operations within a UoW execute in the same database transaction.
 - [ ] Dedicated state persistence instances share the same txStore as shared persistence.
-- [ ] `build()` fails fast if required stores (event, saga) are not configured.
+- [ ] `eventStore` and `sagaStore` are required in config (enforced at compile time).
 - [ ] `stateStoreFor()` fails fast if aggregate name was not registered.
-- [ ] Convention-based column resolution fails fast at `build()` time, not at query time.
+- [ ] Convention-based column resolution fails fast at `createDrizzleAdapter` call time, not at query time.
 
 ## Edge Cases
 
@@ -441,10 +434,11 @@ export function generateDrizzleMigration(
 - **Transaction store cleared after commit/rollback**: `txStore.current` is always reset to `null`.
 - **Outbox save with empty entries array**: No-op, no database call.
 - **markPublishedByEventIds with no matches**: No-op, no error.
-- **Builder with no event store**: `.build()` throws `"DrizzleAdapter requires withEventStore() to be called before build()"`.
-- **Builder with no saga store**: `.build()` throws `"DrizzleAdapter requires withSagaStore() to be called before build()"`.
-- **stateStoreFor unknown aggregate**: Throws `"No dedicated state table configured for aggregate \"Foo\". Call .withAggregateStateTable(\"Foo\", ...) before build()."`.
-- **Convention resolution with missing columns**: `.build()` throws listing available columns and which required columns are missing.
+- **Missing eventStore in config**: TypeScript compile error since `eventStore` is a required field in `DrizzleAdapterConfig`.
+- **Missing sagaStore in config**: TypeScript compile error since `sagaStore` is a required field in `DrizzleAdapterConfig`.
+- **stateStoreFor unknown aggregate**: Throws `"No dedicated state table configured for aggregate \"Foo\". Add \"Foo\" to the aggregateStates config."`.
+- **stateStoreFor with invalid key**: TypeScript compile error — only keys from `config.aggregateStates` are accepted.
+- **Convention resolution with missing columns**: `createDrizzleAdapter` throws at call time listing available columns and which required columns are missing.
 - **Dedicated and shared persistence in same UoW**: Both participate in the same transaction via shared txStore.
 - **Multiple dedicated tables in same UoW**: All share the same transaction.
 - **Migration generation with empty options**: Returns SQL for all three shared tables.
@@ -497,13 +491,16 @@ noddde_outbox
 
 ## Test Scenarios
 
-### Factory creates all four infrastructure components
+### Factory creates all infrastructure components
 
 ```ts
 import { describe, it, expect } from "vitest";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import { createDrizzlePersistence } from "@noddde/drizzle";
+import {
+  createDrizzleAdapter,
+  createDrizzlePersistence,
+} from "@noddde/drizzle";
 import {
   events,
   aggregateStates,
@@ -555,19 +552,19 @@ function createTestDb() {
 }
 
 describe("Drizzle Multi-Dialect Persistence", () => {
-  it("factory creates all four infrastructure components", () => {
+  it("factory creates all infrastructure components", () => {
     const db = createTestDb();
-    const infra = createDrizzlePersistence(db, {
-      events,
-      aggregateStates,
-      sagaStates,
+    const adapter = createDrizzleAdapter(db, {
+      eventStore: events,
+      sagaStore: sagaStates,
+      stateStore: aggregateStates,
     });
 
-    expect(infra.eventSourcedPersistence).toBeDefined();
-    expect(infra.stateStoredPersistence).toBeDefined();
-    expect(infra.sagaPersistence).toBeDefined();
-    expect(infra.unitOfWorkFactory).toBeDefined();
-    expect(typeof infra.unitOfWorkFactory).toBe("function");
+    expect(adapter.eventSourcedPersistence).toBeDefined();
+    expect(adapter.stateStoredPersistence).toBeDefined();
+    expect(adapter.sagaPersistence).toBeDefined();
+    expect(adapter.unitOfWorkFactory).toBeDefined();
+    expect(typeof adapter.unitOfWorkFactory).toBe("function");
   });
 });
 ```
@@ -577,12 +574,11 @@ describe("Drizzle Multi-Dialect Persistence", () => {
 ```ts
 it("saves and loads events with JSON-parsed payloads", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, {
-    events,
-    aggregateStates,
-    sagaStates,
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
   });
-  const persistence = infra.eventSourcedPersistence;
+  const persistence = adapter.eventSourcedPersistence;
 
   await persistence.save("Order", "order-1", [
     { name: "OrderPlaced", payload: { total: 100 } },
@@ -604,13 +600,12 @@ it("saves and loads events with JSON-parsed payloads", async () => {
 ```ts
 it("returns empty array for nonexistent aggregate", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, {
-    events,
-    aggregateStates,
-    sagaStates,
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
   });
 
-  const loaded = await infra.eventSourcedPersistence.load(
+  const loaded = await adapter.eventSourcedPersistence.load(
     "Order",
     "nonexistent",
   );
@@ -623,12 +618,11 @@ it("returns empty array for nonexistent aggregate", async () => {
 ```ts
 it("appends events with incrementing sequence numbers", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, {
-    events,
-    aggregateStates,
-    sagaStates,
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
   });
-  const persistence = infra.eventSourcedPersistence;
+  const persistence = adapter.eventSourcedPersistence;
 
   await persistence.save("Order", "order-1", [
     { name: "OrderPlaced", payload: {} },
@@ -649,12 +643,11 @@ it("appends events with incrementing sequence numbers", async () => {
 ```ts
 it("isolates events by aggregate name", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, {
-    events,
-    aggregateStates,
-    sagaStates,
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
   });
-  const persistence = infra.eventSourcedPersistence;
+  const persistence = adapter.eventSourcedPersistence;
 
   await persistence.save("Order", "id-1", [
     { name: "OrderPlaced", payload: {} },
@@ -678,12 +671,12 @@ it("isolates events by aggregate name", async () => {
 ```ts
 it("saves and loads state with JSON parsing", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, {
-    events,
-    aggregateStates,
-    sagaStates,
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
+    stateStore: aggregateStates,
   });
-  const persistence = infra.stateStoredPersistence;
+  const persistence = adapter.stateStoredPersistence;
 
   await persistence.save("Account", "acc-1", { balance: 500, owner: "Alice" });
   const state = await persistence.load("Account", "acc-1");
@@ -696,13 +689,13 @@ it("saves and loads state with JSON parsing", async () => {
 ```ts
 it("returns undefined for nonexistent aggregate", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, {
-    events,
-    aggregateStates,
-    sagaStates,
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
+    stateStore: aggregateStates,
   });
 
-  const state = await infra.stateStoredPersistence.load(
+  const state = await adapter.stateStoredPersistence.load(
     "Account",
     "nonexistent",
   );
@@ -715,12 +708,12 @@ it("returns undefined for nonexistent aggregate", async () => {
 ```ts
 it("overwrites state on subsequent saves", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, {
-    events,
-    aggregateStates,
-    sagaStates,
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
+    stateStore: aggregateStates,
   });
-  const persistence = infra.stateStoredPersistence;
+  const persistence = adapter.stateStoredPersistence;
 
   await persistence.save("Account", "acc-1", { balance: 100 });
   await persistence.save("Account", "acc-1", { balance: 200 });
@@ -735,12 +728,11 @@ it("overwrites state on subsequent saves", async () => {
 ```ts
 it("saves and loads saga state", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, {
-    events,
-    aggregateStates,
-    sagaStates,
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
   });
-  const persistence = infra.sagaPersistence;
+  const persistence = adapter.sagaPersistence;
 
   await persistence.save("OrderSaga", "saga-1", { status: "active", step: 2 });
   const state = await persistence.load("OrderSaga", "saga-1");
@@ -753,20 +745,20 @@ it("saves and loads saga state", async () => {
 ```ts
 it("commits all operations atomically and returns deferred events", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, {
-    events,
-    aggregateStates,
-    sagaStates,
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
+    stateStore: aggregateStates,
   });
-  const uow = infra.unitOfWorkFactory();
+  const uow = adapter.unitOfWorkFactory();
 
   uow.enlist(async () => {
-    await infra.eventSourcedPersistence.save("Order", "o1", [
+    await adapter.eventSourcedPersistence.save("Order", "o1", [
       { name: "OrderPlaced", payload: { total: 50 } },
     ]);
   });
   uow.enlist(async () => {
-    await infra.stateStoredPersistence.save("Account", "a1", { balance: 50 });
+    await adapter.stateStoredPersistence.save("Account", "a1", { balance: 50 });
   });
   uow.deferPublish({ name: "OrderPlaced", payload: { total: 50 } });
 
@@ -775,10 +767,16 @@ it("commits all operations atomically and returns deferred events", async () => 
   expect(publishedEvents).toHaveLength(1);
   expect(publishedEvents[0]!.name).toBe("OrderPlaced");
 
-  const loadedEvents = await infra.eventSourcedPersistence.load("Order", "o1");
+  const loadedEvents = await adapter.eventSourcedPersistence.load(
+    "Order",
+    "o1",
+  );
   expect(loadedEvents).toHaveLength(1);
 
-  const loadedState = await infra.stateStoredPersistence.load("Account", "a1");
+  const loadedState = await adapter.stateStoredPersistence.load(
+    "Account",
+    "a1",
+  );
   expect(loadedState).toEqual({ balance: 50 });
 });
 ```
@@ -788,15 +786,14 @@ it("commits all operations atomically and returns deferred events", async () => 
 ```ts
 it("rollback discards all operations and events", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, {
-    events,
-    aggregateStates,
-    sagaStates,
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
   });
-  const uow = infra.unitOfWorkFactory();
+  const uow = adapter.unitOfWorkFactory();
 
   uow.enlist(async () => {
-    await infra.eventSourcedPersistence.save("Order", "o1", [
+    await adapter.eventSourcedPersistence.save("Order", "o1", [
       { name: "OrderPlaced", payload: {} },
     ]);
   });
@@ -804,7 +801,7 @@ it("rollback discards all operations and events", async () => {
 
   await uow.rollback();
 
-  const loaded = await infra.eventSourcedPersistence.load("Order", "o1");
+  const loaded = await adapter.eventSourcedPersistence.load("Order", "o1");
   expect(loaded).toEqual([]);
 });
 ```
@@ -814,12 +811,11 @@ it("rollback discards all operations and events", async () => {
 ```ts
 it("throws on any operation after commit or rollback", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, {
-    events,
-    aggregateStates,
-    sagaStates,
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
   });
-  const uow = infra.unitOfWorkFactory();
+  const uow = adapter.unitOfWorkFactory();
 
   await uow.commit();
 
@@ -837,15 +833,14 @@ it("throws on any operation after commit or rollback", async () => {
 ```ts
 it("snapshot store: save and load roundtrip", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, {
-    events,
-    aggregateStates,
-    sagaStates,
-    snapshots,
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
+    snapshotStore: snapshots,
   });
 
-  expect(infra.snapshotStore).toBeDefined();
-  const store = infra.snapshotStore!;
+  // snapshotStore is non-optional on the result type since config includes snapshotStore
+  const store = adapter.snapshotStore;
 
   await store.save("Order", "order-1", {
     state: { status: "confirmed", total: 100 },
@@ -865,14 +860,13 @@ it("snapshot store: save and load roundtrip", async () => {
 ```ts
 it("snapshot store: returns null for unknown aggregate", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, {
-    events,
-    aggregateStates,
-    sagaStates,
-    snapshots,
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
+    snapshotStore: snapshots,
   });
 
-  const loaded = await infra.snapshotStore!.load("Order", "nonexistent");
+  const loaded = await adapter.snapshotStore.load("Order", "nonexistent");
   expect(loaded).toBeNull();
 });
 ```
@@ -882,13 +876,12 @@ it("snapshot store: returns null for unknown aggregate", async () => {
 ```ts
 it("snapshot store: overwrites on repeated saves", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, {
-    events,
-    aggregateStates,
-    sagaStates,
-    snapshots,
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
+    snapshotStore: snapshots,
   });
-  const store = infra.snapshotStore!;
+  const store = adapter.snapshotStore;
 
   await store.save("Order", "order-1", {
     state: { status: "placed" },
@@ -907,18 +900,19 @@ it("snapshot store: overwrites on repeated saves", async () => {
 });
 ```
 
-### snapshotStore is not present when schema.snapshots is not provided
+### snapshotStore is not present when config.snapshotStore is not provided
 
 ```ts
-it("snapshotStore is not present when schema.snapshots is not provided", () => {
+it("snapshotStore is not present when config.snapshotStore is not provided", () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, {
-    events,
-    aggregateStates,
-    sagaStates,
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
   });
 
-  expect(infra.snapshotStore).toBeUndefined();
+  // TypeScript: adapter.snapshotStore does not exist on the type
+  // At runtime, the property is simply absent
+  expect((adapter as any).snapshotStore).toBeUndefined();
 });
 ```
 
@@ -927,13 +921,11 @@ it("snapshotStore is not present when schema.snapshots is not provided", () => {
 ```ts
 it("loadAfterVersion: returns events after given version", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, {
-    events,
-    aggregateStates,
-    sagaStates,
-    snapshots,
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
   });
-  const persistence = infra.eventSourcedPersistence;
+  const persistence = adapter.eventSourcedPersistence;
 
   await persistence.save(
     "Order",
@@ -958,13 +950,11 @@ it("loadAfterVersion: returns events after given version", async () => {
 ```ts
 it("loadAfterVersion: returns empty array when afterVersion >= stream length", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, {
-    events,
-    aggregateStates,
-    sagaStates,
-    snapshots,
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
   });
-  const persistence = infra.eventSourcedPersistence;
+  const persistence = adapter.eventSourcedPersistence;
 
   await persistence.save(
     "Order",
@@ -989,14 +979,13 @@ it("loadAfterVersion: returns empty array when afterVersion >= stream length", a
 ```ts
 it("outbox store: save and load unpublished entries", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, {
-    events,
-    aggregateStates,
-    sagaStates,
-    outbox,
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
+    outboxStore: outbox,
   });
-  expect(infra.outboxStore).toBeDefined();
-  const store = infra.outboxStore!;
+  // outboxStore is non-optional on the result type since config includes outboxStore
+  const store = adapter.outboxStore;
 
   await store.save([
     {
@@ -1025,13 +1014,12 @@ it("outbox store: save and load unpublished entries", async () => {
 ```ts
 it("outbox store: markPublished sets publishedAt", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, {
-    events,
-    aggregateStates,
-    sagaStates,
-    outbox,
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
+    outboxStore: outbox,
   });
-  const store = infra.outboxStore!;
+  const store = adapter.outboxStore;
 
   await store.save([
     {
@@ -1053,13 +1041,12 @@ it("outbox store: markPublished sets publishedAt", async () => {
 ```ts
 it("outbox store: markPublishedByEventIds matches on event metadata", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, {
-    events,
-    aggregateStates,
-    sagaStates,
-    outbox,
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
+    outboxStore: outbox,
   });
-  const store = infra.outboxStore!;
+  const store = adapter.outboxStore;
 
   await store.save([
     {
@@ -1096,13 +1083,12 @@ it("outbox store: markPublishedByEventIds matches on event metadata", async () =
 ```ts
 it("outbox store: deletePublished removes only published entries", async () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, {
-    events,
-    aggregateStates,
-    sagaStates,
-    outbox,
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
+    outboxStore: outbox,
   });
-  const store = infra.outboxStore!;
+  const store = adapter.outboxStore;
 
   await store.save([
     {
@@ -1120,82 +1106,62 @@ it("outbox store: deletePublished removes only published entries", async () => {
 });
 ```
 
-### Outbox store: not present when schema.outbox not provided
+### Outbox store: not present when config.outboxStore not provided
 
 ```ts
-it("outbox store: not present when schema.outbox not provided", () => {
+it("outbox store: not present when config.outboxStore not provided", () => {
   const db = createTestDb();
-  const infra = createDrizzlePersistence(db, {
-    events,
-    aggregateStates,
-    sagaStates,
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
   });
-  expect(infra.outboxStore).toBeUndefined();
+  // TypeScript: adapter.outboxStore does not exist on the type
+  expect((adapter as any).outboxStore).toBeUndefined();
 });
 ```
 
-### Builder: creates all stores with shared txStore
+### Adapter: creates all stores with shared txStore
 
 ```ts
-import { DrizzleAdapter } from "@noddde/drizzle";
-
-it("builder creates all stores with shared transaction context", () => {
+it("creates all stores with shared transaction context", () => {
   const db = createTestDb();
-  const result = new DrizzleAdapter(db)
-    .withEventStore(events)
-    .withStateStore(aggregateStates)
-    .withSagaStore(sagaStates)
-    .withSnapshotStore(snapshots)
-    .withOutboxStore(outbox)
-    .build();
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
+    stateStore: aggregateStates,
+    snapshotStore: snapshots,
+    outboxStore: outbox,
+    aggregateStates: {
+      Order: { table: aggregateStates },
+    },
+  });
 
-  expect(result.eventSourcedPersistence).toBeDefined();
-  expect(result.stateStoredPersistence).toBeDefined();
-  expect(result.sagaPersistence).toBeDefined();
-  expect(result.unitOfWorkFactory).toBeDefined();
-  expect(result.snapshotStore).toBeDefined();
-  expect(result.outboxStore).toBeDefined();
-  expect(typeof result.stateStoreFor).toBe("function");
+  expect(adapter.eventSourcedPersistence).toBeDefined();
+  expect(adapter.stateStoredPersistence).toBeDefined();
+  expect(adapter.sagaPersistence).toBeDefined();
+  expect(adapter.unitOfWorkFactory).toBeDefined();
+  expect(adapter.snapshotStore).toBeDefined();
+  expect(adapter.outboxStore).toBeDefined();
+  expect(typeof adapter.stateStoreFor).toBe("function");
 });
 ```
 
-### Builder: throws if withEventStore not called
+### Adapter: stateStoredPersistence absent when stateStore not in config
 
 ```ts
-it("build() throws if withEventStore was not called", () => {
+it("stateStoredPersistence is absent when stateStore not in config", () => {
   const db = createTestDb();
-  expect(() =>
-    new DrizzleAdapter(db).withSagaStore(sagaStates).build(),
-  ).toThrow("DrizzleAdapter requires withEventStore()");
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
+  });
+
+  // TypeScript: adapter.stateStoredPersistence does not exist on the type
+  expect((adapter as any).stateStoredPersistence).toBeUndefined();
 });
 ```
 
-### Builder: throws if withSagaStore not called
-
-```ts
-it("build() throws if withSagaStore was not called", () => {
-  const db = createTestDb();
-  expect(() => new DrizzleAdapter(db).withEventStore(events).build()).toThrow(
-    "DrizzleAdapter requires withSagaStore()",
-  );
-});
-```
-
-### Builder: stateStoredPersistence is undefined when withStateStore not called
-
-```ts
-it("stateStoredPersistence is undefined when withStateStore not called", () => {
-  const db = createTestDb();
-  const result = new DrizzleAdapter(db)
-    .withEventStore(events)
-    .withSagaStore(sagaStates)
-    .build();
-
-  expect(result.stateStoredPersistence).toBeUndefined();
-});
-```
-
-### Builder: createDrizzlePersistence delegates to builder (backwards compat)
+### Backwards compat: createDrizzlePersistence delegates to createDrizzleAdapter
 
 ```ts
 it("createDrizzlePersistence continues to work unchanged", async () => {
@@ -1260,13 +1226,15 @@ function createTestDbWithCustomTables() {
 
 it("per-aggregate state table: save and load roundtrip", async () => {
   const db = createTestDbWithCustomTables();
-  const result = new DrizzleAdapter(db)
-    .withEventStore(events)
-    .withSagaStore(sagaStates)
-    .withAggregateStateTable("Order", { table: ordersTable })
-    .build();
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
+    aggregateStates: {
+      Order: { table: ordersTable },
+    },
+  });
 
-  const orderPersistence = result.stateStoreFor("Order");
+  const orderPersistence = adapter.stateStoreFor("Order");
   await orderPersistence.save(
     "Order",
     "order-1",
@@ -1286,13 +1254,15 @@ it("per-aggregate state table: save and load roundtrip", async () => {
 ```ts
 it("per-aggregate state table: returns null for nonexistent", async () => {
   const db = createTestDbWithCustomTables();
-  const result = new DrizzleAdapter(db)
-    .withEventStore(events)
-    .withSagaStore(sagaStates)
-    .withAggregateStateTable("Order", { table: ordersTable })
-    .build();
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
+    aggregateStates: {
+      Order: { table: ordersTable },
+    },
+  });
 
-  const loaded = await result
+  const loaded = await adapter
     .stateStoreFor("Order")
     .load("Order", "nonexistent");
   expect(loaded).toBeNull();
@@ -1304,13 +1274,15 @@ it("per-aggregate state table: returns null for nonexistent", async () => {
 ```ts
 it("per-aggregate state table: throws ConcurrencyError on version mismatch", async () => {
   const db = createTestDbWithCustomTables();
-  const result = new DrizzleAdapter(db)
-    .withEventStore(events)
-    .withSagaStore(sagaStates)
-    .withAggregateStateTable("Order", { table: ordersTable })
-    .build();
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
+    aggregateStates: {
+      Order: { table: ordersTable },
+    },
+  });
 
-  const persistence = result.stateStoreFor("Order");
+  const persistence = adapter.stateStoreFor("Order");
   await persistence.save("Order", "order-1", { status: "placed" }, 0);
 
   // Try to save with wrong version
@@ -1354,20 +1326,22 @@ it("per-aggregate state table: uses custom column mapping", async () => {
   `);
   const db = drizzle(sqlite);
 
-  const result = new DrizzleAdapter(db)
-    .withEventStore(events)
-    .withSagaStore(sagaStates)
-    .withAggregateStateTable("Order", {
-      table: customOrdersTable,
-      columns: {
-        aggregateId: customOrdersTable.id,
-        state: customOrdersTable.data,
-        version: customOrdersTable.ver,
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
+    aggregateStates: {
+      Order: {
+        table: customOrdersTable,
+        columns: {
+          aggregateId: customOrdersTable.id,
+          state: customOrdersTable.data,
+          version: customOrdersTable.ver,
+        },
       },
-    })
-    .build();
+    },
+  });
 
-  const persistence = result.stateStoreFor("Order");
+  const persistence = adapter.stateStoreFor("Order");
   await persistence.save("Order", "order-1", { status: "placed" }, 0);
 
   const loaded = await persistence.load("Order", "order-1");
@@ -1382,13 +1356,17 @@ it("per-aggregate state table: uses custom column mapping", async () => {
 ```ts
 it("stateStoreFor throws for unconfigured aggregate", () => {
   const db = createTestDbWithCustomTables();
-  const result = new DrizzleAdapter(db)
-    .withEventStore(events)
-    .withSagaStore(sagaStates)
-    .withAggregateStateTable("Order", { table: ordersTable })
-    .build();
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
+    aggregateStates: {
+      Order: { table: ordersTable },
+    },
+  });
 
-  expect(() => result.stateStoreFor("Payment")).toThrow(
+  // TypeScript would catch this at compile time for literal strings,
+  // but at runtime it throws for dynamically constructed names
+  expect(() => (adapter.stateStoreFor as any)("Payment")).toThrow(
     'No dedicated state table configured for aggregate "Payment"',
   );
 });
@@ -1399,17 +1377,19 @@ it("stateStoreFor throws for unconfigured aggregate", () => {
 ```ts
 it("per-aggregate state table: participates in UoW transaction", async () => {
   const db = createTestDbWithCustomTables();
-  const result = new DrizzleAdapter(db)
-    .withEventStore(events)
-    .withSagaStore(sagaStates)
-    .withAggregateStateTable("Order", { table: ordersTable })
-    .build();
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
+    aggregateStates: {
+      Order: { table: ordersTable },
+    },
+  });
 
-  const orderPersistence = result.stateStoreFor("Order");
-  const uow = result.unitOfWorkFactory();
+  const orderPersistence = adapter.stateStoreFor("Order");
+  const uow = adapter.unitOfWorkFactory();
 
   uow.enlist(async () => {
-    await result.eventSourcedPersistence.save(
+    await adapter.eventSourcedPersistence.save(
       "Payment",
       "p1",
       [{ name: "PaymentReceived", payload: { amount: 50 } }],
@@ -1422,7 +1402,7 @@ it("per-aggregate state table: participates in UoW transaction", async () => {
 
   await uow.commit();
 
-  const paymentEvents = await result.eventSourcedPersistence.load(
+  const paymentEvents = await adapter.eventSourcedPersistence.load(
     "Payment",
     "p1",
   );
@@ -1434,7 +1414,7 @@ it("per-aggregate state table: participates in UoW transaction", async () => {
 });
 ```
 
-### Builder: convention-based column resolution fails with clear error
+### Adapter: convention-based column resolution fails at creation time
 
 ```ts
 const badTable = sqliteTable("bad_table", {
@@ -1442,19 +1422,22 @@ const badTable = sqliteTable("bad_table", {
   bar: integer("bar").notNull(),
 });
 
-it("build() throws clear error when convention resolution fails", () => {
+it("createDrizzleAdapter throws clear error when convention resolution fails", () => {
   const sqlite = new Database(":memory:");
   sqlite.exec(
     `CREATE TABLE bad_table (foo TEXT NOT NULL, bar INTEGER NOT NULL);`,
   );
   const db = drizzle(sqlite);
 
+  // Throws at createDrizzleAdapter call time, not lazily
   expect(() =>
-    new DrizzleAdapter(db)
-      .withEventStore(events)
-      .withSagaStore(sagaStates)
-      .withAggregateStateTable("Bad", { table: badTable })
-      .build(),
+    createDrizzleAdapter(db, {
+      eventStore: events,
+      sagaStore: sagaStates,
+      aggregateStates: {
+        Bad: { table: badTable },
+      },
+    }),
   ).toThrow(/aggregate_id.*state.*version/);
 });
 ```

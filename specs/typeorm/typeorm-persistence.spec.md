@@ -4,7 +4,12 @@ module: typeorm/persistence
 source_file: packages/adapters/typeorm/src/index.ts
 status: implemented
 exports:
-  - createTypeORMPersistence
+  - createTypeORMAdapter
+  - TypeORMAdapterConfig
+  - TypeORMAdapterResult
+  - TypeORMAggregateStateTableConfig
+  - TypeORMStateTableColumnMap
+  - createTypeORMPersistence (deprecated)
   - TypeORMPersistenceInfrastructure
   - TypeORMEventSourcedAggregatePersistence
   - TypeORMStateStoredAggregatePersistence
@@ -19,10 +24,6 @@ exports:
   - NodddeSnapshotEntity
   - TypeORMOutboxStore
   - NodddeOutboxEntryEntity
-  - TypeORMAdapter
-  - TypeORMAdapterResult
-  - TypeORMAggregateStateTableConfig
-  - TypeORMStateTableColumnMap
   - generateTypeORMMigration
   - TypeORMMigrationOptions
 depends_on:
@@ -47,6 +48,7 @@ import type {
   PartialEventLoad,
   Snapshot,
   SnapshotStore,
+  OutboxStore,
   StateStoredAggregatePersistence,
   SagaPersistence,
   UnitOfWorkFactory,
@@ -62,21 +64,91 @@ export interface TypeORMTransactionStore {
 }
 
 /**
- * Result of createTypeORMPersistence.
+ * Column mapping for a custom state-stored aggregate table in TypeORM.
+ * Maps logical noddde columns to TypeORM entity property names.
+ * Defaults: `{ aggregateId: "aggregateId", state: "state", version: "version" }`.
+ */
+export interface TypeORMStateTableColumnMap {
+  aggregateId: string;
+  state: string;
+  version: string;
+}
+
+/**
+ * Configuration for a per-aggregate state table in TypeORM.
+ */
+export interface TypeORMAggregateStateTableConfig {
+  entity: Function;
+  columns?: Partial<TypeORMStateTableColumnMap>;
+}
+
+/**
+ * Configuration for createTypeORMAdapter.
+ *
+ * Event store, state store, and saga store are always created (built-in entities).
+ * Optional stores (snapshot, outbox) and per-aggregate tables are configured here.
+ */
+export interface TypeORMAdapterConfig {
+  snapshotStore?: true;
+  outboxStore?: true;
+  aggregateStates?: Record<string, TypeORMAggregateStateTableConfig>;
+}
+
+/**
+ * Result of createTypeORMAdapter. The type narrows based on which
+ * optional stores were configured — configured stores appear as non-optional.
+ *
+ * Event store, state store, saga store, and UoW are always present.
+ */
+export type TypeORMAdapterResult<C extends TypeORMAdapterConfig> = {
+  eventSourcedPersistence: EventSourcedAggregatePersistence;
+  stateStoredPersistence: StateStoredAggregatePersistence;
+  sagaPersistence: SagaPersistence;
+  unitOfWorkFactory: UnitOfWorkFactory;
+} & (C extends { snapshotStore: true }
+  ? { snapshotStore: SnapshotStore }
+  : {}) &
+  (C extends { outboxStore: true } ? { outboxStore: OutboxStore } : {}) &
+  (C extends { aggregateStates: Record<string, any> }
+    ? {
+        stateStoreFor(
+          name: keyof C["aggregateStates"] & string,
+        ): StateStoredAggregatePersistence;
+      }
+    : {});
+
+/**
+ * Creates a fully-configured TypeORM persistence adapter.
+ *
+ * Event store, state store, saga store, and UoW are always created (built-in
+ * entities). The config controls optional stores and per-aggregate tables.
+ *
+ * @param dataSource - An initialized TypeORM DataSource.
+ * @param config - Optional adapter configuration.
+ * @returns Typed persistence infrastructure.
+ */
+export function createTypeORMAdapter(
+  dataSource: DataSource,
+): TypeORMAdapterResult<{}>;
+export function createTypeORMAdapter<const C extends TypeORMAdapterConfig>(
+  dataSource: DataSource,
+  config: C,
+): TypeORMAdapterResult<C>;
+
+/**
+ * @deprecated Use createTypeORMAdapter instead.
  */
 export interface TypeORMPersistenceInfrastructure {
   eventSourcedPersistence: EventSourcedAggregatePersistence;
   stateStoredPersistence: StateStoredAggregatePersistence;
   sagaPersistence: SagaPersistence;
   snapshotStore: SnapshotStore;
-  unitOfWorkFactory: UnitOfWorkFactory;
   outboxStore: OutboxStore;
+  unitOfWorkFactory: UnitOfWorkFactory;
 }
 
 /**
- * Single factory for all TypeORM persistence components.
- *
- * @param dataSource - An initialized TypeORM DataSource.
+ * @deprecated Use createTypeORMAdapter instead.
  */
 export function createTypeORMPersistence(
   dataSource: DataSource,
@@ -301,116 +373,112 @@ export class NodddeOutboxEntryEntity {
 
 ### Factory
 
-1. `createTypeORMPersistence(dataSource)` returns a `TypeORMPersistenceInfrastructure` containing all four components: `eventSourcedPersistence`, `stateStoredPersistence`, `sagaPersistence`, and `unitOfWorkFactory`.
-2. All four components share a single `TypeORMTransactionStore` so that persistence operations inside a UoW participate in the same transaction context.
-3. The factory does not validate entity registration at runtime — missing entities will produce TypeORM errors on first use.
+1. `createTypeORMAdapter(dataSource)` (no config) returns a `TypeORMAdapterResult<{}>` containing `eventSourcedPersistence`, `stateStoredPersistence`, `sagaPersistence`, and `unitOfWorkFactory`. No optional stores are present on the result type.
+2. `createTypeORMAdapter(dataSource, config)` returns a `TypeORMAdapterResult<C>` that conditionally includes `snapshotStore`, `outboxStore`, and/or `stateStoreFor()` depending on the config.
+3. All persistence instances from a single `createTypeORMAdapter` call share a single `TypeORMTransactionStore` so that persistence operations inside a UoW participate in the same transaction context.
+4. The factory does not validate entity registration at runtime — missing entities will produce TypeORM errors on first use.
 
 ### Event-Sourced Aggregate Persistence
 
-4. `save(aggregateName, aggregateId, events, expectedVersion)` creates `NodddeEventEntity` instances with `sequenceNumber = expectedVersion + index + 1` for each event, then saves them via the repository.
-5. `save()` with an empty events array is a no-op (returns immediately).
-6. `save()` catches errors whose message matches `/UNIQUE|duplicate|unique/i` (regex) and throws `ConcurrencyError`.
-7. `load(aggregateName, aggregateId)` returns events found via `repo.find()` with `order: { sequenceNumber: "ASC" }`, mapping each row to `{ name: row.eventName, payload: JSON.parse(row.payload) }`.
-8. `load()` returns `[]` for a nonexistent aggregate.
-9. Events are stored with `JSON.stringify(event.payload)` and reconstructed with `JSON.parse(row.payload)`.
+5. `save(aggregateName, aggregateId, events, expectedVersion)` creates `NodddeEventEntity` instances with `sequenceNumber = expectedVersion + index + 1` for each event, then saves them via the repository.
+6. `save()` with an empty events array is a no-op (returns immediately).
+7. `save()` catches errors whose message matches `/UNIQUE|duplicate|unique/i` (regex) and throws `ConcurrencyError`.
+8. `load(aggregateName, aggregateId)` returns events found via `repo.find()` with `order: { sequenceNumber: "ASC" }`, mapping each row to `{ name: row.eventName, payload: JSON.parse(row.payload) }`.
+9. `load()` returns `[]` for a nonexistent aggregate.
+10. Events are stored with `JSON.stringify(event.payload)` and reconstructed with `JSON.parse(row.payload)`.
 
 ### State-Stored Aggregate Persistence
 
-10. `save()` first performs a `findOne` to check for existing state. If found: validates `existing.version === expectedVersion`, updates state and sets `version = expectedVersion + 1`; if version mismatches, throws `ConcurrencyError` with the actual stored version.
-11. `save()` on a new aggregate (no existing row): validates `expectedVersion === 0`, creates a new `NodddeAggregateStateEntity` with `version: 1`; if `expectedVersion !== 0`, throws `ConcurrencyError` with `actualVersion: 0`.
-12. `load()` uses `repo.findOne()` and returns `{ state: JSON.parse(row.state), version: row.version }`, or `null` if not found.
+11. `save()` first performs a `findOne` to check for existing state. If found: validates `existing.version === expectedVersion`, updates state and sets `version = expectedVersion + 1`; if version mismatches, throws `ConcurrencyError` with the actual stored version.
+12. `save()` on a new aggregate (no existing row): validates `expectedVersion === 0`, creates a new `NodddeAggregateStateEntity` with `version: 1`; if `expectedVersion !== 0`, throws `ConcurrencyError` with `actualVersion: 0`.
+13. `load()` uses `repo.findOne()` and returns `{ state: JSON.parse(row.state), version: row.version }`, or `null` if not found.
 
 ### Saga Persistence
 
-13. `save()` performs a `findOne` followed by a conditional `create` (if not found) or update (if found), using `JSON.stringify(state)`.
-14. `load()` uses `repo.findOne()` and returns `JSON.parse(row.state)`, or `undefined` if not found.
-15. Saga persistence has no concurrency control — no version checking on save.
+14. `save()` performs a `findOne` followed by a conditional `create` (if not found) or update (if found), using `JSON.stringify(state)`.
+15. `load()` uses `repo.findOne()` and returns `JSON.parse(row.state)`, or `undefined` if not found.
+16. Saga persistence has no concurrency control — no version checking on save.
 
 ### Advisory Locker
 
-16. Constructor auto-detects dialect from `dataSource.options.type`: `"postgres"` maps to PostgreSQL, `"mysql"` or `"mariadb"` maps to MySQL, `"mssql"` maps to MSSQL. Any other type throws an error at construction time.
-17. PostgreSQL: `acquire()` without timeout uses `pg_advisory_lock($1::bigint)` via `dataSource.query()`. With timeout, polls `pg_try_advisory_lock` every 50ms until acquired or deadline exceeded, then throws `LockTimeoutError`.
-18. MySQL/MariaDB: `acquire()` uses `GET_LOCK(?, ?)` with timeout in seconds (ceiling of `timeoutMs / 1000`). If `acquired !== 1`, throws `LockTimeoutError`.
-19. MSSQL: `acquire()` uses `sp_getapplock` with `@LockMode = 'Exclusive'`, `@LockOwner = 'Session'`, and `@LockTimeout` set to `timeoutMs` (or `-1` for infinite). Return codes `< 0` (timeout, cancelled, deadlock) throw `LockTimeoutError`.
-20. `release()` uses `pg_advisory_unlock` (PostgreSQL), `RELEASE_LOCK` (MySQL/MariaDB), or `sp_releaseapplock` (MSSQL) via `dataSource.query()`. MSSQL release is idempotent — releasing an unheld lock is silently ignored.
-21. The lock key is derived via `fnv1a64(${aggregateName}:${aggregateId})` for PostgreSQL, the raw composite key truncated to 64 chars for MySQL/MariaDB, or truncated to 255 chars for MSSQL.
-22. SQLite/better-sqlite3 are explicitly not supported — constructor throws with a message suggesting `InMemoryAggregateLocker`.
+17. Constructor auto-detects dialect from `dataSource.options.type`: `"postgres"` maps to PostgreSQL, `"mysql"` or `"mariadb"` maps to MySQL, `"mssql"` maps to MSSQL. Any other type throws an error at construction time.
+18. PostgreSQL: `acquire()` without timeout uses `pg_advisory_lock($1::bigint)` via `dataSource.query()`. With timeout, polls `pg_try_advisory_lock` every 50ms until acquired or deadline exceeded, then throws `LockTimeoutError`.
+19. MySQL/MariaDB: `acquire()` uses `GET_LOCK(?, ?)` with timeout in seconds (ceiling of `timeoutMs / 1000`). If `acquired !== 1`, throws `LockTimeoutError`.
+20. MSSQL: `acquire()` uses `sp_getapplock` with `@LockMode = 'Exclusive'`, `@LockOwner = 'Session'`, and `@LockTimeout` set to `timeoutMs` (or `-1` for infinite). Return codes `< 0` (timeout, cancelled, deadlock) throw `LockTimeoutError`.
+21. `release()` uses `pg_advisory_unlock` (PostgreSQL), `RELEASE_LOCK` (MySQL/MariaDB), or `sp_releaseapplock` (MSSQL) via `dataSource.query()`. MSSQL release is idempotent — releasing an unheld lock is silently ignored.
+22. The lock key is derived via `fnv1a64(${aggregateName}:${aggregateId})` for PostgreSQL, the raw composite key truncated to 64 chars for MySQL/MariaDB, or truncated to 255 chars for MSSQL.
+23. SQLite/better-sqlite3 are explicitly not supported — constructor throws with a message suggesting `InMemoryAggregateLocker`.
 
 ### Unit of Work
 
-23. `enlist(operation)` buffers an async operation for deferred execution.
-24. `deferPublish(...events)` accumulates events for post-commit publishing.
-25. `commit()` wraps all enlisted operations in `dataSource.manager.transaction(async (transactionalEntityManager) => { ... })`. Sets `txStore.current = transactionalEntityManager` before executing operations, and resets it to `null` in a `finally` block. Returns deferred events on success.
-26. `rollback()` discards all operations and events without touching the database.
-27. After `commit()` or `rollback()`, further calls to `enlist`, `deferPublish`, `commit`, or `rollback` throw `"UnitOfWork already completed"`.
+24. `enlist(operation)` buffers an async operation for deferred execution.
+25. `deferPublish(...events)` accumulates events for post-commit publishing.
+26. `commit()` wraps all enlisted operations in `dataSource.manager.transaction(async (transactionalEntityManager) => { ... })`. Sets `txStore.current = transactionalEntityManager` before executing operations, and resets it to `null` in a `finally` block. Returns deferred events on success.
+27. `rollback()` discards all operations and events without touching the database.
+28. After `commit()` or `rollback()`, further calls to `enlist`, `deferPublish`, `commit`, or `rollback` throw `"UnitOfWork already completed"`.
 
 ### Transaction Store
 
-28. All persistence classes use `getManager()` which returns `txStore.current ?? dataSource.manager`, routing operations through the active transaction when inside a UoW.
+29. All persistence classes use `getManager()` which returns `txStore.current ?? dataSource.manager`, routing operations through the active transaction when inside a UoW.
 
 ### Entity Definitions
 
-29. `NodddeEventEntity` maps to table `noddde_events` with a `@PrimaryGeneratedColumn()` id and a unique `@Index` on `[aggregateName, aggregateId, sequenceNumber]`. Columns use `@Column({ name: "snake_case" })` for mapping.
-30. `NodddeAggregateStateEntity` maps to table `noddde_aggregate_states` with `@PrimaryColumn` composite key on `[aggregateName, aggregateId]` and a `version` column with `default: 0`.
-31. `NodddeSagaStateEntity` maps to table `noddde_saga_states` with `@PrimaryColumn` composite key on `[sagaName, sagaId]`.
+30. `NodddeEventEntity` maps to table `noddde_events` with a `@PrimaryGeneratedColumn()` id and a unique `@Index` on `[aggregateName, aggregateId, sequenceNumber]`. Columns use `@Column({ name: "snake_case" })` for mapping.
+31. `NodddeAggregateStateEntity` maps to table `noddde_aggregate_states` with `@PrimaryColumn` composite key on `[aggregateName, aggregateId]` and a `version` column with `default: 0`.
+32. `NodddeSagaStateEntity` maps to table `noddde_saga_states` with `@PrimaryColumn` composite key on `[sagaName, sagaId]`.
 
 ### Snapshot Store
 
-32. `TypeORMSnapshotStore.save()` upserts the snapshot using `findOne` + conditional `save` (create if new, update if exists).
-33. `TypeORMSnapshotStore.load()` uses `findOne` and returns `{ state: JSON.parse(row.state), version: row.version }`, or `null` if not found.
-34. `TypeORMEventSourcedAggregatePersistence.loadAfterVersion()` uses TypeORM's `MoreThan(afterVersion)` operator to load events with `sequenceNumber > afterVersion`, ordered by `sequenceNumber: "ASC"`.
-35. `NodddeSnapshotEntity` maps to table `noddde_snapshots` with `@PrimaryColumn` composite key on `[aggregateName, aggregateId]`.
-36. Snapshot operations route through `txStore.current` like all other persistence operations.
+33. `TypeORMSnapshotStore.save()` upserts the snapshot using `findOne` + conditional `save` (create if new, update if exists).
+34. `TypeORMSnapshotStore.load()` uses `findOne` and returns `{ state: JSON.parse(row.state), version: row.version }`, or `null` if not found.
+35. `TypeORMEventSourcedAggregatePersistence.loadAfterVersion()` uses TypeORM's `MoreThan(afterVersion)` operator to load events with `sequenceNumber > afterVersion`, ordered by `sequenceNumber: "ASC"`.
+36. `NodddeSnapshotEntity` maps to table `noddde_snapshots` with `@PrimaryColumn` composite key on `[aggregateName, aggregateId]`.
+37. Snapshot operations route through `txStore.current` like all other persistence operations.
 
 ### Outbox Store
 
-37. `TypeORMOutboxStore.save()` creates `NodddeOutboxEntryEntity` instances with `JSON.stringify(entry.event)` for the event column and saves them via the repository. Runs inside active transaction via `txStore.current`.
-38. `TypeORMOutboxStore.loadUnpublished()` returns entries where `publishedAt IS NULL` ordered by `createdAt ASC`, limited by `take: batchSize` (default 100). Deserializes event from JSON.
-39. `TypeORMOutboxStore.markPublished()` updates `publishedAt` to current ISO timestamp for entries matching the given IDs.
-40. `TypeORMOutboxStore.markPublishedByEventIds()` loads unpublished entries, filters by deserialized `event.metadata.eventId`, and marks matching entries as published.
-41. `TypeORMOutboxStore.deletePublished()` removes rows where `publishedAt IS NOT NULL` and optionally `createdAt < olderThan`.
-42. Factory always includes `outboxStore` in returned infrastructure.
+38. `TypeORMOutboxStore.save()` creates `NodddeOutboxEntryEntity` instances with `JSON.stringify(entry.event)` for the event column and saves them via the repository. Runs inside active transaction via `txStore.current`.
+39. `TypeORMOutboxStore.loadUnpublished()` returns entries where `publishedAt IS NULL` ordered by `createdAt ASC`, limited by `take: batchSize` (default 100). Deserializes event from JSON.
+40. `TypeORMOutboxStore.markPublished()` updates `publishedAt` to current ISO timestamp for entries matching the given IDs.
+41. `TypeORMOutboxStore.markPublishedByEventIds()` loads unpublished entries, filters by deserialized `event.metadata.eventId`, and marks matching entries as published.
+42. `TypeORMOutboxStore.deletePublished()` removes rows where `publishedAt IS NOT NULL` and optionally `createdAt < olderThan`.
 43. `NodddeOutboxEntryEntity` maps to table `noddde_outbox` with a string `@PrimaryColumn()` id, `text` event column, nullable `aggregate_name` and `aggregate_id`, and `created_at`/`published_at` (nullable) columns.
 44. Outbox operations route through `txStore.current` like all other persistence operations.
 
-### Builder
+### Config-Based Adapter
 
-45. `new TypeORMAdapter(dataSource)` creates a builder with no stores configured.
-46. `.withEventStore(entity?)` configures the shared events table. Defaults to `NodddeEventEntity`. Required for `build()`.
-47. `.withSagaStore(entity?)` configures the shared saga states table. Defaults to `NodddeSagaStateEntity`. Required for `build()`.
-48. `.withStateStore(entity?)` configures the shared aggregate states table. Defaults to `NodddeAggregateStateEntity`. Optional — only needed if some aggregates use the shared table.
-49. `.withSnapshotStore(entity?)` and `.withOutboxStore(entity?)` are optional. Default to built-in entities.
-50. `.withAggregateStateTable(name, config)` registers a dedicated state table for a named aggregate. Config includes `entity` (TypeORM entity class) and optional `columns` mapping.
-51. `.build()` throws if `withEventStore` or `withSagaStore` was not called.
-52. `.build()` returns a `TypeORMAdapterResult` with all configured stores.
-53. All persistence instances from a single builder share the same `TypeORMTransactionStore` so that operations inside a UoW participate in the same transaction.
+45. `createTypeORMAdapter(dataSource)` with no config always creates event store, state store, saga store, and UoW factory using built-in entity classes.
+46. `{ snapshotStore: true }` in config creates a `TypeORMSnapshotStore` and includes it in the result.
+47. `{ outboxStore: true }` in config creates a `TypeORMOutboxStore` and includes it in the result.
+48. `{ aggregateStates: { Name: { entity, columns? } } }` in config creates dedicated state persistence instances and exposes `stateStoreFor()` on the result.
+49. The return type `TypeORMAdapterResult<C>` uses TypeScript conditional types to narrow: `snapshotStore` only appears when `C extends { snapshotStore: true }`, `outboxStore` only appears when `C extends { outboxStore: true }`, and `stateStoreFor()` only appears when `C extends { aggregateStates: Record<string, any> }`.
 
 ### Per-Aggregate State Persistence
 
-54. `stateStoreFor(aggregateName)` returns a `StateStoredAggregatePersistence` bound to that aggregate's dedicated TypeORM entity.
-55. `stateStoreFor(aggregateName)` throws if no dedicated table was configured for that aggregate via `.withAggregateStateTable()`.
-56. The dedicated state persistence ignores the `aggregateName` parameter passed to `save()`/`load()` — the entity table itself is the namespace.
-57. The dedicated state persistence uses the column mapping to read/write the correct properties on the TypeORM entity.
-58. When `columns` is omitted from `TypeORMAggregateStateTableConfig`, defaults to `{ aggregateId: "aggregateId", state: "state", version: "version" }`.
-59. Dedicated state persistence participates in the same UoW transaction as shared persistence via the shared `TypeORMTransactionStore`.
-60. `save()` uses `findOne` + version check: if entity exists and version doesn't match, throws `ConcurrencyError`; if entity doesn't exist and `expectedVersion !== 0`, throws `ConcurrencyError`.
-61. `load()` uses `findOne` and returns `{ state: JSON.parse(stateValue), version }` or `null`.
+50. `stateStoreFor(aggregateName)` returns a `StateStoredAggregatePersistence` bound to that aggregate's dedicated TypeORM entity.
+51. `stateStoreFor(aggregateName)` throws if no dedicated table was configured for that aggregate in `config.aggregateStates`.
+52. The dedicated state persistence ignores the `aggregateName` parameter passed to `save()`/`load()` — the entity table itself is the namespace.
+53. The dedicated state persistence uses the column mapping to read/write the correct properties on the TypeORM entity.
+54. When `columns` is omitted from `TypeORMAggregateStateTableConfig`, defaults to `{ aggregateId: "aggregateId", state: "state", version: "version" }`.
+55. Dedicated state persistence participates in the same UoW transaction as shared persistence via the shared `TypeORMTransactionStore`.
+56. `save()` uses `findOne` + version check: if entity exists and version doesn't match, throws `ConcurrencyError`; if entity doesn't exist and `expectedVersion !== 0`, throws `ConcurrencyError`.
+57. `load()` uses `findOne` and returns `{ state: JSON.parse(stateValue), version }` or `null`.
 
 ### Migration Generation
 
-62. `generateTypeORMMigration(dialect)` returns a SQL string with `CREATE TABLE IF NOT EXISTS` and `CREATE UNIQUE INDEX IF NOT EXISTS` statements.
-63. Default (no options) includes shared tables: `noddde_events`, `noddde_aggregate_states`, `noddde_saga_states`.
-64. When `options.sharedTables.snapshots` or `.outbox` is `true`, the corresponding table is included.
-65. When `options.aggregateStateTables` is provided, generates `CREATE TABLE IF NOT EXISTS` for each custom table with the configured column names.
-66. Output is dialect-aware: PostgreSQL uses `SERIAL`/`JSONB`/`TEXT`, MySQL uses `INT AUTO_INCREMENT`/`JSON`/`VARCHAR(255)`, SQLite uses `INTEGER`/`TEXT`, MSSQL uses `INT IDENTITY(1,1)`/`NVARCHAR(MAX)`/`NVARCHAR(255)`.
-67. All DDL statements use `IF NOT EXISTS` for idempotent migrations.
+58. `generateTypeORMMigration(dialect)` returns a SQL string with `CREATE TABLE IF NOT EXISTS` and `CREATE UNIQUE INDEX IF NOT EXISTS` statements.
+59. Default (no options) includes shared tables: `noddde_events`, `noddde_aggregate_states`, `noddde_saga_states`.
+60. When `options.sharedTables.snapshots` or `.outbox` is `true`, the corresponding table is included.
+61. When `options.aggregateStateTables` is provided, generates `CREATE TABLE IF NOT EXISTS` for each custom table with the configured column names.
+62. Output is dialect-aware: PostgreSQL uses `SERIAL`/`JSONB`/`TEXT`, MySQL uses `INT AUTO_INCREMENT`/`JSON`/`VARCHAR(255)`, SQLite uses `INTEGER`/`TEXT`, MSSQL uses `INT IDENTITY(1,1)`/`NVARCHAR(MAX)`/`NVARCHAR(255)`.
+63. All DDL statements use `IF NOT EXISTS` for idempotent migrations.
 
 ### Backwards Compatibility
 
-68. `createTypeORMPersistence(dataSource)` continues to work with the same signature and return type (`TypeORMPersistenceInfrastructure`).
-69. `createTypeORMPersistence` delegates to `TypeORMAdapter` internally (builder wraps the old behavior).
-70. The `TypeORMPersistenceInfrastructure` return type is unchanged.
-71. `createTypeORMPersistence` is marked `@deprecated` in JSDoc, recommending `TypeORMAdapter` instead.
+64. `createTypeORMPersistence(dataSource)` continues to work with the same signature and return type (`TypeORMPersistenceInfrastructure`).
+65. `createTypeORMPersistence` delegates to `createTypeORMAdapter` internally with `{ snapshotStore: true, outboxStore: true }`.
+66. The `TypeORMPersistenceInfrastructure` return type is unchanged.
+67. `createTypeORMPersistence` is marked `@deprecated` in JSDoc, recommending `createTypeORMAdapter` instead.
 
 ## Invariants
 
@@ -423,8 +491,8 @@ export class NodddeOutboxEntryEntity {
 - [ ] Event-sourced save detects concurrent writes via the unique index on `[aggregateName, aggregateId, sequenceNumber]`.
 - [ ] Advisory locker constructor rejects unsupported database types immediately.
 - [ ] Dedicated state persistence instances share the same txStore as shared persistence.
-- [ ] `build()` fails fast if required stores (event, saga) are not configured.
-- [ ] `stateStoreFor()` fails fast if aggregate name was not registered.
+- [ ] `stateStoreFor()` fails fast if aggregate name was not configured in `aggregateStates`.
+- [ ] Event store, state store, saga store, and UoW are always present regardless of config.
 
 ## Edge Cases
 
@@ -443,9 +511,8 @@ export class NodddeOutboxEntryEntity {
 - **MSSQL release of unheld lock**: `sp_releaseapplock` raises error 1223; silently caught for idempotency.
 - **Outbox save with empty entries array**: No-op, no database call.
 - **markPublishedByEventIds with no matches**: No-op, no error.
-- **Builder with no event store**: `.build()` throws `"TypeORMAdapter requires withEventStore() to be called before build()"`.
-- **Builder with no saga store**: `.build()` throws `"TypeORMAdapter requires withSagaStore() to be called before build()"`.
-- **stateStoreFor unknown aggregate**: Throws `"No dedicated state table configured for aggregate \"Foo\". Call .withAggregateStateTable(\"Foo\", ...) before build()."`.
+- **No config provided**: `createTypeORMAdapter(dataSource)` returns only the always-present stores; no `snapshotStore`, `outboxStore`, or `stateStoreFor` on the result.
+- **stateStoreFor unknown aggregate**: Throws `"No dedicated state table configured for aggregate \"Foo\". Add \"Foo\" to the aggregateStates config."`.
 - **Dedicated and shared persistence in same UoW**: Both participate in the same transaction via shared txStore.
 - **Multiple dedicated tables in same UoW**: All share the same transaction.
 - **Migration generation with empty options**: Returns SQL for all three shared tables.
@@ -508,16 +575,19 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import "reflect-metadata";
 import { DataSource } from "typeorm";
 import { ConcurrencyError } from "@noddde/core";
-import { createTypeORMPersistence } from "@noddde/typeorm";
 import {
+  createTypeORMAdapter,
   NodddeEventEntity,
   NodddeAggregateStateEntity,
   NodddeSagaStateEntity,
+  NodddeSnapshotEntity,
   NodddeOutboxEntryEntity,
 } from "@noddde/typeorm";
 
 let dataSource: DataSource;
-let infra: ReturnType<typeof createTypeORMPersistence>;
+let infra: ReturnType<
+  typeof createTypeORMAdapter<{ snapshotStore: true; outboxStore: true }>
+>;
 
 async function setupDb() {
   dataSource = new DataSource({
@@ -527,12 +597,16 @@ async function setupDb() {
       NodddeEventEntity,
       NodddeAggregateStateEntity,
       NodddeSagaStateEntity,
+      NodddeSnapshotEntity,
       NodddeOutboxEntryEntity,
     ],
     synchronize: true,
   });
   await dataSource.initialize();
-  infra = createTypeORMPersistence(dataSource);
+  infra = createTypeORMAdapter(dataSource, {
+    snapshotStore: true,
+    outboxStore: true,
+  });
 }
 
 async function teardownDb() {
@@ -949,8 +1023,7 @@ it("should return empty array when afterVersion >= stream length", async () => {
 ### Outbox store: save and load unpublished entries
 
 ```ts
-import { NodddeOutboxEntryEntity } from "@noddde/typeorm";
-// Note: NodddeOutboxEntryEntity must be added to the setupDb entities array.
+// NodddeOutboxEntryEntity and NodddeSnapshotEntity are already registered in setupDb.
 
 describe("TypeORMOutboxStore", () => {
   beforeEach(setupDb);
