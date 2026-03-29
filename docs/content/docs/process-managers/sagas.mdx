@@ -10,18 +10,22 @@ A **saga** (also called a process manager) is a stateful, event-driven workflow 
 A saga is the structural inverse of an aggregate: an aggregate receives commands and produces events; a saga receives events and produces commands.
 
 <Callout type="info">
-  You can scaffold a saga with the CLI: `noddde new saga PaymentProcessing`. See [CLI Reference](/docs/getting-started/cli#noddde-new-saga-name) for details.
+  You can scaffold a saga with the CLI: `noddde new saga PaymentProcessing`. See
+  [CLI Reference](/docs/getting-started/cli#noddde-new-saga-name) for details.
 </Callout>
 
-```
-  Aggregate                          Saga
-  =========                          ====
-
-  Command ──> decide ──> Event(s)    Event ──> react ──> Command(s)
-                 |                               |
-                 v                               v
-              State                           State
-```
+<Mermaid
+  chart={`graph LR
+  subgraph Aggregate
+    C["Command"] --> D["decide"] --> E["Event(s)"]
+    D --> S1["State"]
+  end
+  subgraph Saga
+    EV["Event"] --> R["react"] --> CMD["Command(s)"]
+    R --> S2["State"]
+  end
+`}
+/>
 
 ### Aggregate vs Saga
 
@@ -364,7 +368,9 @@ const MySaga = defineSaga<MySagaDef, OrderSagaId>({
   on: {
     OrderPlaced: {
       id: (event) => event.payload.orderId as OrderSagaId,
-      handle: (event, state) => ({ /* ... */ }),
+      handle: (event, state) => ({
+        /* ... */
+      }),
     },
   },
 });
@@ -384,29 +390,27 @@ The full saga runtime lifecycle proceeds as follows:
 8. The framework persists the new state and dispatches the returned commands
 9. Those commands trigger aggregates, which emit events, which may trigger the saga again
 
-```
-Event ──> on[event.name].id ──> Load State ──> on[event.name].handle ──> SagaReaction
-                                                                            |
-                                                                     ┌──────┴──────┐
-                                                                     v             v
-                                                               Persist State   Dispatch Commands
-                                                                                   |
-                                                                                   v
-                                                                            Aggregate(s)
-                                                                                   |
-                                                                                   v
-                                                                             New Event(s)
-                                                                                   |
-                                                                                   v
-                                                                             (cycle repeats)
-```
+<Mermaid
+  chart={`graph LR
+  E["Event"] --> ID["on[name].id"] --> LS["Load State"] --> H["on[name].handle"] --> SR["SagaReaction"]
+  SR --> PS["Persist State"]
+  SR --> DC["Dispatch Commands"]
+  DC --> AGG["Aggregate(s)"]
+  AGG --> NE["New Event(s)"]
+  NE -. "cycle repeats" .-> E
+`}
+/>
 
 ## Registering Sagas
 
 Sagas are registered in the `processModel` section of `defineDomain` -- a dedicated top-level key separate from `writeModel` and `readModel`:
 
 ```ts
-import { defineDomain, wireDomain, InMemorySagaPersistence } from "@noddde/engine";
+import {
+  defineDomain,
+  wireDomain,
+  InMemorySagaPersistence,
+} from "@noddde/engine";
 
 const ecommerceDomain = defineDomain<EcommerceInfrastructure>({
   writeModel: {
@@ -423,14 +427,18 @@ const ecommerceDomain = defineDomain<EcommerceInfrastructure>({
 });
 
 const domain = await wireDomain(ecommerceDomain, {
-  infrastructure: () => ({ /* ... */ }),
+  infrastructure: () => ({
+    /* ... */
+  }),
   aggregates: {
     persistence: () => new InMemoryEventSourcedAggregatePersistence(),
   },
   sagas: {
     persistence: () => new InMemorySagaPersistence(),
   },
-  buses: () => ({ /* ... */ }),
+  buses: () => ({
+    /* ... */
+  }),
 });
 ```
 

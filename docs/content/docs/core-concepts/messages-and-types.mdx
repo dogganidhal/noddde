@@ -15,16 +15,15 @@ In noddde, every interaction between components happens through **messages**. Th
 
 This separation is fundamental to the CQRS pattern that noddde implements. Commands flow into the write model (aggregates), events flow out of the write model and into the read model (projections), and queries flow into the read model to retrieve data.
 
-```
-   Command                    Event                     Query
-  (intent)                   (fact)                  (question)
-     |                         |                         |
-     v                         v                         v
- +-----------+          +-------------+          +-------------+
- | Aggregate |  emits   | Projection  |  serves  |   Caller    |
- | (write)   | -------> | (read)      | -------> |             |
- +-----------+          +-------------+          +-------------+
-```
+<Mermaid
+  chart={`graph LR
+  CMD["Command (intent)"] --> AGG["Aggregate (write)"]
+  AGG -- "emits" --> EVT["Event (fact)"]
+  EVT --> PROJ["Projection (read)"]
+  Q["Query (question)"] --> PROJ
+  PROJ -- "serves" --> CALLER["Caller"]
+`}
+/>
 
 ## Anatomy of a Message
 
@@ -458,53 +457,15 @@ With the bundle, every type is labeled. You can immediately see what each type r
 
 Here is the complete flow of type information through a noddde aggregate definition:
 
-```
-1. You define payload maps
-   +-----------------------------------+
-   |  { CreateBankAccount: void;       |
-   |    AuthorizeTransaction: {...} }  |
-   +----------------+------------------+
-                    |
-2. DefineCommands transforms to discriminated union
-   +----------------v------------------+
-   |  | { name: "CreateBankAccount";   |
-   |      targetAggregateId: string }  |
-   |  | { name: "AuthorizeTransaction";|
-   |      targetAggregateId: string;   |
-   |      payload: {...} }             |
-   +----------------+------------------+
-                    |
-3. You bundle into AggregateTypes
-   +----------------v------------------+
-   |  { state: BankAccountState;       |
-   |    commands: BankingCommand;      |
-   |    events: BankingEvent;          |
-   |    infrastructure: {} }           |
-   +----------------+------------------+
-                    |
-4. defineAggregate uses the bundle to type handler maps
-   +----------------v------------------+
-   |  commands: {                      |
-   |    CreateBankAccount:             |
-   |      (command, state, infra) =>   |
-   |      // command: narrowed type    |
-   |      // state: BankAccountState   |
-   |      // return: BankingEvent      |
-   |    AuthorizeTransaction:          |
-   |      (command, state, infra) =>   |
-   |      // command: narrowed type    |
-   |      // state: BankAccountState   |
-   |      // return: BankingEvent      |
-   |  }                                |
-   |  apply: {                         |
-   |    BankAccountCreated:            |
-   |      (event, state) =>            |
-   |      // event: { id: string }     |
-   |      // state: BankAccountState   |
-   |      // return: BankAccountState  |
-   |  }                                |
-   +-----------------------------------+
-```
+<Mermaid
+  chart={`graph TD
+  A["1. Payload maps\n{ CreateBankAccount: void;\n  AuthorizeTransaction: ... }"]
+  B["2. DefineCommands\nDiscriminated union with\nname + targetAggregateId + payload"]
+  C["3. AggregateTypes bundle\n{ state, commands, events, infrastructure }"]
+  D["4. defineAggregate\nTyped handler maps:\ncommands + apply"]
+  A --> B --> C --> D
+`}
+/>
 
 At every step, TypeScript infers the types from the previous step. You declare the payload maps and the types bundle; the framework handles the rest.
 

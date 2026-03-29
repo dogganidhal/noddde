@@ -44,3 +44,13 @@ A map of command handlers keyed by command name. Each handler implements the "de
 Defined in: [ddd/aggregate-root.ts:101](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/aggregate-root.ts#L101)
 
 A map of apply handlers keyed by event name. Each handler implements the "evolve" phase. Must be pure.
+
+---
+
+### upcasters?
+
+> `optional` **upcasters**: [`UpcasterMap`](/api/type-aliases/upcastermap/)\<`T`\[`"events"`\]\>
+
+Defined in: [ddd/aggregate-root.ts:112](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/aggregate-root.ts#L112)
+
+Optional map of event upcaster chains for schema evolution. Each chain transforms events from older versions to the current schema. Applied during event replay before apply handlers.

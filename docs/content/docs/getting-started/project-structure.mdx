@@ -9,72 +9,90 @@ When you run `noddde new project <name>` or `noddde new domain <name>`, the CLI 
 
 A project generated with `noddde new project HotelBooking` produces:
 
-```
-hotel-booking/
-├── package.json                    # dependencies + scripts
-├── tsconfig.json                   # TypeScript config
-├── vitest.config.mts               # test config
-├── .gitignore
-└── src/
-    ├── main.ts                     # wireDomain — runtime entry point
-    ├── infrastructure/
-    │   └── index.ts                # domain infrastructure interface
-    ├── domain/
-    │   ├── domain.ts               # defineDomain — pure domain structure
-    │   ├── event-model/
-    │   │   ├── index.ts
-    │   │   └── hotel-booking-created.ts
-    │   ├── write-model/
-    │   │   ├── index.ts
-    │   │   └── aggregates/
-    │   │       └── hotel-booking/
-    │   │           ├── index.ts
-    │   │           ├── state.ts
-    │   │           ├── hotel-booking.ts
-    │   │           ├── commands/
-    │   │           └── command-handlers/
-    │   ├── read-model/
-    │   │   └── projections/
-    │   │       └── hotel-booking/
-    │   │           ├── index.ts
-    │   │           ├── hotel-booking.ts
-    │   │           ├── queries/
-    │   │           ├── query-handlers/
-    │   │           └── view-reducers/
-    │   └── process-model/          # ready for sagas
-    └── __tests__/
-        └── hotel-booking.test.ts   # sample test
-```
+<Files>
+  <Folder name="hotel-booking" defaultOpen>
+    <File name="package.json" />
+    <File name="tsconfig.json" />
+    <File name="vitest.config.mts" />
+    <File name=".gitignore" />
+    <Folder name="src" defaultOpen>
+      <File name="main.ts" />
+      <Folder name="infrastructure">
+        <File name="index.ts" />
+      </Folder>
+      <Folder name="domain" defaultOpen>
+        <File name="domain.ts" />
+        <Folder name="event-model">
+          <File name="index.ts" />
+          <File name="hotel-booking-created.ts" />
+        </Folder>
+        <Folder name="write-model" defaultOpen>
+          <File name="index.ts" />
+          <Folder name="aggregates" defaultOpen>
+            <Folder name="hotel-booking">
+              <File name="index.ts" />
+              <File name="state.ts" />
+              <File name="hotel-booking.ts" />
+              <Folder name="commands" />
+              <Folder name="command-handlers" />
+            </Folder>
+          </Folder>
+        </Folder>
+        <Folder name="read-model" defaultOpen>
+          <Folder name="projections" defaultOpen>
+            <Folder name="hotel-booking">
+              <File name="index.ts" />
+              <File name="hotel-booking.ts" />
+              <Folder name="queries" />
+              <Folder name="query-handlers" />
+              <Folder name="view-reducers" />
+            </Folder>
+          </Folder>
+        </Folder>
+        <Folder name="process-model" />
+      </Folder>
+      <Folder name="__tests__">
+        <File name="hotel-booking.test.ts" />
+      </Folder>
+    </Folder>
+  </Folder>
+</Files>
 
 ## Layer by Layer
 
 ### Event Model
 
-```
-domain/event-model/
-├── index.ts                        # barrel re-exporting all event payloads
-└── hotel-booking-created.ts        # HotelBookingCreatedPayload interface
-```
+<Files>
+  <Folder name="domain/event-model" defaultOpen>
+    <File name="index.ts" />
+    <File name="hotel-booking-created.ts" />
+  </Folder>
+</Files>
 
 Event payloads are defined as standalone interfaces — one file per event. This directory is the shared source of truth for event shapes across the domain. The aggregate that produces each event assembles them into a `DefineEvents` union.
 
 ### Write Model
 
-```
-domain/write-model/
-├── index.ts                        # barrel re-exporting aggregates
-└── aggregates/
-    └── hotel-booking/
-        ├── index.ts                # barrel + DefineEvents/DefineCommands type unions
-        ├── state.ts                # HotelBookingState interface + initial state
-        ├── hotel-booking.ts        # defineAggregate + type bundle
-        ├── commands/
-        │   ├── index.ts
-        │   └── create-hotel-booking.ts   # command payload interface
-        └── command-handlers/
-            ├── index.ts
-            └── handle-create-hotel-booking.ts  # standalone handler function
-```
+<Files>
+  <Folder name="domain/write-model" defaultOpen>
+    <File name="index.ts" />
+    <Folder name="aggregates" defaultOpen>
+      <Folder name="hotel-booking" defaultOpen>
+        <File name="index.ts" />
+        <File name="state.ts" />
+        <File name="hotel-booking.ts" />
+        <Folder name="commands">
+          <File name="index.ts" />
+          <File name="create-hotel-booking.ts" />
+        </Folder>
+        <Folder name="command-handlers">
+          <File name="index.ts" />
+          <File name="handle-create-hotel-booking.ts" />
+        </Folder>
+      </Folder>
+    </Folder>
+  </Folder>
+</Files>
 
 State is defined in a separate `state.ts` file next to the aggregate definition. This keeps the state interface and initial values easy to find and import independently.
 
@@ -84,7 +102,9 @@ Each aggregate owns its type unions. The aggregate file imports event payloads f
 
 ```ts
 // command-handlers/handle-create-hotel-booking.ts
-export function handleCreateHotelBooking(command: { targetAggregateId: string }) {
+export function handleCreateHotelBooking(command: {
+  targetAggregateId: string;
+}) {
   return {
     name: "HotelBookingCreated" as const,
     payload: { id: command.targetAggregateId },
@@ -104,28 +124,36 @@ export const HotelBooking = defineAggregate<HotelBookingDef>({
 
 ### Read Model
 
-```
-domain/read-model/
-└── projections/
-    └── hotel-booking/
-        ├── index.ts                          # barrel exports
-        ├── hotel-booking.ts                  # defineProjection
-        ├── queries/
-        │   ├── index.ts                      # View interface + DefineQueries
-        │   └── get-hotel-booking.ts          # query payload interface
-        ├── query-handlers/
-        │   ├── index.ts
-        │   └── handle-get-hotel-booking.ts   # standalone query handler
-        └── view-reducers/
-            ├── index.ts
-            └── on-hotel-booking-created.ts   # standalone reduce function
-```
+<Files>
+  <Folder name="domain/read-model" defaultOpen>
+    <Folder name="projections" defaultOpen>
+      <Folder name="hotel-booking" defaultOpen>
+        <File name="index.ts" />
+        <File name="hotel-booking.ts" />
+        <Folder name="queries">
+          <File name="index.ts" />
+          <File name="get-hotel-booking.ts" />
+        </Folder>
+        <Folder name="query-handlers">
+          <File name="index.ts" />
+          <File name="handle-get-hotel-booking.ts" />
+        </Folder>
+        <Folder name="view-reducers">
+          <File name="index.ts" />
+          <File name="on-hotel-booking-created.ts" />
+        </Folder>
+      </Folder>
+    </Folder>
+  </Folder>
+</Files>
 
 Projections follow the same extraction pattern as aggregates. **Query handlers** and **view reducers** are standalone functions imported into the `defineProjection` `queryHandlers` and `on` maps:
 
 ```ts
 // view-reducers/on-hotel-booking-created.ts
-export function onHotelBookingCreated(event: { payload: { id: string } }): HotelBookingView {
+export function onHotelBookingCreated(event: {
+  payload: { id: string };
+}): HotelBookingView {
   return { id: event.payload.id };
 }
 
@@ -133,31 +161,35 @@ export function onHotelBookingCreated(event: { payload: { id: string } }): Hotel
 import { onHotelBookingCreated } from "./view-reducers/index.js";
 import { handleGetHotelBooking } from "./query-handlers/index.js";
 
-export const HotelBookingProjection = defineProjection<HotelBookingProjectionDef>({
-  on: {
-    HotelBookingCreated: {
-      id: (event) => event.payload.id,
-      reduce: onHotelBookingCreated,
+export const HotelBookingProjection =
+  defineProjection<HotelBookingProjectionDef>({
+    on: {
+      HotelBookingCreated: {
+        id: (event) => event.payload.id,
+        reduce: onHotelBookingCreated,
+      },
     },
-  },
-  queryHandlers: {
-    GetHotelBooking: handleGetHotelBooking,
-  },
-});
+    queryHandlers: {
+      GetHotelBooking: handleGetHotelBooking,
+    },
+  });
 ```
 
 ### Process Model
 
-```
-domain/process-model/
-└── booking-fulfillment/
-    ├── index.ts                          # barrel exports
-    ├── state.ts                          # BookingFulfillmentSagaState + initial state
-    ├── saga.ts                           # defineSaga with on map, imports handlers
-    └── transition-handlers/
-        ├── index.ts
-        └── on-start-event.ts             # standalone transition handler
-```
+<Files>
+  <Folder name="domain/process-model" defaultOpen>
+    <Folder name="booking-fulfillment" defaultOpen>
+      <File name="index.ts" />
+      <File name="state.ts" />
+      <File name="saga.ts" />
+      <Folder name="transition-handlers">
+        <File name="index.ts" />
+        <File name="on-start-event.ts" />
+      </Folder>
+    </Folder>
+  </Folder>
+</Files>
 
 Sagas follow the same extraction pattern. **Transition handlers** are standalone functions imported into the `defineSaga` `on` map. Each handler receives an event and the current saga state, and returns the new state plus optional commands to dispatch:
 
@@ -192,9 +224,11 @@ The `process-model/` directory is created empty when scaffolding a project or do
 
 ### Domain Definition
 
-```
-domain/domain.ts
-```
+<Files>
+  <Folder name="domain" defaultOpen>
+    <File name="domain.ts" />
+  </Folder>
+</Files>
 
 The `defineDomain` call captures the pure domain structure — aggregates, projections, and sagas — without any infrastructure or runtime concerns:
 
@@ -209,10 +243,11 @@ This is a sync identity function. It returns the input with full type inference.
 
 ### Infrastructure
 
-```
-infrastructure/
-└── index.ts
-```
+<Files>
+  <Folder name="infrastructure" defaultOpen>
+    <File name="index.ts" />
+  </Folder>
+</Files>
 
 Defines the domain-wide infrastructure interface that gets passed to all handlers:
 
@@ -224,15 +259,17 @@ export interface HotelBookingInfrastructure extends Infrastructure {
 
 ### Main Entry Point
 
-```
-main.ts
-```
+<Files>
+  <File name="main.ts" />
+</Files>
 
 Wires the domain to runtime infrastructure using `wireDomain`:
 
 ```ts
 const domain = await wireDomain(hotelBookingDomain, {
-  infrastructure: () => ({ /* implementations */ }),
+  infrastructure: () => ({
+    /* implementations */
+  }),
   buses: () => ({
     commandBus: new InMemoryCommandBus(),
     eventBus: new EventEmitterEventBus(),

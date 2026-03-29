@@ -93,7 +93,7 @@ export interface EventSourcedAggregatePersistence {
    * @param aggregateName - The aggregate type name (used as a namespace).
    * @param aggregateId - The unique identifier of the aggregate instance.
    */
-  load(aggregateName: string, aggregateId: string): Promise<Event[]>;
+  load(aggregateName: string, aggregateId: ID): Promise<Event[]>;
 }
 
 /**
@@ -131,5 +131,5 @@ export interface SagaPersistence {
    * @param sagaName - The saga type name (used as a namespace).
    * @param sagaId - The unique identifier of the saga instance.
    */
-  load(sagaName: string, sagaId: string): Promise<any | undefined | null>;
+  load(sagaName: string, sagaId: ID): Promise<any | undefined | null>;
 }

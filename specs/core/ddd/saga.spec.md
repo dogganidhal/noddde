@@ -44,10 +44,10 @@ docs:
 
 - **`SagaEventHandler<TEvent, TState, TCommands, TInfrastructure>`** is a function type:
 
-  - Parameters: `(event: TEvent, state: TState, infrastructure: TInfrastructure & CQRSInfrastructure)`.
+  - Parameters: `(event: TEvent, state: TState, infrastructure: TInfrastructure & CQRSInfrastructure & FrameworkInfrastructure)`.
   - Return: `SagaReaction<TState, TCommands> | Promise<SagaReaction<TState, TCommands>>`.
   - Receives the FULL event (not just payload), like projection reducers.
-  - Infrastructure is merged with `CQRSInfrastructure` via intersection.
+  - Infrastructure is merged with `CQRSInfrastructure` and `FrameworkInfrastructure` via intersection (providing bus access and logger).
 
 - **`SagaOnEntry<TEvent, TState, TCommands, TInfrastructure, TSagaId>`** is an object type that bundles identity extraction and handler for one event:
 
@@ -73,7 +73,7 @@ docs:
 
 ## Behavioral Requirements
 
-- Saga event handlers receive the FULL event object (with narrowed type), the current saga state, and infrastructure merged with CQRS buses.
+- Saga event handlers receive the FULL event object (with narrowed type), the current saga state, and infrastructure merged with CQRS buses and framework infrastructure (logger).
 - Handlers return a `SagaReaction` containing the new state and optional commands to dispatch.
 - `startedBy` must be a non-empty array (tuple with at least one element). This is enforced by the tuple type `[T, ...T[]]`.
 - The `on` map is partial -- only events the saga handles need entries. Unhandled events are silently ignored at runtime.
@@ -91,7 +91,7 @@ docs:
 - `startedBy` has at least one element (non-empty tuple).
 - `startedBy` elements must be valid event names from the saga's event union.
 - `SagaReaction.commands` is optional; when omitted, no commands are dispatched.
-- Infrastructure parameter in handlers always includes `CQRSInfrastructure` via `&`.
+- Infrastructure parameter in handlers always includes `CQRSInfrastructure` and `FrameworkInfrastructure` via `&`.
 - `defineSaga` returns the exact same object reference.
 - `SagaTypes["commands"]` is constrained to `Command` (not `AggregateCommand`), allowing sagas to dispatch both aggregate and standalone commands.
 
@@ -257,6 +257,7 @@ import type {
   Command,
   Infrastructure,
   CQRSInfrastructure,
+  FrameworkInfrastructure,
 } from "@noddde/core";
 
 describe("SagaEventHandler", () => {
@@ -266,7 +267,7 @@ describe("SagaEventHandler", () => {
   type MyCommand = Command & { name: "ProcessOrder" };
 
   interface MyInfra extends Infrastructure {
-    logger: { log(msg: string): void };
+    notifier: { notify(msg: string): void };
   }
 
   type Handler = SagaEventHandler<
@@ -284,9 +285,9 @@ describe("SagaEventHandler", () => {
     expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<MyState>();
   });
 
-  it("should receive infrastructure merged with CQRSInfrastructure", () => {
+  it("should receive infrastructure merged with CQRSInfrastructure and FrameworkInfrastructure", () => {
     expectTypeOf<Parameters<Handler>[2]>().toEqualTypeOf<
-      MyInfra & CQRSInfrastructure
+      MyInfra & CQRSInfrastructure & FrameworkInfrastructure
     >();
   });
 

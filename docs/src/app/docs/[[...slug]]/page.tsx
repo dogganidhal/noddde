@@ -7,6 +7,8 @@ import {
 } from "fumadocs-ui/page";
 import { notFound } from "next/navigation";
 import defaultMdxComponents from "fumadocs-ui/mdx";
+import { File, Folder, Files } from "fumadocs-ui/components/files";
+import { Mermaid } from "@/components/mermaid";
 import type { Metadata } from "next";
 
 const BASE_URL = "https://noddde.dev";
@@ -25,7 +27,9 @@ export default async function Page(props: {
       <DocsTitle>{page.data.title}</DocsTitle>
       <DocsDescription>{page.data.description}</DocsDescription>
       <DocsBody>
-        <MDX components={{ ...defaultMdxComponents }} />
+        <MDX
+          components={{ ...defaultMdxComponents, Files, File, Folder, Mermaid }}
+        />
       </DocsBody>
     </DocsPage>
   );

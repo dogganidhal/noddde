@@ -7,7 +7,7 @@ title: "Projection"
 
 > **Projection**\<`T`\> = `object`
 
-Defined in: [ddd/projection.ts:132](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/projection.ts#L132)
+Defined in: [ddd/projection.ts:161](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/projection.ts#L161)
 
 A projection that transforms domain events into a read-optimized view and co-locates query handlers for serving that view. Projections are the read side of CQRS.
 
@@ -21,13 +21,13 @@ Note: `Projection` is declared as an `interface` in source but documented here a
 
 ## Properties
 
-### reducers
+### on
 
-> **reducers**: `ReducerMap`\<`T`\>
+> **on**: `ProjectionOnMap`\<`T`\>
 
-Defined in: [ddd/projection.ts:137](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/projection.ts#L137)
+Defined in: [ddd/projection.ts:168](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/projection.ts#L168)
 
-A map of reducer functions keyed by event name. Each reducer receives the narrowed event type and current view, returning the updated view.
+A partial map of event handlers keyed by event name. Each entry bundles an `id` function (extracts the view instance ID from the event) and a `reduce` function (transforms the current view based on the event). Only events the projection cares about need entries — unhandled events are silently ignored.
 
 ---
 
@@ -35,7 +35,7 @@ A map of reducer functions keyed by event name. Each reducer receives the narrow
 
 > **queryHandlers**: `QueryHandlerMap`\<`T`\>
 
-Defined in: [ddd/projection.ts:146](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/projection.ts#L146)
+Defined in: [ddd/projection.ts:178](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/projection.ts#L178)
 
 A map of query handlers keyed by query name. Handlers serve the view built by the reducers. All handlers are optional. When `T` has a `viewStore` field, handlers receive `{ views }` merged into their infrastructure parameter.
 
@@ -45,19 +45,9 @@ A map of query handlers keyed by query name. Handlers serve the view built by th
 
 > `optional` **initialView**: `T`\[`"view"`\]
 
-Defined in: [ddd/projection.ts:153](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/projection.ts#L153)
+Defined in: [ddd/projection.ts:185](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/projection.ts#L185)
 
 Optional default view state for new view instances. When `viewStore.load()` returns `undefined`/`null` for a new entity, `initialView` is used as the starting state for the reducer.
-
----
-
-### identity?
-
-> `optional` **identity**: `IdentityMap`\<`T`\>
-
-Defined in: [ddd/projection.ts:162](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/projection.ts#L162)
-
-Maps each event name to a function that extracts the view instance ID. Enables per-entity auto-persistence. Must be exhaustive when provided.
 
 ---
 
@@ -65,7 +55,7 @@ Maps each event name to a function that extracts the view instance ID. Enables p
 
 > `optional` **viewStore**: `ViewStoreFactory`\<`T`\>
 
-Defined in: [ddd/projection.ts:174](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/projection.ts#L174)
+Defined in: [ddd/projection.ts:192](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/projection.ts#L192)
 
 Factory that resolves the view store from infrastructure. Synchronous only. Called during `Domain.init()` with the resolved infrastructure.
 
@@ -75,6 +65,6 @@ Factory that resolves the view store from infrastructure. Synchronous only. Call
 
 > `optional` **consistency**: `"eventual"` \| `"strong"`
 
-Defined in: [ddd/projection.ts:184](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/projection.ts#L184)
+Defined in: [ddd/projection.ts:202](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/projection.ts#L202)
 
 Consistency mode for view persistence. `"eventual"` (default): views updated asynchronously via event bus. `"strong"`: views updated within the same UoW as the originating command.

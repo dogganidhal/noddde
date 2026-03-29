@@ -9,24 +9,24 @@ description: How noddde separates write and read models using CQRS and uses even
 
 noddde organizes a domain into three sides:
 
-```
-                 Write Side                           Read Side
-           =====================               =====================
-
-   Command --> [ Aggregate ] --> Event(s) --> [ Projection ] <-- Query
-                   |                  |             |
-                   v                  |             v
-            Event Store /             |      Read Database /
-            State Store               |      View Tables
-                                      |
-                                Process Side
-                           =====================
-                                      |
-                               [ Saga ] --> Command(s)
-                                  |
-                                  v
-                           Saga State Store
-```
+<Mermaid
+  chart={`graph LR
+  subgraph Write Side
+    CMD["Command"] --> AGG["Aggregate"]
+    AGG --> ES["Event Store /\nState Store"]
+  end
+  AGG -- "Event(s)" --> PROJ
+  AGG -- "Event(s)" --> SAGA
+  subgraph Read Side
+    Q["Query"] --> PROJ["Projection"]
+    PROJ --> VT["View Tables"]
+  end
+  subgraph Process Side
+    SAGA["Saga"] --> CMD2["Command(s)"]
+    SAGA --> SS["Saga State Store"]
+  end
+`}
+/>
 
 - **Write Side** -- Aggregates receive commands, enforce business rules, and emit events.
 - **Process Side** -- Sagas react to events and dispatch commands across aggregates.

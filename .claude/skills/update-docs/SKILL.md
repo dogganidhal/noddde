@@ -61,15 +61,15 @@ This catches pages not listed in the `docs` frontmatter — for example, a `conc
 
 Add any discovered pages NOT already in the `docs` list to the working set, but mark them as "discovered" (handle with more caution — they may only mention the export in passing).
 
-### Strategy 3: Check auto-generated API reference
+### Strategy 3: Check API reference pages
 
 Search `docs/src/content/docs/api/` for files matching the spec's exports:
 
 ```bash
-ls docs/src/content/docs/api/*/
+grep -rl "ExportName1\|ExportName2" docs/src/content/docs/api/ --include="*.md"
 ```
 
-**Do NOT edit auto-generated API reference files.** Only flag them in the report if the API surface changed (new exports added, existing signatures changed).
+These are **hand-maintained Markdown files** (not auto-generated). They must be updated whenever the API surface changes. Add any matching files to the working set.
 
 ## Step 3: Classify Documentation Impact
 
@@ -225,13 +225,53 @@ Skip this step when:
 - Only existing page content changed (no structural changes)
 - No pages were created, deleted, or renamed
 
-## Step 7: Flag API Reference Changes
+## Step 7: Update API Reference Pages
+
+The API reference pages under `docs/src/content/docs/api/` are **hand-maintained Markdown files**. They must be updated whenever the API surface changes.
 
 If the spec added new exports, removed exports, or changed existing signatures:
 
-1. List the affected auto-generated API pages in `docs/src/content/docs/api/`
-2. Note these in the report as needing regeneration
-3. **Do NOT manually edit these files** — they are auto-generated
+### 7a: Update existing API reference pages
+
+For each affected API reference page found in Strategy 3:
+
+1. Read the current `.md` file
+2. Compare its documented properties, methods, and signatures against the actual source code
+3. Update:
+   - **Property names** — if a field was renamed (e.g., `reducers` → `on`), update the property heading and description
+   - **Property types** — if a type changed (e.g., `string` → `ID`), update the type annotation
+   - **Added fields** — add new `### fieldName` sections with type, source line reference, and description
+   - **Removed fields** — remove the section entirely (no deprecation shims in API reference)
+   - **Source line numbers** — update `Defined in:` links to point to the correct line in source
+4. Preserve the file's frontmatter and overall format
+
+**Format for property entries** (follow existing pages as a template):
+
+```markdown
+### propertyName
+
+> **propertyName**: `TypeAnnotation`
+
+Defined in: [path/to/source.ts:LINE](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/path/to/source.ts#LLINE)
+
+Description of what this property does.
+```
+
+### 7b: Create new API reference pages
+
+When the spec adds a **new exported type or interface** that has no existing API reference page:
+
+1. Determine the correct subdirectory:
+   - `interfaces/` for `interface` declarations
+   - `type-aliases/` for `type` declarations
+   - `classes/` for `class` declarations
+   - `functions/` for exported functions
+2. Create the `.md` file following the format of existing pages in that directory (read one for reference)
+3. Include all public properties/methods with types, source line references, and descriptions
+
+### 7c: Remove obsolete API reference pages
+
+When the spec removes an export entirely, delete the corresponding API reference page.
 
 ## Step 8: Documentation Update Report
 
@@ -245,10 +285,13 @@ If the spec added new exports, removed exports, or changed existing signatures:
   Pages created: <N>
     - docs/content/docs/<category>/<name>.mdx (new stub)
 
-  API reference: <status>
-    - <N> auto-generated pages may need regeneration (exports changed: <list>)
+  API reference pages updated: <N>
+    - docs/src/content/docs/api/<subdir>/<Name>.md (<summary of changes>)
     — OR —
-    - No API surface changes — auto-generated docs are up to date
+    - No API surface changes — API reference docs are up to date
+
+  API reference pages created: <N>
+    - docs/src/content/docs/api/<subdir>/<Name>.md (new export)
 
   LLM discoverability:
     - llms.txt updated: added <N> entries, removed <N> entries

@@ -3,7 +3,7 @@ title: "Infrastructure & CQRSInfrastructure"
 module: infrastructure/index
 source_file: packages/core/src/infrastructure/index.ts
 status: implemented
-exports: [Infrastructure, CQRSInfrastructure]
+exports: [Infrastructure, FrameworkInfrastructure, CQRSInfrastructure]
 depends_on: [cqrs/command/command-bus, cqrs/query/query-bus, edd/event-bus]
 docs:
   - infrastructure/overview.mdx
@@ -20,6 +20,10 @@ docs:
 - **`Infrastructure`** is a type alias for `{}` (empty object type).
   - It serves as the base constraint for all infrastructure type parameters.
   - Users extend it by declaring interfaces that include their dependencies.
+- **`FrameworkInfrastructure`** is an interface with one field:
+  - `logger: Logger` -- the framework logger instance, available to all handlers.
+  - Merged into every handler's `infrastructure` parameter by the engine via intersection (`&`).
+  - Handlers can use `infrastructure.logger` without declaring it in their custom infrastructure type.
 - **`CQRSInfrastructure`** is an interface with three fields:
   - `commandBus: CommandBus` -- for dispatching commands.
   - `eventBus: EventBus` -- for publishing events.
@@ -28,15 +32,17 @@ docs:
 ## Behavioral Requirements
 
 - `Infrastructure` being `{}` means any object type is assignable to it (it is the top of the infrastructure type hierarchy).
-- `CQRSInfrastructure` provides the runtime-injected CQRS buses. It is merged with user infrastructure via intersection (`&`) in handlers that need bus access.
-- The separation between `Infrastructure` and `CQRSInfrastructure` ensures that pure handlers (like aggregate command handlers) do not accidentally depend on CQRS buses, while orchestration handlers (standalone commands, sagas) get them.
+- `FrameworkInfrastructure` provides the framework logger. It is merged with user infrastructure via intersection (`&`) in **all** handler types (event handlers, command handlers, query handlers, saga event handlers, standalone command handlers).
+- `CQRSInfrastructure` provides the runtime-injected CQRS buses. It is merged with user infrastructure via intersection (`&`) in handlers that need bus access (standalone command handlers, saga event handlers).
+- The separation ensures that pure handlers (like apply handlers) have no infrastructure access, all handlers get the framework logger via `FrameworkInfrastructure`, and orchestration handlers (standalone commands, sagas) additionally get CQRS buses.
 
 ## Invariants
 
 - `Infrastructure` is exactly `{}` -- it has no required fields.
 - Any interface extending `Infrastructure` is a valid infrastructure type.
+- `FrameworkInfrastructure` always has exactly one field: `logger`.
 - `CQRSInfrastructure` always has exactly three fields: `commandBus`, `eventBus`, `queryBus`.
-- `CQRSInfrastructure` is NOT a subtype of `Infrastructure` per se -- it is a separate interface that gets intersected where needed.
+- `FrameworkInfrastructure` and `CQRSInfrastructure` are NOT subtypes of `Infrastructure` per se -- they are separate interfaces that get intersected where needed.
 
 ## Edge Cases
 
@@ -53,9 +59,15 @@ docs:
   - `AggregateTypes["infrastructure"]`
   - `ProjectionTypes["infrastructure"]`
   - `SagaTypes["infrastructure"]`
-- `CQRSInfrastructure` is merged via `&` in:
-  - `StandaloneCommandHandler` second parameter: `TInfrastructure & CQRSInfrastructure`
-  - `SagaEventHandler` third parameter: `TInfrastructure & CQRSInfrastructure`
+- `FrameworkInfrastructure` is merged via `&` in **all** handler types:
+  - `EventHandler` second parameter: `TInfrastructure & FrameworkInfrastructure`
+  - `CommandHandler` (aggregate) third parameter: `TInfrastructure & FrameworkInfrastructure`
+  - `QueryHandler` second parameter: `TInfrastructure & FrameworkInfrastructure`
+  - `StandaloneCommandHandler` second parameter: `TInfrastructure & CQRSInfrastructure & FrameworkInfrastructure`
+  - `SagaEventHandler` third parameter: `TInfrastructure & CQRSInfrastructure & FrameworkInfrastructure`
+- `CQRSInfrastructure` is additionally merged via `&` in:
+  - `StandaloneCommandHandler` second parameter
+  - `SagaEventHandler` third parameter
 
 ## Test Scenarios
 

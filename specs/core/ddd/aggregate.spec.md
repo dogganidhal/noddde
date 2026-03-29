@@ -46,15 +46,17 @@ docs:
 
 - **`CommandHandler<TCommand, TState, TEvents, TInfrastructure>`** is a function type:
 
-  - Parameters: `(command: TCommand, state: TState, infrastructure: TInfrastructure)`.
+  - Parameters: `(command: TCommand, state: TState, infrastructure: TInfrastructure & FrameworkInfrastructure)`.
   - Return: `TEvents | TEvents[] | Promise<TEvents | TEvents[]>`.
   - `TCommand extends AggregateCommand<ID>`, `TEvents extends Event`, `TInfrastructure extends Infrastructure` (defaults to `Infrastructure`).
+  - Infrastructure is merged with `FrameworkInfrastructure` via intersection, giving command handlers access to `logger`.
 
 - **`Aggregate<T extends AggregateTypes>`** is an interface with three fields:
 
   - `initialState: T["state"]` -- the zero-value state.
   - `commands: CommandHandlerMap<T>` -- a map of command handlers keyed by command `name`, where each handler is typed with `Extract<T["commands"], { name: K }>`.
   - `apply: ApplyHandlerMap<T>` -- a map of apply handlers keyed by event `name`, where each handler is typed with `Extract<T["events"], { name: K }>`.
+  - `upcasters?: UpcasterMap<T["events"]>` -- optional map of event upcaster chains for schema evolution. See the upcaster spec for details.
 
 - **`defineAggregate<T>(config): Aggregate<T>`** -- identity function returning `config` as-is, providing type inference.
 

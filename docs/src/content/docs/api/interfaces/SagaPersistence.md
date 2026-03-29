@@ -55,7 +55,7 @@ Loads the current state of a saga instance. Returns `undefined` or `null` if no 
 
 ##### sagaId
 
-`string`
+[`ID`](/api/type-aliases/id/)
 
 #### Returns
 

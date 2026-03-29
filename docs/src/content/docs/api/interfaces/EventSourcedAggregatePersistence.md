@@ -27,7 +27,7 @@ Loads the full event stream for an aggregate instance. Returns an empty array if
 
 ##### aggregateId
 
-`string`
+[`ID`](/api/type-aliases/id/)
 
 #### Returns
 
