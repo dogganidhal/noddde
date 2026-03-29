@@ -19,7 +19,8 @@ export {
 } from "./unit-of-work";
 export type { TypeORMTransactionStore } from "./unit-of-work";
 export {
-  TypeORMAdapter,
+  createTypeORMAdapter,
+  type TypeORMAdapterConfig,
   type TypeORMAdapterResult,
   type TypeORMAggregateStateTableConfig,
   type TypeORMStateTableColumnMap,
@@ -38,7 +39,7 @@ import type {
   SnapshotStore,
   OutboxStore,
 } from "@noddde/core";
-import { TypeORMAdapter } from "./builder";
+import { createTypeORMAdapter } from "./builder";
 
 /**
  * Result of {@link createTypeORMPersistence}.
@@ -55,7 +56,7 @@ export interface TypeORMPersistenceInfrastructure {
 /**
  * Creates a complete set of TypeORM-backed persistence implementations.
  *
- * @deprecated Use {@link TypeORMAdapter} builder instead for new code.
+ * @deprecated Use {@link createTypeORMAdapter} instead for new code.
  * This function is preserved for backwards compatibility and delegates
  * to the builder internally.
  *
@@ -103,20 +104,17 @@ export interface TypeORMPersistenceInfrastructure {
 export function createTypeORMPersistence(
   dataSource: DataSource,
 ): TypeORMPersistenceInfrastructure {
-  const result = new TypeORMAdapter(dataSource)
-    .withEventStore()
-    .withStateStore()
-    .withSagaStore()
-    .withSnapshotStore()
-    .withOutboxStore()
-    .build();
+  const result = createTypeORMAdapter(dataSource, {
+    snapshotStore: true,
+    outboxStore: true,
+  });
 
   return {
     eventSourcedPersistence: result.eventSourcedPersistence,
-    stateStoredPersistence: result.stateStoredPersistence!,
+    stateStoredPersistence: result.stateStoredPersistence,
     sagaPersistence: result.sagaPersistence,
-    snapshotStore: result.snapshotStore!,
-    outboxStore: result.outboxStore!,
+    snapshotStore: result.snapshotStore,
+    outboxStore: result.outboxStore,
     unitOfWorkFactory: result.unitOfWorkFactory,
   };
 }

@@ -8,11 +8,12 @@ import type {
   SnapshotStore,
   OutboxStore,
 } from "@noddde/core";
-import { DrizzleAdapter } from "./builder";
+import { createDrizzleAdapter } from "./builder";
 
 export { DrizzleSnapshotStore, DrizzleOutboxStore } from "./persistence";
 export {
-  DrizzleAdapter,
+  createDrizzleAdapter,
+  type DrizzleAdapterConfig,
   type DrizzleAdapterResult,
   type AggregateStateTableConfig,
   type StateTableColumnMap,
@@ -82,7 +83,7 @@ export interface DrizzlePersistenceInfrastructure {
  * (SQLite, PostgreSQL, MySQL) — the dialect is determined by the `db`
  * instance and `schema` tables you provide.
  *
- * @deprecated Use {@link DrizzleAdapter} builder instead for new code.
+ * @deprecated Use {@link createDrizzleAdapter} instead for new code.
  * This function is preserved for backwards compatibility and delegates
  * to the builder internally.
  *
@@ -123,23 +124,17 @@ export function createDrizzlePersistence(
   db: any,
   schema: DrizzleNodddeSchema,
 ): DrizzlePersistenceInfrastructure {
-  let builder = new DrizzleAdapter(db)
-    .withEventStore(schema.events)
-    .withStateStore(schema.aggregateStates)
-    .withSagaStore(schema.sagaStates);
-
-  if (schema.snapshots) {
-    builder = builder.withSnapshotStore(schema.snapshots);
-  }
-  if (schema.outbox) {
-    builder = builder.withOutboxStore(schema.outbox);
-  }
-
-  const result = builder.build();
+  const result = createDrizzleAdapter(db, {
+    eventStore: schema.events,
+    stateStore: schema.aggregateStates,
+    sagaStore: schema.sagaStates,
+    snapshotStore: schema.snapshots,
+    outboxStore: schema.outbox,
+  });
 
   return {
     eventSourcedPersistence: result.eventSourcedPersistence,
-    stateStoredPersistence: result.stateStoredPersistence!,
+    stateStoredPersistence: result.stateStoredPersistence,
     sagaPersistence: result.sagaPersistence,
     unitOfWorkFactory: result.unitOfWorkFactory,
     snapshotStore: result.snapshotStore,

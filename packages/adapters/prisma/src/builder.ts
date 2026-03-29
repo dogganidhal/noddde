@@ -43,37 +43,6 @@ export interface PrismaAggregateStateTableConfig {
   columns?: Partial<PrismaStateTableColumnMap>;
 }
 
-/**
- * Result of {@link PrismaAdapter.build}. Provides all persistence
- * implementations, a UoW factory, and per-aggregate state store access.
- */
-export interface PrismaAdapterResult {
-  /** Shared event-sourced persistence (noddde_events table). */
-  eventSourcedPersistence: EventSourcedAggregatePersistence;
-  /**
-   * Shared state-stored persistence (noddde_aggregate_states table).
-   * Undefined if {@link PrismaAdapter.withStateStore} was not called.
-   */
-  stateStoredPersistence?: StateStoredAggregatePersistence;
-  /** Saga persistence (always shared table). */
-  sagaPersistence: SagaPersistence;
-  /** Factory for creating Prisma-backed UnitOfWork instances. */
-  unitOfWorkFactory: UnitOfWorkFactory;
-  /** Snapshot store. Present only when {@link PrismaAdapter.withSnapshotStore} was called. */
-  snapshotStore?: SnapshotStore;
-  /** Outbox store. Present only when {@link PrismaAdapter.withOutboxStore} was called. */
-  outboxStore?: OutboxStore;
-  /**
-   * Returns a {@link StateStoredAggregatePersistence} bound to a specific
-   * aggregate's dedicated Prisma model. Throws if no such aggregate was
-   * configured via {@link PrismaAdapter.withAggregateStateTable}.
-   *
-   * @param aggregateName - The aggregate name as registered with `withAggregateStateTable`.
-   * @throws If the aggregate was not configured.
-   */
-  stateStoreFor(aggregateName: string): StateStoredAggregatePersistence;
-}
-
 const DEFAULT_COLUMNS: PrismaStateTableColumnMap = {
   aggregateId: "aggregateId",
   state: "state",
@@ -81,163 +50,139 @@ const DEFAULT_COLUMNS: PrismaStateTableColumnMap = {
 };
 
 /**
- * Builder for constructing a fully-configured Prisma persistence layer.
- * Supports shared tables (existing behavior) plus per-aggregate
- * dedicated state tables with custom column mappings.
+ * Configuration for {@link createPrismaAdapter}.
  *
- * All persistence instances created by a single builder share the same
- * {@link PrismaTransactionStore}, ensuring UoW atomicity.
+ * Event store, state store, and saga store are always created (built-in Prisma models).
+ * Optional stores (snapshot, outbox) and per-aggregate tables are configured here.
+ */
+export interface PrismaAdapterConfig {
+  /** Enable the snapshot store (NodddeSnapshot model). Optional. */
+  snapshotStore?: true;
+  /** Enable the outbox store (NodddeOutboxEntry model). Optional. */
+  outboxStore?: true;
+  /** Per-aggregate dedicated state tables with custom column mappings. Optional. */
+  aggregateStates?: Record<string, PrismaAggregateStateTableConfig>;
+}
+
+/**
+ * Result of {@link createPrismaAdapter}. The type narrows based on which
+ * optional stores were configured — configured stores appear as non-optional.
+ *
+ * Event store, state store, saga store, and UoW are always present.
+ *
+ * @typeParam C - The adapter config, inferred from the call site.
+ */
+export type PrismaAdapterResult<C extends PrismaAdapterConfig> = {
+  /** Shared event-sourced persistence (noddde_events). Always present. */
+  eventSourcedPersistence: EventSourcedAggregatePersistence;
+  /** Shared state-stored persistence (noddde_aggregate_states). Always present. */
+  stateStoredPersistence: StateStoredAggregatePersistence;
+  /** Saga persistence (noddde_saga_states). Always present. */
+  sagaPersistence: SagaPersistence;
+  /** Factory for creating Prisma-backed UnitOfWork instances. Always present. */
+  unitOfWorkFactory: UnitOfWorkFactory;
+} & (C extends { snapshotStore: true }
+  ? { /** Snapshot store. */ snapshotStore: SnapshotStore }
+  : {}) &
+  (C extends { outboxStore: true }
+    ? { /** Outbox store. */ outboxStore: OutboxStore }
+    : {}) &
+  (C extends { aggregateStates: Record<string, any> }
+    ? {
+        /**
+         * Returns a {@link StateStoredAggregatePersistence} bound to a dedicated Prisma model.
+         * @param name - Must be one of the aggregate names configured in `aggregateStates`.
+         */
+        stateStoreFor(
+          name: keyof C["aggregateStates"] & string,
+        ): StateStoredAggregatePersistence;
+      }
+    : {});
+
+/**
+ * Creates a fully-configured Prisma persistence adapter.
+ *
+ * Event store, state store, saga store, and UoW are always created (built-in
+ * Prisma models). The config controls optional stores and per-aggregate tables.
+ *
+ * The return type narrows based on the config: only configured optional stores
+ * appear in the result, eliminating the need for `!` non-null assertions.
+ *
+ * @param prisma - A PrismaClient instance.
+ * @param config - Optional adapter configuration for snapshots, outbox, and per-aggregate tables.
+ * @returns Typed persistence infrastructure.
  *
  * @example
  * ```ts
- * import { PrismaAdapter } from "@noddde/prisma";
- * import { PrismaClient } from "@prisma/client";
+ * import { createPrismaAdapter } from "@noddde/prisma";
  *
- * const prisma = new PrismaClient();
+ * // Minimal — just event store, state store, saga store, UoW
+ * const adapter = createPrismaAdapter(prisma);
  *
- * const adapter = new PrismaAdapter(prisma)
- *   .withEventStore()
- *   .withSagaStore()
- *   .withSnapshotStore()
- *   .withAggregateStateTable("Order", { model: "order" })
- *   .build();
+ * // With snapshots and per-aggregate tables
+ * const adapter = createPrismaAdapter(prisma, {
+ *   snapshotStore: true,
+ *   aggregateStates: {
+ *     Order: { model: "order" },
+ *   },
+ * });
  *
- * const orderPersistence = adapter.stateStoreFor("Order");
+ * adapter.snapshotStore;            // SnapshotStore (non-optional)
+ * adapter.stateStoreFor("Order");   // compiles
+ * adapter.stateStoreFor("Unknown"); // compile error
  * ```
  */
-export class PrismaAdapter {
-  private _eventStore = false;
-  private _stateStore = false;
-  private _sagaStore = false;
-  private _snapshotStore = false;
-  private _outboxStore = false;
-  private _aggregateStateTables = new Map<
-    string,
-    PrismaAggregateStateTableConfig
-  >();
+// eslint-disable-next-line no-redeclare
+export function createPrismaAdapter(
+  prisma: PrismaClient,
+): PrismaAdapterResult<{}>;
+// eslint-disable-next-line no-redeclare
+export function createPrismaAdapter<const C extends PrismaAdapterConfig>(
+  prisma: PrismaClient,
+  config: C,
+): PrismaAdapterResult<C>;
+// eslint-disable-next-line no-redeclare
+export function createPrismaAdapter(
+  prisma: PrismaClient,
+  config?: PrismaAdapterConfig,
+): any {
+  const txStore: PrismaTransactionStore = { current: null };
 
-  constructor(private readonly prisma: PrismaClient) {}
-
-  /**
-   * Configures the shared event store (NodddeEvent model).
-   * Required for {@link build}.
-   */
-  withEventStore(): this {
-    this._eventStore = true;
-    return this;
-  }
-
-  /**
-   * Configures the shared aggregate state store (NodddeAggregateState model).
-   * Optional — only needed if some aggregates use the shared table.
-   */
-  withStateStore(): this {
-    this._stateStore = true;
-    return this;
-  }
-
-  /**
-   * Configures the saga state store (NodddeSagaState model).
-   * Required for {@link build}.
-   */
-  withSagaStore(): this {
-    this._sagaStore = true;
-    return this;
-  }
-
-  /**
-   * Configures the snapshot store (NodddeSnapshot model).
-   * Optional.
-   */
-  withSnapshotStore(): this {
-    this._snapshotStore = true;
-    return this;
-  }
-
-  /**
-   * Configures the outbox store (NodddeOutboxEntry model).
-   * Optional.
-   */
-  withOutboxStore(): this {
-    this._outboxStore = true;
-    return this;
-  }
-
-  /**
-   * Maps an aggregate to a dedicated state table. The persistence
-   * instance returned by {@link PrismaAdapterResult.stateStoreFor}
-   * will query/write this specific Prisma model instead of the shared
-   * `noddde_aggregate_states`.
-   *
-   * @param aggregateName - The aggregate name (must match the name used in domain definition).
-   * @param config - Prisma model name and optional column mappings.
-   */
-  withAggregateStateTable(
-    aggregateName: string,
-    config: PrismaAggregateStateTableConfig,
-  ): this {
-    this._aggregateStateTables.set(aggregateName, config);
-    return this;
-  }
-
-  /**
-   * Builds and returns the configured persistence infrastructure.
-   *
-   * @throws If {@link withEventStore} was not called.
-   * @throws If {@link withSagaStore} was not called.
-   */
-  build(): PrismaAdapterResult {
-    if (!this._eventStore) {
-      throw new Error(
-        "PrismaAdapter requires withEventStore() to be called before build()",
-      );
-    }
-    if (!this._sagaStore) {
-      throw new Error(
-        "PrismaAdapter requires withSagaStore() to be called before build()",
-      );
-    }
-
-    const txStore: PrismaTransactionStore = { current: null };
-
-    const eventSourcedPersistence = new PrismaEventSourcedAggregatePersistence(
-      this.prisma,
+  const result: Record<string, any> = {
+    eventSourcedPersistence: new PrismaEventSourcedAggregatePersistence(
+      prisma,
       txStore,
-    );
-
-    const stateStoredPersistence = this._stateStore
-      ? new PrismaStateStoredAggregatePersistence(this.prisma, txStore)
-      : undefined;
-
-    const sagaPersistence = new PrismaSagaPersistence(this.prisma, txStore);
-
-    const snapshotStore = this._snapshotStore
-      ? new PrismaSnapshotStore(this.prisma, txStore)
-      : undefined;
-
-    const outboxStore = this._outboxStore
-      ? new PrismaOutboxStore(this.prisma, txStore)
-      : undefined;
-
-    const unitOfWorkFactory = createPrismaUnitOfWorkFactory(
-      this.prisma,
+    ),
+    stateStoredPersistence: new PrismaStateStoredAggregatePersistence(
+      prisma,
       txStore,
-    );
+    ),
+    sagaPersistence: new PrismaSagaPersistence(prisma, txStore),
+    unitOfWorkFactory: createPrismaUnitOfWorkFactory(prisma, txStore),
+  };
 
-    // Build per-aggregate dedicated state persistence instances
+  if (config?.snapshotStore) {
+    result.snapshotStore = new PrismaSnapshotStore(prisma, txStore);
+  }
+
+  if (config?.outboxStore) {
+    result.outboxStore = new PrismaOutboxStore(prisma, txStore);
+  }
+
+  if (config?.aggregateStates) {
     const dedicatedStores = new Map<string, StateStoredAggregatePersistence>();
 
-    for (const [name, config] of this._aggregateStateTables) {
+    for (const [name, aggConfig] of Object.entries(config.aggregateStates)) {
       const columns: PrismaStateTableColumnMap = {
         ...DEFAULT_COLUMNS,
-        ...config.columns,
+        ...aggConfig.columns,
       };
 
       // Validate the model delegate exists on the Prisma client
-      const delegate = (this.prisma as any)[config.model];
+      const delegate = (prisma as any)[aggConfig.model];
       if (!delegate) {
         throw new Error(
-          `Prisma model "${config.model}" not found on PrismaClient for aggregate "${name}". ` +
+          `Prisma model "${aggConfig.model}" not found on PrismaClient for aggregate "${name}". ` +
             `Ensure the model is defined in your Prisma schema and prisma generate has been run.`,
         );
       }
@@ -245,31 +190,27 @@ export class PrismaAdapter {
       dedicatedStores.set(
         name,
         new PrismaDedicatedStateStoredPersistence(
-          this.prisma,
+          prisma,
           txStore,
-          config.model,
+          aggConfig.model,
           columns,
         ),
       );
     }
 
-    return {
-      eventSourcedPersistence,
-      stateStoredPersistence,
-      sagaPersistence,
-      unitOfWorkFactory,
-      snapshotStore,
-      outboxStore,
-      stateStoreFor(aggregateName: string): StateStoredAggregatePersistence {
-        const store = dedicatedStores.get(aggregateName);
-        if (!store) {
-          throw new Error(
-            `No dedicated state table configured for aggregate "${aggregateName}". ` +
-              `Call .withAggregateStateTable("${aggregateName}", ...) before build().`,
-          );
-        }
-        return store;
-      },
+    result.stateStoreFor = (
+      aggregateName: string,
+    ): StateStoredAggregatePersistence => {
+      const store = dedicatedStores.get(aggregateName);
+      if (!store) {
+        throw new Error(
+          `No dedicated state table configured for aggregate "${aggregateName}". ` +
+            `Add "${aggregateName}" to the aggregateStates config.`,
+        );
+      }
+      return store;
     };
   }
+
+  return result;
 }

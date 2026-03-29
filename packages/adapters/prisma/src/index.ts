@@ -12,7 +12,8 @@ export {
 } from "./unit-of-work";
 export type { PrismaTransactionStore } from "./unit-of-work";
 export {
-  PrismaAdapter,
+  createPrismaAdapter,
+  type PrismaAdapterConfig,
   type PrismaAdapterResult,
   type PrismaAggregateStateTableConfig,
   type PrismaStateTableColumnMap,
@@ -33,7 +34,7 @@ import type {
   StateStoredAggregatePersistence,
   SagaPersistence,
 } from "@noddde/core";
-import { PrismaAdapter } from "./builder";
+import { createPrismaAdapter } from "./builder";
 
 /**
  * Result of {@link createPrismaPersistence}.
@@ -50,7 +51,7 @@ export interface PrismaPersistenceInfrastructure {
 /**
  * Creates a complete set of Prisma-backed persistence implementations.
  *
- * @deprecated Use {@link PrismaAdapter} builder instead for new code.
+ * @deprecated Use {@link createPrismaAdapter} instead for new code.
  * This function is preserved for backwards compatibility and delegates
  * to the builder internally.
  *
@@ -85,20 +86,17 @@ export interface PrismaPersistenceInfrastructure {
 export function createPrismaPersistence(
   prisma: PrismaClient,
 ): PrismaPersistenceInfrastructure {
-  const result = new PrismaAdapter(prisma)
-    .withEventStore()
-    .withStateStore()
-    .withSagaStore()
-    .withSnapshotStore()
-    .withOutboxStore()
-    .build();
+  const result = createPrismaAdapter(prisma, {
+    snapshotStore: true,
+    outboxStore: true,
+  });
 
   return {
     eventSourcedPersistence: result.eventSourcedPersistence,
-    stateStoredPersistence: result.stateStoredPersistence!,
+    stateStoredPersistence: result.stateStoredPersistence,
     sagaPersistence: result.sagaPersistence,
-    snapshotStore: result.snapshotStore!,
-    outboxStore: result.outboxStore!,
+    snapshotStore: result.snapshotStore,
+    outboxStore: result.outboxStore,
     unitOfWorkFactory: result.unitOfWorkFactory,
   };
 }

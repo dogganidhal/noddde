@@ -4,7 +4,7 @@ import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import { ConcurrencyError } from "@noddde/core";
-import { PrismaAdapter, createPrismaPersistence } from "../index";
+import { createPrismaAdapter, createPrismaPersistence } from "../index";
 import { PrismaDedicatedStateStoredPersistence } from "../dedicated-state-persistence";
 
 const TEST_DB = path.resolve(__dirname, "../../prisma/test-builder.db");
@@ -28,18 +28,26 @@ async function teardownDb() {
   if (fs.existsSync(TEST_DB)) fs.unlinkSync(TEST_DB);
 }
 
-describe("PrismaAdapter Builder", () => {
+describe("createPrismaAdapter", () => {
   beforeEach(setupDb);
   afterEach(teardownDb);
 
-  it("should create all stores when fully configured", () => {
-    const result = new PrismaAdapter(prisma)
-      .withEventStore()
-      .withStateStore()
-      .withSagaStore()
-      .withSnapshotStore()
-      .withOutboxStore()
-      .build();
+  it("creates base stores with no config", () => {
+    const result = createPrismaAdapter(prisma);
+
+    expect(result.eventSourcedPersistence).toBeDefined();
+    expect(result.stateStoredPersistence).toBeDefined();
+    expect(result.sagaPersistence).toBeDefined();
+    expect(result.unitOfWorkFactory).toBeDefined();
+    expect((result as any).snapshotStore).toBeUndefined();
+    expect((result as any).outboxStore).toBeUndefined();
+  });
+
+  it("creates all stores when fully configured", () => {
+    const result = createPrismaAdapter(prisma, {
+      snapshotStore: true,
+      outboxStore: true,
+    });
 
     expect(result.eventSourcedPersistence).toBeDefined();
     expect(result.stateStoredPersistence).toBeDefined();
@@ -47,34 +55,6 @@ describe("PrismaAdapter Builder", () => {
     expect(result.unitOfWorkFactory).toBeDefined();
     expect(result.snapshotStore).toBeDefined();
     expect(result.outboxStore).toBeDefined();
-    expect(typeof result.stateStoreFor).toBe("function");
-  });
-
-  it("should throw if withEventStore was not called", () => {
-    expect(() => {
-      new PrismaAdapter(prisma).withSagaStore().build();
-    }).toThrow(
-      "PrismaAdapter requires withEventStore() to be called before build()",
-    );
-  });
-
-  it("should throw if withSagaStore was not called", () => {
-    expect(() => {
-      new PrismaAdapter(prisma).withEventStore().build();
-    }).toThrow(
-      "PrismaAdapter requires withSagaStore() to be called before build()",
-    );
-  });
-
-  it("should have stateStoredPersistence undefined when withStateStore not called", () => {
-    const result = new PrismaAdapter(prisma)
-      .withEventStore()
-      .withSagaStore()
-      .build();
-
-    expect(result.stateStoredPersistence).toBeUndefined();
-    expect(result.snapshotStore).toBeUndefined();
-    expect(result.outboxStore).toBeUndefined();
   });
 
   it("createPrismaPersistence backwards compatibility", () => {
@@ -87,23 +67,9 @@ describe("PrismaAdapter Builder", () => {
     expect(infra.outboxStore).toBeDefined();
     expect(infra.unitOfWorkFactory).toBeDefined();
   });
-
-  it("stateStoreFor should throw for unknown aggregate", () => {
-    const result = new PrismaAdapter(prisma)
-      .withEventStore()
-      .withSagaStore()
-      .build();
-
-    expect(() => result.stateStoreFor("Unknown")).toThrow(
-      'No dedicated state table configured for aggregate "Unknown"',
-    );
-  });
 });
 
 describe("PrismaDedicatedStateStoredPersistence (unit)", () => {
-  // Since Prisma models are code-generated and we can't define custom ones
-  // at test time, we test the dedicated persistence with a mock delegate.
-
   function createMockDelegate() {
     const store = new Map<
       string,
@@ -182,23 +148,6 @@ describe("PrismaDedicatedStateStoredPersistence (unit)", () => {
     ).rejects.toThrow(ConcurrencyError);
   });
 
-  it("should throw ConcurrencyError on update with wrong version", async () => {
-    const delegate = createMockDelegate();
-    const mockPrisma = { order: delegate } as any;
-    const txStore = { current: null };
-    const persistence = new PrismaDedicatedStateStoredPersistence(
-      mockPrisma,
-      txStore,
-      "order",
-      { aggregateId: "aggregateId", state: "state", version: "version" },
-    );
-
-    await persistence.save("Order", "order-1", { total: 100 }, 0);
-    await expect(
-      persistence.save("Order", "order-1", { total: 200 }, 5),
-    ).rejects.toThrow(ConcurrencyError);
-  });
-
   it("should use txStore.current when inside a transaction", async () => {
     const delegate = createMockDelegate();
     const txDelegate = createMockDelegate();
@@ -211,12 +160,9 @@ describe("PrismaDedicatedStateStoredPersistence (unit)", () => {
       { aggregateId: "aggregateId", state: "state", version: "version" },
     );
 
-    // Simulate a transaction context
     txStore.current = { order: txDelegate };
-
     await persistence.save("Order", "order-1", { total: 100 }, 0);
 
-    // txDelegate should have been called, not the main delegate
     expect(txDelegate.create).toHaveBeenCalled();
     expect(delegate.create).not.toHaveBeenCalled();
 

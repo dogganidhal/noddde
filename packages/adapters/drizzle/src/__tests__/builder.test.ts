@@ -4,7 +4,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import { ConcurrencyError } from "@noddde/core";
 import { createDrizzlePersistence } from "../index";
-import { DrizzleAdapter } from "../builder";
+import { createDrizzleAdapter } from "../builder";
 import {
   events,
   aggregateStates,
@@ -108,16 +108,17 @@ function createTestDbWithCustomTables() {
   return drizzle(sqlite);
 }
 
-describe("DrizzleAdapter Builder", () => {
-  it("builder creates all stores with shared transaction context", () => {
+describe("createDrizzleAdapter", () => {
+  it("creates all stores when fully configured", () => {
     const db = createTestDb();
-    const result = new DrizzleAdapter(db)
-      .withEventStore(events)
-      .withStateStore(aggregateStates)
-      .withSagaStore(sagaStates)
-      .withSnapshotStore(snapshots)
-      .withOutboxStore(outbox)
-      .build();
+    const result = createDrizzleAdapter(db, {
+      eventStore: events,
+      stateStore: aggregateStates,
+      sagaStore: sagaStates,
+      snapshotStore: snapshots,
+      outboxStore: outbox,
+      aggregateStates: { Order: { table: ordersTable } },
+    });
 
     expect(result.eventSourcedPersistence).toBeDefined();
     expect(result.stateStoredPersistence).toBeDefined();
@@ -128,28 +129,16 @@ describe("DrizzleAdapter Builder", () => {
     expect(typeof result.stateStoreFor).toBe("function");
   });
 
-  it("build() throws if withEventStore was not called", () => {
+  it("stateStoredPersistence absent when stateStore not in config", () => {
     const db = createTestDb();
-    expect(() =>
-      new DrizzleAdapter(db).withSagaStore(sagaStates).build(),
-    ).toThrow("DrizzleAdapter requires withEventStore()");
-  });
+    const result = createDrizzleAdapter(db, {
+      eventStore: events,
+      sagaStore: sagaStates,
+    });
 
-  it("build() throws if withSagaStore was not called", () => {
-    const db = createTestDb();
-    expect(() => new DrizzleAdapter(db).withEventStore(events).build()).toThrow(
-      "DrizzleAdapter requires withSagaStore()",
-    );
-  });
-
-  it("stateStoredPersistence is undefined when withStateStore not called", () => {
-    const db = createTestDb();
-    const result = new DrizzleAdapter(db)
-      .withEventStore(events)
-      .withSagaStore(sagaStates)
-      .build();
-
-    expect(result.stateStoredPersistence).toBeUndefined();
+    expect((result as any).stateStoredPersistence).toBeUndefined();
+    expect((result as any).snapshotStore).toBeUndefined();
+    expect((result as any).outboxStore).toBeUndefined();
   });
 
   it("createDrizzlePersistence continues to work unchanged (backwards compat)", async () => {
@@ -175,11 +164,11 @@ describe("DrizzleAdapter Builder", () => {
 describe("Per-Aggregate State Table", () => {
   it("save and load roundtrip", async () => {
     const db = createTestDbWithCustomTables();
-    const result = new DrizzleAdapter(db)
-      .withEventStore(events)
-      .withSagaStore(sagaStates)
-      .withAggregateStateTable("Order", { table: ordersTable })
-      .build();
+    const result = createDrizzleAdapter(db, {
+      eventStore: events,
+      sagaStore: sagaStates,
+      aggregateStates: { Order: { table: ordersTable } },
+    });
 
     const orderPersistence = result.stateStoreFor("Order");
     await orderPersistence.save(
@@ -197,11 +186,11 @@ describe("Per-Aggregate State Table", () => {
 
   it("returns null for nonexistent aggregate", async () => {
     const db = createTestDbWithCustomTables();
-    const result = new DrizzleAdapter(db)
-      .withEventStore(events)
-      .withSagaStore(sagaStates)
-      .withAggregateStateTable("Order", { table: ordersTable })
-      .build();
+    const result = createDrizzleAdapter(db, {
+      eventStore: events,
+      sagaStore: sagaStates,
+      aggregateStates: { Order: { table: ordersTable } },
+    });
 
     const loaded = await result
       .stateStoreFor("Order")
@@ -211,11 +200,11 @@ describe("Per-Aggregate State Table", () => {
 
   it("throws ConcurrencyError on version mismatch", async () => {
     const db = createTestDbWithCustomTables();
-    const result = new DrizzleAdapter(db)
-      .withEventStore(events)
-      .withSagaStore(sagaStates)
-      .withAggregateStateTable("Order", { table: ordersTable })
-      .build();
+    const result = createDrizzleAdapter(db, {
+      eventStore: events,
+      sagaStore: sagaStates,
+      aggregateStates: { Order: { table: ordersTable } },
+    });
 
     const persistence = result.stateStoreFor("Order");
     await persistence.save("Order", "order-1", { status: "placed" }, 0);
@@ -253,18 +242,20 @@ describe("Per-Aggregate State Table", () => {
     `);
     const db = drizzle(sqlite);
 
-    const result = new DrizzleAdapter(db)
-      .withEventStore(events)
-      .withSagaStore(sagaStates)
-      .withAggregateStateTable("Order", {
-        table: customOrdersTable,
-        columns: {
-          aggregateId: customOrdersTable.id,
-          state: customOrdersTable.data,
-          version: customOrdersTable.ver,
+    const result = createDrizzleAdapter(db, {
+      eventStore: events,
+      sagaStore: sagaStates,
+      aggregateStates: {
+        Order: {
+          table: customOrdersTable,
+          columns: {
+            aggregateId: customOrdersTable.id,
+            state: customOrdersTable.data,
+            version: customOrdersTable.ver,
+          },
         },
-      })
-      .build();
+      },
+    });
 
     const persistence = result.stateStoreFor("Order");
     await persistence.save("Order", "order-1", { status: "placed" }, 0);
@@ -277,24 +268,24 @@ describe("Per-Aggregate State Table", () => {
 
   it("stateStoreFor throws for unconfigured aggregate", () => {
     const db = createTestDbWithCustomTables();
-    const result = new DrizzleAdapter(db)
-      .withEventStore(events)
-      .withSagaStore(sagaStates)
-      .withAggregateStateTable("Order", { table: ordersTable })
-      .build();
+    const result = createDrizzleAdapter(db, {
+      eventStore: events,
+      sagaStore: sagaStates,
+      aggregateStates: { Order: { table: ordersTable } },
+    });
 
-    expect(() => result.stateStoreFor("Payment")).toThrow(
+    expect(() => (result as any).stateStoreFor("Payment")).toThrow(
       'No dedicated state table configured for aggregate "Payment"',
     );
   });
 
   it("participates in UoW transaction", async () => {
     const db = createTestDbWithCustomTables();
-    const result = new DrizzleAdapter(db)
-      .withEventStore(events)
-      .withSagaStore(sagaStates)
-      .withAggregateStateTable("Order", { table: ordersTable })
-      .build();
+    const result = createDrizzleAdapter(db, {
+      eventStore: events,
+      sagaStore: sagaStates,
+      aggregateStates: { Order: { table: ordersTable } },
+    });
 
     const orderPersistence = result.stateStoreFor("Order");
     const uow = result.unitOfWorkFactory();
@@ -324,7 +315,7 @@ describe("Per-Aggregate State Table", () => {
     expect(orderState!.state).toEqual({ status: "paid" });
   });
 
-  it("build() throws clear error when convention resolution fails", () => {
+  it("throws clear error when convention resolution fails", () => {
     const sqlite = new Database(":memory:");
     sqlite.exec(
       `CREATE TABLE bad_table (foo TEXT NOT NULL, bar INTEGER NOT NULL);`,
@@ -332,11 +323,11 @@ describe("Per-Aggregate State Table", () => {
     const db = drizzle(sqlite);
 
     expect(() =>
-      new DrizzleAdapter(db)
-        .withEventStore(events)
-        .withSagaStore(sagaStates)
-        .withAggregateStateTable("Bad", { table: badTable })
-        .build(),
+      createDrizzleAdapter(db, {
+        eventStore: events,
+        sagaStore: sagaStates,
+        aggregateStates: { Bad: { table: badTable } },
+      }),
     ).toThrow(/aggregate_id.*state.*version/);
   });
 });

@@ -13,7 +13,10 @@
  */
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { DrizzleAdapter, generateDrizzleMigration } from "@noddde/drizzle";
+import {
+  createDrizzleAdapter,
+  generateDrizzleMigration,
+} from "@noddde/drizzle";
 import {
   events,
   aggregateStates,
@@ -92,12 +95,12 @@ async function main() {
   `);
 
   const db = drizzle(pool);
-  const drizzleInfra = new DrizzleAdapter(db)
-    .withEventStore(events)
-    .withStateStore(aggregateStates)
-    .withSagaStore(sagaStates)
-    .withSnapshotStore(snapshots)
-    .build();
+  const drizzleInfra = createDrizzleAdapter(db, {
+    eventStore: events,
+    stateStore: aggregateStates,
+    sagaStore: sagaStates,
+    snapshotStore: snapshots,
+  });
 
   // -- Define the domain structure (pure, sync) --
   const hotelDomain = defineDomain<
@@ -151,7 +154,7 @@ async function main() {
         persistence: () => drizzleInfra.eventSourcedPersistence,
         concurrency: { maxRetries: 3 },
         snapshots: {
-          store: () => drizzleInfra.snapshotStore!,
+          store: () => drizzleInfra.snapshotStore,
           strategy: everyNEvents(50),
         },
       },
@@ -160,7 +163,7 @@ async function main() {
         concurrency: { maxRetries: 3 },
       },
       Inventory: {
-        persistence: () => drizzleInfra.stateStoredPersistence!,
+        persistence: () => drizzleInfra.stateStoredPersistence,
       },
     },
 

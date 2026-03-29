@@ -18,13 +18,6 @@ import {
 } from "./persistence";
 import { TypeORMDedicatedStateStoredPersistence } from "./dedicated-state-persistence";
 import { createTypeORMUnitOfWorkFactory } from "./unit-of-work";
-import {
-  NodddeEventEntity,
-  NodddeAggregateStateEntity,
-  NodddeSagaStateEntity,
-  NodddeSnapshotEntity,
-  NodddeOutboxEntryEntity,
-} from "./entities";
 
 /**
  * Column mapping for a custom state-stored aggregate table in TypeORM.
@@ -50,37 +43,6 @@ export interface TypeORMAggregateStateTableConfig {
   columns?: Partial<TypeORMStateTableColumnMap>;
 }
 
-/**
- * Result of {@link TypeORMAdapter.build}. Provides all persistence
- * implementations, a UoW factory, and per-aggregate state store access.
- */
-export interface TypeORMAdapterResult {
-  /** Shared event-sourced persistence (noddde_events table). */
-  eventSourcedPersistence: EventSourcedAggregatePersistence;
-  /**
-   * Shared state-stored persistence (noddde_aggregate_states table).
-   * Undefined if {@link TypeORMAdapter.withStateStore} was not called.
-   */
-  stateStoredPersistence?: StateStoredAggregatePersistence;
-  /** Saga persistence (always shared table). */
-  sagaPersistence: SagaPersistence;
-  /** Factory for creating TypeORM-backed UnitOfWork instances. */
-  unitOfWorkFactory: UnitOfWorkFactory;
-  /** Snapshot store. Present only when {@link TypeORMAdapter.withSnapshotStore} was called. */
-  snapshotStore?: SnapshotStore;
-  /** Outbox store. Present only when {@link TypeORMAdapter.withOutboxStore} was called. */
-  outboxStore?: OutboxStore;
-  /**
-   * Returns a {@link StateStoredAggregatePersistence} bound to a specific
-   * aggregate's dedicated TypeORM entity. Throws if no such aggregate was
-   * configured via {@link TypeORMAdapter.withAggregateStateTable}.
-   *
-   * @param aggregateName - The aggregate name as registered with `withAggregateStateTable`.
-   * @throws If the aggregate was not configured.
-   */
-  stateStoreFor(aggregateName: string): StateStoredAggregatePersistence;
-}
-
 const DEFAULT_COLUMNS: TypeORMStateTableColumnMap = {
   aggregateId: "aggregateId",
   state: "state",
@@ -88,197 +50,160 @@ const DEFAULT_COLUMNS: TypeORMStateTableColumnMap = {
 };
 
 /**
- * Builder for constructing a fully-configured TypeORM persistence layer.
- * Supports shared tables (existing behavior) plus per-aggregate
- * dedicated state tables with custom column mappings.
+ * Configuration for {@link createTypeORMAdapter}.
  *
- * All persistence instances created by a single builder share the same
- * {@link TypeORMTransactionStore}, ensuring UoW atomicity.
+ * Event store, state store, and saga store are always created (built-in entities).
+ * Optional stores (snapshot, outbox) and per-aggregate tables are configured here.
+ */
+export interface TypeORMAdapterConfig {
+  /** Enable the snapshot store (NodddeSnapshotEntity). Optional. */
+  snapshotStore?: true;
+  /** Enable the outbox store (NodddeOutboxEntryEntity). Optional. */
+  outboxStore?: true;
+  /** Per-aggregate dedicated state tables with custom entity mappings. Optional. */
+  aggregateStates?: Record<string, TypeORMAggregateStateTableConfig>;
+}
+
+/**
+ * Result of {@link createTypeORMAdapter}. The type narrows based on which
+ * optional stores were configured — configured stores appear as non-optional.
+ *
+ * Event store, state store, saga store, and UoW are always present.
+ *
+ * @typeParam C - The adapter config, inferred from the call site.
+ */
+export type TypeORMAdapterResult<C extends TypeORMAdapterConfig> = {
+  /** Shared event-sourced persistence (noddde_events). Always present. */
+  eventSourcedPersistence: EventSourcedAggregatePersistence;
+  /** Shared state-stored persistence (noddde_aggregate_states). Always present. */
+  stateStoredPersistence: StateStoredAggregatePersistence;
+  /** Saga persistence (noddde_saga_states). Always present. */
+  sagaPersistence: SagaPersistence;
+  /** Factory for creating TypeORM-backed UnitOfWork instances. Always present. */
+  unitOfWorkFactory: UnitOfWorkFactory;
+} & (C extends { snapshotStore: true }
+  ? { /** Snapshot store. */ snapshotStore: SnapshotStore }
+  : {}) &
+  (C extends { outboxStore: true }
+    ? { /** Outbox store. */ outboxStore: OutboxStore }
+    : {}) &
+  (C extends { aggregateStates: Record<string, any> }
+    ? {
+        /**
+         * Returns a {@link StateStoredAggregatePersistence} bound to a dedicated TypeORM entity.
+         * @param name - Must be one of the aggregate names configured in `aggregateStates`.
+         */
+        stateStoreFor(
+          name: keyof C["aggregateStates"] & string,
+        ): StateStoredAggregatePersistence;
+      }
+    : {});
+
+/**
+ * Creates a fully-configured TypeORM persistence adapter.
+ *
+ * Event store, state store, saga store, and UoW are always created (built-in
+ * entities). The config controls optional stores and per-aggregate tables
+ * with custom entity class mappings.
+ *
+ * The return type narrows based on the config: only configured optional stores
+ * appear in the result, eliminating the need for `!` non-null assertions.
+ *
+ * @param dataSource - An initialized TypeORM DataSource.
+ * @param config - Optional adapter configuration for snapshots, outbox, and per-aggregate tables.
+ * @returns Typed persistence infrastructure.
  *
  * @example
  * ```ts
- * import { TypeORMAdapter, NodddeEventEntity, NodddeSagaStateEntity } from "@noddde/typeorm";
+ * import { createTypeORMAdapter } from "@noddde/typeorm";
  * import { OrderEntity } from "./entities";
  *
- * const adapter = new TypeORMAdapter(dataSource)
- *   .withEventStore()
- *   .withSagaStore()
- *   .withSnapshotStore()
- *   .withAggregateStateTable("Order", { entity: OrderEntity })
- *   .build();
+ * // Minimal — just event store, state store, saga store, UoW
+ * const adapter = createTypeORMAdapter(dataSource);
  *
- * const orderPersistence = adapter.stateStoreFor("Order");
+ * // With snapshots and per-aggregate tables
+ * const adapter = createTypeORMAdapter(dataSource, {
+ *   snapshotStore: true,
+ *   aggregateStates: {
+ *     Order: { entity: OrderEntity },
+ *   },
+ * });
+ *
+ * adapter.snapshotStore;            // SnapshotStore (non-optional)
+ * adapter.stateStoreFor("Order");   // compiles
+ * adapter.stateStoreFor("Unknown"); // compile error
  * ```
  */
-export class TypeORMAdapter {
-  private _eventStoreEntity: Function | undefined;
-  private _stateStoreEntity: Function | undefined;
-  private _sagaStoreEntity: Function | undefined;
-  private _snapshotStoreEntity: Function | undefined;
-  private _outboxStoreEntity: Function | undefined;
-  private _aggregateStateTables = new Map<
-    string,
-    TypeORMAggregateStateTableConfig
-  >();
+// eslint-disable-next-line no-redeclare
+export function createTypeORMAdapter(
+  dataSource: DataSource,
+): TypeORMAdapterResult<{}>;
+// eslint-disable-next-line no-redeclare
+export function createTypeORMAdapter<const C extends TypeORMAdapterConfig>(
+  dataSource: DataSource,
+  config: C,
+): TypeORMAdapterResult<C>;
+// eslint-disable-next-line no-redeclare
+export function createTypeORMAdapter(
+  dataSource: DataSource,
+  config?: TypeORMAdapterConfig,
+): any {
+  const txStore: TypeORMTransactionStore = { current: null };
 
-  constructor(private readonly dataSource: DataSource) {}
-
-  /**
-   * Configures the shared event store.
-   * Required for {@link build}.
-   *
-   * @param entity - TypeORM entity class. Defaults to {@link NodddeEventEntity}.
-   */
-  withEventStore(entity?: Function): this {
-    this._eventStoreEntity = entity ?? NodddeEventEntity;
-    return this;
-  }
-
-  /**
-   * Configures the shared aggregate state store.
-   * Optional — only needed if some aggregates use the shared table.
-   *
-   * @param entity - TypeORM entity class. Defaults to {@link NodddeAggregateStateEntity}.
-   */
-  withStateStore(entity?: Function): this {
-    this._stateStoreEntity = entity ?? NodddeAggregateStateEntity;
-    return this;
-  }
-
-  /**
-   * Configures the saga state store.
-   * Required for {@link build}.
-   *
-   * @param entity - TypeORM entity class. Defaults to {@link NodddeSagaStateEntity}.
-   */
-  withSagaStore(entity?: Function): this {
-    this._sagaStoreEntity = entity ?? NodddeSagaStateEntity;
-    return this;
-  }
-
-  /**
-   * Configures the snapshot store.
-   * Optional.
-   *
-   * @param entity - TypeORM entity class. Defaults to {@link NodddeSnapshotEntity}.
-   */
-  withSnapshotStore(entity?: Function): this {
-    this._snapshotStoreEntity = entity ?? NodddeSnapshotEntity;
-    return this;
-  }
-
-  /**
-   * Configures the outbox store.
-   * Optional.
-   *
-   * @param entity - TypeORM entity class. Defaults to {@link NodddeOutboxEntryEntity}.
-   */
-  withOutboxStore(entity?: Function): this {
-    this._outboxStoreEntity = entity ?? NodddeOutboxEntryEntity;
-    return this;
-  }
-
-  /**
-   * Maps an aggregate to a dedicated state table. The persistence
-   * instance returned by {@link TypeORMAdapterResult.stateStoreFor}
-   * will query/write this specific TypeORM entity instead of the shared
-   * `noddde_aggregate_states`.
-   *
-   * @param aggregateName - The aggregate name (must match the name used in domain definition).
-   * @param config - TypeORM entity class and optional column mappings.
-   */
-  withAggregateStateTable(
-    aggregateName: string,
-    config: TypeORMAggregateStateTableConfig,
-  ): this {
-    this._aggregateStateTables.set(aggregateName, config);
-    return this;
-  }
-
-  /**
-   * Builds and returns the configured persistence infrastructure.
-   *
-   * @throws If {@link withEventStore} was not called.
-   * @throws If {@link withSagaStore} was not called.
-   */
-  build(): TypeORMAdapterResult {
-    if (!this._eventStoreEntity) {
-      throw new Error(
-        "TypeORMAdapter requires withEventStore() to be called before build()",
-      );
-    }
-    if (!this._sagaStoreEntity) {
-      throw new Error(
-        "TypeORMAdapter requires withSagaStore() to be called before build()",
-      );
-    }
-
-    const txStore: TypeORMTransactionStore = { current: null };
-
-    const eventSourcedPersistence = new TypeORMEventSourcedAggregatePersistence(
-      this.dataSource,
+  const result: Record<string, any> = {
+    eventSourcedPersistence: new TypeORMEventSourcedAggregatePersistence(
+      dataSource,
       txStore,
-    );
-
-    const stateStoredPersistence = this._stateStoreEntity
-      ? new TypeORMStateStoredAggregatePersistence(this.dataSource, txStore)
-      : undefined;
-
-    const sagaPersistence = new TypeORMSagaPersistence(
-      this.dataSource,
+    ),
+    stateStoredPersistence: new TypeORMStateStoredAggregatePersistence(
+      dataSource,
       txStore,
-    );
+    ),
+    sagaPersistence: new TypeORMSagaPersistence(dataSource, txStore),
+    unitOfWorkFactory: createTypeORMUnitOfWorkFactory(dataSource, txStore),
+  };
 
-    const snapshotStore = this._snapshotStoreEntity
-      ? new TypeORMSnapshotStore(this.dataSource, txStore)
-      : undefined;
+  if (config?.snapshotStore) {
+    result.snapshotStore = new TypeORMSnapshotStore(dataSource, txStore);
+  }
 
-    const outboxStore = this._outboxStoreEntity
-      ? new TypeORMOutboxStore(this.dataSource, txStore)
-      : undefined;
+  if (config?.outboxStore) {
+    result.outboxStore = new TypeORMOutboxStore(dataSource, txStore);
+  }
 
-    const unitOfWorkFactory = createTypeORMUnitOfWorkFactory(
-      this.dataSource,
-      txStore,
-    );
-
-    // Build per-aggregate dedicated state persistence instances
+  if (config?.aggregateStates) {
     const dedicatedStores = new Map<string, StateStoredAggregatePersistence>();
 
-    for (const [name, config] of this._aggregateStateTables) {
+    for (const [name, aggConfig] of Object.entries(config.aggregateStates)) {
       const columns: TypeORMStateTableColumnMap = {
         ...DEFAULT_COLUMNS,
-        ...config.columns,
+        ...aggConfig.columns,
       };
 
       dedicatedStores.set(
         name,
         new TypeORMDedicatedStateStoredPersistence(
-          this.dataSource,
+          dataSource,
           txStore,
-          config.entity,
+          aggConfig.entity,
           columns,
         ),
       );
     }
 
-    return {
-      eventSourcedPersistence,
-      stateStoredPersistence,
-      sagaPersistence,
-      unitOfWorkFactory,
-      snapshotStore,
-      outboxStore,
-      stateStoreFor(aggregateName: string): StateStoredAggregatePersistence {
-        const store = dedicatedStores.get(aggregateName);
-        if (!store) {
-          throw new Error(
-            `No dedicated state table configured for aggregate "${aggregateName}". ` +
-              `Call .withAggregateStateTable("${aggregateName}", ...) before build().`,
-          );
-        }
-        return store;
-      },
+    result.stateStoreFor = (
+      aggregateName: string,
+    ): StateStoredAggregatePersistence => {
+      const store = dedicatedStores.get(aggregateName);
+      if (!store) {
+        throw new Error(
+          `No dedicated state table configured for aggregate "${aggregateName}". ` +
+            `Add "${aggregateName}" to the aggregateStates config.`,
+        );
+      }
+      return store;
     };
   }
+
+  return result;
 }

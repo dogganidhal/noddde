@@ -46,221 +46,166 @@ export interface AggregateStateTableConfig {
 }
 
 /**
- * Result of {@link DrizzleAdapter.build}. Provides all persistence
- * implementations, a UoW factory, and per-aggregate state store access.
+ * Configuration for {@link createDrizzleAdapter}.
+ *
+ * `eventStore` and `sagaStore` are required. All other fields are optional
+ * and their presence determines the shape of the result type.
  */
-export interface DrizzleAdapterResult {
-  /** Shared event-sourced persistence (shared noddde_events table). */
-  eventSourcedPersistence: EventSourcedAggregatePersistence;
-  /**
-   * Shared state-stored persistence (shared noddde_aggregate_states table).
-   * Undefined if {@link DrizzleAdapter.withStateStore} was not called.
-   */
-  stateStoredPersistence?: StateStoredAggregatePersistence;
-  /** Saga persistence (always shared table). */
-  sagaPersistence: SagaPersistence;
-  /** Factory for creating Drizzle-backed UnitOfWork instances. */
-  unitOfWorkFactory: UnitOfWorkFactory;
-  /** Snapshot store. Present only when {@link DrizzleAdapter.withSnapshotStore} was called. */
-  snapshotStore?: SnapshotStore;
-  /** Outbox store. Present only when {@link DrizzleAdapter.withOutboxStore} was called. */
-  outboxStore?: OutboxStore;
-  /**
-   * Returns a {@link StateStoredAggregatePersistence} bound to a specific
-   * aggregate's dedicated table. Throws if no such aggregate was configured
-   * via {@link DrizzleAdapter.withAggregateStateTable}.
-   *
-   * @param aggregateName - The aggregate name as registered with `withAggregateStateTable`.
-   * @throws If the aggregate was not configured.
-   */
-  stateStoreFor(aggregateName: string): StateStoredAggregatePersistence;
+export interface DrizzleAdapterConfig {
+  /** Drizzle table definition for the event store. Required. */
+  eventStore: any;
+  /** Drizzle table definition for the saga state store. Required. */
+  sagaStore: any;
+  /** Drizzle table definition for the shared aggregate state store. Optional. */
+  stateStore?: any;
+  /** Drizzle table definition for the snapshot store. Optional. */
+  snapshotStore?: any;
+  /** Drizzle table definition for the outbox store. Optional. */
+  outboxStore?: any;
+  /** Per-aggregate dedicated state tables with custom column mappings. Optional. */
+  aggregateStates?: Record<string, AggregateStateTableConfig>;
 }
 
 /**
- * Builder for constructing a fully-configured Drizzle persistence layer.
- * Supports shared tables (existing behavior) plus per-aggregate
- * dedicated state tables with custom column mappings.
+ * Result of {@link createDrizzleAdapter}. The type narrows based on which
+ * optional stores were configured — configured stores appear as non-optional,
+ * absent stores are not present on the type at all.
  *
- * All persistence instances created by a single builder share the same
- * {@link DrizzleTransactionStore}, ensuring UoW atomicity.
+ * @typeParam C - The adapter config, inferred from the call site.
+ */
+export type DrizzleAdapterResult<C extends DrizzleAdapterConfig> = {
+  /** Shared event-sourced persistence (shared noddde_events table). Always present. */
+  eventSourcedPersistence: EventSourcedAggregatePersistence;
+  /** Saga persistence (shared saga states table). Always present. */
+  sagaPersistence: SagaPersistence;
+  /** Factory for creating Drizzle-backed UnitOfWork instances. Always present. */
+  unitOfWorkFactory: UnitOfWorkFactory;
+} & (C extends { stateStore: any }
+  ? {
+      /** Shared state-stored persistence. */ stateStoredPersistence: StateStoredAggregatePersistence;
+    }
+  : {}) &
+  (C extends { snapshotStore: any }
+    ? { /** Snapshot store. */ snapshotStore: SnapshotStore }
+    : {}) &
+  (C extends { outboxStore: any }
+    ? { /** Outbox store. */ outboxStore: OutboxStore }
+    : {}) &
+  (C extends { aggregateStates: Record<string, any> }
+    ? {
+        /**
+         * Returns a {@link StateStoredAggregatePersistence} bound to a dedicated table.
+         * @param name - Must be one of the aggregate names configured in `aggregateStates`.
+         */
+        stateStoreFor(
+          name: keyof C["aggregateStates"] & string,
+        ): StateStoredAggregatePersistence;
+      }
+    : {});
+
+/**
+ * Creates a fully-configured Drizzle persistence adapter.
+ *
+ * All persistence instances share the same {@link DrizzleTransactionStore},
+ * ensuring UoW atomicity across shared and dedicated tables.
+ *
+ * The return type narrows based on the config: only configured optional stores
+ * appear in the result, eliminating the need for `!` non-null assertions.
+ *
+ * @param db - A Drizzle database instance (any dialect).
+ * @param config - Adapter configuration with table definitions and optional per-aggregate tables.
+ * @returns Typed persistence infrastructure.
  *
  * @example
  * ```ts
- * import { DrizzleAdapter } from "@noddde/drizzle";
- * import { events, sagaStates } from "@noddde/drizzle/pg";
+ * import { createDrizzleAdapter } from "@noddde/drizzle";
+ * import { events, sagaStates, snapshots } from "@noddde/drizzle/pg";
  * import { orders } from "./schema";
  *
- * const adapter = new DrizzleAdapter(db)
- *   .withEventStore(events)
- *   .withSagaStore(sagaStates)
- *   .withAggregateStateTable("Order", { table: orders })
- *   .build();
+ * const adapter = createDrizzleAdapter(db, {
+ *   eventStore: events,
+ *   sagaStore: sagaStates,
+ *   snapshotStore: snapshots,
+ *   aggregateStates: {
+ *     Order: { table: orders },
+ *   },
+ * });
  *
- * const orderPersistence = adapter.stateStoreFor("Order");
+ * adapter.snapshotStore;            // SnapshotStore (non-optional)
+ * adapter.stateStoreFor("Order");   // compiles
+ * adapter.stateStoreFor("Unknown"); // compile error
  * ```
  */
-export class DrizzleAdapter {
-  private _eventStore: any | undefined;
-  private _stateStore: any | undefined;
-  private _sagaStore: any | undefined;
-  private _snapshotStore: any | undefined;
-  private _outboxStore: any | undefined;
-  private _aggregateStateTables = new Map<string, AggregateStateTableConfig>();
+export function createDrizzleAdapter<const C extends DrizzleAdapterConfig>(
+  db: any,
+  config: C,
+): DrizzleAdapterResult<C> {
+  const txStore: DrizzleTransactionStore = { current: null };
 
-  constructor(private readonly db: any) {}
+  // Build the schema object for shared persistence classes
+  const schema: any = {
+    events: config.eventStore,
+    aggregateStates: config.stateStore,
+    sagaStates: config.sagaStore,
+    snapshots: config.snapshotStore,
+    outbox: config.outboxStore,
+  };
 
-  /**
-   * Configures the shared event store table (e.g., `noddde_events`).
-   * Required for {@link build}.
-   */
-  withEventStore(table: any): this {
-    this._eventStore = table;
-    return this;
-  }
+  const result: Record<string, any> = {
+    eventSourcedPersistence: new DrizzleEventSourcedAggregatePersistence(
+      db,
+      txStore,
+      schema,
+    ),
+    sagaPersistence: new DrizzleSagaPersistence(db, txStore, schema),
+    unitOfWorkFactory: createDrizzleUnitOfWorkFactory(db, txStore),
+  };
 
-  /**
-   * Configures the shared aggregate state table (e.g., `noddde_aggregate_states`).
-   * Optional — only needed if some aggregates use the shared table.
-   */
-  withStateStore(table: any): this {
-    this._stateStore = table;
-    return this;
-  }
-
-  /**
-   * Configures the saga state table (e.g., `noddde_saga_states`).
-   * Required for {@link build}.
-   */
-  withSagaStore(table: any): this {
-    this._sagaStore = table;
-    return this;
-  }
-
-  /**
-   * Configures the snapshot table (e.g., `noddde_snapshots`).
-   * Optional.
-   */
-  withSnapshotStore(table: any): this {
-    this._snapshotStore = table;
-    return this;
-  }
-
-  /**
-   * Configures the outbox table (e.g., `noddde_outbox`).
-   * Optional.
-   */
-  withOutboxStore(table: any): this {
-    this._outboxStore = table;
-    return this;
-  }
-
-  /**
-   * Maps an aggregate to a dedicated state table. The persistence
-   * instance returned by {@link DrizzleAdapterResult.stateStoreFor}
-   * will query/write this specific table instead of the shared
-   * `noddde_aggregate_states`.
-   *
-   * @param aggregateName - The aggregate name (must match the name used in domain definition).
-   * @param config - Table definition and optional column mappings.
-   */
-  withAggregateStateTable(
-    aggregateName: string,
-    config: AggregateStateTableConfig,
-  ): this {
-    this._aggregateStateTables.set(aggregateName, config);
-    return this;
-  }
-
-  /**
-   * Builds and returns the configured persistence infrastructure.
-   *
-   * @throws If {@link withEventStore} was not called.
-   * @throws If {@link withSagaStore} was not called.
-   * @throws If convention-based column resolution fails for any aggregate state table.
-   */
-  build(): DrizzleAdapterResult {
-    if (!this._eventStore) {
-      throw new Error(
-        "DrizzleAdapter requires withEventStore() to be called before build()",
-      );
-    }
-    if (!this._sagaStore) {
-      throw new Error(
-        "DrizzleAdapter requires withSagaStore() to be called before build()",
-      );
-    }
-
-    const txStore: DrizzleTransactionStore = { current: null };
-
-    // Build the schema object for shared persistence classes
-    const schema: any = {
-      events: this._eventStore,
-      aggregateStates: this._stateStore,
-      sagaStates: this._sagaStore,
-      snapshots: this._snapshotStore,
-      outbox: this._outboxStore,
-    };
-
-    // Shared persistence instances
-    const eventSourcedPersistence = new DrizzleEventSourcedAggregatePersistence(
-      this.db,
+  if (config.stateStore) {
+    result.stateStoredPersistence = new DrizzleStateStoredAggregatePersistence(
+      db,
       txStore,
       schema,
     );
+  }
 
-    const stateStoredPersistence = this._stateStore
-      ? new DrizzleStateStoredAggregatePersistence(this.db, txStore, schema)
-      : undefined;
+  if (config.snapshotStore) {
+    result.snapshotStore = new DrizzleSnapshotStore(db, txStore, schema);
+  }
 
-    const sagaPersistence = new DrizzleSagaPersistence(
-      this.db,
-      txStore,
-      schema,
-    );
+  if (config.outboxStore) {
+    result.outboxStore = new DrizzleOutboxStore(db, txStore, schema);
+  }
 
-    const snapshotStore = this._snapshotStore
-      ? new DrizzleSnapshotStore(this.db, txStore, schema)
-      : undefined;
-
-    const outboxStore = this._outboxStore
-      ? new DrizzleOutboxStore(this.db, txStore, schema)
-      : undefined;
-
-    const unitOfWorkFactory = createDrizzleUnitOfWorkFactory(this.db, txStore);
-
-    // Build per-aggregate dedicated state persistence instances
+  if (config.aggregateStates) {
     const dedicatedStores = new Map<string, StateStoredAggregatePersistence>();
 
-    for (const [name, config] of this._aggregateStateTables) {
-      const columns = resolveColumns(config.table, name, config.columns);
+    for (const [name, aggConfig] of Object.entries(config.aggregateStates)) {
+      const columns = resolveColumns(aggConfig.table, name, aggConfig.columns);
       dedicatedStores.set(
         name,
         new DrizzleDedicatedStateStoredPersistence(
-          this.db,
+          db,
           txStore,
-          config.table,
+          aggConfig.table,
           columns,
         ),
       );
     }
 
-    return {
-      eventSourcedPersistence,
-      stateStoredPersistence,
-      sagaPersistence,
-      unitOfWorkFactory,
-      snapshotStore,
-      outboxStore,
-      stateStoreFor(aggregateName: string): StateStoredAggregatePersistence {
-        const store = dedicatedStores.get(aggregateName);
-        if (!store) {
-          throw new Error(
-            `No dedicated state table configured for aggregate "${aggregateName}". ` +
-              `Call .withAggregateStateTable("${aggregateName}", ...) before build().`,
-          );
-        }
-        return store;
-      },
+    result.stateStoreFor = (
+      aggregateName: string,
+    ): StateStoredAggregatePersistence => {
+      const store = dedicatedStores.get(aggregateName);
+      if (!store) {
+        throw new Error(
+          `No dedicated state table configured for aggregate "${aggregateName}". ` +
+            `Add "${aggregateName}" to the aggregateStates config.`,
+        );
+      }
+      return store;
     };
   }
+
+  return result as any as DrizzleAdapterResult<C>;
 }
