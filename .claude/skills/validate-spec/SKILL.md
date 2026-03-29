@@ -108,22 +108,59 @@ cd packages/core && npx tsc --noEmit
 
 ## Step 7.5: Documentation Staleness Check
 
-If the spec has a `docs` frontmatter field, check documentation coverage:
+Check both conceptual docs and API reference pages for staleness.
+
+### 7.5a: Conceptual documentation pages
+
+If the spec has a `docs` frontmatter field:
 
 1. Read each listed documentation page
 2. For each page, find code blocks that import from `@noddde/core` and reference the spec's exports
 3. Check if those code examples still match the current API signatures
-4. Report any stale documentation:
+
+### 7.5b: API reference pages
+
+Search for API reference pages matching the spec's exports:
+
+```bash
+grep -rl "ExportName1\|ExportName2" docs/src/content/docs/api/ --include="*.md"
+```
+
+For each matching page:
+
+1. Check that documented properties/methods match the actual source interface
+2. Check that parameter types match (e.g., `string` vs `ID`)
+3. Check that all interface fields are documented (no missing fields)
+4. Check that no removed fields are still documented
+
+### 7.5c: Missing API reference pages
+
+For each export in the spec's `exports` list, check if a corresponding API reference page exists:
+
+```bash
+ls docs/src/content/docs/api/interfaces/<ExportName>.md
+ls docs/src/content/docs/api/type-aliases/<ExportName>.md
+ls docs/src/content/docs/api/classes/<ExportName>.md
+ls docs/src/content/docs/api/functions/<ExportName>.md
+```
+
+Flag any exported types/interfaces/functions that have no API reference page.
+
+### 7.5d: Report
 
 ```
 Documentation Coverage:
-  Pages listed in spec: <N>
-  Pages with stale code examples: <N>
+  Conceptual pages listed in spec: <N>
+  Conceptual pages with stale code examples: <N>
     - <page-path> (uses old signature for <export>)
-  Pages discovered via grep but not in spec: <N>
+  API reference pages checked: <N>
+  API reference pages with stale content: <N>
+    - <page-path> (<description of mismatch>)
+  Missing API reference pages: <N>
+    - <ExportName> (no docs/src/content/docs/api/**/<ExportName>.md found)
 ```
 
-This is a **warning**, not a hard failure — documentation updates happen in step 6.
+Stale documentation is a **hard failure** — the spec cannot be marked as `implemented` with stale docs. Step 6 (Update Documentation) will fix them, but this step must flag every instance so none are missed.
 
 ## Step 8: Validation Report
 
@@ -155,9 +192,11 @@ Tests: <test-file>
 
 ### Verdict: PASS | PARTIAL | FAIL
 
-  - PASS:    100% coverage, all tests green, no stubs → spec status stays `implemented`
-  - PARTIAL: >80% coverage, tests green, minor gaps → flag gaps, spec status stays `implemented` with notes
-  - FAIL:    Critical gaps, test failures, or stubs remain → spec status reset to `implementing`
+  - PASS:    100% coverage, all tests green, no stubs, docs up to date → spec status stays `implemented`
+  - PARTIAL: >80% coverage, tests green, minor gaps, no stale docs → flag gaps, spec status stays `implemented` with notes
+  - FAIL:    Critical gaps, test failures, stubs remain, OR stale/missing documentation → spec status reset to `implementing`
+
+Documentation staleness (stale code examples, missing API reference pages, outdated property lists) counts as FAIL — step 6 will fix them before the pipeline can complete.
 ```
 
 ### If FAIL
