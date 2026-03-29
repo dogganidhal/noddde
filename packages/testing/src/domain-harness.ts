@@ -40,6 +40,8 @@ export type TestDomainConfig<
   >;
   /** Saga definitions keyed by name. */
   sagas?: Record<string, Saga<any, any>>;
+  /** Optional standalone query handlers keyed by query name. */
+  standaloneQueryHandlers?: Record<string, any>;
   /** Optional custom infrastructure to provide to handlers. */
   infrastructure?: TInfrastructure;
 };
@@ -124,6 +126,9 @@ export async function testDomain<
     },
     readModel: {
       projections: config.projections ?? {},
+      ...(config.standaloneQueryHandlers
+        ? { standaloneQueryHandlers: config.standaloneQueryHandlers }
+        : {}),
     },
     processModel: config.sagas ? { sagas: config.sagas } : undefined,
   });
