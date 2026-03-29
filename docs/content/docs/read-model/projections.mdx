@@ -12,7 +12,9 @@ An aggregate's state is structured to enforce business rules -- not to serve que
 Projections solve this by building query-specific views from the event stream. Adding a new read model means writing a new projection. The write model is never touched.
 
 <Callout type="info">
-  You can scaffold a projection with the CLI: `noddde new projection OrderSummary`. See [CLI Reference](/docs/getting-started/cli#noddde-new-projection-name) for details.
+  You can scaffold a projection with the CLI: `noddde new projection
+  OrderSummary`. See [CLI
+  Reference](/docs/getting-started/cli#noddde-new-projection-name) for details.
 </Callout>
 
 ## The Event Flow
@@ -306,7 +308,9 @@ const bankingDomain = defineDomain<BankingInfrastructure>({
   },
 });
 
-const domain = await wireDomain(bankingDomain, { /* wiring */ });
+const domain = await wireDomain(bankingDomain, {
+  /* wiring */
+});
 ```
 
 The key in the projections map (e.g., `"AccountBalance"`) is the projection's name. It does not need to match the aggregate name. Passing `{ projection, viewStore }` connects the projection to a view store from your infrastructure, enabling automatic view persistence and `{ views }` injection into query handlers.
@@ -396,6 +400,15 @@ on: {
   },
 },
 ```
+
+<Callout type="warn">
+  When a handler omits `id` and a view store is configured, the engine defaults
+  to `event.metadata.aggregateId` and logs a warning at startup. This works for
+  the common case where each view maps 1:1 to an aggregate instance. If your
+  view is keyed differently (e.g., by date, by a related entity ID), you
+  **must** provide an explicit `id` extractor — otherwise the wrong view
+  instance will be loaded and updated.
+</Callout>
 
 The view store itself is provided in the domain configuration (not in the projection definition). When the engine handles an event, it automatically:
 

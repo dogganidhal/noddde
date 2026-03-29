@@ -627,14 +627,25 @@ export class Domain<
       if (viewStoreFactory) {
         const storeInstance = viewStoreFactory(this._infrastructure);
         resolvedViewStores.set(name, storeInstance);
-        // Validate: every on entry must have id when viewStore is present
+        // Default missing id extractors to event.metadata.aggregateId
         for (const [eventName, handler] of Object.entries(projection.on)) {
           if (handler && !(handler as any).id) {
-            throw new Error(
-              `Projection "${String(name)}" has a viewStore but the "${eventName}" handler ` +
-                `in "on" is missing an "id" function. All event handlers must provide ` +
-                `an identity extractor when viewStore is present.`,
+            domainLog.warn(
+              `Projection "${String(name)}": handler "${eventName}" has no "id" function. ` +
+                `Defaulting to event.metadata.aggregateId. Provide an explicit "id" ` +
+                `extractor if the view key differs from the aggregate ID.`,
             );
+            (handler as any).id = (event: Event) => {
+              const id = event.metadata?.aggregateId;
+              if (id == null) {
+                throw new Error(
+                  `Projection "${String(name)}": handler "${eventName}" has no "id" function ` +
+                    `and the event's metadata.aggregateId is missing. Either provide an ` +
+                    `explicit "id" extractor or ensure events carry aggregate metadata.`,
+                );
+              }
+              return id;
+            };
           }
         }
       }
