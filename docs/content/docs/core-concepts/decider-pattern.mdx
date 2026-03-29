@@ -15,21 +15,16 @@ The Decider pattern is a functional approach to modeling domain behavior as a st
 
 That is the entire pattern. There are no base classes to extend, no lifecycle hooks to override, no decorators to apply, and no framework-specific interfaces to implement. A Decider is just data and functions.
 
-```
-                    +---------+
-         command -->| decide  |--> event(s)
-                    |         |
-         state  -->|         |
-                    +---------+
-                         |
-                         | event(s)
-                         v
-                    +---------+
-         event  -->| evolve  |--> new state
-                    |         |
-         state  -->|         |
-                    +---------+
-```
+<Mermaid
+  chart={`graph LR
+  C["command"] --> D["decide"]
+  S1["state"] --> D
+  D --> E["event(s)"]
+  E --> EV["evolve"]
+  S2["state"] --> EV
+  EV --> NS["new state"]
+`}
+/>
 
 The flow works as follows: a command arrives, and `decide` examines the current state to determine whether the command should be accepted. If accepted, it returns one or more events describing what happened. Each event is then fed through `evolve` to produce the next state. The cycle repeats for the next command.
 
