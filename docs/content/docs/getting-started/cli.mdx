@@ -73,18 +73,21 @@ noddde new aggregate BankAccount
 
 Generates:
 
-```
-bank-account/
-├── index.ts                              # barrel exports
-├── state.ts                              # BankAccountState interface + initial state
-├── bank-account.ts                       # defineAggregate + DefineEvents/DefineCommands
-├── commands/
-│   ├── index.ts
-│   └── create-bank-account.ts            # command payload interface
-└── command-handlers/
-    ├── index.ts
-    └── handle-create-bank-account.ts     # standalone handler function
-```
+<Files>
+  <Folder name="bank-account" defaultOpen>
+    <File name="index.ts" />
+    <File name="state.ts" />
+    <File name="bank-account.ts" />
+    <Folder name="commands">
+      <File name="index.ts" />
+      <File name="create-bank-account.ts" />
+    </Folder>
+    <Folder name="command-handlers">
+      <File name="index.ts" />
+      <File name="handle-create-bank-account.ts" />
+    </Folder>
+  </Folder>
+</Files>
 
 Command handlers are standalone exported functions imported into the `defineAggregate` `commands` map. This keeps handlers testable in isolation and aggregates readable.
 
@@ -98,20 +101,24 @@ noddde new projection OrderSummary
 
 Generates:
 
-```
-order-summary/
-├── index.ts                                      # barrel exports
-├── order-summary.ts                              # defineProjection with on map
-├── queries/
-│   ├── index.ts                                  # View interface + DefineQueries
-│   └── get-order-summary.ts                      # query payload interface
-├── query-handlers/
-│   ├── index.ts
-│   └── handle-get-order-summary.ts               # standalone query handler
-└── view-reducers/
-    ├── index.ts
-    └── on-order-summary-created.ts               # standalone reduce function
-```
+<Files>
+  <Folder name="order-summary" defaultOpen>
+    <File name="index.ts" />
+    <File name="order-summary.ts" />
+    <Folder name="queries">
+      <File name="index.ts" />
+      <File name="get-order-summary.ts" />
+    </Folder>
+    <Folder name="query-handlers">
+      <File name="index.ts" />
+      <File name="handle-get-order-summary.ts" />
+    </Folder>
+    <Folder name="view-reducers">
+      <File name="index.ts" />
+      <File name="on-order-summary-created.ts" />
+    </Folder>
+  </Folder>
+</Files>
 
 View reducers and query handlers are standalone functions imported into the `defineProjection` `on` and `queryHandlers` maps respectively.
 
@@ -125,15 +132,17 @@ noddde new saga PaymentProcessing
 
 Generates:
 
-```
-payment-processing/
-├── index.ts                          # barrel exports
-├── state.ts                          # PaymentProcessingSagaState + initial state
-├── saga.ts                           # defineSaga with on map, imports handlers
-└── transition-handlers/
-    ├── index.ts
-    └── on-start-event.ts             # standalone transition handler function
-```
+<Files>
+  <Folder name="payment-processing" defaultOpen>
+    <File name="index.ts" />
+    <File name="state.ts" />
+    <File name="saga.ts" />
+    <Folder name="transition-handlers">
+      <File name="index.ts" />
+      <File name="on-start-event.ts" />
+    </Folder>
+  </Folder>
+</Files>
 
 Transition handlers are standalone exported functions imported into the `defineSaga` `on` map. Each handler receives an event and the current saga state, and returns the new state plus optional commands to dispatch.
 
