@@ -1,7 +1,7 @@
 ---
 title: "Closeable & BackgroundProcess"
 module: infrastructure/closeable
-source_file: packages/core/src/infrastructure/closeable.ts
+source_file: packages/core/src/infrastructure/closeable.ts, packages/core/src/infrastructure/background-process.ts
 status: implemented
 exports:
   - Closeable

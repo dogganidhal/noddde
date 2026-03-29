@@ -18,7 +18,7 @@ docs:
 
 - **`StandaloneCommandHandler<TInfrastructure, TCommand>`** is a function type:
   - First parameter: `command: TCommand` -- the full command object (not just the payload).
-  - Second parameter: `infrastructure: TInfrastructure & CQRSInfrastructure` -- custom infrastructure merged with CQRS buses.
+  - Second parameter: `infrastructure: TInfrastructure & CQRSInfrastructure & FrameworkInfrastructure` -- custom infrastructure merged with CQRS buses and framework infrastructure (provides `logger`).
   - Return type: `void | Promise<void>`.
 - `TInfrastructure` is constrained to `extends Infrastructure`.
 - `TCommand` is constrained to `extends StandaloneCommand`.
@@ -26,20 +26,20 @@ docs:
 ## Behavioral Requirements
 
 - The handler receives the full command object (including `name`), unlike event handlers which receive only the payload. This is because standalone commands may need to inspect the command name for routing logic.
-- Infrastructure is merged with `CQRSInfrastructure` via intersection (`&`), giving the handler access to `commandBus`, `eventBus`, and `queryBus` in addition to custom infrastructure.
+- Infrastructure is merged with `CQRSInfrastructure` and `FrameworkInfrastructure` via intersection (`&`), giving the handler access to `commandBus`, `eventBus`, `queryBus`, and `logger` in addition to custom infrastructure.
 - The handler may be sync (`void`) or async (`Promise<void>`).
 - The handler can dispatch commands, publish events, or query read models through the CQRS buses.
 
 ## Invariants
 
 - The first parameter is the full `TCommand`, not `TCommand["payload"]`.
-- The second parameter always includes `CQRSInfrastructure` via intersection.
+- The second parameter always includes `CQRSInfrastructure` and `FrameworkInfrastructure` via intersection.
 - The return type is exactly `void | Promise<void>`.
 - The generic parameter order is `<TInfrastructure, TCommand>` (infrastructure first, command second).
 
 ## Edge Cases
 
-- **Empty infrastructure (`{}`)**: The handler still gets `CQRSInfrastructure` (the three buses).
+- **Empty infrastructure (`{}`)**: The handler still gets `CQRSInfrastructure` (the three buses) and `FrameworkInfrastructure` (logger).
 - **Command with no payload**: `StandaloneCommand` allows `payload` to be `undefined`.
 - **Async handler**: Returning a `Promise<void>` is valid.
 - **Handler that dispatches commands**: The handler can call `infrastructure.commandBus.dispatch(...)`.
@@ -61,6 +61,7 @@ import type {
   StandaloneCommand,
   Infrastructure,
   CQRSInfrastructure,
+  FrameworkInfrastructure,
 } from "@noddde/core";
 
 describe("StandaloneCommandHandler", () => {
@@ -84,9 +85,9 @@ describe("StandaloneCommandHandler", () => {
     >().toEqualTypeOf<SendNotificationCommand>();
   });
 
-  it("should receive infrastructure merged with CQRSInfrastructure", () => {
+  it("should receive infrastructure merged with CQRSInfrastructure and FrameworkInfrastructure", () => {
     expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<
-      NotificationInfra & CQRSInfrastructure
+      NotificationInfra & CQRSInfrastructure & FrameworkInfrastructure
     >();
   });
 

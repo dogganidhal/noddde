@@ -63,11 +63,12 @@ docs:
 
   - `[QueryName]?: QueryHandler<ProjectionQueryInfra<T>, Extract<T["queries"], { name: QueryName }>>`
 
-- **`Projection<T extends ProjectionTypes>`** is an interface with two required fields and two optional fields:
+- **`Projection<T extends ProjectionTypes>`** is an interface with two required fields and three optional fields:
 
   - `on: ProjectionOnMap<T>` -- partial map of event handlers. Each entry bundles an `id` function (extracts view instance ID) and a `reduce` function (transforms the view). Only events the projection cares about need entries.
   - `queryHandlers: QueryHandlerMap<T>` -- optional handler per query name.
   - `initialView?: T["view"]` -- optional default view state for new view instances.
+  - `viewStore?: ViewStoreFactory<T>` -- optional factory function that resolves a view store from infrastructure. When `T` has a typed `viewStore` field, returns that specific type; otherwise returns `ViewStore<T["view"]>`. Prefer using `ProjectionWiring` in `DomainWiring` for runtime view store configuration.
   - `consistency?: "eventual" | "strong"` -- optional consistency mode (defaults to `"eventual"`).
 
 - **`defineProjection<T>(config): Projection<T>`** -- identity function for type inference.

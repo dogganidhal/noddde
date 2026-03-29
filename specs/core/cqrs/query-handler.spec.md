@@ -17,25 +17,25 @@ docs:
 
 - **`QueryHandler<TInfrastructure, TQuery>`** is a function type:
   - First parameter: `query: TQuery["payload"]` -- the query payload (filters, IDs, etc.).
-  - Second parameter: `infrastructure: TInfrastructure` -- external dependencies for data access.
+  - Second parameter: `infrastructure: TInfrastructure & FrameworkInfrastructure` -- external dependencies for data access, merged with framework infrastructure (provides `logger`).
   - Return type: `QueryResult<TQuery> | Promise<QueryResult<TQuery>>` -- sync or async, typed by the query's phantom result.
 - `TInfrastructure` is constrained to `extends Infrastructure`.
 - `TQuery` is constrained to `extends Query<any>`.
 
 ## Behavioral Requirements
 
-- The handler receives the unwrapped `payload` from the query, not the full query object. This is consistent with `EventHandler` and `ApplyHandler` which also receive payloads.
+- The handler receives the unwrapped `payload` from the query, not the full query object. This is consistent with `ApplyHandler` which also receives payloads (note: `EventHandler` receives the full event).
 - The return type is derived from the query's phantom `TResult` type via `QueryResult<TQuery>`.
 - The handler may return synchronously or asynchronously (`T | Promise<T>`).
 - Infrastructure provides access to repositories, caches, databases, etc.
-- Unlike `StandaloneCommandHandler`, the infrastructure is NOT merged with `CQRSInfrastructure`.
+- Unlike `StandaloneCommandHandler`, the infrastructure is NOT merged with `CQRSInfrastructure`. It is merged with `FrameworkInfrastructure` (providing `logger`).
 
 ## Invariants
 
 - The first parameter type is `TQuery["payload"]`, which may be `any` (since `Query.payload` is `any`).
 - The return type always matches `QueryResult<TQuery>` or its promise-wrapped form.
 - The generic parameter order is `<TInfrastructure, TQuery>` (infrastructure first, query second).
-- No `CQRSInfrastructure` merging -- query handlers are read-only by convention.
+- No `CQRSInfrastructure` merging -- query handlers are read-only by convention. `FrameworkInfrastructure` is merged (providing `logger`).
 
 ## Edge Cases
 
@@ -61,6 +61,7 @@ import type {
   DefineQueries,
   QueryResult,
   Infrastructure,
+  FrameworkInfrastructure,
 } from "@noddde/core";
 
 describe("QueryHandler", () => {
@@ -84,8 +85,10 @@ describe("QueryHandler", () => {
     expectTypeOf<Parameters<Handler>[0]>().toEqualTypeOf<{ id: string }>();
   });
 
-  it("should receive infrastructure as second parameter", () => {
-    expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<AccountInfra>();
+  it("should receive infrastructure merged with FrameworkInfrastructure as second parameter", () => {
+    expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<
+      AccountInfra & FrameworkInfrastructure
+    >();
   });
 
   it("should return the query result type or a promise of it", () => {

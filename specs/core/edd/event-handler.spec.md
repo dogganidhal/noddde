@@ -17,7 +17,7 @@ docs:
 
 - **`EventHandler<TEvent, TInfrastructure>`** is a function type:
   - First parameter: `event: TEvent` -- receives the full event object (including `name`, `payload`, and optional `metadata`).
-  - Second parameter: `infrastructure: TInfrastructure` -- external dependencies.
+  - Second parameter: `infrastructure: TInfrastructure & FrameworkInfrastructure` -- external dependencies merged with framework infrastructure (provides `logger`).
   - Return type: `void | Promise<void>` -- may be sync or async; no return value expected.
 - `TEvent` is constrained to `extends Event`.
 - `TInfrastructure` is constrained to `extends Infrastructure`.
@@ -33,7 +33,7 @@ docs:
 ## Invariants
 
 - The first parameter type is always `TEvent` (the full event type, not `TEvent["payload"]`).
-- The second parameter type is always the full `TInfrastructure` (no merging with `CQRSInfrastructure`).
+- The second parameter type is always `TInfrastructure & FrameworkInfrastructure` (merged with framework infrastructure for logger access, but NOT with `CQRSInfrastructure`).
 - The return type is exactly `void | Promise<void>` -- no other return types are allowed.
 
 ## Edge Cases
@@ -73,7 +73,12 @@ const handler: EventHandler<MyEvent, MyInfra> = (event, infra) => {
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
-import type { EventHandler, DefineEvents, Infrastructure } from "@noddde/core";
+import type {
+  EventHandler,
+  DefineEvents,
+  Infrastructure,
+  FrameworkInfrastructure,
+} from "@noddde/core";
 
 describe("EventHandler", () => {
   type OrderEvent = DefineEvents<{
@@ -91,8 +96,10 @@ describe("EventHandler", () => {
     expectTypeOf<Parameters<Handler>[0]>().toEqualTypeOf<OrderPlacedEvent>();
   });
 
-  it("should accept infrastructure as second parameter", () => {
-    expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<MyInfrastructure>();
+  it("should accept infrastructure merged with FrameworkInfrastructure as second parameter", () => {
+    expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<
+      MyInfrastructure & FrameworkInfrastructure
+    >();
   });
 
   it("should return void or Promise<void>", () => {
