@@ -31,6 +31,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       links={[
         {
           type: "icon",
+          text: "GitHub",
           label: "GitHub",
           icon: (
             <svg
