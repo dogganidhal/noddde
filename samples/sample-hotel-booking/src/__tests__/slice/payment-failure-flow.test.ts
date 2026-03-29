@@ -10,6 +10,7 @@ import { Room } from "../../domain/write-model/aggregates/room";
 import { Booking } from "../../domain/write-model/aggregates/booking";
 import { BookingFulfillmentSaga } from "../../domain/process-model/booking-fulfillment";
 import { PaymentProcessingSaga } from "../../domain/process-model/payment-processing";
+import { SearchAvailableRoomsHandler } from "../../domain/read-model/query-handlers";
 
 function createTestInfrastructure(): HotelInfrastructure {
   return {
@@ -72,6 +73,9 @@ describe("Payment failure compensation flow (slice)", () => {
       sagas: {
         BookingFulfillment: BookingFulfillmentSaga,
         PaymentProcessing: PaymentProcessingSaga,
+      },
+      standaloneQueryHandlers: {
+        SearchAvailableRooms: SearchAvailableRoomsHandler,
       },
       infrastructure: infra,
     });
