@@ -242,7 +242,7 @@ describe("Saga Infer utilities", () => {
     on: {
       StepCompleted: {
         id: (event) => String(event.payload.stepId),
-        handle: (event, state) => ({
+        handle: (event, _state) => ({
           state: { step: event.payload.stepId + 1 },
           commands: { name: "NextStep" },
         }),

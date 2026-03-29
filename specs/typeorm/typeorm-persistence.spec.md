@@ -19,6 +19,12 @@ exports:
   - NodddeSnapshotEntity
   - TypeORMOutboxStore
   - NodddeOutboxEntryEntity
+  - TypeORMAdapter
+  - TypeORMAdapterResult
+  - TypeORMAggregateStateTableConfig
+  - TypeORMStateTableColumnMap
+  - generateTypeORMMigration
+  - TypeORMMigrationOptions
 depends_on:
   - core/persistence/persistence
   - core/persistence/unit-of-work
@@ -367,6 +373,45 @@ export class NodddeOutboxEntryEntity {
 43. `NodddeOutboxEntryEntity` maps to table `noddde_outbox` with a string `@PrimaryColumn()` id, `text` event column, nullable `aggregate_name` and `aggregate_id`, and `created_at`/`published_at` (nullable) columns.
 44. Outbox operations route through `txStore.current` like all other persistence operations.
 
+### Builder
+
+45. `new TypeORMAdapter(dataSource)` creates a builder with no stores configured.
+46. `.withEventStore(entity?)` configures the shared events table. Defaults to `NodddeEventEntity`. Required for `build()`.
+47. `.withSagaStore(entity?)` configures the shared saga states table. Defaults to `NodddeSagaStateEntity`. Required for `build()`.
+48. `.withStateStore(entity?)` configures the shared aggregate states table. Defaults to `NodddeAggregateStateEntity`. Optional — only needed if some aggregates use the shared table.
+49. `.withSnapshotStore(entity?)` and `.withOutboxStore(entity?)` are optional. Default to built-in entities.
+50. `.withAggregateStateTable(name, config)` registers a dedicated state table for a named aggregate. Config includes `entity` (TypeORM entity class) and optional `columns` mapping.
+51. `.build()` throws if `withEventStore` or `withSagaStore` was not called.
+52. `.build()` returns a `TypeORMAdapterResult` with all configured stores.
+53. All persistence instances from a single builder share the same `TypeORMTransactionStore` so that operations inside a UoW participate in the same transaction.
+
+### Per-Aggregate State Persistence
+
+54. `stateStoreFor(aggregateName)` returns a `StateStoredAggregatePersistence` bound to that aggregate's dedicated TypeORM entity.
+55. `stateStoreFor(aggregateName)` throws if no dedicated table was configured for that aggregate via `.withAggregateStateTable()`.
+56. The dedicated state persistence ignores the `aggregateName` parameter passed to `save()`/`load()` — the entity table itself is the namespace.
+57. The dedicated state persistence uses the column mapping to read/write the correct properties on the TypeORM entity.
+58. When `columns` is omitted from `TypeORMAggregateStateTableConfig`, defaults to `{ aggregateId: "aggregateId", state: "state", version: "version" }`.
+59. Dedicated state persistence participates in the same UoW transaction as shared persistence via the shared `TypeORMTransactionStore`.
+60. `save()` uses `findOne` + version check: if entity exists and version doesn't match, throws `ConcurrencyError`; if entity doesn't exist and `expectedVersion !== 0`, throws `ConcurrencyError`.
+61. `load()` uses `findOne` and returns `{ state: JSON.parse(stateValue), version }` or `null`.
+
+### Migration Generation
+
+62. `generateTypeORMMigration(dialect)` returns a SQL string with `CREATE TABLE IF NOT EXISTS` and `CREATE UNIQUE INDEX IF NOT EXISTS` statements.
+63. Default (no options) includes shared tables: `noddde_events`, `noddde_aggregate_states`, `noddde_saga_states`.
+64. When `options.sharedTables.snapshots` or `.outbox` is `true`, the corresponding table is included.
+65. When `options.aggregateStateTables` is provided, generates `CREATE TABLE IF NOT EXISTS` for each custom table with the configured column names.
+66. Output is dialect-aware: PostgreSQL uses `SERIAL`/`JSONB`/`TEXT`, MySQL uses `INT AUTO_INCREMENT`/`JSON`/`VARCHAR(255)`, SQLite uses `INTEGER`/`TEXT`, MSSQL uses `INT IDENTITY(1,1)`/`NVARCHAR(MAX)`/`NVARCHAR(255)`.
+67. All DDL statements use `IF NOT EXISTS` for idempotent migrations.
+
+### Backwards Compatibility
+
+68. `createTypeORMPersistence(dataSource)` continues to work with the same signature and return type (`TypeORMPersistenceInfrastructure`).
+69. `createTypeORMPersistence` delegates to `TypeORMAdapter` internally (builder wraps the old behavior).
+70. The `TypeORMPersistenceInfrastructure` return type is unchanged.
+71. `createTypeORMPersistence` is marked `@deprecated` in JSDoc, recommending `TypeORMAdapter` instead.
+
 ## Invariants
 
 - [ ] Events saved and loaded maintain FIFO order (sequenceNumber ordering).
@@ -377,6 +422,9 @@ export class NodddeOutboxEntryEntity {
 - [ ] State-stored version increments by exactly 1 on each successful save.
 - [ ] Event-sourced save detects concurrent writes via the unique index on `[aggregateName, aggregateId, sequenceNumber]`.
 - [ ] Advisory locker constructor rejects unsupported database types immediately.
+- [ ] Dedicated state persistence instances share the same txStore as shared persistence.
+- [ ] `build()` fails fast if required stores (event, saga) are not configured.
+- [ ] `stateStoreFor()` fails fast if aggregate name was not registered.
 
 ## Edge Cases
 
@@ -395,6 +443,13 @@ export class NodddeOutboxEntryEntity {
 - **MSSQL release of unheld lock**: `sp_releaseapplock` raises error 1223; silently caught for idempotency.
 - **Outbox save with empty entries array**: No-op, no database call.
 - **markPublishedByEventIds with no matches**: No-op, no error.
+- **Builder with no event store**: `.build()` throws `"TypeORMAdapter requires withEventStore() to be called before build()"`.
+- **Builder with no saga store**: `.build()` throws `"TypeORMAdapter requires withSagaStore() to be called before build()"`.
+- **stateStoreFor unknown aggregate**: Throws `"No dedicated state table configured for aggregate \"Foo\". Call .withAggregateStateTable(\"Foo\", ...) before build()."`.
+- **Dedicated and shared persistence in same UoW**: Both participate in the same transaction via shared txStore.
+- **Multiple dedicated tables in same UoW**: All share the same transaction.
+- **Migration generation with empty options**: Returns SQL for all three shared tables.
+- **MSSQL dialect in migration**: Uses `INT IDENTITY(1,1)`, `NVARCHAR(MAX)`, `NVARCHAR(255)` types.
 
 ## Integration Points
 

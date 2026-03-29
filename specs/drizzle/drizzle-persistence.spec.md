@@ -8,6 +8,12 @@ exports:
   - DrizzlePersistenceInfrastructure
   - DrizzleNodddeSchema
   - DrizzleSnapshotStore
+  - DrizzleAdapter
+  - DrizzleAdapterResult
+  - AggregateStateTableConfig
+  - StateTableColumnMap
+  - generateDrizzleMigration
+  - DrizzleMigrationOptions
   # @noddde/drizzle/sqlite
   - events (sqliteTable)
   - aggregateStates (sqliteTable)
@@ -183,6 +189,139 @@ export const outbox: MySqlTableWithColumns<...>;
 
 All three dialects define the same logical schema with the same table names (`noddde_events`, `noddde_aggregate_states`, `noddde_saga_states`) and column names.
 
+### Builder API (`DrizzleAdapter`)
+
+```ts
+/**
+ * Column mapping for a custom state-stored aggregate table.
+ * Maps logical noddde columns to actual Drizzle column references.
+ * If omitted from config, columns are resolved by convention
+ * (looks for columns named aggregate_id, state, version).
+ */
+export interface StateTableColumnMap {
+  /** Column holding the aggregate instance ID (string PK). */
+  aggregateId: any;
+  /** Column holding the serialized aggregate state (text/jsonb). */
+  state: any;
+  /** Column holding the version number (integer). */
+  version: any;
+}
+
+/**
+ * Configuration for a per-aggregate state table.
+ */
+export interface AggregateStateTableConfig {
+  /** The Drizzle table definition. */
+  table: any;
+  /** Column mappings. If omitted, uses convention-based defaults. */
+  columns?: Partial<StateTableColumnMap>;
+}
+
+/**
+ * Result of DrizzleAdapter.build().
+ */
+export interface DrizzleAdapterResult {
+  /** Shared event-sourced persistence (shared noddde_events table). */
+  eventSourcedPersistence: EventSourcedAggregatePersistence;
+  /** Shared state-stored persistence (shared noddde_aggregate_states). Undefined if no shared state store configured. */
+  stateStoredPersistence?: StateStoredAggregatePersistence;
+  /** Saga persistence (always shared table). */
+  sagaPersistence: SagaPersistence;
+  /** UoW factory — all persistence instances share the same txStore. */
+  unitOfWorkFactory: UnitOfWorkFactory;
+  /** Snapshot store. Present only when configured. */
+  snapshotStore?: SnapshotStore;
+  /** Outbox store. Present only when configured. */
+  outboxStore?: OutboxStore;
+  /**
+   * Returns a StateStoredAggregatePersistence bound to a specific
+   * aggregate's dedicated table. Throws if no such aggregate was
+   * configured via .withAggregateStateTable().
+   */
+  stateStoreFor(aggregateName: string): StateStoredAggregatePersistence;
+}
+
+/**
+ * Builder for constructing a fully-configured Drizzle persistence layer.
+ * Supports shared tables (existing behavior) plus per-aggregate
+ * dedicated state tables with custom column mappings.
+ */
+export class DrizzleAdapter {
+  constructor(db: any);
+  /** Configures the shared event store table. Required. */
+  withEventStore(table: any): this;
+  /** Configures the shared aggregate state table. Optional. */
+  withStateStore(table: any): this;
+  /** Configures the saga state table. Required. */
+  withSagaStore(table: any): this;
+  /** Configures the snapshot table. Optional. */
+  withSnapshotStore(table: any): this;
+  /** Configures the outbox table. Optional. */
+  withOutboxStore(table: any): this;
+  /**
+   * Maps an aggregate to a dedicated state table.
+   * The returned StateStoredAggregatePersistence from stateStoreFor()
+   * will query/write this specific table.
+   */
+  withAggregateStateTable(
+    aggregateName: string,
+    config: AggregateStateTableConfig,
+  ): this;
+  /**
+   * Builds the configured persistence infrastructure.
+   * Throws if withEventStore or withSagaStore was not called.
+   * Throws if convention-based column resolution fails for any
+   * aggregate state table.
+   */
+  build(): DrizzleAdapterResult;
+}
+```
+
+### Migration Generation
+
+```ts
+/**
+ * Options for generating Drizzle-Kit compatible migration SQL.
+ */
+export interface DrizzleMigrationOptions {
+  /** Which shared noddde tables to include. */
+  sharedTables?: {
+    events?: boolean; // default true
+    aggregateStates?: boolean; // default true
+    sagaStates?: boolean; // default true
+    snapshots?: boolean; // default false
+    outbox?: boolean; // default false
+  };
+  /** Per-aggregate state tables to include in the migration. */
+  aggregateStateTables?: Record<
+    string,
+    {
+      /** Table name in the database. */
+      tableName: string;
+      /** Custom column names. Defaults: aggregate_id, state, version. */
+      columns?: {
+        aggregateId?: string;
+        state?: string;
+        version?: string;
+      };
+    }
+  >;
+}
+
+/**
+ * Generates a Drizzle-Kit compatible migration SQL string.
+ * Can be written to a migration directory for drizzle-kit push/migrate.
+ *
+ * @param dialect - Target SQL dialect.
+ * @param options - Migration configuration.
+ * @returns SQL string with CREATE TABLE and CREATE INDEX statements.
+ */
+export function generateDrizzleMigration(
+  dialect: "postgresql" | "mysql" | "sqlite",
+  options?: DrizzleMigrationOptions,
+): string;
+```
+
 ## Behavioral Requirements
 
 ### Factory
@@ -241,6 +380,43 @@ All three dialects define the same logical schema with the same table names (`no
 37. `outboxStore` is only included in the factory return when `schema.outbox` is provided (same pattern as `snapshotStore`).
 38. Outbox operations route through `txStore.current` like all other persistence operations.
 
+### Builder
+
+39. `new DrizzleAdapter(db)` creates a builder with no stores configured.
+40. `.withEventStore(table)` configures the shared events table. Required for `build()`.
+41. `.withSagaStore(table)` configures the shared saga states table. Required for `build()`.
+42. `.withStateStore(table)` configures the shared aggregate states table. Optional — only needed if some aggregates use the shared table.
+43. `.withSnapshotStore(table)` and `.withOutboxStore(table)` are optional.
+44. `.withAggregateStateTable(name, config)` registers a dedicated state table for a named aggregate.
+45. `.build()` throws if `withEventStore` or `withSagaStore` was not called.
+46. `.build()` returns a `DrizzleAdapterResult` with all configured stores.
+47. All persistence instances from a single builder share the same `DrizzleTransactionStore` so that operations inside a UoW participate in the same transaction.
+
+### Per-Aggregate State Persistence
+
+48. `stateStoreFor(aggregateName)` returns a `StateStoredAggregatePersistence` bound to that aggregate's dedicated table.
+49. `stateStoreFor(aggregateName)` throws if no dedicated table was configured for that aggregate via `.withAggregateStateTable()`.
+50. The dedicated state persistence ignores the `aggregateName` parameter passed to `save()`/`load()` — the table itself is the namespace.
+51. The dedicated state persistence uses the column mapping to read/write the correct columns in the dedicated table.
+52. When `columns` is omitted from `AggregateStateTableConfig`, the builder resolves columns by convention: looks for columns named `aggregate_id`, `state`, `version` in the Drizzle table definition.
+53. If convention-based column resolution fails (required columns not found), `.build()` throws with a clear error listing the available columns in the table.
+54. Dedicated state persistence participates in the same UoW transaction as shared persistence via the shared `DrizzleTransactionStore`.
+
+### Migration Generation
+
+55. `generateDrizzleMigration(dialect)` returns a SQL string with `CREATE TABLE IF NOT EXISTS` and `CREATE UNIQUE INDEX IF NOT EXISTS` statements.
+56. Default (no options) includes shared tables: `noddde_events`, `noddde_aggregate_states`, `noddde_saga_states`.
+57. When `options.sharedTables.snapshots` or `.outbox` is `true`, the corresponding table is included.
+58. When `options.aggregateStateTables` is provided, generates `CREATE TABLE IF NOT EXISTS` for each custom table with `aggregate_id TEXT NOT NULL PRIMARY KEY`, `state` (dialect-appropriate JSON type), `version INTEGER NOT NULL DEFAULT 0` columns (or custom column names from config).
+59. Output is dialect-aware: PostgreSQL uses `SERIAL`/`JSONB`/`TEXT`, MySQL uses `INT AUTO_INCREMENT`/`JSON`/`VARCHAR(255)`, SQLite uses `INTEGER`/`TEXT`.
+60. All DDL statements use `IF NOT EXISTS` for idempotent migrations.
+
+### Backwards Compatibility
+
+61. `createDrizzlePersistence(db, schema)` continues to work with the same signature and return type (`DrizzlePersistenceInfrastructure`).
+62. `createDrizzlePersistence` delegates to `DrizzleAdapter` internally (builder wraps the old behavior).
+63. The `DrizzlePersistenceInfrastructure` return type is unchanged.
+
 ## Invariants
 
 - [ ] Events saved and loaded maintain FIFO order (sequence number ordering).
@@ -248,6 +424,10 @@ All three dialects define the same logical schema with the same table names (`no
 - [ ] A committed UoW cannot be reused.
 - [ ] Transaction store is `null` outside a UoW boundary.
 - [ ] All persistence operations within a UoW execute in the same database transaction.
+- [ ] Dedicated state persistence instances share the same txStore as shared persistence.
+- [ ] `build()` fails fast if required stores (event, saga) are not configured.
+- [ ] `stateStoreFor()` fails fast if aggregate name was not registered.
+- [ ] Convention-based column resolution fails fast at `build()` time, not at query time.
 
 ## Edge Cases
 
@@ -261,6 +441,13 @@ All three dialects define the same logical schema with the same table names (`no
 - **Transaction store cleared after commit/rollback**: `txStore.current` is always reset to `null`.
 - **Outbox save with empty entries array**: No-op, no database call.
 - **markPublishedByEventIds with no matches**: No-op, no error.
+- **Builder with no event store**: `.build()` throws `"DrizzleAdapter requires withEventStore() to be called before build()"`.
+- **Builder with no saga store**: `.build()` throws `"DrizzleAdapter requires withSagaStore() to be called before build()"`.
+- **stateStoreFor unknown aggregate**: Throws `"No dedicated state table configured for aggregate \"Foo\". Call .withAggregateStateTable(\"Foo\", ...) before build()."`.
+- **Convention resolution with missing columns**: `.build()` throws listing available columns and which required columns are missing.
+- **Dedicated and shared persistence in same UoW**: Both participate in the same transaction via shared txStore.
+- **Multiple dedicated tables in same UoW**: All share the same transaction.
+- **Migration generation with empty options**: Returns SQL for all three shared tables.
 
 ## Integration Points
 
@@ -944,5 +1131,407 @@ it("outbox store: not present when schema.outbox not provided", () => {
     sagaStates,
   });
   expect(infra.outboxStore).toBeUndefined();
+});
+```
+
+### Builder: creates all stores with shared txStore
+
+```ts
+import { DrizzleAdapter } from "@noddde/drizzle";
+
+it("builder creates all stores with shared transaction context", () => {
+  const db = createTestDb();
+  const result = new DrizzleAdapter(db)
+    .withEventStore(events)
+    .withStateStore(aggregateStates)
+    .withSagaStore(sagaStates)
+    .withSnapshotStore(snapshots)
+    .withOutboxStore(outbox)
+    .build();
+
+  expect(result.eventSourcedPersistence).toBeDefined();
+  expect(result.stateStoredPersistence).toBeDefined();
+  expect(result.sagaPersistence).toBeDefined();
+  expect(result.unitOfWorkFactory).toBeDefined();
+  expect(result.snapshotStore).toBeDefined();
+  expect(result.outboxStore).toBeDefined();
+  expect(typeof result.stateStoreFor).toBe("function");
+});
+```
+
+### Builder: throws if withEventStore not called
+
+```ts
+it("build() throws if withEventStore was not called", () => {
+  const db = createTestDb();
+  expect(() =>
+    new DrizzleAdapter(db).withSagaStore(sagaStates).build(),
+  ).toThrow("DrizzleAdapter requires withEventStore()");
+});
+```
+
+### Builder: throws if withSagaStore not called
+
+```ts
+it("build() throws if withSagaStore was not called", () => {
+  const db = createTestDb();
+  expect(() => new DrizzleAdapter(db).withEventStore(events).build()).toThrow(
+    "DrizzleAdapter requires withSagaStore()",
+  );
+});
+```
+
+### Builder: stateStoredPersistence is undefined when withStateStore not called
+
+```ts
+it("stateStoredPersistence is undefined when withStateStore not called", () => {
+  const db = createTestDb();
+  const result = new DrizzleAdapter(db)
+    .withEventStore(events)
+    .withSagaStore(sagaStates)
+    .build();
+
+  expect(result.stateStoredPersistence).toBeUndefined();
+});
+```
+
+### Builder: createDrizzlePersistence delegates to builder (backwards compat)
+
+```ts
+it("createDrizzlePersistence continues to work unchanged", async () => {
+  const db = createTestDb();
+  const infra = createDrizzlePersistence(db, {
+    events,
+    aggregateStates,
+    sagaStates,
+  });
+
+  // Same behavior as before
+  await infra.eventSourcedPersistence.save(
+    "Order",
+    "o1",
+    [{ name: "OrderPlaced", payload: { total: 100 } }],
+    0,
+  );
+  const loaded = await infra.eventSourcedPersistence.load("Order", "o1");
+  expect(loaded).toHaveLength(1);
+  expect(loaded[0]!.name).toBe("OrderPlaced");
+});
+```
+
+### Per-aggregate state table: save and load roundtrip
+
+```ts
+import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+
+const ordersTable = sqliteTable("orders", {
+  aggregateId: text("aggregate_id").notNull().primaryKey(),
+  state: text("state").notNull(),
+  version: integer("version").notNull().default(0),
+});
+
+function createTestDbWithCustomTables() {
+  const sqlite = new Database(":memory:");
+  sqlite.exec(`
+    CREATE TABLE noddde_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      aggregate_name TEXT NOT NULL,
+      aggregate_id TEXT NOT NULL,
+      sequence_number INTEGER NOT NULL,
+      event_name TEXT NOT NULL,
+      payload TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX noddde_events_stream_version_idx
+      ON noddde_events (aggregate_name, aggregate_id, sequence_number);
+    CREATE TABLE noddde_saga_states (
+      saga_name TEXT NOT NULL,
+      saga_id TEXT NOT NULL,
+      state TEXT NOT NULL,
+      PRIMARY KEY (saga_name, saga_id)
+    );
+    CREATE TABLE orders (
+      aggregate_id TEXT NOT NULL PRIMARY KEY,
+      state TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 0
+    );
+  `);
+  return drizzle(sqlite);
+}
+
+it("per-aggregate state table: save and load roundtrip", async () => {
+  const db = createTestDbWithCustomTables();
+  const result = new DrizzleAdapter(db)
+    .withEventStore(events)
+    .withSagaStore(sagaStates)
+    .withAggregateStateTable("Order", { table: ordersTable })
+    .build();
+
+  const orderPersistence = result.stateStoreFor("Order");
+  await orderPersistence.save(
+    "Order",
+    "order-1",
+    { status: "placed", total: 100 },
+    0,
+  );
+
+  const loaded = await orderPersistence.load("Order", "order-1");
+  expect(loaded).not.toBeNull();
+  expect(loaded!.state).toEqual({ status: "placed", total: 100 });
+  expect(loaded!.version).toBe(1);
+});
+```
+
+### Per-aggregate state table: returns null for nonexistent aggregate
+
+```ts
+it("per-aggregate state table: returns null for nonexistent", async () => {
+  const db = createTestDbWithCustomTables();
+  const result = new DrizzleAdapter(db)
+    .withEventStore(events)
+    .withSagaStore(sagaStates)
+    .withAggregateStateTable("Order", { table: ordersTable })
+    .build();
+
+  const loaded = await result
+    .stateStoreFor("Order")
+    .load("Order", "nonexistent");
+  expect(loaded).toBeNull();
+});
+```
+
+### Per-aggregate state table: optimistic concurrency
+
+```ts
+it("per-aggregate state table: throws ConcurrencyError on version mismatch", async () => {
+  const db = createTestDbWithCustomTables();
+  const result = new DrizzleAdapter(db)
+    .withEventStore(events)
+    .withSagaStore(sagaStates)
+    .withAggregateStateTable("Order", { table: ordersTable })
+    .build();
+
+  const persistence = result.stateStoreFor("Order");
+  await persistence.save("Order", "order-1", { status: "placed" }, 0);
+
+  // Try to save with wrong version
+  await expect(
+    persistence.save("Order", "order-1", { status: "confirmed" }, 0),
+  ).rejects.toThrow("ConcurrencyError");
+});
+```
+
+### Per-aggregate state table: custom column mapping
+
+```ts
+const customOrdersTable = sqliteTable("custom_orders", {
+  id: text("id").notNull().primaryKey(),
+  data: text("data").notNull(),
+  ver: integer("ver").notNull().default(0),
+});
+
+it("per-aggregate state table: uses custom column mapping", async () => {
+  const sqlite = new Database(":memory:");
+  sqlite.exec(`
+    CREATE TABLE noddde_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      aggregate_name TEXT NOT NULL,
+      aggregate_id TEXT NOT NULL,
+      sequence_number INTEGER NOT NULL,
+      event_name TEXT NOT NULL,
+      payload TEXT NOT NULL
+    );
+    CREATE TABLE noddde_saga_states (
+      saga_name TEXT NOT NULL,
+      saga_id TEXT NOT NULL,
+      state TEXT NOT NULL,
+      PRIMARY KEY (saga_name, saga_id)
+    );
+    CREATE TABLE custom_orders (
+      id TEXT NOT NULL PRIMARY KEY,
+      data TEXT NOT NULL,
+      ver INTEGER NOT NULL DEFAULT 0
+    );
+  `);
+  const db = drizzle(sqlite);
+
+  const result = new DrizzleAdapter(db)
+    .withEventStore(events)
+    .withSagaStore(sagaStates)
+    .withAggregateStateTable("Order", {
+      table: customOrdersTable,
+      columns: {
+        aggregateId: customOrdersTable.id,
+        state: customOrdersTable.data,
+        version: customOrdersTable.ver,
+      },
+    })
+    .build();
+
+  const persistence = result.stateStoreFor("Order");
+  await persistence.save("Order", "order-1", { status: "placed" }, 0);
+
+  const loaded = await persistence.load("Order", "order-1");
+  expect(loaded).not.toBeNull();
+  expect(loaded!.state).toEqual({ status: "placed" });
+  expect(loaded!.version).toBe(1);
+});
+```
+
+### Per-aggregate state table: stateStoreFor throws for unknown aggregate
+
+```ts
+it("stateStoreFor throws for unconfigured aggregate", () => {
+  const db = createTestDbWithCustomTables();
+  const result = new DrizzleAdapter(db)
+    .withEventStore(events)
+    .withSagaStore(sagaStates)
+    .withAggregateStateTable("Order", { table: ordersTable })
+    .build();
+
+  expect(() => result.stateStoreFor("Payment")).toThrow(
+    'No dedicated state table configured for aggregate "Payment"',
+  );
+});
+```
+
+### Per-aggregate state table: participates in UoW transaction
+
+```ts
+it("per-aggregate state table: participates in UoW transaction", async () => {
+  const db = createTestDbWithCustomTables();
+  const result = new DrizzleAdapter(db)
+    .withEventStore(events)
+    .withSagaStore(sagaStates)
+    .withAggregateStateTable("Order", { table: ordersTable })
+    .build();
+
+  const orderPersistence = result.stateStoreFor("Order");
+  const uow = result.unitOfWorkFactory();
+
+  uow.enlist(async () => {
+    await result.eventSourcedPersistence.save(
+      "Payment",
+      "p1",
+      [{ name: "PaymentReceived", payload: { amount: 50 } }],
+      0,
+    );
+  });
+  uow.enlist(async () => {
+    await orderPersistence.save("Order", "order-1", { status: "paid" }, 0);
+  });
+
+  await uow.commit();
+
+  const paymentEvents = await result.eventSourcedPersistence.load(
+    "Payment",
+    "p1",
+  );
+  expect(paymentEvents).toHaveLength(1);
+
+  const orderState = await orderPersistence.load("Order", "order-1");
+  expect(orderState).not.toBeNull();
+  expect(orderState!.state).toEqual({ status: "paid" });
+});
+```
+
+### Builder: convention-based column resolution fails with clear error
+
+```ts
+const badTable = sqliteTable("bad_table", {
+  foo: text("foo").notNull(),
+  bar: integer("bar").notNull(),
+});
+
+it("build() throws clear error when convention resolution fails", () => {
+  const sqlite = new Database(":memory:");
+  sqlite.exec(
+    `CREATE TABLE bad_table (foo TEXT NOT NULL, bar INTEGER NOT NULL);`,
+  );
+  const db = drizzle(sqlite);
+
+  expect(() =>
+    new DrizzleAdapter(db)
+      .withEventStore(events)
+      .withSagaStore(sagaStates)
+      .withAggregateStateTable("Bad", { table: badTable })
+      .build(),
+  ).toThrow(/aggregate_id.*state.*version/);
+});
+```
+
+### Migration generation: default shared tables
+
+```ts
+import { generateDrizzleMigration } from "@noddde/drizzle";
+
+it("generates SQL for default shared tables (SQLite)", () => {
+  const sql = generateDrizzleMigration("sqlite");
+
+  expect(sql).toContain("CREATE TABLE IF NOT EXISTS noddde_events");
+  expect(sql).toContain("CREATE TABLE IF NOT EXISTS noddde_aggregate_states");
+  expect(sql).toContain("CREATE TABLE IF NOT EXISTS noddde_saga_states");
+  expect(sql).toContain("CREATE UNIQUE INDEX IF NOT EXISTS");
+  expect(sql).not.toContain("noddde_snapshots");
+  expect(sql).not.toContain("noddde_outbox");
+});
+```
+
+### Migration generation: includes optional tables when requested
+
+```ts
+it("includes snapshots and outbox tables when requested", () => {
+  const sql = generateDrizzleMigration("sqlite", {
+    sharedTables: { snapshots: true, outbox: true },
+  });
+
+  expect(sql).toContain("CREATE TABLE IF NOT EXISTS noddde_snapshots");
+  expect(sql).toContain("CREATE TABLE IF NOT EXISTS noddde_outbox");
+});
+```
+
+### Migration generation: per-aggregate state tables
+
+```ts
+it("generates per-aggregate state tables", () => {
+  const sql = generateDrizzleMigration("sqlite", {
+    aggregateStateTables: {
+      Order: { tableName: "orders" },
+      BankAccount: {
+        tableName: "bank_accounts",
+        columns: { aggregateId: "account_id", state: "data", version: "ver" },
+      },
+    },
+  });
+
+  expect(sql).toContain("CREATE TABLE IF NOT EXISTS orders");
+  expect(sql).toContain("aggregate_id TEXT NOT NULL PRIMARY KEY");
+  expect(sql).toContain("CREATE TABLE IF NOT EXISTS bank_accounts");
+  expect(sql).toContain("account_id TEXT NOT NULL PRIMARY KEY");
+  expect(sql).toContain("data TEXT NOT NULL");
+  expect(sql).toContain("ver INTEGER NOT NULL DEFAULT 0");
+});
+```
+
+### Migration generation: PostgreSQL dialect
+
+```ts
+it("generates PostgreSQL-specific DDL", () => {
+  const sql = generateDrizzleMigration("postgresql");
+
+  expect(sql).toContain("SERIAL PRIMARY KEY");
+  expect(sql).toContain("JSONB NOT NULL");
+  expect(sql).toContain("TEXT NOT NULL");
+});
+```
+
+### Migration generation: MySQL dialect
+
+```ts
+it("generates MySQL-specific DDL", () => {
+  const sql = generateDrizzleMigration("mysql");
+
+  expect(sql).toContain("INT AUTO_INCREMENT PRIMARY KEY");
+  expect(sql).toContain("JSON NOT NULL");
+  expect(sql).toContain("VARCHAR(255) NOT NULL");
 });
 ```

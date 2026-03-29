@@ -18,6 +18,17 @@ export {
   createTypeORMUnitOfWorkFactory,
 } from "./unit-of-work";
 export type { TypeORMTransactionStore } from "./unit-of-work";
+export {
+  createTypeORMAdapter,
+  type TypeORMAdapterConfig,
+  type TypeORMAdapterResult,
+  type TypeORMAggregateStateTableConfig,
+  type TypeORMStateTableColumnMap,
+} from "./builder";
+export {
+  generateTypeORMMigration,
+  type TypeORMMigrationOptions,
+} from "./migrations";
 
 import type { DataSource } from "typeorm";
 import type { UnitOfWorkFactory } from "@noddde/core";
@@ -28,15 +39,7 @@ import type {
   SnapshotStore,
   OutboxStore,
 } from "@noddde/core";
-import {
-  TypeORMEventSourcedAggregatePersistence,
-  TypeORMStateStoredAggregatePersistence,
-  TypeORMSagaPersistence,
-  TypeORMSnapshotStore,
-  TypeORMOutboxStore,
-} from "./persistence";
-import { createTypeORMUnitOfWorkFactory } from "./unit-of-work";
-import type { TypeORMTransactionStore } from "./unit-of-work";
+import { createTypeORMAdapter } from "./builder";
 
 /**
  * Result of {@link createTypeORMPersistence}.
@@ -52,6 +55,10 @@ export interface TypeORMPersistenceInfrastructure {
 
 /**
  * Creates a complete set of TypeORM-backed persistence implementations.
+ *
+ * @deprecated Use {@link createTypeORMAdapter} instead for new code.
+ * This function is preserved for backwards compatibility and delegates
+ * to the builder internally.
  *
  * @param dataSource - An initialized TypeORM DataSource.
  * @returns Persistence implementations and a UoW factory.
@@ -97,20 +104,17 @@ export interface TypeORMPersistenceInfrastructure {
 export function createTypeORMPersistence(
   dataSource: DataSource,
 ): TypeORMPersistenceInfrastructure {
-  const txStore: TypeORMTransactionStore = { current: null };
+  const result = createTypeORMAdapter(dataSource, {
+    snapshotStore: true,
+    outboxStore: true,
+  });
 
   return {
-    eventSourcedPersistence: new TypeORMEventSourcedAggregatePersistence(
-      dataSource,
-      txStore,
-    ),
-    stateStoredPersistence: new TypeORMStateStoredAggregatePersistence(
-      dataSource,
-      txStore,
-    ),
-    sagaPersistence: new TypeORMSagaPersistence(dataSource, txStore),
-    snapshotStore: new TypeORMSnapshotStore(dataSource, txStore),
-    outboxStore: new TypeORMOutboxStore(dataSource, txStore),
-    unitOfWorkFactory: createTypeORMUnitOfWorkFactory(dataSource, txStore),
+    eventSourcedPersistence: result.eventSourcedPersistence,
+    stateStoredPersistence: result.stateStoredPersistence,
+    sagaPersistence: result.sagaPersistence,
+    snapshotStore: result.snapshotStore,
+    outboxStore: result.outboxStore,
+    unitOfWorkFactory: result.unitOfWorkFactory,
   };
 }

@@ -12,7 +12,7 @@
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import { DataSource } from "typeorm";
 import {
-  createTypeORMPersistence,
+  createTypeORMAdapter,
   TypeORMAdvisoryLocker,
   NodddeEventEntity,
   NodddeAggregateStateEntity,
@@ -60,7 +60,7 @@ async function main() {
     console.log("Database tables created via TypeORM synchronize\n");
 
     // Step 3: Configure domain with pessimistic concurrency
-    const typeormInfra = createTypeORMPersistence(dataSource);
+    const typeormInfra = createTypeORMAdapter(dataSource);
 
     // Define the domain structure (pure, sync -- same as optimistic)
     const flashSaleDomain = defineDomain<Infrastructure>({

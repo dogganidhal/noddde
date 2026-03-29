@@ -13,7 +13,10 @@
  */
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { createDrizzlePersistence } from "@noddde/drizzle";
+import {
+  createDrizzleAdapter,
+  generateDrizzleMigration,
+} from "@noddde/drizzle";
 import {
   events,
   aggregateStates,
@@ -77,42 +80,12 @@ async function main() {
       "postgres://noddde:noddde@localhost:5432/hotel_booking",
   });
 
+  // Auto-create noddde tables + hotel_views using migration generation
+  const migrationSql = generateDrizzleMigration("postgresql", {
+    sharedTables: { snapshots: true },
+  });
+  await pool.query(migrationSql);
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS noddde_events (
-      id SERIAL PRIMARY KEY,
-      aggregate_name TEXT NOT NULL,
-      aggregate_id TEXT NOT NULL,
-      sequence_number INTEGER NOT NULL,
-      event_name TEXT NOT NULL,
-      payload JSONB NOT NULL,
-      metadata JSONB
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS noddde_events_stream_version_idx
-      ON noddde_events(aggregate_name, aggregate_id, sequence_number);
-
-    CREATE TABLE IF NOT EXISTS noddde_aggregate_states (
-      aggregate_name TEXT NOT NULL,
-      aggregate_id TEXT NOT NULL,
-      state JSONB NOT NULL,
-      version INTEGER NOT NULL DEFAULT 0,
-      PRIMARY KEY (aggregate_name, aggregate_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS noddde_saga_states (
-      saga_name TEXT NOT NULL,
-      saga_id TEXT NOT NULL,
-      state JSONB NOT NULL,
-      PRIMARY KEY (saga_name, saga_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS noddde_snapshots (
-      aggregate_name TEXT NOT NULL,
-      aggregate_id TEXT NOT NULL,
-      state JSONB NOT NULL,
-      version INTEGER NOT NULL,
-      PRIMARY KEY (aggregate_name, aggregate_id)
-    );
-
     CREATE TABLE IF NOT EXISTS hotel_views (
       view_type TEXT NOT NULL,
       view_id TEXT NOT NULL,
@@ -122,11 +95,11 @@ async function main() {
   `);
 
   const db = drizzle(pool);
-  const drizzleInfra = createDrizzlePersistence(db, {
-    events,
-    aggregateStates,
-    sagaStates,
-    snapshots,
+  const drizzleInfra = createDrizzleAdapter(db, {
+    eventStore: events,
+    stateStore: aggregateStates,
+    sagaStore: sagaStates,
+    snapshotStore: snapshots,
   });
 
   // -- Define the domain structure (pure, sync) --
@@ -181,7 +154,7 @@ async function main() {
         persistence: () => drizzleInfra.eventSourcedPersistence,
         concurrency: { maxRetries: 3 },
         snapshots: {
-          store: () => drizzleInfra.snapshotStore!,
+          store: () => drizzleInfra.snapshotStore,
           strategy: everyNEvents(50),
         },
       },
