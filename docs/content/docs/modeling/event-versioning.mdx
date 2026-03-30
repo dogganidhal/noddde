@@ -28,7 +28,7 @@ Later, you add a `status` field:
 }
 ```
 
-Without upcasting, replaying version 1 events through apply handlers that expect version 2 payloads will produce incorrect state — the `status` field will be `undefined`.
+Without upcasting, replaying version 1 events through evolve handlers that expect version 2 payloads will produce incorrect state — the `status` field will be `undefined`.
 
 ## Defining Upcaster Chains
 
@@ -91,12 +91,12 @@ Pass the upcaster map to `defineAggregate` via the optional `upcasters` field:
 ```typescript
 const BankAccount = defineAggregate<BankAccountTypes>({
   initialState: { balance: 0, status: "active" },
-  commands: {
+  decide: {
     /* ... */
   },
-  apply: {
-    // Apply handlers always receive the CURRENT version payload.
-    // Upcasting happens before apply handlers are called.
+  evolve: {
+    // evolve handlers always receive the CURRENT version payload.
+    // Upcasting happens before evolve handlers are called.
     BankAccountCreated: (payload, state) => ({
       ...state,
       id: payload.id,
@@ -110,14 +110,14 @@ const BankAccount = defineAggregate<BankAccountTypes>({
 
 ## How It Works
 
-During aggregate rehydration (loading events from persistence to rebuild state), the engine applies the upcaster chain to each loaded event before passing it to the apply handler:
+During aggregate rehydration (loading events from persistence to rebuild state), the engine applies the upcaster chain to each loaded event before passing it to the evolve handler:
 
 1. **Load events** from the event store
 2. **Determine stored version** from `event.metadata.version` (defaults to 1 if absent)
 3. **Apply upcaster steps** from the stored version to the current version
-4. **Pass upcasted payload** to the apply handler
+4. **Pass upcasted payload** to the evolve handler
 
-New events produced by command handlers automatically get `metadata.version` set to the current version for their event name.
+New events produced by decide handlers automatically get `metadata.version` set to the current version for their event name.
 
 ## Type Safety
 
@@ -130,7 +130,7 @@ The upcaster API provides compile-time safety at multiple levels:
 
 ## Constraints
 
-Upcaster steps follow the same constraints as apply handlers:
+Upcaster steps follow the same constraints as evolve handlers:
 
 - **Pure**: No side effects, no I/O, no infrastructure access.
 - **Synchronous**: No `async`/`await`.

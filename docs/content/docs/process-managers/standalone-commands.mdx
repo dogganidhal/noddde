@@ -29,7 +29,7 @@ The naming distinction exists to make intent clear in your codebase. When you se
 
 ## StandaloneCommandHandler
 
-Standalone command handlers have a different signature from aggregate command handlers. Instead of receiving aggregate state, they receive the full [CQRS](/docs/core-concepts/cqrs-and-event-sourcing) infrastructure:
+Standalone command handlers have a different signature from aggregate decide handlers. Instead of receiving aggregate state, they receive the full [CQRS](/docs/core-concepts/cqrs-and-event-sourcing) infrastructure:
 
 ```typescript
 type StandaloneCommandHandler<
@@ -46,7 +46,7 @@ type StandaloneCommandHandler<
 | `command`        | The incoming standalone command                                                              |
 | `infrastructure` | Your domain infrastructure merged with `CQRSInfrastructure` (commandBus, eventBus, queryBus) |
 
-Key differences from aggregate command handlers:
+Key differences from aggregate decide handlers:
 
 - **No state parameter.** Standalone handlers do not have an aggregate state to inspect.
 - **No event return value.** The handler returns `void`. If it needs to produce side effects, it does so explicitly through the infrastructure (e.g., dispatching commands to other aggregates via the command bus).
@@ -186,7 +186,7 @@ standaloneCommandHandlers: {
 
 ## Guidelines
 
-- Use standalone commands for **orchestration**, not for domain logic. Business rules and invariants should live in aggregate command handlers where they have access to consistent state.
+- Use standalone commands for **orchestration**, not for domain logic. Business rules and invariants should live in aggregate decide handlers where they have access to consistent state.
 - Keep standalone handlers **thin**. They should coordinate and delegate, not contain complex logic.
 - When a standalone handler dispatches multiple aggregate commands, consider what happens if one of them fails. For complex failure scenarios, consider a [saga](/docs/process-managers/sagas) instead.
 - Standalone handlers are a good fit for reacting to external triggers (webhooks, scheduled jobs) that need to dispatch commands into the domain.

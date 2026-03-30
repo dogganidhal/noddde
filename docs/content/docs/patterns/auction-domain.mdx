@@ -3,7 +3,7 @@ title: "Example: Auction Domain"
 description: Complete walkthrough of an auction aggregate with time-based validation, the Clock pattern, event upcasting, and projections.
 ---
 
-This example walks through the auction domain sample. It demonstrates infrastructure injection via the Clock pattern, multi-validation command handlers, rejection events, no-op apply handlers, event upcasting, and projections with ViewStore.
+This example walks through the auction domain sample. It demonstrates infrastructure injection via the Clock pattern, multi-validation decide handlers, rejection events, no-op evolve handlers, event upcasting, and projections with ViewStore.
 
 > **Full source**: [samples/sample-auction](https://github.com/dogganidhal/noddde/tree/main/samples/sample-auction) — clone and run locally with `npm start`.
 >
@@ -85,18 +85,18 @@ See [The Clock Pattern](/docs/patterns/clock-pattern) for the full rationale.
 
 ## The Aggregate
 
-The recommended pattern extracts command handlers and apply handlers into separate files, typed with `InferCommandHandler` and `InferApplyHandler`. The aggregate definition then imports and wires them together.
+The recommended pattern extracts decide handlers and evolve handlers into separate files, typed with `InferDecideHandler` and `InferEvolveHandler`. The aggregate definition then imports and wires them together.
 
-### Command handlers (extracted)
+### Decide handlers (extracted)
 
-Each command handler is a standalone, independently testable function. The type is inferred from the aggregate's type bundle (`AuctionDef`) and the command name.
+Each decide handler is a standalone, independently testable function. The type is inferred from the aggregate's type bundle (`AuctionDef`) and the command name.
 
 ```ts
-// command-handlers/handle-create-auction.ts
-import type { InferCommandHandler } from "@noddde/core";
+// deciders/decide-create-auction.ts
+import type { InferDecideHandler } from "@noddde/core";
 import type { AuctionDef } from "../auction";
 
-export const handleCreateAuction: InferCommandHandler<
+export const decideCreateAuction: InferDecideHandler<
   AuctionDef,
   "CreateAuction"
 > = (command) => ({
@@ -106,11 +106,11 @@ export const handleCreateAuction: InferCommandHandler<
 ```
 
 ```ts
-// command-handlers/handle-place-bid.ts
-import type { InferCommandHandler } from "@noddde/core";
+// deciders/decide-place-bid.ts
+import type { InferDecideHandler } from "@noddde/core";
 import type { AuctionDef } from "../auction";
 
-export const handlePlaceBid: InferCommandHandler<AuctionDef, "PlaceBid"> = (
+export const decidePlaceBid: InferDecideHandler<AuctionDef, "PlaceBid"> = (
   command,
   state,
   { clock },
@@ -151,18 +151,18 @@ export const handlePlaceBid: InferCommandHandler<AuctionDef, "PlaceBid"> = (
 };
 ```
 
-The `CloseAuction` handler follows the same pattern. Each file imports only `InferCommandHandler` and the type bundle — no runtime dependencies beyond the function itself.
+The `CloseAuction` handler follows the same pattern. Each file imports only `InferDecideHandler` and the type bundle — no runtime dependencies beyond the function itself.
 
-### Apply handlers (extracted)
+### Evolve handlers (extracted)
 
-Apply handlers are also extracted. They are pure functions — no infrastructure access, no async.
+Evolve handlers are also extracted. They are pure functions — no infrastructure access, no async.
 
 ```ts
-// apply-handlers/apply-auction-created.ts
-import type { InferApplyHandler } from "@noddde/core";
+// evolvers/evolve-auction-created.ts
+import type { InferEvolveHandler } from "@noddde/core";
 import type { AuctionDef } from "../auction";
 
-export const applyAuctionCreated: InferApplyHandler<
+export const evolveAuctionCreated: InferEvolveHandler<
   AuctionDef,
   "AuctionCreated"
 > = (event) => ({
@@ -176,11 +176,11 @@ export const applyAuctionCreated: InferApplyHandler<
 ```
 
 ```ts
-// apply-handlers/apply-bid-placed.ts
-import type { InferApplyHandler } from "@noddde/core";
+// evolvers/evolve-bid-placed.ts
+import type { InferEvolveHandler } from "@noddde/core";
 import type { AuctionDef } from "../auction";
 
-export const applyBidPlaced: InferApplyHandler<AuctionDef, "BidPlaced"> = (
+export const evolveBidPlaced: InferEvolveHandler<AuctionDef, "BidPlaced"> = (
   event,
   state,
 ) => ({
@@ -191,17 +191,17 @@ export const applyBidPlaced: InferApplyHandler<AuctionDef, "BidPlaced"> = (
 ```
 
 ```ts
-// apply-handlers/apply-bid-rejected.ts
-import type { InferApplyHandler } from "@noddde/core";
+// evolvers/evolve-bid-rejected.ts
+import type { InferEvolveHandler } from "@noddde/core";
 import type { AuctionDef } from "../auction";
 
-export const applyBidRejected: InferApplyHandler<AuctionDef, "BidRejected"> = (
+export const evolveBidRejected: InferEvolveHandler<AuctionDef, "BidRejected"> = (
   _event,
   state,
 ) => state; // No state change
 ```
 
-The `AuctionClosed` apply handler follows the same pattern.
+The `AuctionClosed` evolve handler follows the same pattern.
 
 ### Aggregate definition (wiring)
 
@@ -221,24 +221,24 @@ type AuctionDef = {
 export const Auction = defineAggregate<AuctionDef>({
   initialState: initialAuctionState,
 
-  commands: {
-    CreateAuction: handleCreateAuction,
-    PlaceBid: handlePlaceBid,
-    CloseAuction: handleCloseAuction,
+  decide: {
+    CreateAuction: decideCreateAuction,
+    PlaceBid: decidePlaceBid,
+    CloseAuction: decideCloseAuction,
   },
 
-  apply: {
-    AuctionCreated: applyAuctionCreated,
-    BidPlaced: applyBidPlaced,
-    BidRejected: applyBidRejected,
-    AuctionClosed: applyAuctionClosed,
+  evolve: {
+    AuctionCreated: evolveAuctionCreated,
+    BidPlaced: evolveBidPlaced,
+    BidRejected: evolveBidRejected,
+    AuctionClosed: evolveAuctionClosed,
   },
 });
 ```
 
 ## Key Patterns Demonstrated
 
-### Multi-Validation Command Handlers
+### Multi-Validation Decide Handlers
 
 The `PlaceBid` handler checks three conditions in sequence. Each validation path returns a different event. This is the recommended pattern — validate early, return rejection events for failures.
 
@@ -250,7 +250,7 @@ Instead of throwing `new Error("Auction is closed")`, the handler returns a `Bid
 - Keeps the handler as a pure decision-maker (no exceptions)
 - Allows downstream consumers (projections, notifications) to react to rejections
 
-### No-Op Apply Handlers
+### No-Op Evolve Handlers
 
 `BidRejected` does not change state:
 
@@ -262,7 +262,7 @@ The aggregate records that the bid happened (as an event) but the state remains 
 
 ### Nullable State Fields
 
-`highestBid` starts as `null` and becomes populated after the first valid bid. The command handler uses optional chaining (`state.highestBid?.amount ?? state.startingPrice`) to handle both cases cleanly.
+`highestBid` starts as `null` and becomes populated after the first valid bid. The decide handler uses optional chaining (`state.highestBid?.amount ?? state.startingPrice`) to handle both cases cleanly.
 
 ## Running the Example
 

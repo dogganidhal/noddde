@@ -11,22 +11,22 @@ A flash sale where limited stock sells first-come-first-served. Multiple buyers 
 
 ## Why Optimistic
 
-The command handler is trivial: check stock, decrement, return event. If two buyers load the same version simultaneously, one succeeds and the other gets a `ConcurrencyError`. The framework automatically retries — re-loading the latest stock, re-running the check, and re-attempting the save. Total cost of a retry is microseconds.
+The decide handler is trivial: check stock, decrement, return event. If two buyers load the same version simultaneously, one succeeds and the other gets a `ConcurrencyError`. The framework automatically retries — re-loading the latest stock, re-running the check, and re-attempting the save. Total cost of a retry is microseconds.
 
 Pessimistic locking would add unnecessary overhead here. Acquiring and releasing a database lock for every purchase adds latency that matters in a high-throughput flash sale.
 
 ## The Aggregate
 
-The aggregate uses extracted handlers — each command handler and apply handler lives in its own file, typed with `InferCommandHandler` and `InferApplyHandler`.
+The aggregate uses extracted handlers — each decide handler and evolve handler lives in its own file, typed with `InferDecideHandler` and `InferEvolveHandler`.
 
-### Command handlers (extracted)
+### Decide handlers (extracted)
 
 ```ts
-// command-handlers/handle-create-flash-sale.ts
-import type { InferCommandHandler } from "@noddde/core";
+// deciders/decide-create-flash-sale.ts
+import type { InferDecideHandler } from "@noddde/core";
 import type { FlashSaleItemTypes } from "../flash-sale-item";
 
-export const handleCreateFlashSale: InferCommandHandler<
+export const decideCreateFlashSale: InferDecideHandler<
   FlashSaleItemTypes,
   "CreateFlashSale"
 > = (command) => ({
@@ -39,11 +39,11 @@ export const handleCreateFlashSale: InferCommandHandler<
 ```
 
 ```ts
-// command-handlers/handle-purchase-item.ts
-import type { InferCommandHandler } from "@noddde/core";
+// deciders/decide-purchase-item.ts
+import type { InferDecideHandler } from "@noddde/core";
 import type { FlashSaleItemTypes } from "../flash-sale-item";
 
-export const handlePurchaseItem: InferCommandHandler<
+export const decidePurchaseItem: InferDecideHandler<
   FlashSaleItemTypes,
   "PurchaseItem"
 > = (command, state) => {
@@ -65,14 +65,14 @@ export const handlePurchaseItem: InferCommandHandler<
 
 The `PurchaseItem` handler either produces `ItemPurchased` (decrements stock) or `PurchaseRejected` (stock exhausted). Both are valid domain events — rejection is not an error, it is a recorded fact.
 
-### Apply handlers (extracted)
+### Evolve handlers (extracted)
 
 ```ts
-// apply-handlers/apply-flash-sale-created.ts
-import type { InferApplyHandler } from "@noddde/core";
+// evolvers/evolve-flash-sale-created.ts
+import type { InferEvolveHandler } from "@noddde/core";
 import type { FlashSaleItemTypes } from "../flash-sale-item";
 
-export const applyFlashSaleCreated: InferApplyHandler<
+export const evolveFlashSaleCreated: InferEvolveHandler<
   FlashSaleItemTypes,
   "FlashSaleCreated"
 > = (payload) => ({
@@ -83,11 +83,11 @@ export const applyFlashSaleCreated: InferApplyHandler<
 ```
 
 ```ts
-// apply-handlers/apply-item-purchased.ts
-import type { InferApplyHandler } from "@noddde/core";
+// evolvers/evolve-item-purchased.ts
+import type { InferEvolveHandler } from "@noddde/core";
 import type { FlashSaleItemTypes } from "../flash-sale-item";
 
-export const applyItemPurchased: InferApplyHandler<
+export const evolveItemPurchased: InferEvolveHandler<
   FlashSaleItemTypes,
   "ItemPurchased"
 > = (payload, state) => ({
@@ -97,7 +97,7 @@ export const applyItemPurchased: InferApplyHandler<
 });
 ```
 
-The `PurchaseRejected` apply handler follows the same pattern — it returns `state` unchanged (no-op).
+The `PurchaseRejected` evolve handler follows the same pattern — it returns `state` unchanged (no-op).
 
 ### Aggregate definition (wiring)
 
@@ -115,14 +115,14 @@ export type FlashSaleItemTypes = AggregateTypes & {
 
 export const FlashSaleItem = defineAggregate<FlashSaleItemTypes>({
   initialState: initialFlashSaleState,
-  commands: {
-    CreateFlashSale: handleCreateFlashSale,
-    PurchaseItem: handlePurchaseItem,
+  decide: {
+    CreateFlashSale: decideCreateFlashSale,
+    PurchaseItem: decidePurchaseItem,
   },
-  apply: {
-    FlashSaleCreated: applyFlashSaleCreated,
-    ItemPurchased: applyItemPurchased,
-    PurchaseRejected: applyPurchaseRejected,
+  evolve: {
+    FlashSaleCreated: evolveFlashSaleCreated,
+    ItemPurchased: evolveItemPurchased,
+    PurchaseRejected: evolvePurchaseRejected,
   },
 });
 ```

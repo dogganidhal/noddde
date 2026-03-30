@@ -49,17 +49,17 @@ Three aggregates support the write model:
 
 ### Booking aggregate — payment state machine
 
-The `Booking` aggregate is the most instructive of the three. Its status field is a strict state machine: every payment command validates the current status before emitting an event. All handlers are extracted to separate files typed with `InferCommandHandler` and `InferApplyHandler`.
+The `Booking` aggregate is the most instructive of the three. Its status field is a strict state machine: every payment command validates the current status before emitting an event. All handlers are extracted to separate files typed with `InferDecideHandler` and `InferEvolveHandler`.
 
-#### Command handlers (extracted)
+#### Decide handlers (extracted)
 
 ```ts
-// command-handlers/handle-request-payment.ts
-import type { InferCommandHandler } from "@noddde/core";
+// deciders/decide-request-payment.ts
+import type { InferDecideHandler } from "@noddde/core";
 import type { BookingDef } from "../booking";
 
 // Transition: pending → awaiting_payment
-export const handleRequestPayment: InferCommandHandler<
+export const decideRequestPayment: InferDecideHandler<
   BookingDef,
   "RequestPayment"
 > = (command, state) => {
@@ -79,12 +79,12 @@ export const handleRequestPayment: InferCommandHandler<
 ```
 
 ```ts
-// command-handlers/handle-complete-payment.ts
-import type { InferCommandHandler } from "@noddde/core";
+// deciders/decide-complete-payment.ts
+import type { InferDecideHandler } from "@noddde/core";
 import type { BookingDef } from "../booking";
 
 // Transition: awaiting_payment → (transactionId recorded)
-export const handleCompletePayment: InferCommandHandler<
+export const decideCompletePayment: InferDecideHandler<
   BookingDef,
   "CompletePayment"
 > = (command, state, { clock }) => {
@@ -104,16 +104,16 @@ export const handleCompletePayment: InferCommandHandler<
 };
 ```
 
-The remaining command handlers (`FailPayment`, `RefundPayment`, `CreateBooking`, `ConfirmBooking`, `CancelBooking`, `ModifyBooking`) follow the same pattern — each in its own file, each typed with `InferCommandHandler<BookingDef, "CommandName">`.
+The remaining decide handlers (`FailPayment`, `RefundPayment`, `CreateBooking`, `ConfirmBooking`, `CancelBooking`, `ModifyBooking`) follow the same pattern — each in its own file, each typed with `InferDecideHandler<BookingDef, "CommandName">`.
 
-#### Apply handlers (extracted)
+#### Evolve handlers (extracted)
 
 ```ts
-// apply-handlers/apply-payment-requested.ts
-import type { InferApplyHandler } from "@noddde/core";
+// evolvers/evolve-payment-requested.ts
+import type { InferEvolveHandler } from "@noddde/core";
 import type { BookingDef } from "../booking";
 
-export const applyPaymentRequested: InferApplyHandler<
+export const evolvePaymentRequested: InferEvolveHandler<
   BookingDef,
   "PaymentRequested"
 > = (event, state) => ({
@@ -124,11 +124,11 @@ export const applyPaymentRequested: InferApplyHandler<
 ```
 
 ```ts
-// apply-handlers/apply-payment-failed.ts
-import type { InferApplyHandler } from "@noddde/core";
+// evolvers/evolve-payment-failed.ts
+import type { InferEvolveHandler } from "@noddde/core";
 import type { BookingDef } from "../booking";
 
-export const applyPaymentFailed: InferApplyHandler<
+export const evolvePaymentFailed: InferEvolveHandler<
   BookingDef,
   "PaymentFailed"
 > = (_event, state) => ({
@@ -138,7 +138,7 @@ export const applyPaymentFailed: InferApplyHandler<
 });
 ```
 
-Notice that `PaymentFailed` resets status back to `"pending"` rather than `"cancelled"`. This lets the guest retry payment without creating a new booking. The other apply handlers (`PaymentCompleted`, `BookingCreated`, `BookingConfirmed`, `BookingCancelled`, `BookingModified`, `PaymentRefunded`) follow the same pattern.
+Notice that `PaymentFailed` resets status back to `"pending"` rather than `"cancelled"`. This lets the guest retry payment without creating a new booking. The other evolve handlers (`PaymentCompleted`, `BookingCreated`, `BookingConfirmed`, `BookingCancelled`, `BookingModified`, `PaymentRefunded`) follow the same pattern.
 
 #### Aggregate definition (wiring)
 
@@ -158,26 +158,26 @@ type BookingDef = {
 export const Booking = defineAggregate<BookingDef>({
   initialState: initialBookingState,
 
-  commands: {
-    CreateBooking: handleCreateBooking,
-    ConfirmBooking: handleConfirmBooking,
-    CancelBooking: handleCancelBooking,
-    ModifyBooking: handleModifyBooking,
-    RequestPayment: handleRequestPayment,
-    CompletePayment: handleCompletePayment,
-    FailPayment: handleFailPayment,
-    RefundPayment: handleRefundPayment,
+  decide: {
+    CreateBooking: decideCreateBooking,
+    ConfirmBooking: decideConfirmBooking,
+    CancelBooking: decideCancelBooking,
+    ModifyBooking: decideModifyBooking,
+    RequestPayment: decideRequestPayment,
+    CompletePayment: decideCompletePayment,
+    FailPayment: decideFailPayment,
+    RefundPayment: decideRefundPayment,
   },
 
-  apply: {
-    BookingCreated: applyBookingCreated,
-    BookingConfirmed: applyBookingConfirmed,
-    BookingCancelled: applyBookingCancelled,
-    BookingModified: applyBookingModified,
-    PaymentRequested: applyPaymentRequested,
-    PaymentCompleted: applyPaymentCompleted,
-    PaymentFailed: applyPaymentFailed,
-    PaymentRefunded: applyPaymentRefunded,
+  evolve: {
+    BookingCreated: evolveBookingCreated,
+    BookingConfirmed: evolveBookingConfirmed,
+    BookingCancelled: evolveBookingCancelled,
+    BookingModified: evolveBookingModified,
+    PaymentRequested: evolvePaymentRequested,
+    PaymentCompleted: evolvePaymentCompleted,
+    PaymentFailed: evolvePaymentFailed,
+    PaymentRefunded: evolvePaymentRefunded,
   },
 });
 ```
@@ -227,7 +227,7 @@ export const onBookingCreated = (event: {
       roomId: null,
       status: "awaiting_payment" as const,
     } satisfies BookingFulfillmentState,
-    commands: {
+    decide: {
       name: "RequestPayment" as const,
       targetAggregateId: event.payload.bookingId,
       payload: { paymentId, amount: event.payload.totalAmount },
@@ -254,7 +254,7 @@ export const onPaymentCompleted = async (
   if (!room) {
     return {
       state: { ...state, status: "cancelled" as const },
-      commands: {
+      decide: {
         name: "CancelBooking" as const,
         targetAggregateId: state.bookingId,
         payload: { reason: "No available room of requested type" },
@@ -400,7 +400,7 @@ export const onPaymentRequested = async (
         amount: event.payload.amount,
         status: "charging" as const,
       } satisfies PaymentProcessingState,
-      commands: {
+      decide: {
         name: "CompletePayment" as const,
         targetAggregateId: event.payload.bookingId,
         payload: {
@@ -419,7 +419,7 @@ export const onPaymentRequested = async (
         amount: event.payload.amount,
         status: "failed" as const,
       } satisfies PaymentProcessingState,
-      commands: {
+      decide: {
         name: "FailPayment" as const,
         targetAggregateId: event.payload.bookingId,
         payload: {
@@ -583,7 +583,7 @@ export const RoomAvailabilityProjection =
 
 The sample shows both consistency modes side by side:
 
-- **`RoomAvailabilityProjection`** is registered as a domain projection. The engine runs it synchronously during command dispatch, so the view is always up to date before the command handler returns. Queries against it reflect the current write-model state.
+- **`RoomAvailabilityProjection`** is registered as a domain projection. The engine runs it synchronously during command dispatch, so the view is always up to date before the decide handler returns. Queries against it reflect the current write-model state.
 - **`GuestHistoryProjection`** and **`RevenueProjection`** are also registered projections but use `InMemoryViewStore` — illustrating that consistency level is a persistence choice, not a projection design choice.
 
 ### Standalone query handler
@@ -730,5 +730,5 @@ If any command fails — for example, because a room is already reserved — the
 - [Why Two Persistence Strategies](/docs/design-decisions/why-two-persistence-strategies) — when to choose event-sourced vs state-stored
 - [Queries](/docs/read-model/queries) — standalone query handlers and how they differ from projection-backed queries
 - [ORM Adapters](/docs/running/orm-adapters) — the `@noddde/drizzle` adapter used in this sample
-- [The Clock Pattern](/docs/patterns/clock-pattern) — deterministic time in command handlers
+- [The Clock Pattern](/docs/patterns/clock-pattern) — deterministic time in decide handlers
 - [Example: Auction Domain](/docs/patterns/auction-domain) — a simpler single-aggregate example with rejection events and the Clock pattern

@@ -91,14 +91,14 @@ const domain = await wireDomain(bankingDomain, {
 
 ## Using the Logger in Handlers
 
-The framework logger is automatically available as `infrastructure.logger` in **every handler** -- aggregate command handlers, event handlers, saga handlers, query handlers, and standalone handlers.
+The framework logger is automatically available as `infrastructure.logger` in **every handler** -- aggregate decide handlers, event handlers, saga handlers, query handlers, and standalone handlers.
 
-### In Aggregate Command Handlers
+### In Aggregate Decide Handlers
 
 ```ts
 const BankAccount = defineAggregate<BankAccountTypes>({
   initialState: { balance: 0 },
-  commands: {
+  decide: {
     Deposit: (command, state, infrastructure) => {
       infrastructure.logger.info("Processing deposit", {
         amount: command.payload.amount,
@@ -107,7 +107,7 @@ const BankAccount = defineAggregate<BankAccountTypes>({
       return { name: "Deposited", payload: { amount: command.payload.amount } };
     },
   },
-  apply: {
+  evolve: {
     Deposited: (payload, state) => ({
       ...state,
       balance: state.balance + payload.amount,
@@ -131,7 +131,7 @@ const OrderFulfillment = defineSaga<OrderFulfillmentTypes>({
         });
         return {
           state: { ...state, status: "processing" },
-          commands: {
+          decide: {
             name: "ReserveInventory",
             targetAggregateId: event.payload.orderId,
           },
@@ -254,6 +254,6 @@ Here is what the framework logs at each level, so you can decide which level to 
 
 ### `error`
 
-- Command handler failure
+- Decide handler failure
 - Saga execution failure
 - Outbox dispatch failure

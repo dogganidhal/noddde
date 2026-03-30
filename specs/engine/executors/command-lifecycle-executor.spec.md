@@ -18,7 +18,7 @@ depends_on:
 
 # CommandLifecycleExecutor
 
-> `CommandLifecycleExecutor` executes the full aggregate command lifecycle: load state, execute the command handler, apply events, enrich metadata, enlist persistence in a unit of work, defer event publishing, and evaluate the snapshot strategy. It manages UoW ownership (implicit vs. explicit) and delegates concurrency control to a `ConcurrencyStrategy`. This is an engine-internal class instantiated by `Domain` during `init()`.
+> `CommandLifecycleExecutor` executes the full aggregate command lifecycle: load state, execute the decide handler, evolve state, enrich metadata, enlist persistence in a unit of work, defer event publishing, and evaluate the snapshot strategy. It manages UoW ownership (implicit vs. explicit) and delegates concurrency control to a `ConcurrencyStrategy`. This is an engine-internal class instantiated by `Domain` during `init()`.
 
 ## Type Contract
 
@@ -74,12 +74,12 @@ class CommandLifecycleExecutor {
    - If the persistence implements `PartialEventLoad` (has a `loadAfterVersion` method), call `persistence.loadAfterVersion(aggregateName, id, snapshot.version)` to load only post-snapshot events.
    - If the persistence does not implement `PartialEventLoad`, call `persistence.load(aggregateName, id)` and slice the result: `events.slice(snapshot.version)`.
    - Derive `version = snapshot.version + loadedEvents.length`.
-   - Replay only the post-snapshot events through `aggregate.apply` handlers, starting from `snapshot.state`.
+   - Replay only the post-snapshot events through `aggregate.evolve` handlers, starting from `snapshot.state`.
 
 2. **Event-sourced without snapshot** -- If no snapshot is found (or no `SnapshotStore` is configured), call `persistence.load(aggregateName, command.targetAggregateId)`. If the result is an array (event-sourced):
 
    - Derive `version = events.length`.
-   - Replay all events through `aggregate.apply` handlers, starting from `aggregate.initialState`.
+   - Replay all events through `aggregate.evolve` handlers, starting from `aggregate.initialState`.
 
 3. **State-stored** -- If `persistence.load` returns a non-array result (state-stored):
    - The result is `{ state, version } | null`.
@@ -88,15 +88,15 @@ class CommandLifecycleExecutor {
 
 ### Execute Phase
 
-4. **Invoke command handler** -- Look up the handler via `aggregate.commands[command.name]`. If no handler is found, throw an error: `"No command handler found for command: ${command.name} on aggregate: ${aggregateName}"`. Otherwise, invoke the handler with `(command, currentState, infrastructure)`. The handler may return a single event or an array of events.
+4. **Invoke decide handler** -- Look up the handler via `aggregate.decide[command.name]`. If no handler is found, throw an error: `"No decide handler found for command: ${command.name} on aggregate: ${aggregateName}"`. Otherwise, invoke the handler with `(command, currentState, infrastructure)`. The handler may return a single event or an array of events.
 
 ### Normalize Phase
 
-5. **Single event to array** -- If the command handler returns a single event (not an array), wrap it in an array. If it returns an array, use it as-is.
+5. **Single event to array** -- If the decide handler returns a single event (not an array), wrap it in an array. If it returns an array, use it as-is.
 
-### Apply Phase
+### Evolve Phase
 
-6. **Apply events to state** -- For each event in the normalized array, look up the apply handler via `aggregate.apply[event.name]`. If found, apply it: `newState = applyHandler(event.payload, state)`. If no apply handler exists for an event name, the state is unchanged.
+6. **Evolve state from events** -- For each event in the normalized array, look up the evolve handler via `aggregate.evolve[event.name]`. If found, apply it: `newState = evolveHandler(event.payload, state)`. If no evolve handler exists for an event name, the state is unchanged.
 
 ### Enrich Phase
 
@@ -160,22 +160,22 @@ class CommandLifecycleExecutor {
 
 ## Invariants
 
-- The lifecycle phases always execute in order: load, execute, normalize, apply, enrich, enlist, defer, snapshot evaluation.
+- The lifecycle phases always execute in order: load, execute, normalize, evolve, enrich, enlist, defer, snapshot evaluation.
 - Events are enriched before being enlisted for persistence (enriched events are what gets persisted).
 - Events are published only after successful UoW commit (never before).
 - Snapshot save never causes a command to fail (errors are swallowed).
 - UoW rollback errors are swallowed (the original error is re-thrown).
 - The concurrency strategy always wraps the attempt -- even with 0 retries, the strategy is called.
 - `execute` is always async and returns `Promise<void>`.
-- Missing command handler throws a descriptive error.
+- Missing decide handler throws a descriptive error.
 - The `version` parameter passed to persistence `save` is the version observed at load time (for optimistic concurrency).
 
 ## Edge Cases
 
-- **Command handler returns single event** -- Normalized to `[event]` before apply/enrich.
-- **Command handler returns empty array** -- No events to apply, enrich, persist, or publish. The UoW enlist and deferPublish are called with empty data. Snapshot strategy receives `eventsSinceSnapshot` that may be 0 relative to last snapshot.
-- **No apply handler for an event name** -- State is unchanged for that event. No error thrown.
-- **No command handler found** -- Throws `Error` with message identifying the command and aggregate.
+- **Decide handler returns single event** -- Normalized to `[event]` before evolve/enrich.
+- **Decide handler returns empty array** -- No events to evolve, enrich, persist, or publish. The UoW enlist and deferPublish are called with empty data. Snapshot strategy receives `eventsSinceSnapshot` that may be 0 relative to last snapshot.
+- **No evolve handler for an event name** -- State is unchanged for that event. No error thrown.
+- **No decide handler found** -- Throws `Error` with message identifying the command and aggregate.
 - **Snapshot store configured but no strategy** -- No snapshot evaluation occurs.
 - **Snapshot strategy configured but no store** -- No snapshot evaluation occurs. Both must be present.
 - **State-stored persistence** -- Snapshot evaluation is skipped entirely (only applies to event-sourced).
@@ -241,7 +241,7 @@ type CounterTypes = AggregateTypes & {
 
 const Counter = defineAggregate<CounterTypes>({
   initialState: { count: 0 },
-  commands: {
+  decide: {
     CreateCounter: (command) => ({
       name: "CounterCreated",
       payload: { id: command.targetAggregateId },
@@ -251,14 +251,14 @@ const Counter = defineAggregate<CounterTypes>({
       payload: { by: command.payload.by },
     }),
   },
-  apply: {
+  evolve: {
     CounterCreated: (_payload, state) => state,
     Incremented: (payload, state) => ({ count: state.count + payload.by }),
   },
 });
 
 describe("CommandLifecycleExecutor", () => {
-  it("should load event-sourced aggregate, execute command, apply, enrich, persist, and publish", async () => {
+  it("should load event-sourced aggregate, execute command, evolve, enrich, persist, and publish", async () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const eventBus = new EventEmitterEventBus();
     const infrastructure = {
@@ -341,10 +341,10 @@ type ToggleTypes = AggregateTypes & {
 
 const Toggle = defineAggregate<ToggleTypes>({
   initialState: { on: false },
-  commands: {
+  decide: {
     Toggle: () => ({ name: "Toggled", payload: {} }),
   },
-  apply: {
+  evolve: {
     Toggled: (_payload, state) => ({ on: !state.on }),
   },
 });
@@ -386,7 +386,7 @@ describe("CommandLifecycleExecutor", () => {
 });
 ```
 
-### execute throws when no command handler is found
+### execute throws when no decide handler is found
 
 ```ts
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -420,12 +420,12 @@ const EmptyAggregate = defineAggregate<
   }
 >({
   initialState: {},
-  commands: {},
-  apply: {},
+  decide: {},
+  evolve: {},
 });
 
 describe("CommandLifecycleExecutor", () => {
-  it("should throw an error when the command handler is not found", async () => {
+  it("should throw an error when the decide handler is not found", async () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const infrastructure = {
       commandBus: new InMemoryCommandBus(),
@@ -453,7 +453,7 @@ describe("CommandLifecycleExecutor", () => {
         targetAggregateId: "a1",
       }),
     ).rejects.toThrow(
-      "No command handler found for command: UnknownCommand on aggregate: MyAggregate",
+      "No decide handler found for command: UnknownCommand on aggregate: MyAggregate",
     );
   });
 });
@@ -496,13 +496,13 @@ type ItemTypes = AggregateTypes & {
 
 const ItemList = defineAggregate<ItemTypes>({
   initialState: { items: [] },
-  commands: {
+  decide: {
     AddItem: (command) => ({
       name: "ItemAdded",
       payload: { item: command.payload.item },
     }),
   },
-  apply: {
+  evolve: {
     ItemAdded: (payload, state) => ({
       items: [...state.items, payload.item],
     }),
@@ -602,10 +602,10 @@ type AccTypes = AggregateTypes & {
 
 const Accumulator = defineAggregate<AccTypes>({
   initialState: { total: 0 },
-  commands: {
+  decide: {
     Add: (command) => ({ name: "Added", payload: { n: command.payload.n } }),
   },
-  apply: {
+  evolve: {
     Added: (payload, state) => ({ total: state.total + payload.n }),
   },
 });
@@ -692,13 +692,13 @@ type ValTypes = AggregateTypes & {
 
 const ValueAgg = defineAggregate<ValTypes>({
   initialState: { value: 0 },
-  commands: {
+  decide: {
     SetValue: (command) => ({
       name: "ValueSet",
       payload: { v: command.payload.v },
     }),
   },
-  apply: {
+  evolve: {
     ValueSet: (payload) => ({ value: payload.v }),
   },
 });
@@ -764,7 +764,7 @@ describe("CommandLifecycleExecutor", () => {
 });
 ```
 
-### execute rolls back UoW on command handler error
+### execute rolls back UoW on decide handler error
 
 ```ts
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -801,12 +801,12 @@ type ErrTypes = AggregateTypes & {
 
 const FailingAggregate = defineAggregate<ErrTypes>({
   initialState: {},
-  commands: {
+  decide: {
     Fail: () => {
       throw new Error("Handler exploded");
     },
   },
-  apply: {
+  evolve: {
     Happened: (_payload, state) => state,
   },
 });
@@ -891,13 +891,13 @@ type SimpleTypes = AggregateTypes & {
 
 const SimpleAgg = defineAggregate<SimpleTypes>({
   initialState: { value: 0 },
-  commands: {
+  decide: {
     Update: (command) => ({
       name: "Updated",
       payload: { v: command.payload.v },
     }),
   },
-  apply: {
+  evolve: {
     Updated: (payload) => ({ value: payload.v }),
   },
 });

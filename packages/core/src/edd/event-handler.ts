@@ -7,7 +7,7 @@ import { Infrastructure, FrameworkInfrastructure } from "../infrastructure";
  * Used in projections to update read models, send notifications,
  * or trigger downstream processes.
  *
- * Unlike {@link ApplyHandler}, event handlers have access to infrastructure
+ * Unlike {@link EvolveHandler}, event handlers have access to infrastructure
  * and may perform I/O. The handler receives the full event object (including
  * optional {@link EventMetadata}), consistent with projection reducers and
  * saga event handlers.

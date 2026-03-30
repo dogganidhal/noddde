@@ -2,14 +2,14 @@
 editUrl: false
 next: false
 prev: false
-title: "CommandHandler"
+title: "DecideHandler"
 ---
 
-> **CommandHandler**\<`TCommand`, `TState`, `TEvents`, `TInfrastructure`\> = (`command`, `state`, `infrastructure`) => `TEvents` \| `TEvents`[] \| `Promise`\<`TEvents` \| `TEvents`[]\>
+> **DecideHandler**\<`TCommand`, `TState`, `TEvents`, `TInfrastructure`\> = (`command`, `state`, `infrastructure`) => `TEvents` \| `TEvents`[] \| `Promise`\<`TEvents` \| `TEvents`[]\>
 
 Defined in: [ddd/aggregate-root.ts:51](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/ddd/aggregate-root.ts#L51)
 
-A command handler implements the "decide" phase of the Decider pattern. It receives a command, the current aggregate state, and infrastructure, then returns the event(s) representing what happened.
+A decide handler implements the "decide" phase of the Decider pattern. It receives a command, the current aggregate state, and infrastructure, then returns the event(s) representing what happened.
 
 ## Type Parameters
 

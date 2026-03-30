@@ -27,13 +27,13 @@ import {
   commandPayloadTemplate,
 } from "../templates/domain/aggregate-commands.js";
 import {
-  commandHandlersIndexTemplate,
-  commandHandlerTemplate,
-} from "../templates/domain/aggregate-command-handlers.js";
+  decidersIndexTemplate,
+  deciderTemplate,
+} from "../templates/domain/aggregate-deciders.js";
 import {
-  applyHandlersIndexTemplate,
-  applyHandlerTemplate,
-} from "../templates/domain/aggregate-apply-handlers.js";
+  evolversIndexTemplate,
+  evolverTemplate,
+} from "../templates/domain/aggregate-evolvers.js";
 import {
   domainProjectionIndexTemplate,
   domainProjectionTemplate,
@@ -121,20 +121,20 @@ export async function generateProject(
       content: commandPayloadTemplate(ctx),
     },
     {
-      relativePath: `${agg}/command-handlers/index.ts`,
-      content: commandHandlersIndexTemplate(ctx),
+      relativePath: `${agg}/deciders/index.ts`,
+      content: decidersIndexTemplate(ctx),
     },
     {
-      relativePath: `${agg}/command-handlers/handle-create-${ctx.kebabName}.ts`,
-      content: commandHandlerTemplate(ctx),
+      relativePath: `${agg}/deciders/decide-create-${ctx.kebabName}.ts`,
+      content: deciderTemplate(ctx),
     },
     {
-      relativePath: `${agg}/apply-handlers/index.ts`,
-      content: applyHandlersIndexTemplate(ctx),
+      relativePath: `${agg}/evolvers/index.ts`,
+      content: evolversIndexTemplate(ctx),
     },
     {
-      relativePath: `${agg}/apply-handlers/apply-${ctx.kebabName}-created.ts`,
-      content: applyHandlerTemplate(ctx),
+      relativePath: `${agg}/evolvers/evolve-${ctx.kebabName}-created.ts`,
+      content: evolverTemplate(ctx),
     },
 
     // ── Read model ──────────────────────────────────────────────

@@ -231,7 +231,7 @@ export class CommandLifecycleExecutor {
         ? upcastEvents(events, aggregate.upcasters)
         : events;
       currentState = upcastedEvents.reduce((state: any, event: Event) => {
-        const applyHandler = aggregate.apply[event.name];
+        const applyHandler = aggregate.evolve[event.name];
         return applyHandler ? applyHandler(event.payload, state) : state;
       }, snapshot.state);
     } else {
@@ -250,7 +250,7 @@ export class CommandLifecycleExecutor {
           ? upcastEvents(events, aggregate.upcasters)
           : events;
         currentState = upcastedEvents.reduce((state: any, event: Event) => {
-          const applyHandler = aggregate.apply[event.name];
+          const applyHandler = aggregate.evolve[event.name];
           return applyHandler ? applyHandler(event.payload, state) : state;
         }, aggregate.initialState);
       } else {
@@ -273,7 +273,7 @@ export class CommandLifecycleExecutor {
     });
 
     // Step 2: Execute command handler
-    const handler = aggregate.commands[command.name];
+    const handler = aggregate.decide[command.name];
     if (!handler) {
       throw new Error(
         `No command handler found for command: ${command.name} on aggregate: ${aggregateName}`,
@@ -287,7 +287,7 @@ export class CommandLifecycleExecutor {
     // Step 4: Apply events to get new state
     let newState = currentState;
     for (const event of newEvents) {
-      const applyHandler = aggregate.apply[event.name];
+      const applyHandler = aggregate.evolve[event.name];
       if (applyHandler) {
         newState = applyHandler(event.payload, newState);
       }

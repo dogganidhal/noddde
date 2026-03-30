@@ -36,7 +36,7 @@ Every aggregate instance needs a different ID, but `initialState` is shared acro
 
 ## Alternatives Considered
 
-- **Include `id` in state, populate from first event** — The traditional OOP approach. The `BankAccountCreated` event includes the `id`, and the apply handler sets it. But `initialState` still has a placeholder.
+- **Include `id` in state, populate from first event** — The traditional OOP approach. The `BankAccountCreated` event includes the `id`, and the evolve handler sets it. But `initialState` still has a placeholder.
 - **Separate ID from state at the type level** — `Aggregate<TState, TID>` with separate `id` property. Adds another generic parameter.
 - **ID as a constructor argument** — Requires class-based aggregates.
 
@@ -53,10 +53,10 @@ Keeping the ID on commands:
 
 ## Accessing the ID in Handlers
 
-When a command handler needs the aggregate ID (e.g., to include it in event payloads), it reads it from the command:
+When a decide handler needs the aggregate ID (e.g., to include it in event payloads), it reads it from the command:
 
 ```ts
-commands: {
+decide: {
   CreateBankAccount: (command) => ({
     name: "BankAccountCreated",
     payload: { id: command.targetAggregateId }, // ID from command
@@ -67,7 +67,7 @@ commands: {
 ## Trade-offs
 
 - **ID in event payloads** — If your events need the aggregate ID, you must include it explicitly in each event payload. This is slightly more verbose but makes events self-contained.
-- **No `state.id`** — Apply handlers cannot access the aggregate ID (they only see event payloads and current state). This is by design — apply handlers should not need the ID for state transitions.
+- **No `state.id`** — Evolve handlers cannot access the aggregate ID (they only see event payloads and current state). This is by design — evolve handlers should not need the ID for state transitions.
 
 ## Example
 
@@ -80,7 +80,7 @@ await domain.dispatchCommand({
 });
 
 // Handler reads ID from command, puts it in event payload
-commands: {
+decide: {
   AuthorizeTransaction: (command, state) => ({
     name: "TransactionAuthorized",
     payload: {

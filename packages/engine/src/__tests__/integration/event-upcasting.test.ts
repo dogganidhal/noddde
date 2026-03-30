@@ -61,7 +61,7 @@ const accountUpcasters = defineUpcasters<AccountEvent>({
 
 const Account = defineAggregate<AccountTypes>({
   initialState: { id: null, owner: null, status: "active", balance: 0 },
-  commands: {
+  decide: {
     CreateAccount: (command) => ({
       name: "AccountCreated",
       payload: {
@@ -78,7 +78,7 @@ const Account = defineAggregate<AccountTypes>({
       },
     }),
   },
-  apply: {
+  evolve: {
     AccountCreated: (payload, state) => ({
       ...state,
       id: payload.id,
@@ -368,7 +368,7 @@ describe("Event upcasting integration", () => {
 
       const Item = defineAggregate<ItemTypes>({
         initialState: { name: "", price: 0, currency: "USD" },
-        commands: {
+        decide: {
           CreateItem: (command) => ({
             name: "ItemCreated",
             payload: {
@@ -378,7 +378,7 @@ describe("Event upcasting integration", () => {
             },
           }),
         },
-        apply: {
+        evolve: {
           ItemCreated: (payload) => ({
             name: payload.name,
             price: payload.price,
@@ -475,7 +475,7 @@ describe("Event upcasting integration", () => {
 
       const Tag = defineAggregate<TagTypes>({
         initialState: { label: "", color: "gray", priority: 0 },
-        commands: {
+        decide: {
           CreateTag: (command) => ({
             name: "TagCreated",
             payload: {
@@ -485,7 +485,7 @@ describe("Event upcasting integration", () => {
             },
           }),
         },
-        apply: {
+        evolve: {
           TagCreated: (payload) => ({
             label: payload.label,
             color: payload.color,
@@ -559,7 +559,7 @@ describe("Event upcasting integration", () => {
     it("should reject invalid upcaster chains at init time", async () => {
       const InvalidAggregate = defineAggregate<AccountTypes>({
         initialState: { id: null, owner: null, status: "active", balance: 0 },
-        commands: {
+        decide: {
           CreateAccount: (command) => ({
             name: "AccountCreated",
             payload: {
@@ -573,7 +573,7 @@ describe("Event upcasting integration", () => {
             payload: { amount: command.payload.amount, currency: "USD" },
           }),
         },
-        apply: {
+        evolve: {
           AccountCreated: (payload, state) => ({
             ...state,
             id: payload.id,

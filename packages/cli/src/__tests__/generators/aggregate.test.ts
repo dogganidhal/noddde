@@ -25,10 +25,10 @@ describe("generateAggregate", () => {
       "bank-account.ts",
       "commands/index.ts",
       "commands/create-bank-account.ts",
-      "command-handlers/index.ts",
-      "command-handlers/handle-create-bank-account.ts",
-      "apply-handlers/index.ts",
-      "apply-handlers/apply-bank-account-created.ts",
+      "deciders/index.ts",
+      "deciders/decide-create-bank-account.ts",
+      "evolvers/index.ts",
+      "evolvers/evolve-bank-account-created.ts",
     ];
 
     for (const file of expectedFiles) {
@@ -47,40 +47,34 @@ describe("generateAggregate", () => {
     expect(content).toContain("DefineEvents");
     expect(content).toContain("DefineCommands");
     expect(content).toContain("export type BankAccountDef");
-    expect(content).toContain("handleCreateBankAccount");
-    expect(content).toContain("applyBankAccountCreated");
-    expect(content).toContain('from "./apply-handlers/index.js"');
+    expect(content).toContain("decideCreateBankAccount");
+    expect(content).toContain("evolveBankAccountCreated");
+    expect(content).toContain('from "./evolvers/index.js"');
   });
 
-  it("generates standalone command handler using InferCommandHandler", async () => {
+  it("generates standalone decide handler using InferDecideHandler", async () => {
     await generateAggregate("BankAccount", tmpDir);
 
     const content = await readFile(
-      path.join(
-        tmpDir,
-        "bank-account/command-handlers/handle-create-bank-account.ts",
-      ),
+      path.join(tmpDir, "bank-account/deciders/decide-create-bank-account.ts"),
       "utf-8",
     );
-    expect(content).toContain("InferCommandHandler");
+    expect(content).toContain("InferDecideHandler");
     expect(content).toContain("BankAccountDef");
-    expect(content).toContain("handleCreateBankAccount");
+    expect(content).toContain("decideCreateBankAccount");
     expect(content).toContain('"BankAccountCreated" as const');
   });
 
-  it("generates standalone apply handler using InferApplyHandler", async () => {
+  it("generates standalone evolve handler using InferEvolveHandler", async () => {
     await generateAggregate("BankAccount", tmpDir);
 
     const content = await readFile(
-      path.join(
-        tmpDir,
-        "bank-account/apply-handlers/apply-bank-account-created.ts",
-      ),
+      path.join(tmpDir, "bank-account/evolvers/evolve-bank-account-created.ts"),
       "utf-8",
     );
-    expect(content).toContain("InferApplyHandler");
+    expect(content).toContain("InferEvolveHandler");
     expect(content).toContain("BankAccountDef");
-    expect(content).toContain("applyBankAccountCreated");
+    expect(content).toContain("evolveBankAccountCreated");
   });
 
   it("generates command payload interface", async () => {

@@ -240,7 +240,7 @@ The `init()` method must execute the following steps in order:
 5. **Resolve snapshots** -- For each aggregate with `AggregateWiring.snapshots` configured, call `snapshots.store()` and store the `snapshots.strategy`. Both are optional per-aggregate.
 6. **Resolve saga persistence** -- Only when `processModel.sagas` is defined and non-empty: call `wiring.sagas.persistence()` if provided. If omitted, default to `InMemorySagaPersistence` and log a warning: `[noddde] Using in-memory saga persistence. This is not suitable for production.` When `processModel` has only `standaloneEventHandlers` and no `sagas`, saga persistence is not resolved and no warning is logged.
    6b. **Resolve outbox store** -- If `wiring.outbox` is provided, call `outbox.store()` to resolve the `OutboxStore`. Create an `OutboxRelay` instance (but do not start it). The outbox store is used to compose the `onEventsProduced` callback (enlisting outbox writes in the UoW) and the `onEventsDispatched` callback (marking entries published by event ID after dispatch).
-7. **Register command handlers** -- For each aggregate in `writeModel.aggregates`, register a command handler on the command bus for each command name defined in `Aggregate.commands`. The registered handler encapsulates the full command lifecycle (load, execute, apply, persist, publish).
+7. **Register command handlers** -- For each aggregate in `writeModel.aggregates`, register a command handler on the command bus for each command name defined in `Aggregate.decide`. The registered handler encapsulates the full command lifecycle (load, execute, evolve, persist, publish).
 8. **Register standalone command handlers** -- For each handler in `writeModel.standaloneCommandHandlers`, register it on the command bus, wrapping it to receive the merged infrastructure.
 9. **Register query handlers** -- For each projection in `readModel.projections`, register each query handler from `Projection.queryHandlers` on the query bus.
 10. **Register standalone query handlers** -- For each handler in `readModel.standaloneQueryHandlers`, register it on the query bus.
@@ -252,13 +252,13 @@ The `init()` method must execute the following steps in order:
 
 The `dispatchCommand` method executes the following lifecycle for aggregate commands:
 
-1. **Route** -- Look up the aggregate whose `commands` map contains a handler for `command.name`. If no aggregate handles this command, check standalone command handlers.
+1. **Route** -- Look up the aggregate whose `decide` map contains a handler for `command.name`. If no aggregate handles this command, check standalone command handlers.
 2. **Load** -- Using the resolved persistence:
-   - **Event-sourced (with snapshot)**: If a `SnapshotStore` is configured, call `snapshotStore.load(aggregateName, command.targetAggregateId)` first. If a snapshot is found and the persistence implements `PartialEventLoad`, call `persistence.loadAfterVersion(aggregateName, id, snapshot.version)` to load only post-snapshot events. If the persistence does not implement `PartialEventLoad`, call `persistence.load(aggregateName, id)` and slice the result: `events.slice(snapshot.version)`. Derive `version = snapshot.version + loadedEvents.length`. Replay only the post-snapshot events through `Aggregate.apply` handlers, starting from `snapshot.state`.
-   - **Event-sourced (without snapshot)**: Call `persistence.load(aggregateName, command.targetAggregateId)` to get the full event stream. Derive `version = events.length`. Replay all events through `Aggregate.apply` handlers, starting from `Aggregate.initialState`, to rebuild the current state.
+   - **Event-sourced (with snapshot)**: If a `SnapshotStore` is configured, call `snapshotStore.load(aggregateName, command.targetAggregateId)` first. If a snapshot is found and the persistence implements `PartialEventLoad`, call `persistence.loadAfterVersion(aggregateName, id, snapshot.version)` to load only post-snapshot events. If the persistence does not implement `PartialEventLoad`, call `persistence.load(aggregateName, id)` and slice the result: `events.slice(snapshot.version)`. Derive `version = snapshot.version + loadedEvents.length`. Replay only the post-snapshot events through `Aggregate.evolve` handlers, starting from `snapshot.state`.
+   - **Event-sourced (without snapshot)**: Call `persistence.load(aggregateName, command.targetAggregateId)` to get the full event stream. Derive `version = events.length`. Replay all events through `Aggregate.evolve` handlers, starting from `Aggregate.initialState`, to rebuild the current state.
    - **State-stored**: Call `persistence.load(aggregateName, command.targetAggregateId)` to get `{ state, version }` or `null`. If `null`, use `Aggregate.initialState` with `version = 0`.
-3. **Execute** -- Invoke the aggregate's command handler: `aggregate.commands[command.name](command, currentState, infrastructure)`. The handler returns one or more events.
-4. **Apply** -- For each returned event, apply it to the state via `aggregate.apply[event.name](event.payload, state)` to compute the new state. This ensures the aggregate's in-memory state is consistent with the events.
+3. **Execute** -- Invoke the aggregate's decide handler: `aggregate.decide[command.name](command, currentState, infrastructure)`. The handler returns one or more events.
+4. **Evolve** -- For each returned event, evolve the state via `aggregate.evolve[event.name](event.payload, state)` to compute the new state. This ensures the aggregate's in-memory state is consistent with the events.
 5. **Persist** -- Save the results with optimistic concurrency:
    - **Event-sourced**: Call `persistence.save(aggregateName, command.targetAggregateId, newEvents, version)` to append the new events. `version` is the stream length observed at load time.
    - **State-stored**: Call `persistence.save(aggregateName, command.targetAggregateId, newState, version)` to store the updated state. `version` is the version observed at load time.
@@ -286,7 +286,7 @@ interface ConcurrencyStrategy {
 
 1. **Retry loop** -- Executes the `attempt` callback up to `1 + maxRetries` times. On `ConcurrencyError`, retries with a fresh UoW. Non-`ConcurrencyError` exceptions propagate immediately.
 2. **Max retries exhausted** -- The `ConcurrencyError` from the last attempt propagates.
-3. **Handler re-execution** -- Command handlers may be called multiple times during retry. Handlers should be side-effect-free (the Decider pattern already implies this).
+3. **Handler re-execution** -- Decide handlers may be called multiple times during retry. Handlers should be side-effect-free (the Decider pattern already implies this).
 
 **Pessimistic strategy** (`{ strategy: "pessimistic", locker, lockTimeoutMs? }`):
 
@@ -422,7 +422,7 @@ In global mode, the same snapshot config applies to all event-sourced aggregates
 - `defineDomain` is sync, pure, and has no side effects. It returns the input unchanged.
 - The command bus enforces single-handler-per-command-name. If two aggregates define handlers for the same command name, registration must fail.
 - Events are published only after successful persistence. If persistence fails, events must not be published (to avoid inconsistency between the store and downstream subscribers).
-- The order of event publication matches the order of events returned by the command handler.
+- The order of event publication matches the order of events returned by the decide handler.
 - When idempotency is active, the idempotency record and event persistence MUST be in the same UoW transaction. If event persistence fails, the idempotency record must not be saved.
 - Duplicate commands (same `commandId`, already processed) must produce zero side effects: no events persisted, no state changes, no events published.
 
@@ -442,8 +442,8 @@ In global mode, the same snapshot config applies to all event-sourced aggregates
 - **Per-aggregate persistence with unknown aggregate name** -- If the per-aggregate record contains a key that does not match any registered aggregate, `init()` throws an error listing the unknown names.
 - **Per-aggregate persistence with mixed strategies** -- Some aggregates event-sourced, others state-stored. Snapshots only apply to event-sourced aggregates; the existing `isEventSourced` check in `CommandLifecycleExecutor` handles this correctly.
 - **Per-aggregate factory throws during init** -- The error propagates through `wireDomain` and the domain is not usable.
-- **Command handler returns a single event** -- Must be normalized to an array before processing.
-- **Command handler returns empty array** -- No events to apply, persist, or publish. The aggregate state remains unchanged.
+- **Decide handler returns a single event** -- Must be normalized to an array before processing.
+- **Decide handler returns empty array** -- No events to evolve, persist, or publish. The aggregate state remains unchanged.
 - **Saga handler returns no commands** -- `reaction.commands` is `undefined` or empty. Only the saga state is persisted; no commands are dispatched.
 - **init() factory throws** -- The error propagates through `wireDomain` and the domain is not usable.
 - **Circular saga-command loops** -- A saga dispatches a command that produces an event that triggers the same saga. The framework does not prevent infinite loops; the saga handler must include termination logic (e.g., checking state to avoid re-dispatching).
@@ -503,13 +503,13 @@ type CounterTypes = AggregateTypes & {
 
 const Counter = defineAggregate<CounterTypes>({
   initialState: { count: 0 },
-  commands: {
+  decide: {
     Increment: (cmd) => ({
       name: "Incremented",
       payload: { by: cmd.payload.by },
     }),
   },
-  apply: {
+  evolve: {
     Incremented: (payload, state) => ({ count: state.count + payload.by }),
   },
 });
@@ -567,7 +567,7 @@ type CounterTypes = AggregateTypes & {
 
 const Counter = defineAggregate<CounterTypes>({
   initialState: { count: 0 },
-  commands: {
+  decide: {
     CreateCounter: (cmd) => ({
       name: "CounterCreated",
       payload: { id: cmd.targetAggregateId },
@@ -577,7 +577,7 @@ const Counter = defineAggregate<CounterTypes>({
       payload: { by: cmd.payload.by },
     }),
   },
-  apply: {
+  evolve: {
     CounterCreated: (_p, state) => state,
     Incremented: (payload, state) => ({ count: state.count + payload.by }),
   },
@@ -658,13 +658,13 @@ type CounterTypes = AggregateTypes & {
 
 const Counter = defineAggregate<CounterTypes>({
   initialState: { count: 0 },
-  commands: {
+  decide: {
     Increment: (cmd) => ({
       name: "Incremented",
       payload: { by: cmd.payload.by },
     }),
   },
-  apply: {
+  evolve: {
     Incremented: (payload, state) => ({ count: state.count + payload.by }),
   },
 });
@@ -681,13 +681,13 @@ type BalanceTypes = AggregateTypes & {
 
 const BankAccount = defineAggregate<BalanceTypes>({
   initialState: { balance: 0 },
-  commands: {
+  decide: {
     Deposit: (cmd) => ({
       name: "DepositMade",
       payload: { amount: cmd.payload.amount },
     }),
   },
-  apply: {
+  evolve: {
     DepositMade: (payload, state) => ({
       balance: state.balance + payload.amount,
     }),
@@ -777,10 +777,10 @@ type PingTypes = AggregateTypes & {
 
 const Pinger = defineAggregate<PingTypes>({
   initialState: { pinged: false },
-  commands: {
+  decide: {
     Ping: () => ({ name: "Pinged", payload: {} }),
   },
-  apply: {
+  evolve: {
     Pinged: () => ({ pinged: true }),
   },
 });
@@ -885,10 +885,10 @@ type PingTypes = AggregateTypes & {
 
 const Pinger = defineAggregate<PingTypes>({
   initialState: { pinged: false },
-  commands: {
+  decide: {
     Ping: () => ({ name: "Pinged", payload: {} }),
   },
-  apply: {
+  evolve: {
     Pinged: () => ({ pinged: true }),
   },
 });
@@ -988,13 +988,13 @@ type ItemAggregateTypes = AggregateTypes & {
 
 const ItemAggregate = defineAggregate<ItemAggregateTypes>({
   initialState: {},
-  commands: {
+  decide: {
     AddItem: (cmd) => ({
       name: "ItemAdded",
       payload: { id: cmd.payload.id, name: cmd.payload.name },
     }),
   },
-  apply: {
+  evolve: {
     ItemAdded: (_p, state) => state,
   },
 });
@@ -1076,13 +1076,13 @@ type PingTypes = AggregateTypes & {
 
 const Pinger = defineAggregate<PingTypes>({
   initialState: { lastPing: null },
-  commands: {
+  decide: {
     Ping: (_cmd, _state, infra) => ({
       name: "Pinged",
       payload: { at: infra.clock.now().toISOString() },
     }),
   },
-  apply: {
+  evolve: {
     Pinged: (payload, _state) => ({ lastPing: new Date(payload.at) }),
   },
 });
@@ -1153,13 +1153,13 @@ type CounterTypes = AggregateTypes & {
 
 const Counter = defineAggregate<CounterTypes>({
   initialState: { count: 0 },
-  commands: {
+  decide: {
     Increment: (cmd) => ({
       name: "Incremented",
       payload: { by: cmd.payload.by },
     }),
   },
-  apply: {
+  evolve: {
     Incremented: (payload, state) => ({ count: state.count + payload.by }),
   },
 });
@@ -1238,13 +1238,13 @@ type CounterTypes = AggregateTypes & {
 
 const Counter = defineAggregate<CounterTypes>({
   initialState: { count: 0 },
-  commands: {
+  decide: {
     Increment: (cmd) => ({
       name: "Incremented",
       payload: { by: cmd.payload.by },
     }),
   },
-  apply: {
+  evolve: {
     Incremented: (payload, state) => ({ count: state.count + payload.by }),
   },
 });
@@ -1318,13 +1318,13 @@ type CounterTypes = AggregateTypes & {
 
 const Counter = defineAggregate<CounterTypes>({
   initialState: { count: 0 },
-  commands: {
+  decide: {
     Increment: (cmd) => ({
       name: "Incremented",
       payload: { by: cmd.payload.by },
     }),
   },
-  apply: {
+  evolve: {
     Incremented: (payload, state) => ({ count: state.count + payload.by }),
   },
 });
@@ -1403,13 +1403,13 @@ type CounterTypes = AggregateTypes & {
 
 const Counter = defineAggregate<CounterTypes>({
   initialState: { count: 0 },
-  commands: {
+  decide: {
     Increment: (cmd) => ({
       name: "Incremented",
       payload: { by: cmd.payload.by },
     }),
   },
-  apply: {
+  evolve: {
     Incremented: (payload, state) => ({ count: state.count + payload.by }),
   },
 });

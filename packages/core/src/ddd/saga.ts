@@ -70,8 +70,8 @@ export type SagaReaction<TState, TCommands extends Command> = {
  * pattern. It receives a domain event, the current saga state, and
  * infrastructure, then returns the new state plus commands to dispatch.
  *
- * This is the inverse of an aggregate's {@link CommandHandler}: where a
- * command handler receives a command and returns events, a saga event
+ * This is the inverse of an aggregate's {@link DecideHandler}: where a
+ * decide handler receives a command and returns events, a saga event
  * handler receives an event and returns commands.
  *
  * @typeParam TEvent - The specific event type this handler processes.

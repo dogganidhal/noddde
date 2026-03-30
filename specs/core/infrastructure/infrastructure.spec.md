@@ -34,7 +34,7 @@ docs:
 - `Infrastructure` being `{}` means any object type is assignable to it (it is the top of the infrastructure type hierarchy).
 - `FrameworkInfrastructure` provides the framework logger. It is merged with user infrastructure via intersection (`&`) in **all** handler types (event handlers, command handlers, query handlers, saga event handlers, standalone command handlers).
 - `CQRSInfrastructure` provides the runtime-injected CQRS buses. It is merged with user infrastructure via intersection (`&`) in handlers that need bus access (standalone command handlers, saga event handlers).
-- The separation ensures that pure handlers (like apply handlers) have no infrastructure access, all handlers get the framework logger via `FrameworkInfrastructure`, and orchestration handlers (standalone commands, sagas) additionally get CQRS buses.
+- The separation ensures that pure handlers (like evolve handlers) have no infrastructure access, all handlers get the framework logger via `FrameworkInfrastructure`, and orchestration handlers (standalone commands, sagas) additionally get CQRS buses.
 
 ## Invariants
 
@@ -61,7 +61,7 @@ docs:
   - `SagaTypes["infrastructure"]`
 - `FrameworkInfrastructure` is merged via `&` in **all** handler types:
   - `EventHandler` second parameter: `TInfrastructure & FrameworkInfrastructure`
-  - `CommandHandler` (aggregate) third parameter: `TInfrastructure & FrameworkInfrastructure`
+  - `DecideHandler` (aggregate) third parameter: `TInfrastructure & FrameworkInfrastructure`
   - `QueryHandler` second parameter: `TInfrastructure & FrameworkInfrastructure`
   - `StandaloneCommandHandler` second parameter: `TInfrastructure & CQRSInfrastructure & FrameworkInfrastructure`
   - `SagaEventHandler` third parameter: `TInfrastructure & CQRSInfrastructure & FrameworkInfrastructure`

@@ -8,7 +8,7 @@ description: Why noddde uses function parameter injection instead of dependency 
 noddde injects infrastructure into handlers as function parameters. No DI container, no decorators, no service locator, no global state.
 
 ```ts
-commands: {
+decide: {
   PlaceBid: (command, state, { clock }) => {
     const now = clock.now();
     // ...
@@ -57,7 +57,7 @@ interface AuctionInfrastructure {
 }
 
 // ...and passed as a parameter
-commands: {
+decide: {
   PlaceBid: (command, state, { clock }) => {
     // clock is injected, not imported
   },
@@ -124,7 +124,7 @@ interface BankingInfrastructure {
 }
 
 // Use it in handlers — destructure only what you need
-commands: {
+decide: {
   CreateBankAccount: (command, _state, { logger }) => {
     logger.info(`Creating ${command.targetAggregateId}`);
     return { name: "BankAccountCreated", payload: { id: command.targetAggregateId } };

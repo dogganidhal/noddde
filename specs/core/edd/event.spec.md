@@ -52,7 +52,7 @@ docs:
 
 ## Integration Points
 
-- `Event` is the base constraint for `ApplyHandler`, `EventHandler`, `EventBus.dispatch`, and all aggregate/projection/saga type bundles.
+- `Event` is the base constraint for `EvolveHandler`, `EventHandler`, `EventBus.dispatch`, and all aggregate/projection/saga type bundles.
 - `DefineEvents` is the primary way users define their event unions, which then flow into `AggregateTypes["events"]`, `ProjectionTypes["events"]`, and `SagaTypes["events"]`.
 - `EventMetadata` is imported from `edd/event-metadata` and referenced as the type of the optional `metadata` field.
 - The engine's `Domain` class populates the `metadata` field during command dispatch — events enter persistence and the event bus with metadata attached.

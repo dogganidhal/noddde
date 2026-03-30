@@ -55,7 +55,7 @@ Route by command.name
   |     Use targetAggregateId to identify the specific instance
   v
 Load state
-  |  3. Event-sourced: replay all past events through apply handlers
+  |  3. Event-sourced: replay all past events through evolve handlers
   |     State-stored: load the latest snapshot
   |     New instance: use initialState from the aggregate definition
   v
@@ -102,7 +102,7 @@ For state-stored persistence, the latest state snapshot is loaded directly.
 
 If no prior state exists (the aggregate instance is new), the `initialState` from the aggregate definition is used.
 
-### Step 4: Execute Command Handler
+### Step 4: Execute Decide Handler
 
 The matching handler is called with three arguments:
 
@@ -110,7 +110,7 @@ The matching handler is called with three arguments:
 handler(command, currentState, infrastructure);
 ```
 
-The handler inspects the command and the current state, enforces business invariants, and returns one or more events representing what happened. See [Command Handlers](/docs/modeling/command-handlers) for patterns on writing handler logic.
+The handler inspects the command and the current state, enforces business invariants, and returns one or more events representing what happened. See [Decide Handlers](/docs/modeling/command-handlers) for patterns on writing handler logic.
 
 ### Step 5: Apply Returned Events
 
@@ -120,7 +120,7 @@ Each returned event is passed through the corresponding `apply` handler to produ
 newState = apply[event.name](event.payload, currentState);
 ```
 
-If the command handler returns multiple events, they are applied sequentially. Each produces a new state that feeds into the next. See [State & Event Application](/docs/modeling/state-and-events) for apply handler patterns.
+If the decide handler returns multiple events, they are applied sequentially. Each produces a new state that feeds into the next. See [State & Event Application](/docs/modeling/state-and-events) for evolve handler patterns.
 
 ### Step 6: Persist
 
@@ -287,7 +287,7 @@ interface CQRSInfrastructure {
 }
 ```
 
-In most cases, you interact with commands through `domain.dispatchCommand()` rather than the command bus directly. The command bus becomes relevant when standalone command handlers need to dispatch commands to aggregates, or when sagas need to issue commands in response to events.
+In most cases, you interact with commands through `domain.dispatchCommand()` rather than the command bus directly. The command bus becomes relevant when standalone decide handlers need to dispatch commands to aggregates, or when sagas need to issue commands in response to events.
 
 ### InMemoryCommandBus
 
@@ -356,7 +356,7 @@ For production deployments requiring durability, distribution, or at-least-once 
 
 The seven-step lifecycle has clear failure semantics at each stage:
 
-**Command handler throws.** No events are produced, no state changes are persisted, and the error propagates to the caller as a rejected promise. The aggregate state remains exactly as it was before the command.
+**Decide handler throws.** No events are produced, no state changes are persisted, and the error propagates to the caller as a rejected promise. The aggregate state remains exactly as it was before the command.
 
 **Persistence fails.** The handler returned events, but the storage layer rejected them (network error, constraint violation, etc.). The error propagates to the caller. No events are published to the event bus. The aggregate state remains unchanged.
 

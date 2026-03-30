@@ -11,7 +11,7 @@ docs:
 
 # EventHandler
 
-> `EventHandler` is an impure, async-capable function type that reacts to domain events. Unlike the pure `ApplyHandler`, event handlers have access to infrastructure and may perform I/O such as updating read models, sending notifications, or triggering downstream processes.
+> `EventHandler` is an impure, async-capable function type that reacts to domain events. Unlike the pure `EvolveHandler`, event handlers have access to infrastructure and may perform I/O such as updating read models, sending notifications, or triggering downstream processes.
 
 ## Type Contract
 
@@ -65,7 +65,7 @@ const handler: EventHandler<MyEvent, MyInfra> = (event, infra) => {
 
 - `EventHandler` is used in patterns where events trigger side effects outside of aggregate state transitions.
 - It now has the same event parameter shape as `SagaEventHandler` and projection `ReducerMap` handlers (full event, not just payload).
-- It differs from `ApplyHandler` which still receives `TEvent["payload"]` (pure, no infrastructure, no metadata access).
+- It differs from `EvolveHandler` which still receives `TEvent["payload"]` (pure, no infrastructure, no metadata access).
 
 ## Test Scenarios
 

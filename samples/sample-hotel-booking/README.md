@@ -365,11 +365,11 @@ src/
           room.ts                          # defineAggregate (refs extracted handlers)
           state.ts                         # RoomState + initialRoomState
           commands/                        # One file per command payload
-          command-handlers/                # One file per handler (standalone fn)
+          deciders/                # One file per handler (standalone fn)
         booking/                           # Event-sourced, idempotency
-          booking.ts, state.ts, commands/, command-handlers/
+          booking.ts, state.ts, commands/, deciders/
         inventory/                         # State-stored
-          inventory.ts, state.ts, commands/, command-handlers/
+          inventory.ts, state.ts, commands/, deciders/
     read-model/
       projections/
         room-availability/                 # Strong consistency

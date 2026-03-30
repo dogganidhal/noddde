@@ -1,18 +1,18 @@
 ---
 title: "Why Extract Handlers?"
-description: Why noddde recommends extracting command handlers, apply handlers, saga handlers, and projection handlers into standalone functions in separate files.
+description: Why noddde recommends extracting decide handlers, evolve handlers, saga handlers, and projection handlers into standalone functions in separate files.
 ---
 
 ## The Decision
 
-noddde recommends extracting all handlers -- command handlers, apply handlers, saga on-entries, projection event handlers, and query handlers -- into standalone functions in separate files, typed with the `Infer*Handler` utilities.
+noddde recommends extracting all handlers -- decide handlers, evolve handlers, saga on-entries, projection event handlers, and query handlers -- into standalone functions in separate files, typed with the `Infer*Handler` utilities.
 
 ```ts
-// command-handlers/handle-place-bid.ts
-import type { InferCommandHandler } from "@noddde/core";
+// deciders/decide-place-bid.ts
+import type { InferDecideHandler } from "@noddde/core";
 import type { AuctionDef } from "../auction";
 
-export const handlePlaceBid: InferCommandHandler<AuctionDef, "PlaceBid"> = (
+export const decidePlaceBid: InferDecideHandler<AuctionDef, "PlaceBid"> = (
   command,
   state,
   { clock },
@@ -27,16 +27,16 @@ The aggregate (or saga, or projection) definition becomes a clean wiring file:
 // auction.ts
 export const Auction = defineAggregate<AuctionDef>({
   initialState,
-  commands: {
-    CreateAuction: handleCreateAuction,
-    PlaceBid: handlePlaceBid,
-    CloseAuction: handleCloseAuction,
+  decide: {
+    CreateAuction: decideCreateAuction,
+    PlaceBid: decidePlaceBid,
+    CloseAuction: decideCloseAuction,
   },
-  apply: {
-    AuctionCreated: applyAuctionCreated,
-    BidPlaced: applyBidPlaced,
-    BidRejected: applyBidRejected,
-    AuctionClosed: applyAuctionClosed,
+  evolve: {
+    AuctionCreated: evolveAuctionCreated,
+    BidPlaced: evolveBidPlaced,
+    BidRejected: evolveBidRejected,
+    AuctionClosed: evolveAuctionClosed,
   },
 });
 ```
@@ -47,7 +47,7 @@ Inline handlers are still valid TypeScript and will compile, but extracted handl
 
 Inline handlers concentrate all business logic in a single file. As aggregates grow, this leads to:
 
-- **Monolithic files.** A booking aggregate with 8 command handlers and 8 apply handlers means hundreds of lines of logic in one file. Finding the handler you need requires scrolling.
+- **Monolithic files.** A booking aggregate with 8 decide handlers and 8 evolve handlers means hundreds of lines of logic in one file. Finding the handler you need requires scrolling.
 - **Manual type annotations.** Without extraction, developers who want separate files must manually reconstruct the handler signature -- importing payload types, state types, infrastructure types, and event unions individually.
 - **Coupled tests.** Testing a single handler requires importing the entire aggregate and either calling the handler through the aggregate object or duplicating its setup.
 
@@ -55,13 +55,13 @@ Inline handlers concentrate all business logic in a single file. As aggregates g
 
 ### Testability
 
-Each handler is a plain function that can be tested in isolation. Pass in a command, a state snapshot, and (for command handlers) an infrastructure stub -- assert on the returned events or new state. No aggregate wiring needed:
+Each handler is a plain function that can be tested in isolation. Pass in a command, a state snapshot, and (for decide handlers) an infrastructure stub -- assert on the returned events or new state. No aggregate wiring needed:
 
 ```ts
-import { handlePlaceBid } from "./command-handlers/handle-place-bid";
+import { decidePlaceBid } from "./deciders/decide-place-bid";
 
 it("should reject bids below the starting price", () => {
-  const event = handlePlaceBid(
+  const event = decidePlaceBid(
     {
       name: "PlaceBid",
       targetAggregateId: "a-1",
@@ -79,16 +79,16 @@ it("should reject bids below the starting price", () => {
 
 ### Readability
 
-The aggregate definition becomes a table of contents. You can see at a glance which command maps to which handler and which event maps to which apply function, without reading through business logic.
+The aggregate definition becomes a table of contents. You can see at a glance which command maps to which decide handler and which event maps to which evolve function, without reading through business logic.
 
 ### Type safety
 
-`InferCommandHandler<Def, "PlaceBid">` derives the full function signature from your `AggregateTypes` bundle. The command is narrowed to the specific variant, the state is typed, and infrastructure is correctly scoped with `FrameworkInfrastructure` merged in. The same pattern applies to all handler kinds:
+`InferDecideHandler<Def, "PlaceBid">` derives the full function signature from your `AggregateTypes` bundle. The command is narrowed to the specific variant, the state is typed, and infrastructure is correctly scoped with `FrameworkInfrastructure` merged in. The same pattern applies to all handler kinds:
 
 | Utility                             | Handler kind                                 |
 | ----------------------------------- | -------------------------------------------- |
-| `InferCommandHandler<T, K>`         | Aggregate command handler                    |
-| `InferApplyHandler<T, K>`           | Aggregate apply handler                      |
+| `InferDecideHandler<T, K>`          | Aggregate decide handler                     |
+| `InferEvolveHandler<T, K>`          | Aggregate evolve handler                     |
 | `InferSagaOnEntry<T, K>`            | Saga on-entry (`{ id, handle }`)             |
 | `InferSagaEventHandler<T, K>`       | Saga event handler (just the function)       |
 | `InferProjectionEventHandler<T, K>` | Projection event handler (`{ id?, reduce }`) |
@@ -100,18 +100,18 @@ Changes to one handler do not require reading through a large file. Each handler
 
 ## When Inline Is Fine
 
-For aggregates with 1-2 trivial handlers (e.g., a no-op apply handler or a simple pass-through command), inline is acceptable:
+For aggregates with 1-2 trivial handlers (e.g., a no-op evolve handler or a simple pass-through command), inline is acceptable:
 
 ```ts
 export const Counter = defineAggregate<CounterDef>({
   initialState: { count: 0 },
-  commands: {
+  decide: {
     Increment: (cmd) => ({
       name: "Incremented",
       payload: { amount: cmd.payload.amount },
     }),
   },
-  apply: {
+  evolve: {
     Incremented: (event, state) => ({ count: state.count + event.amount }),
   },
 });

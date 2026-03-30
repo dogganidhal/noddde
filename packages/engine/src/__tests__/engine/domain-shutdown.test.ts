@@ -13,13 +13,13 @@ describe("Domain.shutdown", () => {
     const Agg = defineAggregate({
       name: "Acc",
       initialState: { balance: 0 },
-      commands: {
+      decide: {
         Deposit: (cmd) => ({
           name: "Deposited" as const,
           payload: { amount: cmd.payload.amount },
         }),
       },
-      apply: {
+      evolve: {
         Deposited: (payload, state) => ({
           ...state,
           balance: state.balance + payload.amount,
@@ -70,14 +70,14 @@ describe("Domain.shutdown", () => {
     const Agg = defineAggregate({
       name: "SlowAgg",
       initialState: {},
-      commands: {
+      decide: {
         SlowCmd: async () => {
           commandHandlerEntered = true;
           await blockPromise;
           return { name: "Done" as const, payload: {} };
         },
       },
-      apply: {
+      evolve: {
         Done: (_payload, state) => state,
       },
     });
@@ -196,13 +196,13 @@ describe("Domain.shutdown", () => {
     const Agg = defineAggregate({
       name: "NeverAgg",
       initialState: {},
-      commands: {
+      decide: {
         NeverCmd: async () => {
           await new Promise(() => {}); // never resolves
           return { name: "Done" as const, payload: {} };
         },
       },
-      apply: { Done: (_p, s) => s },
+      evolve: { Done: (_p, s) => s },
     });
 
     const domain = await wireDomain(
@@ -275,14 +275,14 @@ describe("Domain.shutdown", () => {
     const Agg = defineAggregate({
       name: "CmdAgg",
       initialState: { done: false },
-      commands: {
+      decide: {
         DoWork: async () => {
           handlerEntered = true;
           await blockPromise;
           return { name: "WorkDone" as const, payload: {} };
         },
       },
-      apply: {
+      evolve: {
         WorkDone: () => ({ done: true }),
       },
     });
@@ -363,13 +363,13 @@ describe("Domain.shutdown outbox relay", () => {
     const Agg = defineAggregate({
       name: "Acc",
       initialState: { balance: 0 },
-      commands: {
+      decide: {
         Deposit: (cmd) => ({
           name: "Deposited" as const,
           payload: { amount: cmd.payload.amount },
         }),
       },
-      apply: {
+      evolve: {
         Deposited: (payload, state) => ({
           ...state,
           balance: state.balance + payload.amount,

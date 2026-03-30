@@ -3,7 +3,7 @@ title: Testing Overview
 description: How noddde's functional design and @noddde/testing toolkit make testing natural and straightforward.
 ---
 
-noddde's functional architecture is built for testability. Command handlers are functions. Apply handlers are pure functions. Projection reducers are pure functions. Saga handlers return data. There is no framework to boot, no container to configure, and no decorators to mock.
+noddde's functional architecture is built for testability. Decide handlers are functions. evolve handlers are pure functions. Projection reducers are pure functions. Saga handlers return data. There is no framework to boot, no container to configure, and no decorators to mock.
 
 The `@noddde/testing` package provides type-safe test harnesses that eliminate boilerplate and express tests in the natural **Given-When-Then** pattern of the Decider.
 
@@ -44,10 +44,10 @@ Available unit harnesses:
 
 | Harness           | Tests                    | Pattern                                         |
 | ----------------- | ------------------------ | ----------------------------------------------- |
-| `testAggregate`   | Command handlers + apply | Given events, When command, Then events + state |
+| `testAggregate`   | Decide handlers + evolve | Given events, When command, Then events + state |
 | `testProjection`  | Projection reducers      | Given events, Then view                         |
 | `testSaga`        | Saga event handlers      | Given state, When event, Then state + commands  |
-| `evolveAggregate` | Apply handlers only      | Replay events to reconstruct state              |
+| `evolveAggregate` | evolve handlers only      | Replay events to reconstruct state              |
 
 ### Level 2: Slice Tests (Pre-Wired Domain)
 
@@ -87,7 +87,7 @@ The Decider pattern maps naturally to Given-When-Then:
 | **Projection** | Prior events (reduced through reducers) | --             | Final view                      |
 | **Saga**       | Prior saga state                        | Incoming event | New state + dispatched commands |
 
-For aggregates, "Given" means "these events already happened." The harness replays them through the aggregate's `apply` handlers to reconstruct the pre-command state, then executes the command handler.
+For aggregates, "Given" means "these events already happened." The harness replays them through the aggregate's `evolve` handlers to reconstruct the pre-command state, then executes the decide handler.
 
 For sagas, this pattern is inverted: events come in, commands go out.
 
@@ -114,15 +114,15 @@ expect(result.events).toEqual([]);
 Since all handlers are extracted to standalone functions, you can import and test them directly without any harness:
 
 ```ts
-// Command handler — import the extracted function
-import { handleAuthorizeTransaction } from "./command-handlers/handle-authorize-transaction";
+// Decide handler — import the extracted function
+import { decideAuthorizeTransaction } from "./deciders/decide-authorize-transaction";
 
-const events = handleAuthorizeTransaction(command, state, infrastructure);
+const events = decideAuthorizeTransaction(command, state, infrastructure);
 
-// Apply handler — import the extracted function
-import { applyTransactionAuthorized } from "./apply-handlers/apply-transaction-authorized";
+// evolve handler — import the extracted function
+import { evolveTransactionAuthorized } from "./evolvers/evolve-transaction-authorized";
 
-const newState = applyTransactionAuthorized(payload, state);
+const newState = evolveTransactionAuthorized(payload, state);
 
 // Projection event handler — import the extracted on-entry
 import { onTransactionAuthorized } from "./on-entries/on-transaction-authorized";

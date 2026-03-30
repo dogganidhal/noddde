@@ -14,9 +14,9 @@ import {
   commandPayloadTemplate,
 } from "../../templates/domain/aggregate-commands.js";
 import {
-  commandHandlersIndexTemplate,
-  commandHandlerTemplate,
-} from "../../templates/domain/aggregate-command-handlers.js";
+  decidersIndexTemplate,
+  deciderTemplate,
+} from "../../templates/domain/aggregate-deciders.js";
 import {
   domainProjectionIndexTemplate,
   domainProjectionTemplate,
@@ -30,9 +30,9 @@ import {
   queryHandlerTemplate,
 } from "../../templates/domain/projection-query-handlers.js";
 import {
-  applyHandlersIndexTemplate,
-  applyHandlerTemplate,
-} from "../../templates/domain/aggregate-apply-handlers.js";
+  evolversIndexTemplate,
+  evolverTemplate,
+} from "../../templates/domain/aggregate-evolvers.js";
 import {
   viewReducersIndexTemplate,
   viewReducerTemplate,
@@ -87,9 +87,9 @@ describe("domain templates", () => {
       expect(result).toContain("BankAccountCreatedPayload");
       expect(result).toContain("CreateBankAccountPayload");
       expect(result).toContain("export type BankAccountDef");
-      expect(result).toContain("handleCreateBankAccount");
-      expect(result).toContain("applyBankAccountCreated");
-      expect(result).toContain('from "./apply-handlers/index.js"');
+      expect(result).toContain("decideCreateBankAccount");
+      expect(result).toContain("evolveBankAccountCreated");
+      expect(result).toContain('from "./evolvers/index.js"');
     });
 
     it("generates command payload interface", () => {
@@ -97,30 +97,30 @@ describe("domain templates", () => {
       expect(result).toContain("interface CreateBankAccountPayload");
     });
 
-    it("generates command handlers barrel", () => {
-      const result = commandHandlersIndexTemplate(ctx);
-      expect(result).toContain("handleCreateBankAccount");
+    it("generates deciders barrel", () => {
+      const result = decidersIndexTemplate(ctx);
+      expect(result).toContain("decideCreateBankAccount");
     });
 
-    it("generates standalone command handler using InferCommandHandler", () => {
-      const result = commandHandlerTemplate(ctx);
-      expect(result).toContain("InferCommandHandler");
+    it("generates standalone decide handler using InferDecideHandler", () => {
+      const result = deciderTemplate(ctx);
+      expect(result).toContain("InferDecideHandler");
       expect(result).toContain("BankAccountDef");
-      expect(result).toContain("handleCreateBankAccount");
+      expect(result).toContain("decideCreateBankAccount");
       expect(result).toContain('"BankAccountCreated" as const');
       expect(result).toContain("command.targetAggregateId");
     });
 
-    it("generates standalone apply handler using InferApplyHandler", () => {
-      const result = applyHandlerTemplate(ctx);
-      expect(result).toContain("InferApplyHandler");
+    it("generates standalone evolve handler using InferEvolveHandler", () => {
+      const result = evolverTemplate(ctx);
+      expect(result).toContain("InferEvolveHandler");
       expect(result).toContain("BankAccountDef");
-      expect(result).toContain("applyBankAccountCreated");
+      expect(result).toContain("evolveBankAccountCreated");
     });
 
-    it("generates apply handlers barrel", () => {
-      const result = applyHandlersIndexTemplate(ctx);
-      expect(result).toContain("applyBankAccountCreated");
+    it("generates evolvers barrel", () => {
+      const result = evolversIndexTemplate(ctx);
+      expect(result).toContain("evolveBankAccountCreated");
     });
   });
 
@@ -211,9 +211,9 @@ describe("domain templates", () => {
         domainAggregateIndexTemplate(ctx),
         domainAggregateTemplate(ctx),
         commandsIndexTemplate(ctx),
-        commandHandlersIndexTemplate(ctx),
-        applyHandlersIndexTemplate(ctx),
-        applyHandlerTemplate(ctx),
+        decidersIndexTemplate(ctx),
+        evolversIndexTemplate(ctx),
+        evolverTemplate(ctx),
         domainProjectionIndexTemplate(ctx),
         domainProjectionTemplate(ctx),
         queriesIndexTemplate(ctx),

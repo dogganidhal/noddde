@@ -1,7 +1,7 @@
 /* eslint-disable no-unused-vars */
 import type { ID } from "../id";
 import { Event } from "../edd/event";
-import { ApplyHandler } from "../edd/event-sourcing-handler";
+import { EvolveHandler } from "../edd/event-sourcing-handler";
 import type { UpcasterMap } from "../edd/upcaster";
 import { AggregateCommand } from "../cqrs/command/command";
 import { Infrastructure, FrameworkInfrastructure } from "../infrastructure";
@@ -33,7 +33,7 @@ export type AggregateTypes = {
 };
 
 /**
- * A command handler implements the "decide" phase of the Decider pattern.
+ * A decide handler implements the "decide" phase of the Decider pattern.
  * It receives a command, the current aggregate state, and infrastructure,
  * then returns the event(s) representing what happened.
  *
@@ -49,7 +49,7 @@ export type AggregateTypes = {
  * @param infrastructure - External dependencies (clock, APIs, etc.).
  * @returns One or more events, optionally wrapped in a `Promise`.
  */
-export type CommandHandler<
+export type DecideHandler<
   TCommand extends AggregateCommand<ID>,
   TState,
   TEvents extends Event,
@@ -62,8 +62,8 @@ export type CommandHandler<
 
 // ---- Handler maps (internal) ----
 
-type CommandHandlerMap<T extends AggregateTypes> = {
-  [K in T["commands"]["name"]]: CommandHandler<
+type DecideHandlerMap<T extends AggregateTypes> = {
+  [K in T["commands"]["name"]]: DecideHandler<
     Extract<T["commands"], { name: K }>,
     T["state"],
     T["events"],
@@ -71,8 +71,8 @@ type CommandHandlerMap<T extends AggregateTypes> = {
   >;
 };
 
-type ApplyHandlerMap<T extends AggregateTypes> = {
-  [K in T["events"]["name"]]: ApplyHandler<
+type EvolveHandlerMap<T extends AggregateTypes> = {
+  [K in T["events"]["name"]]: EvolveHandler<
     Extract<T["events"], { name: K }>,
     T["state"]
   >;
@@ -80,7 +80,7 @@ type ApplyHandlerMap<T extends AggregateTypes> = {
 
 /**
  * An aggregate definition following the Decider pattern: initial state,
- * command handlers (decide), and apply handlers (evolve). No base classes,
+ * decide handlers, and evolve handlers. No base classes,
  * no decorators — just a typed object.
  *
  * Use {@link defineAggregate} to create an aggregate with full type inference.
@@ -91,15 +91,15 @@ export interface Aggregate<T extends AggregateTypes = AggregateTypes> {
   /** The zero-value state used when no events have been applied yet. */
   initialState: T["state"];
   /**
-   * A map of command handlers keyed by command name. Each handler implements
+   * A map of decide handlers keyed by command name. Each handler implements
    * the "decide" phase: `(command, state, infrastructure) => event(s)`.
    */
-  commands: CommandHandlerMap<T>;
+  decide: DecideHandlerMap<T>;
   /**
-   * A map of apply handlers keyed by event name. Each handler implements
+   * A map of evolve handlers keyed by event name. Each handler implements
    * the "evolve" phase: `(payload, state) => newState`. Must be pure.
    */
-  apply: ApplyHandlerMap<T>;
+  evolve: EvolveHandlerMap<T>;
   /**
    * Optional map of upcaster chains keyed by event name. Each chain
    * transforms historical event payloads from older schema versions
@@ -117,18 +117,18 @@ export interface Aggregate<T extends AggregateTypes = AggregateTypes> {
  * recommended way to define aggregates.
  *
  * @typeParam T - Inferred {@link AggregateTypes} bundle.
- * @param config - The aggregate configuration (initialState, commands, apply).
+ * @param config - The aggregate configuration (initialState, decide, evolve).
  * @returns The same configuration object, fully typed.
  *
  * @example
  * ```ts
  * const BankAccount = defineAggregate<BankAccountTypes>({
  *   initialState: { balance: 0, transactions: [] },
- *   commands: {
+ *   decide: {
  *     CreateAccount: (command, state) => ({ name: "AccountCreated", payload: { id: command.targetAggregateId } }),
  *     // ...
  *   },
- *   apply: {
+ *   evolve: {
  *     AccountCreated: (payload, state) => ({ ...state, id: payload.id }),
  *     // ...
  *   },
@@ -198,7 +198,7 @@ export type InferAggregateInfrastructure<T extends Aggregate> =
 // ---- Handler-level inference utilities ----
 
 /**
- * Infers the fully-typed command handler function for a specific command name
+ * Infers the fully-typed decide handler function for a specific command name
  * within an {@link AggregateTypes} bundle. Use this to type extracted handlers
  * in separate files without manually reconstructing the function signature.
  *
@@ -210,16 +210,16 @@ export type InferAggregateInfrastructure<T extends Aggregate> =
  *
  * @example
  * ```ts
- * // handle-confirm-booking.ts
- * export const handleConfirmBooking: InferCommandHandler<BookingDef, "ConfirmBooking"> = (
+ * // decide-confirm-booking.ts
+ * export const decideConfirmBooking: InferDecideHandler<BookingDef, "ConfirmBooking"> = (
  *   command, state, { clock }
  * ) => ({ name: "BookingConfirmed", payload: { confirmedAt: clock.now() } });
  * ```
  */
-export type InferCommandHandler<
+export type InferDecideHandler<
   T extends AggregateTypes,
   K extends T["commands"]["name"],
-> = CommandHandler<
+> = DecideHandler<
   Extract<T["commands"], { name: K }>,
   T["state"],
   T["events"],
@@ -227,8 +227,8 @@ export type InferCommandHandler<
 >;
 
 /**
- * Infers the fully-typed apply handler function for a specific event name
- * within an {@link AggregateTypes} bundle. Use this to type extracted apply
+ * Infers the fully-typed evolve handler function for a specific event name
+ * within an {@link AggregateTypes} bundle. Use this to type extracted evolve
  * handlers (event reducers) in separate files.
  *
  * Operates on the `AggregateTypes` bundle (not the `Aggregate` definition),
@@ -239,13 +239,13 @@ export type InferCommandHandler<
  *
  * @example
  * ```ts
- * // apply-booking-confirmed.ts
- * export const applyBookingConfirmed: InferApplyHandler<BookingDef, "BookingConfirmed"> = (
+ * // evolve-booking-confirmed.ts
+ * export const evolveBookingConfirmed: InferEvolveHandler<BookingDef, "BookingConfirmed"> = (
  *   payload, state
  * ) => ({ ...state, status: "confirmed", confirmedAt: payload.confirmedAt });
  * ```
  */
-export type InferApplyHandler<
+export type InferEvolveHandler<
   T extends AggregateTypes,
   K extends T["events"]["name"],
-> = ApplyHandler<Extract<T["events"], { name: K }>, T["state"]>;
+> = EvolveHandler<Extract<T["events"], { name: K }>, T["state"]>;

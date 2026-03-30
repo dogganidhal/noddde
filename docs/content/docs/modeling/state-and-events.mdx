@@ -1,18 +1,18 @@
 ---
 title: State Design & Event Application
-description: Designing aggregate state for decision-making and writing pure apply handlers that evolve state in response to events.
+description: Designing aggregate state for decision-making and writing pure evolve handlers that evolve state in response to events.
 ---
 
-State design and event application are two sides of the same coin. The shape of your aggregate state determines what decisions your command handlers can make, and the apply handlers are the mechanism that keeps that state in sync with the event stream. This page covers both topics together.
+State design and event application are two sides of the same coin. The shape of your aggregate state determines what decisions your decide handlers can make, and the evolve handlers are the mechanism that keeps that state in sync with the event stream. This page covers both topics together.
 
-## The Apply Handler
+## The Evolve Handler
 
-Apply handlers are the functions that update aggregate state when an event occurs. They live in the `apply` map of an aggregate definition, with one entry per event type.
+Evolve handlers are the functions that update aggregate state when an event occurs. They live in the `evolve` map of an aggregate definition, with one entry per event type.
 
-The `ApplyHandler` type signature:
+The `EvolveHandler` type signature:
 
 ```typescript
-type ApplyHandler<TEvent extends Event, TState> = (
+type EvolveHandler<TEvent extends Event, TState> = (
   event: TEvent["payload"],
   state: TState,
 ) => TState;
@@ -27,20 +27,20 @@ The return value is the new state after applying the event.
 
 Three things are deliberately absent from this signature:
 
-- **No infrastructure.** Apply handlers cannot access loggers, databases, clocks, or any external service.
+- **No infrastructure.** Evolve handlers cannot access loggers, databases, clocks, or any external service.
 - **No `async`.** The return type is `TState`, not `Promise<TState>`.
-- **No side effects.** Apply handlers must be pure functions -- deterministic, with no mutations beyond returning the new state.
+- **No side effects.** Evolve handlers must be pure functions -- deterministic, with no mutations beyond returning the new state.
 
-These constraints exist because apply handlers run in two contexts: during command processing (applying freshly produced events) and during event replay (reconstructing state from stored events). If they had side effects, replaying events would re-trigger those side effects -- sending duplicate emails, double-writing to databases. Purity ensures that replay is safe and produces the same state every time.
+These constraints exist because evolve handlers run in two contexts: during command processing (applying freshly produced events) and during event replay (reconstructing state from stored events). If they had side effects, replaying events would re-trigger those side effects -- sending duplicate emails, double-writing to databases. Purity ensures that replay is safe and produces the same state every time.
 
-The recommended pattern is to extract each apply handler into its own file using `InferApplyHandler`, which derives the full function type from your `AggregateTypes` bundle:
+The recommended pattern is to extract each evolve handler into its own file using `InferEvolveHandler`, which derives the full function type from your `AggregateTypes` bundle:
 
 ```typescript
-// apply-handlers/apply-transaction-authorized.ts
-import type { InferApplyHandler } from "@noddde/core";
+// evolvers/evolve-transaction-authorized.ts
+import type { InferEvolveHandler } from "@noddde/core";
 import type { BankAccountDef } from "../bank-account";
 
-export const applyTransactionAuthorized: InferApplyHandler<
+export const evolveTransactionAuthorized: InferEvolveHandler<
   BankAccountDef,
   "TransactionAuthorized"
 > = (event, state) => ({
@@ -56,24 +56,24 @@ export const applyTransactionAuthorized: InferApplyHandler<
 The handler is then referenced by name in the aggregate definition:
 
 ```typescript
-apply: {
-  TransactionAuthorized: applyTransactionAuthorized,
-  TransactionDeclined: applyTransactionDeclined,
+evolve: {
+  TransactionAuthorized: evolveTransactionAuthorized,
+  TransactionDeclined: evolveTransactionDeclined,
   // ...
 },
 ```
 
 <Callout type="info">
-  For simple handlers, you can define them inline in the `apply` map. But
+  For simple handlers, you can define them inline in the `evolve` map. But
   extracted handlers are preferred -- each can be tested in isolation and the
   aggregate definition stays concise.
 </Callout>
 
-For a deeper discussion, see [Why Are Apply Handlers Pure?](/docs/design-decisions/why-pure-apply-handlers).
+For a deeper discussion, see [Why Are Evolve Handlers Pure?](/docs/design-decisions/why-pure-apply-handlers).
 
 ## Designing Initial State
 
-Every aggregate declares an `initialState` -- the state a brand-new instance starts with before any events have been applied. When the framework loads an aggregate for the first time (or when there are no stored events), this is what the command handler receives as `state`.
+Every aggregate declares an `initialState` -- the state a brand-new instance starts with before any events have been applied. When the framework loads an aggregate for the first time (or when there are no stored events), this is what the decide handler receives as `state`.
 
 ```typescript
 export const BankAccount = defineAggregate<BankAccountDef>({
@@ -109,18 +109,18 @@ The `as const` assertion on `"pending"` ensures TypeScript narrows the type to t
 
 ## State Immutability
 
-Apply handlers must return a **new state object**. Never mutate the existing state. The spread operator is the standard approach.
+Evolve handlers must return a **new state object**. Never mutate the existing state. The spread operator is the standard approach.
 
 ### Flat Updates
 
 Override specific fields while preserving the rest:
 
 ```typescript
-// apply-handlers/apply-transaction-authorized.ts
-import type { InferApplyHandler } from "@noddde/core";
+// evolvers/evolve-transaction-authorized.ts
+import type { InferEvolveHandler } from "@noddde/core";
 import type { BankAccountDef } from "../bank-account";
 
-export const applyTransactionAuthorized: InferApplyHandler<
+export const evolveTransactionAuthorized: InferEvolveHandler<
   BankAccountDef,
   "TransactionAuthorized"
 > = (event, state) => ({
@@ -146,11 +146,11 @@ This creates a new object with all existing state fields, but with `availableBal
 When updating a specific item inside a collection, use `map` to produce a new array and spread to produce a new item:
 
 ```typescript
-// apply-handlers/apply-transaction-processed.ts
-import type { InferApplyHandler } from "@noddde/core";
+// evolvers/evolve-transaction-processed.ts
+import type { InferEvolveHandler } from "@noddde/core";
 import type { BankAccountDef } from "../bank-account";
 
-export const applyTransactionProcessed: InferApplyHandler<
+export const evolveTransactionProcessed: InferEvolveHandler<
   BankAccountDef,
   "TransactionProcessed"
 > = (event, state) => ({
@@ -202,28 +202,28 @@ TransactionAuthorized: (event, state) => {
 
 This modifies the existing state object. Even though it returns `state`, the original reference has been changed, which can cause subtle bugs during event replay and breaks the purity contract.
 
-## No-Op Apply Handlers
+## No-Op Evolve Handlers
 
 Some events do not change the aggregate state. For example, a `TransactionDeclined` event records a decline but might not affect the balances or transaction list in your model. A `BidRejected` event in the auction domain records a rejection but leaves the highest bid and status unchanged.
 
 These handlers simply return the existing state:
 
 ```typescript
-// apply-handlers/apply-bid-rejected.ts
-import type { InferApplyHandler } from "@noddde/core";
+// evolvers/evolve-bid-rejected.ts
+import type { InferEvolveHandler } from "@noddde/core";
 import type { AuctionDef } from "../auction";
 
-export const applyBidRejected: InferApplyHandler<AuctionDef, "BidRejected"> = (
+export const evolveBidRejected: InferEvolveHandler<AuctionDef, "BidRejected"> = (
   _event,
   state,
 ) => state;
 ```
 
-This is still required in the `apply` map -- the framework expects a handler for every event type. The event remains part of the event stream and can be projected or audited, even though the aggregate's internal state is unaffected.
+This is still required in the `evolve` map -- the framework expects a handler for every event type. The event remains part of the event stream and can be projected or audited, even though the aggregate's internal state is unaffected.
 
 ## State Evolution Walkthrough
 
-The most important thing to understand about apply handlers is how state accumulates over a sequence of events. Let's trace a bank account through its lifecycle.
+The most important thing to understand about evolve handlers is how state accumulates over a sequence of events. Let's trace a bank account through its lifecycle.
 
 ### Starting Point: Initial State
 
@@ -234,8 +234,8 @@ The most important thing to understand about apply handlers is how state accumul
 ### Event 1: BankAccountCreated
 
 ```typescript
-// apply-handlers/apply-bank-account-created.ts
-export const applyBankAccountCreated: InferApplyHandler<
+// evolvers/evolve-bank-account-created.ts
+export const evolveBankAccountCreated: InferEvolveHandler<
   BankAccountDef,
   "BankAccountCreated"
 > = (_event, _state) => ({
@@ -256,8 +256,8 @@ This handler ignores both the event and prior state, returning a clean initial s
 ### Event 2: TransactionAuthorized (amount: 50)
 
 ```typescript
-// apply-handlers/apply-transaction-authorized.ts
-export const applyTransactionAuthorized: InferApplyHandler<
+// evolvers/evolve-transaction-authorized.ts
+export const evolveTransactionAuthorized: InferEvolveHandler<
   BankAccountDef,
   "TransactionAuthorized"
 > = (event, state) => ({
@@ -310,8 +310,8 @@ The same handler runs again with a new event. Both transactions are now pending.
 ### Event 4: TransactionProcessed (id: "tx-1", amount: 50)
 
 ```typescript
-// apply-handlers/apply-transaction-processed.ts
-export const applyTransactionProcessed: InferApplyHandler<
+// evolvers/evolve-transaction-processed.ts
+export const evolveTransactionProcessed: InferEvolveHandler<
   BankAccountDef,
   "TransactionProcessed"
 > = (event, state) => ({
@@ -346,9 +346,9 @@ This is exactly the state that would be produced whether these four events are a
 
 A key design decision is whether a value should be **stored in state** or **derived elsewhere** (in a projection or query handler).
 
-The rule: **"Does a command handler need this field to make a decision?"**
+The rule: **"Does a decide handler need this field to make a decision?"**
 
-- **Yes** -- store it in state, update it in apply handlers.
+- **Yes** -- store it in state, update it in evolve handlers.
 - **No** -- compute it in a [projection](/docs/read-model/projections).
 
 ### Store: Fields Needed for Decisions
@@ -356,7 +356,7 @@ The rule: **"Does a command handler need this field to make a decision?"**
 Both `balance` and `availableBalance` are stored because they are needed for authorization:
 
 ```typescript
-export const handleAuthorizeTransaction: InferCommandHandler<
+export const decideAuthorizeTransaction: InferDecideHandler<
   BankAccountDef,
   "AuthorizeTransaction"
 > = (command, state) => {
@@ -372,7 +372,7 @@ export const handleAuthorizeTransaction: InferCommandHandler<
 };
 ```
 
-Even though `availableBalance` could theoretically be computed from the transaction list, storing it explicitly makes command handlers simpler and avoids recomputation on every command.
+Even though `availableBalance` could theoretically be computed from the transaction list, storing it explicitly makes decide handlers simpler and avoids recomputation on every command.
 
 ### Derive: Fields Only for Display
 
@@ -402,7 +402,7 @@ The aggregate ID (`targetAggregateId`) is deliberately excluded from aggregate s
 The ID is always available in the command object:
 
 ```typescript
-export const handleCreateBankAccount: InferCommandHandler<
+export const decideCreateBankAccount: InferDecideHandler<
   BankAccountDef,
   "CreateBankAccount"
 > = (command, _state) => ({
@@ -413,18 +413,18 @@ export const handleCreateBankAccount: InferCommandHandler<
 
 If your event payloads need the ID (for example, to identify the aggregate in read models), pass it from the command into the event payload. But do not store it as a field in the aggregate state object.
 
-This separation keeps state identity-free, simplifies serialization, and makes testing easier -- you can test apply handlers with any state snapshot without worrying about matching IDs.
+This separation keeps state identity-free, simplifies serialization, and makes testing easier -- you can test evolve handlers with any state snapshot without worrying about matching IDs.
 
 For the full rationale, see [Why Is the Aggregate ID Not in State?](/docs/design-decisions/why-id-not-in-state).
 
 ## Common Patterns
 
-Quick reference for the most frequent apply handler shapes, shown as extracted functions with `InferApplyHandler`.
+Quick reference for the most frequent evolve handler shapes, shown as extracted functions with `InferEvolveHandler`.
 
 ### Appending to an Array
 
 ```typescript
-export const applyTransactionAuthorized: InferApplyHandler<
+export const evolveTransactionAuthorized: InferEvolveHandler<
   BankAccountDef,
   "TransactionAuthorized"
 > = (event, state) => ({
@@ -439,7 +439,7 @@ export const applyTransactionAuthorized: InferApplyHandler<
 ### Updating an Item in an Array
 
 ```typescript
-export const applyTransactionProcessed: InferApplyHandler<
+export const evolveTransactionProcessed: InferEvolveHandler<
   BankAccountDef,
   "TransactionProcessed"
 > = (event, state) => ({
@@ -453,7 +453,7 @@ export const applyTransactionProcessed: InferApplyHandler<
 ### Incrementing a Counter
 
 ```typescript
-export const applyBidPlaced: InferApplyHandler<AuctionDef, "BidPlaced"> = (
+export const evolveBidPlaced: InferEvolveHandler<AuctionDef, "BidPlaced"> = (
   event,
   state,
 ) => ({
@@ -468,7 +468,7 @@ export const applyBidPlaced: InferApplyHandler<AuctionDef, "BidPlaced"> = (
 For creation events that set the entire state from the event payload:
 
 ```typescript
-export const applyBankAccountCreated: InferApplyHandler<
+export const evolveBankAccountCreated: InferEvolveHandler<
   BankAccountDef,
   "BankAccountCreated"
 > = (_event, _state) => ({
@@ -480,6 +480,6 @@ export const applyBankAccountCreated: InferApplyHandler<
 
 ## Next Steps
 
-- [Command Handlers](/docs/modeling/command-handlers) -- Writing command handlers that enforce business rules and produce events.
+- [Decide Handlers](/docs/modeling/command-handlers) -- Writing decide handlers that enforce business rules and produce events.
 - [Routing & Dispatch](/docs/modeling/routing-and-dispatch) -- How commands reach the correct aggregate instance.
 - [Testing Aggregates](/docs/testing/testing-aggregates-and-projections) -- Strategies for testing aggregates in isolation.

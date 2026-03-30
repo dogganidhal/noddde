@@ -1,6 +1,6 @@
 ---
 title: The Clock Pattern
-description: How to inject time as an infrastructure dependency for deterministic, testable command handlers.
+description: How to inject time as an infrastructure dependency for deterministic, testable decide handlers.
 ---
 
 The Clock pattern is the canonical example of infrastructure injection in noddde. It solves a fundamental problem in event-sourced systems: non-deterministic behavior caused by direct calls to `new Date()`.
@@ -11,7 +11,7 @@ Consider an auction system where bids are rejected if the auction has ended:
 
 ```ts
 // Problematic: direct Date call
-commands: {
+decide: {
   PlaceBid: (command, state) => {
     const now = new Date(); // Different every time!
     if (now > state.endsAt) {
@@ -62,10 +62,10 @@ interface AuctionInfrastructure {
 }
 ```
 
-Use it in the command handler:
+Use it in the decide handler:
 
 ```ts
-commands: {
+decide: {
   PlaceBid: (command, state, { clock }) => {
     const now = clock.now(); // Deterministic!
     if (now > state.endsAt) {

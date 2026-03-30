@@ -99,8 +99,8 @@ import { defineAggregate } from "@noddde/core";
 const BankAccount = defineAggregate<BankAccountDef>({
   initialState: { balance: 0 },
 
-  // Commands decide what happens (Business Logic)
-  commands: {
+  // Decide handlers decide what happens (Business Logic)
+  decide: {
     Deposit: (command, state) => {
       if (command.payload.amount <= 0) throw new Error("Invalid amount");
       return {
@@ -110,8 +110,8 @@ const BankAccount = defineAggregate<BankAccountDef>({
     },
   },
 
-  // Apply pure functions evolve the state (Deterministic Replay)
-  apply: {
+  // Evolve handlers evolve the state (Deterministic Replay)
+  evolve: {
     DepositMade: (payload, state) => ({
       balance: state.balance + payload.amount,
     }),
@@ -122,7 +122,7 @@ const BankAccount = defineAggregate<BankAccountDef>({
 });
 ```
 
-There are no base classes to extend or lifecycle hooks to implement. The `apply` handlers are pure and synchronous, making event replay deterministic.
+There are no base classes to extend or lifecycle hooks to implement. The `evolve` handlers are pure and synchronous, making event replay deterministic.
 
 ## Sagas: Workflows without Side Effects
 

@@ -1,12 +1,12 @@
 ---
-title: "AggregateTypes, CommandHandler, Aggregate, defineAggregate & Infer Utilities"
+title: "AggregateTypes, DecideHandler, Aggregate, defineAggregate & Infer Utilities"
 module: ddd/aggregate-root
 source_file: packages/core/src/ddd/aggregate-root.ts
 status: implemented
 exports:
   [
     AggregateTypes,
-    CommandHandler,
+    DecideHandler,
     Aggregate,
     defineAggregate,
     InferAggregateID,
@@ -14,8 +14,8 @@ exports:
     InferAggregateEvents,
     InferAggregateCommands,
     InferAggregateInfrastructure,
-    InferCommandHandler,
-    InferApplyHandler,
+    InferDecideHandler,
+    InferEvolveHandler,
   ]
 depends_on:
   [
@@ -33,9 +33,9 @@ docs:
   - aggregates/type-inference.mdx
 ---
 
-# AggregateTypes, CommandHandler, Aggregate, defineAggregate & Infer Utilities
+# AggregateTypes, DecideHandler, Aggregate, defineAggregate & Infer Utilities
 
-> This module implements the Decider pattern for aggregates: a typed configuration object with initial state, command handlers (decide), and apply handlers (evolve). `AggregateTypes` bundles the four type parameters. `CommandHandler` implements the decide phase. `Aggregate` is the definition interface. `defineAggregate` is an identity function providing full type inference. Five `Infer*` utilities extract individual types from an aggregate definition.
+> This module implements the Decider pattern for aggregates: a typed configuration object with initial state, decide handlers (decide), and evolve handlers (evolve). `AggregateTypes` bundles the four type parameters. `DecideHandler` implements the decide phase. `Aggregate` is the definition interface. `defineAggregate` is an identity function providing full type inference. Five `Infer*` utilities extract individual types from an aggregate definition.
 
 ## Type Contract
 
@@ -46,18 +46,18 @@ docs:
   - `commands: AggregateCommand<ID>` -- discriminated union of commands the aggregate handles. Uses `AggregateCommand<ID>` as the base constraint to support any ID type.
   - `infrastructure: Infrastructure` -- external dependencies for command handlers.
 
-- **`CommandHandler<TCommand, TState, TEvents, TInfrastructure>`** is a function type:
+- **`DecideHandler<TCommand, TState, TEvents, TInfrastructure>`** is a function type:
 
   - Parameters: `(command: TCommand, state: TState, infrastructure: TInfrastructure & FrameworkInfrastructure)`.
   - Return: `TEvents | TEvents[] | Promise<TEvents | TEvents[]>`.
   - `TCommand extends AggregateCommand<ID>`, `TEvents extends Event`, `TInfrastructure extends Infrastructure` (defaults to `Infrastructure`).
-  - Infrastructure is merged with `FrameworkInfrastructure` via intersection, giving command handlers access to `logger`.
+  - Infrastructure is merged with `FrameworkInfrastructure` via intersection, giving decide handlers access to `logger`.
 
 - **`Aggregate<T extends AggregateTypes>`** is an interface with three fields:
 
   - `initialState: T["state"]` -- the zero-value state.
-  - `commands: CommandHandlerMap<T>` -- a map of command handlers keyed by command `name`, where each handler is typed with `Extract<T["commands"], { name: K }>`.
-  - `apply: ApplyHandlerMap<T>` -- a map of apply handlers keyed by event `name`, where each handler is typed with `Extract<T["events"], { name: K }>`.
+  - `decide: DecideHandlerMap<T>` -- a map of decide handlers keyed by command `name`, where each handler is typed with `Extract<T["commands"], { name: K }>`.
+  - `evolve: EvolveHandlerMap<T>` -- a map of evolve handlers keyed by event `name`, where each handler is typed with `Extract<T["events"], { name: K }>`.
   - `upcasters?: UpcasterMap<T["events"]>` -- optional map of event upcaster chains for schema evolution. See the upcaster spec for details.
 
 - **`defineAggregate<T>(config): Aggregate<T>`** -- identity function returning `config` as-is, providing type inference.
@@ -72,51 +72,51 @@ docs:
 
 - **Handler-level inference utilities** (operate on `AggregateTypes` bundle, for typing extracted handlers in separate files):
 
-  - `InferCommandHandler<T extends AggregateTypes, K extends T["commands"]["name"]>` = `CommandHandler<Extract<T["commands"], { name: K }>, T["state"], T["events"], T["infrastructure"]>`. Resolves to the exact command handler function type for command `K`, with the command narrowed via `Extract`, and infrastructure merged with `FrameworkInfrastructure` (via `CommandHandler`).
+  - `InferDecideHandler<T extends AggregateTypes, K extends T["commands"]["name"]>` = `DecideHandler<Extract<T["commands"], { name: K }>, T["state"], T["events"], T["infrastructure"]>`. Resolves to the exact decide handler function type for command `K`, with the command narrowed via `Extract`, and infrastructure merged with `FrameworkInfrastructure` (via `DecideHandler`).
 
-  - `InferApplyHandler<T extends AggregateTypes, K extends T["events"]["name"]>` = `ApplyHandler<Extract<T["events"], { name: K }>, T["state"]>`. Resolves to the exact apply handler function type for event `K`, with the event payload narrowed via `Extract`.
+  - `InferEvolveHandler<T extends AggregateTypes, K extends T["events"]["name"]>` = `EvolveHandler<Extract<T["events"], { name: K }>, T["state"]>`. Resolves to the exact evolve handler function type for event `K`, with the event payload narrowed via `Extract`.
 
 ## Behavioral Requirements
 
-- `CommandHandlerMap` requires one handler per command `name` in the union. Missing handlers cause a compile error.
-- `ApplyHandlerMap` requires one handler per event `name` in the union. Missing handlers cause a compile error.
-- Each command handler receives the narrowed command type (via `Extract`) -- only the specific command variant, not the full union.
-- Each apply handler receives the narrowed event payload (via `Extract`) -- only the specific event variant's payload.
+- `DecideHandlerMap` requires one handler per command `name` in the union. Missing handlers cause a compile error.
+- `EvolveHandlerMap` requires one handler per event `name` in the union. Missing handlers cause a compile error.
+- Each decide handler receives the narrowed command type (via `Extract`) -- only the specific command variant, not the full union.
+- Each evolve handler receives the narrowed event payload (via `Extract`) -- only the specific event variant's payload.
 - `defineAggregate` is a pass-through that enables TypeScript to infer `T` from the config object, so users write `defineAggregate<MyTypes>({...})` with full autocomplete.
-- Command handlers can return a single event, an array of events, or a Promise of either.
-- Apply handlers must be synchronous and return the new state.
-- `InferCommandHandler<T, K>` resolves to a function receiving the narrowed command (via `Extract<T["commands"], { name: K }>`), the aggregate state, and infrastructure merged with `FrameworkInfrastructure`, returning the event union.
-- `InferApplyHandler<T, K>` resolves to a function receiving the narrowed event payload (via `Extract<T["events"], { name: K }>`) and the aggregate state, returning the new state.
-- Both `InferCommandHandler` and `InferApplyHandler` operate on the `AggregateTypes` bundle (not the `Aggregate` definition instance), enabling use before `defineAggregate` is called.
-- A handler typed with `InferCommandHandler<T, K>` is structurally compatible with the corresponding slot in `CommandHandlerMap<T>` and can be used directly in `defineAggregate`.
-- A handler typed with `InferApplyHandler<T, K>` is structurally compatible with the corresponding slot in `ApplyHandlerMap<T>`.
+- Decide handlers can return a single event, an array of events, or a Promise of either.
+- Evolve handlers must be synchronous and return the new state.
+- `InferDecideHandler<T, K>` resolves to a function receiving the narrowed command (via `Extract<T["commands"], { name: K }>`), the aggregate state, and infrastructure merged with `FrameworkInfrastructure`, returning the event union.
+- `InferEvolveHandler<T, K>` resolves to a function receiving the narrowed event payload (via `Extract<T["events"], { name: K }>`) and the aggregate state, returning the new state.
+- Both `InferDecideHandler` and `InferEvolveHandler` operate on the `AggregateTypes` bundle (not the `Aggregate` definition instance), enabling use before `defineAggregate` is called.
+- A handler typed with `InferDecideHandler<T, K>` is structurally compatible with the corresponding slot in `DecideHandlerMap<T>` and can be used directly in `defineAggregate`.
+- A handler typed with `InferEvolveHandler<T, K>` is structurally compatible with the corresponding slot in `EvolveHandlerMap<T>`.
 
 ## Invariants
 
-- The `commands` map has exactly one key per command name in `T["commands"]`.
-- The `apply` map has exactly one key per event name in `T["events"]`.
+- The `decide` map has exactly one key per command name in `T["commands"]`.
+- The `evolve` map has exactly one key per event name in `T["events"]`.
 - `defineAggregate` returns the exact same object it receives (identity function).
-- Command handler parameter types are narrowed by `Extract`, not the full union.
-- Apply handler parameter types are narrowed by `Extract`, not the full union.
+- Decide handler parameter types are narrowed by `Extract`, not the full union.
+- Evolve handler parameter types are narrowed by `Extract`, not the full union.
 - `InferAggregateID` operates on `AggregateTypes` (the bundle), not on `Aggregate` (the definition).
 - The other four `Infer*` utilities operate on `Aggregate` (the definition).
-- `InferCommandHandler` and `InferApplyHandler` operate on `AggregateTypes` (the bundle), like `InferAggregateID`.
-- `InferCommandHandler<T, K>` always produces the same type as indexing `CommandHandlerMap<T>` at key `K`.
-- `InferApplyHandler<T, K>` always produces the same type as indexing `ApplyHandlerMap<T>` at key `K`.
+- `InferDecideHandler` and `InferEvolveHandler` operate on `AggregateTypes` (the bundle), like `InferAggregateID`.
+- `InferDecideHandler<T, K>` always produces the same type as indexing `DecideHandlerMap<T>` at key `K`.
+- `InferEvolveHandler<T, K>` always produces the same type as indexing `EvolveHandlerMap<T>` at key `K`.
 
 ## Edge Cases
 
 - **Single command/event**: Maps have exactly one key each.
-- **Command handler returning a single event vs array**: Both are valid return types.
-- **Async command handler**: Returning `Promise<TEvents>` is valid.
+- **Decide handler returning a single event vs array**: Both are valid return types.
+- **Async decide handler**: Returning `Promise<TEvents>` is valid.
 - **Infrastructure defaults to `{}`**: If not overridden in the types bundle.
 - **Custom aggregate ID type**: `InferAggregateID` extracts the ID type from the commands' `targetAggregateId`.
 
 ## Integration Points
 
 - `Aggregate` is the primary building block of the domain layer.
-- The engine/runtime loads an aggregate, replays events through `apply` handlers to rebuild state, then routes commands to `commands` handlers.
-- Events emitted by command handlers are persisted and published via `EventBus`.
+- The engine/runtime loads an aggregate, replays events through `evolve` handlers to rebuild state, then routes commands to `decide` handlers.
+- Events emitted by decide handlers are persisted and published via `EventBus`.
 - `InferAggregate*` utilities are used downstream to derive types for repositories, test helpers, and engine configuration.
 
 ## Test Scenarios
@@ -154,7 +154,7 @@ describe("defineAggregate", () => {
 
   const Counter = defineAggregate<CounterTypes>({
     initialState: { count: 0 },
-    commands: {
+    decide: {
       Increment: (command, _state, _infra) => ({
         name: "Incremented",
         payload: { amount: command.payload.amount },
@@ -164,7 +164,7 @@ describe("defineAggregate", () => {
         payload: { amount: command.payload.amount },
       }),
     },
-    apply: {
+    evolve: {
       Incremented: (payload, state) => ({
         count: state.count + payload.amount,
       }),
@@ -178,30 +178,30 @@ describe("defineAggregate", () => {
     expectTypeOf(Counter.initialState).toEqualTypeOf<CounterState>();
   });
 
-  it("should have typed command handlers", () => {
-    expectTypeOf(Counter.commands.Increment).toBeFunction();
-    expectTypeOf(Counter.commands.Decrement).toBeFunction();
+  it("should have typed decide handlers", () => {
+    expectTypeOf(Counter.decide.Increment).toBeFunction();
+    expectTypeOf(Counter.decide.Decrement).toBeFunction();
   });
 
-  it("should have typed apply handlers", () => {
-    expectTypeOf(Counter.apply.Incremented).toBeFunction();
-    expectTypeOf(Counter.apply.Decremented).toBeFunction();
+  it("should have typed evolve handlers", () => {
+    expectTypeOf(Counter.evolve.Incremented).toBeFunction();
+    expectTypeOf(Counter.evolve.Decremented).toBeFunction();
   });
 });
 ```
 
-### CommandHandler receives narrowed command type
+### DecideHandler receives narrowed command type
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
 import type {
-  CommandHandler,
+  DecideHandler,
   AggregateCommand,
   Event,
   Infrastructure,
 } from "@noddde/core";
 
-describe("CommandHandler", () => {
+describe("DecideHandler", () => {
   interface CreateAccountCommand extends AggregateCommand {
     name: "CreateAccount";
     payload: { owner: string };
@@ -212,7 +212,7 @@ describe("CommandHandler", () => {
     payload: { id: string; owner: string };
   };
 
-  type Handler = CommandHandler<
+  type Handler = DecideHandler<
     CreateAccountCommand,
     { balance: number },
     AccountEvent,
@@ -273,7 +273,7 @@ describe("Aggregate exhaustive handlers", () => {
   it("should compile when all handlers are provided", () => {
     const cart = defineAggregate<CartTypes>({
       initialState: { items: [] },
-      commands: {
+      decide: {
         AddItem: (cmd) => ({
           name: "ItemAdded",
           payload: { item: cmd.payload.item },
@@ -283,7 +283,7 @@ describe("Aggregate exhaustive handlers", () => {
           payload: { item: cmd.payload.item },
         }),
       },
-      apply: {
+      evolve: {
         ItemAdded: (payload, state) => ({
           items: [...state.items, payload.item],
         }),
@@ -331,13 +331,13 @@ describe("Infer utilities", () => {
 
   const MyAggregate = defineAggregate<MyTypes>({
     initialState: { value: 0 },
-    commands: {
+    decide: {
       Update: (cmd) => ({
         name: "Updated",
         payload: { newValue: cmd.payload.newValue },
       }),
     },
-    apply: {
+    evolve: {
       Updated: (payload, _state) => ({ value: payload.newValue }),
     },
   });
@@ -400,7 +400,7 @@ describe("InferAggregateID with number ID", () => {
 });
 ```
 
-### Command handler can return single event or array
+### Decide handler can return single event or array
 
 ```ts
 import { describe, it, expect } from "vitest";
@@ -411,7 +411,7 @@ import type {
 } from "@noddde/core";
 import { defineAggregate } from "@noddde/core";
 
-describe("Command handler return types", () => {
+describe("Decide handler return types", () => {
   type Events = DefineEvents<{ Done: { id: string } }>;
   type Commands = DefineCommands<{ DoIt: void; DoItTwice: void }>;
 
@@ -425,7 +425,7 @@ describe("Command handler return types", () => {
   it("should accept single event return", () => {
     const agg = defineAggregate<Types>({
       initialState: {},
-      commands: {
+      decide: {
         DoIt: (cmd) => ({
           name: "Done",
           payload: { id: cmd.targetAggregateId },
@@ -435,7 +435,7 @@ describe("Command handler return types", () => {
           { name: "Done", payload: { id: cmd.targetAggregateId } },
         ],
       },
-      apply: {
+      evolve: {
         Done: (_payload, state) => state,
       },
     });
@@ -468,13 +468,13 @@ describe("defineAggregate identity", () => {
   it("should return the exact same config object", () => {
     const config = {
       initialState: { v: 0 },
-      commands: {
+      decide: {
         Y: (cmd: any) => ({
           name: "X" as const,
           payload: { v: cmd.payload.v },
         }),
       },
-      apply: {
+      evolve: {
         X: (payload: any, state: any) => ({ v: payload.v }),
       },
     };
@@ -484,7 +484,7 @@ describe("defineAggregate identity", () => {
 });
 ```
 
-### InferCommandHandler narrows command and wires infrastructure
+### InferDecideHandler narrows command and wires infrastructure
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
@@ -492,13 +492,13 @@ import type {
   DefineEvents,
   DefineCommands,
   Infrastructure,
-  InferCommandHandler,
-  CommandHandler,
+  InferDecideHandler,
+  DecideHandler,
   FrameworkInfrastructure,
 } from "@noddde/core";
 import { defineAggregate } from "@noddde/core";
 
-describe("InferCommandHandler", () => {
+describe("InferDecideHandler", () => {
   type MyState = { value: number };
 
   type MyEvent = DefineEvents<{
@@ -523,32 +523,32 @@ describe("InferCommandHandler", () => {
   };
 
   it("should narrow the command to the specific variant", () => {
-    type Handler = InferCommandHandler<MyTypes, "Update">;
+    type Handler = InferDecideHandler<MyTypes, "Update">;
     type Cmd = Parameters<Handler>[0];
     expectTypeOf<Cmd>().toEqualTypeOf<Extract<MyCommand, { name: "Update" }>>();
   });
 
   it("should use the aggregate state as second parameter", () => {
-    type Handler = InferCommandHandler<MyTypes, "Update">;
+    type Handler = InferDecideHandler<MyTypes, "Update">;
     expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<MyState>();
   });
 
   it("should merge infrastructure with FrameworkInfrastructure", () => {
-    type Handler = InferCommandHandler<MyTypes, "Update">;
+    type Handler = InferDecideHandler<MyTypes, "Update">;
     expectTypeOf<Parameters<Handler>[2]>().toEqualTypeOf<
       MyInfra & FrameworkInfrastructure
     >();
   });
 
   it("should return the event union", () => {
-    type Handler = InferCommandHandler<MyTypes, "Update">;
+    type Handler = InferDecideHandler<MyTypes, "Update">;
     expectTypeOf<ReturnType<Handler>>().toEqualTypeOf<
       MyEvent | MyEvent[] | Promise<MyEvent | MyEvent[]>
     >();
   });
 
-  it("should be usable in defineAggregate commands map", () => {
-    const handleUpdate: InferCommandHandler<MyTypes, "Update"> = (
+  it("should be usable in defineAggregate decide map", () => {
+    const decideUpdate: InferDecideHandler<MyTypes, "Update"> = (
       command,
       _state,
       _infra,
@@ -557,7 +557,7 @@ describe("InferCommandHandler", () => {
       payload: { newValue: command.payload.newValue },
     });
 
-    const handleReset: InferCommandHandler<MyTypes, "Reset"> = (
+    const decideReset: InferDecideHandler<MyTypes, "Reset"> = (
       _command,
       _state,
       _infra,
@@ -568,22 +568,22 @@ describe("InferCommandHandler", () => {
 
     const agg = defineAggregate<MyTypes>({
       initialState: { value: 0 },
-      commands: {
-        Update: handleUpdate,
-        Reset: handleReset,
+      decide: {
+        Update: decideUpdate,
+        Reset: decideReset,
       },
-      apply: {
+      evolve: {
         Updated: (payload, _state) => ({ value: payload.newValue }),
         Reset: (_payload, _state) => ({ value: 0 }),
       },
     });
 
-    expectTypeOf(agg.commands.Update).toEqualTypeOf<typeof handleUpdate>();
+    expectTypeOf(agg.decide.Update).toEqualTypeOf<typeof decideUpdate>();
   });
 });
 ```
 
-### InferApplyHandler narrows event payload
+### InferEvolveHandler narrows event payload
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
@@ -591,11 +591,11 @@ import type {
   DefineEvents,
   DefineCommands,
   Infrastructure,
-  InferApplyHandler,
+  InferEvolveHandler,
 } from "@noddde/core";
 import { defineAggregate } from "@noddde/core";
 
-describe("InferApplyHandler", () => {
+describe("InferEvolveHandler", () => {
   type MyState = { value: number };
 
   type MyEvent = DefineEvents<{
@@ -616,32 +616,32 @@ describe("InferApplyHandler", () => {
   };
 
   it("should narrow the event payload to the specific variant", () => {
-    type Handler = InferApplyHandler<MyTypes, "Updated">;
+    type Handler = InferEvolveHandler<MyTypes, "Updated">;
     expectTypeOf<Parameters<Handler>[0]>().toEqualTypeOf<{
       newValue: number;
     }>();
   });
 
   it("should use the aggregate state as second parameter and return type", () => {
-    type Handler = InferApplyHandler<MyTypes, "Updated">;
+    type Handler = InferEvolveHandler<MyTypes, "Updated">;
     expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<MyState>();
     expectTypeOf<ReturnType<Handler>>().toEqualTypeOf<MyState>();
   });
 
-  it("should be usable in defineAggregate apply map", () => {
-    const applyUpdated: InferApplyHandler<MyTypes, "Updated"> = (
+  it("should be usable in defineAggregate evolve map", () => {
+    const evolveUpdated: InferEvolveHandler<MyTypes, "Updated"> = (
       payload,
       _state,
     ) => ({ value: payload.newValue });
 
-    const applyReset: InferApplyHandler<MyTypes, "Reset"> = (
+    const evolveReset: InferEvolveHandler<MyTypes, "Reset"> = (
       _payload,
       _state,
     ) => ({ value: 0 });
 
     const agg = defineAggregate<MyTypes>({
       initialState: { value: 0 },
-      commands: {
+      decide: {
         Update: (cmd) => ({
           name: "Updated",
           payload: { newValue: cmd.payload.newValue },
@@ -651,13 +651,13 @@ describe("InferApplyHandler", () => {
           payload: {},
         }),
       },
-      apply: {
-        Updated: applyUpdated,
-        Reset: applyReset,
+      evolve: {
+        Updated: evolveUpdated,
+        Reset: evolveReset,
       },
     });
 
-    expectTypeOf(agg.apply.Updated).toEqualTypeOf<typeof applyUpdated>();
+    expectTypeOf(agg.evolve.Updated).toEqualTypeOf<typeof evolveUpdated>();
   });
 });
 ```

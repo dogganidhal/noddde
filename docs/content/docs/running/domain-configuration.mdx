@@ -396,7 +396,7 @@ See [View Persistence](/docs/read-model/view-persistence) for details on configu
 
 ## Event Metadata
 
-Every event dispatched through the domain is automatically enriched with an `EventMetadata` envelope containing audit, tracing, and sequencing information. Command handlers return bare `{ name, payload }` objects -- the engine adds metadata before persistence and publication.
+Every event dispatched through the domain is automatically enriched with an `EventMetadata` envelope containing audit, tracing, and sequencing information. Decide handlers return bare `{ name, payload }` objects -- the engine adds metadata before persistence and publication.
 
 ### What Metadata Contains
 

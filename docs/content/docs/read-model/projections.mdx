@@ -21,7 +21,7 @@ Projections solve this by building query-specific views from the event stream. A
 
 When a command is dispatched, the following sequence connects the write side to projections:
 
-1. The aggregate's command handler processes the command and returns events
+1. The aggregate's decide handler processes the command and returns events
 2. Events are persisted (via `EventSourcedAggregatePersistence` or equivalent)
 3. Each event is published to the `EventBus`
 4. Registered projections receive the events and update their views via event handlers
@@ -235,7 +235,7 @@ Key properties of event handlers:
 - **Automatic type narrowing** -- Inside each handler, `event` is narrowed to the specific event variant (e.g., `Extract<BankAccountEvent, { name: "BankAccountCreated" }>`). No switch statements or type guards needed.
 - **Partial event mapping** -- Only include events the projection cares about. Unhandled events are silently ignored. No more noop pass-throughs.
 - **Can be async** -- `reduce` may return `Promise<View>` when it needs to perform asynchronous work.
-- **Receive full events** -- Unlike aggregate apply handlers that receive just the payload, projection reducers receive the complete event object (with `name` and `payload`).
+- **Receive full events** -- Unlike aggregate evolve handlers that receive just the payload, projection reducers receive the complete event object (with `name` and `payload`).
 
 ### Why an `on` Map?
 
@@ -244,11 +244,11 @@ A map of per-event functions has two advantages over a single `(view, event) => 
 1. **Automatic type narrowing** -- Each handler gets the specific event type, not the union.
 2. **Event filtering** -- Only subscribe to events you care about. Unhandled events are silently ignored.
 
-### Similarity to Apply Handlers
+### Similarity to Evolve Handlers
 
-The `on` map pattern mirrors the apply handler pattern used in aggregates. Both are maps of functions that transform state based on events. The difference is purpose:
+The `on` map pattern mirrors the evolve handler pattern used in aggregates. Both are maps of functions that transform state based on events. The difference is purpose:
 
-- **Apply handlers** rebuild the aggregate's internal state for command processing
+- **Evolve handlers** rebuild the aggregate's internal state for command processing
 - **Projection reducers** build a query-optimized view for the read model
 
 ## Query Handlers

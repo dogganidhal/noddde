@@ -65,7 +65,7 @@ Generates `event-model/`, `write-model/`, `read-model/`, `domain.ts`, `infrastru
 
 ### `noddde new aggregate <name>`
 
-Scaffolds a single aggregate with extracted command handlers and apply handlers. Run from the project root — the CLI automatically places files at `src/domain/write-model/aggregates/<name>/`.
+Scaffolds a single aggregate with extracted decide handlers and evolve handlers. Run from the project root — the CLI automatically places files at `src/domain/write-model/aggregates/<name>/`.
 
 ```bash
 noddde new aggregate BankAccount
@@ -82,18 +82,18 @@ Generates:
       <File name="index.ts" />
       <File name="create-bank-account.ts" />
     </Folder>
-    <Folder name="command-handlers">
+    <Folder name="deciders">
       <File name="index.ts" />
-      <File name="handle-create-bank-account.ts" />
+      <File name="decide-create-bank-account.ts" />
     </Folder>
-    <Folder name="apply-handlers">
+    <Folder name="evolvers">
       <File name="index.ts" />
-      <File name="apply-bank-account-created.ts" />
+      <File name="evolve-bank-account-created.ts" />
     </Folder>
   </Folder>
 </Files>
 
-Command handlers are typed with `InferCommandHandler<Def, "CommandName">` and apply handlers with `InferApplyHandler<Def, "EventName">`. Both are standalone exported functions imported into the aggregate definition. This keeps each handler individually testable and the aggregate definition concise.
+Decide handlers are typed with `InferDecideHandler<Def, "CommandName">` and evolve handlers with `InferEvolveHandler<Def, "EventName">`. Both are standalone exported functions imported into the aggregate definition. This keeps each handler individually testable and the aggregate definition concise.
 
 ### `noddde new projection <name>`
 

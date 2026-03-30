@@ -141,7 +141,7 @@ src/
           state.ts                       # AuctionState + initialAuctionState
           upcasters.ts                   # BidPlaced v1->v2 upcaster chain
           commands/                      # One file per command payload
-          command-handlers/              # One file per handler (standalone fn)
+          deciders/              # One file per handler (standalone fn)
     read-model/
       projections/
         auction-summary/

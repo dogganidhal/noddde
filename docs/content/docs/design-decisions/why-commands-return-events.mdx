@@ -1,14 +1,14 @@
 ---
 title: "Why Commands Return Events?"
-description: Why command handlers return events instead of calling eventBus.dispatch() directly.
+description: Why decide handlers return events instead of calling eventBus.dispatch() directly.
 ---
 
 ## The Decision
 
-In noddde, command handlers return the event(s) they produce as a return value. The framework handles persistence and publishing.
+In noddde, decide handlers return the event(s) they produce as a return value. The framework handles persistence and publishing.
 
 ```ts
-commands: {
+decide: {
   AuthorizeTransaction: (command, state, infra) => {
     return { name: "TransactionAuthorized", payload: { ... } };
   },
@@ -17,7 +17,7 @@ commands: {
 
 ## The Problem
 
-In many frameworks, command handlers call `this.apply()` or `eventBus.dispatch()` directly:
+In many frameworks, decide handlers call `this.apply()` or `eventBus.dispatch()` directly:
 
 ```ts
 // Traditional approach (NOT how noddde works)
@@ -49,7 +49,7 @@ Returning events makes the handler a pure decision function:
 
 ```ts
 // The handler only decides WHAT happened
-commands: {
+decide: {
   AuthorizeTransaction: (command, state) => {
     if (state.availableBalance < command.payload.amount) {
       return { name: "TransactionDeclined", payload: { ... } };
@@ -84,7 +84,7 @@ These limitations are intentional — they enforce the Decider pattern where eac
 
 ```ts
 // Handler returns single event
-commands: {
+decide: {
   CreateBankAccount: (command) => ({
     name: "BankAccountCreated",
     payload: { id: command.targetAggregateId },

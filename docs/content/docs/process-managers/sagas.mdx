@@ -35,7 +35,7 @@ A saga is the structural inverse of an aggregate: an aggregate receives commands
 | **Produces**     | Events                         | Commands                     |
 | **State**        | Domain truth                   | Workflow progress            |
 | **Persistence**  | Event-sourced or state-stored  | State-stored                 |
-| **Purity**       | Command handlers may use infra | Event handlers may use infra |
+| **Purity**       | Decide handlers may use infra | Event handlers may use infra |
 
 ## When to Use a Saga
 

@@ -61,7 +61,7 @@ interface Event {
 }
 ```
 
-Events have a required `payload` (unlike commands where it is optional) — every event must carry data describing what happened. The optional `metadata` field is an `EventMetadata` envelope that the engine auto-populates at dispatch time with audit, tracing, and sequencing information (event ID, timestamp, correlation/causation IDs, etc.). Command handlers never produce metadata — they return bare `{ name, payload }` objects, and the framework enriches them before persistence and publication.
+Events have a required `payload` (unlike commands where it is optional) — every event must carry data describing what happened. The optional `metadata` field is an `EventMetadata` envelope that the engine auto-populates at dispatch time with audit, tracing, and sequencing information (event ID, timestamp, correlation/causation IDs, etc.). Decide handlers never produce metadata — they return bare `{ name, payload }` objects, and the framework enriches them before persistence and publication.
 
 ### The Query Interface
 
@@ -116,7 +116,7 @@ function describeEvent(event: BankingEvent): string {
 
 This narrowing happens automatically. There are no type assertions, no casting, and no runtime reflection. The compiler tracks the relationship between the `name` literal and the payload shape, and it guarantees exhaustiveness — if you add a new event variant to the union and forget to handle it, the compiler will tell you.
 
-noddde leverages this pattern throughout the framework. Command handler maps and apply handler maps are both keyed by the `name` discriminant, so the framework can automatically narrow the command or event type for each handler.
+noddde leverages this pattern throughout the framework. Decide handler maps and evolve handler maps are both keyed by the `name` discriminant, so the framework can automatically narrow the command or event type for each handler.
 
 ## DefineCommands and DefineEvents
 
@@ -357,10 +357,10 @@ Then pass it as a single generic parameter:
 ```typescript
 const BankAccount = defineAggregate<BankAccountTypes>({
   initialState: { balance: 0, status: "active" },
-  commands: {
+  decide: {
     /* ... */
   },
-  apply: {
+  evolve: {
     /* ... */
   },
 });
@@ -372,8 +372,8 @@ The `AggregateTypes` bundle is not just a convenience for the developer — it i
 
 ```typescript
 // How the framework uses the bundle internally
-type CommandHandlerMap<T extends AggregateTypes> = {
-  [K in T["commands"]["name"]]: CommandHandler<
+type DecideHandlerMap<T extends AggregateTypes> = {
+  [K in T["commands"]["name"]]: DecideHandler<
     Extract<T["commands"], { name: K }>, // Narrowed command type
     T["state"], // The state type
     T["events"], // The event union (return type)
@@ -381,15 +381,15 @@ type CommandHandlerMap<T extends AggregateTypes> = {
   >;
 };
 
-type ApplyHandlerMap<T extends AggregateTypes> = {
-  [K in T["events"]["name"]]: ApplyHandler<
+type EvolveHandlerMap<T extends AggregateTypes> = {
+  [K in T["events"]["name"]]: EvolveHandler<
     Extract<T["events"], { name: K }>, // Narrowed event type
     T["state"] // The state type
   >;
 };
 ```
 
-This means that when you write a command handler for `AuthorizeTransaction`, TypeScript already knows:
+This means that when you write a decide handler for `AuthorizeTransaction`, TypeScript already knows:
 
 - The `command` parameter has type `{ name: "AuthorizeTransaction"; targetAggregateId: string; payload: { amount: number; merchant: string } }`
 - The `state` parameter has type `BankAccountState`
@@ -399,7 +399,7 @@ This means that when you write a command handler for `AuthorizeTransaction`, Typ
 You get this without writing a single type annotation on the handler function:
 
 ```typescript
-commands: {
+decide: {
   // TypeScript infers all parameter types from the bundle
   AuthorizeTransaction: (command, state, infrastructure) => {
     // command.payload.amount  -- TypeScript knows this is `number`
@@ -419,10 +419,10 @@ commands: {
 }
 ```
 
-Similarly, in apply handlers, the event payload type is narrowed per handler:
+Similarly, in evolve handlers, the event payload type is narrowed per handler:
 
 ```typescript
-apply: {
+evolve: {
   // TypeScript knows: event is { amount: number; merchant: string }
   // (the payload of TransactionAuthorized)
   TransactionAuthorized: (event, state) => ({
@@ -505,7 +505,7 @@ type BankEvent = InferAggregateEvents<typeof BankAccount>;
 
 function applyEvents(events: BankEvent[]): BankState {
   return events.reduce((state, event) => {
-    const handler = BankAccount.apply[event.name];
+    const handler = BankAccount.evolve[event.name];
     return handler(event.payload, state);
   }, BankAccount.initialState);
 }
@@ -551,7 +551,7 @@ The most common mistake when using noddde's type system is over-annotating. You 
 
 ```typescript
 // Unnecessary — TypeScript already knows these types
-commands: {
+decide: {
   AuthorizeTransaction: (
     command: Extract<BankingCommand, { name: "AuthorizeTransaction" }>,
     state: BankAccountState,
@@ -560,7 +560,7 @@ commands: {
 }
 
 // Preferred — let inference do the work
-commands: {
+decide: {
   AuthorizeTransaction: (command, state, infrastructure) => { /* ... */ },
 }
 ```
@@ -604,15 +604,15 @@ initialState: {
 },
 ```
 
-This ensures that TypeScript can distinguish between status values in your command handlers and apply handlers.
+This ensures that TypeScript can distinguish between status values in your decide handlers and evolve handlers.
 
 ## How the Framework Uses Messages
 
 Messages are not just data types — they drive the framework's runtime behavior:
 
-1. **Command routing.** When you call `domain.dispatchCommand(command)`, the framework reads `command.name` and routes it to the matching handler in the aggregate's `commands` map.
+1. **Command routing.** When you call `domain.dispatchCommand(command)`, the framework reads `command.name` and routes it to the matching handler in the aggregate's `decide` map.
 
-2. **Event application.** After a command handler returns events, the framework reads each `event.name` and calls the matching handler in the aggregate's `apply` map to evolve the state.
+2. **Event application.** After a decide handler returns events, the framework reads each `event.name` and calls the matching handler in the aggregate's `evolve` map to evolve the state.
 
 3. **Event dispatch.** After events are applied and persisted, the `EventBus` dispatches them to projections and other subscribers using `event.name` as the routing key.
 

@@ -24,7 +24,7 @@ docs:
 
 ## Behavioral Requirements
 
-- The handler receives the unwrapped `payload` from the query, not the full query object. This is consistent with `ApplyHandler` which also receives payloads (note: `EventHandler` receives the full event).
+- The handler receives the unwrapped `payload` from the query, not the full query object. This is consistent with `EvolveHandler` which also receives payloads (note: `EventHandler` receives the full event).
 - The return type is derived from the query's phantom `TResult` type via `QueryResult<TQuery>`.
 - The handler may return synchronously or asynchronously (`T | Promise<T>`).
 - Infrastructure provides access to repositories, caches, databases, etc.

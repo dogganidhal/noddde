@@ -104,7 +104,7 @@ type [AggregateName]Types = {
 
 ## Behavioral Requirements
 
-### Command Handlers (Decide)
+### Decide Handlers
 
 <!--
   For each command, describe:
@@ -116,10 +116,10 @@ type [AggregateName]Types = {
 
 - **[CommandName]**: [What this command does. Pre-conditions. Events produced. Error conditions.]
 
-### Apply Handlers (Evolve)
+### Evolve Handlers
 
 <!--
-  For each event, describe how the state changes. Apply handlers are pure and synchronous.
+  For each event, describe how the state changes. Evolve handlers are pure and synchronous.
   They receive (event.payload, currentState) and return newState.
 -->
 
@@ -167,15 +167,15 @@ const [AggregateName] = defineAggregate<[AggregateName]Types>({
   initialState: {
     // TODO: Set your zero-value state
   },
-  commands: {
-    // TODO: Implement command handlers
+  decide: {
+    // TODO: Implement decide handlers
     // [CommandName]: (command, state, infrastructure) => {
     //   // validate, then return event(s)
     //   return { name: "[EventName]", payload: { ... } };
     // },
   },
-  apply: {
-    // TODO: Implement apply handlers
+  evolve: {
+    // TODO: Implement evolve handlers
     // [EventName]: (payload, state) => {
     //   return { ...state, ... };
     // },
@@ -205,7 +205,7 @@ describe("[AggregateName]", () => {
     const aggregate = /* your aggregate definition */;
     const state = aggregate.initialState;
 
-    const events = aggregate.commands.[CommandName](
+    const events = aggregate.decide.[CommandName](
       {
         name: "[CommandName]",
         targetAggregateId: "test-id",
@@ -218,13 +218,13 @@ describe("[AggregateName]", () => {
     // Verify events
     expect(events).toEqual(/* expected events */);
 
-    // Apply and verify state
+    // Evolve and verify state
     const newState = Array.isArray(events)
       ? events.reduce(
-          (s, e) => aggregate.apply[e.name](e.payload, s),
+          (s, e) => aggregate.evolve[e.name](e.payload, s),
           state,
         )
-      : aggregate.apply[events.name](events.payload, state);
+      : aggregate.evolve[events.name](events.payload, state);
 
     expect(newState).toEqual(/* expected state */);
   });
@@ -242,7 +242,7 @@ describe("[AggregateName] invariant enforcement", () => {
     const invalidState = { /* state that violates the invariant */ };
 
     expect(() =>
-      aggregate.commands.[CommandName](
+      aggregate.decide.[CommandName](
         {
           name: "[CommandName]",
           targetAggregateId: "test-id",
@@ -256,16 +256,16 @@ describe("[AggregateName] invariant enforcement", () => {
 });
 ```
 
-### Apply handlers produce correct state transitions
+### Evolve handlers produce correct state transitions
 
 ```ts
 import { describe, it, expect } from "vitest";
 
-describe("[AggregateName] apply handlers", () => {
+describe("[AggregateName] evolve handlers", () => {
   it("should evolve state correctly for [EventName]", () => {
     const aggregate = /* your aggregate definition */;
 
-    const newState = aggregate.apply.[EventName](
+    const newState = aggregate.evolve.[EventName](
       { /* event payload */ },
       aggregate.initialState,
     );

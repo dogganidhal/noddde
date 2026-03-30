@@ -780,7 +780,7 @@ export class Domain<
     for (const [aggregateName, aggregate] of Object.entries(
       definition.writeModel.aggregates,
     )) {
-      for (const commandName of Object.keys(aggregate.commands)) {
+      for (const commandName of Object.keys(aggregate.decide)) {
         (commandBus as InMemoryCommandBus).register(
           commandName,
           async (command: Command) => {
@@ -1155,7 +1155,7 @@ export class Domain<
       for (const [aggregateName, aggregate] of Object.entries(
         this.definition.writeModel.aggregates,
       )) {
-        if (command.name in aggregate.commands) {
+        if (command.name in aggregate.decide) {
           await this._commandExecutor.execute(
             aggregateName,
             aggregate,

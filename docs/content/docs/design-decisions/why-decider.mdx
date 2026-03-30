@@ -5,7 +5,7 @@ description: Why noddde uses pure functions instead of OOP aggregate classes.
 
 ## The Decision
 
-noddde models aggregates as pure function Deciders — `initialState` + `commands` (decide) + `apply` (evolve) — instead of class hierarchies with base classes and method decorators.
+noddde models aggregates as pure function Deciders — `initialState` + `decide` + `evolve` — instead of class hierarchies with base classes and method decorators.
 
 ## The Problem
 
@@ -53,12 +53,12 @@ The Decider pattern treats an aggregate as three pure components:
 ```ts
 const BankAccount = defineAggregate<BankAccountDef>({
   initialState: { balance: 0, transactions: [] },
-  commands: {
+  decide: {
     AuthorizeTransaction: (command, state, infra) => {
       /* return events */
     },
   },
-  apply: {
+  evolve: {
     TransactionAuthorized: (event, state) => {
       /* return new state */
     },
@@ -71,7 +71,7 @@ Benefits:
 - **No base class** — Your domain types are plain TypeScript
 - **No decorators** — Works with any TypeScript version and build tool
 - **No `this`** — Handlers are functions, not methods; no binding issues
-- **Pure functions** — Command handlers return events; apply handlers return state
+- **Pure functions** — Decide handlers return events; evolve handlers return state
 - **Trivial testing** — Call the function, assert the result
 - **Full type inference** — TypeScript infers handler parameter types automatically
 - **Composable** — Aggregate definitions are plain objects; they can be merged, transformed, or generated
@@ -96,7 +96,7 @@ class BankAccount extends AggregateRoot {
 }
 
 // Decider: pure function, returns events
-commands: {
+decide: {
   AuthorizeTransaction: (cmd, state) => {
     if (state.availableBalance < cmd.payload.amount) {
       return { name: "TransactionDeclined", payload: { ... } };

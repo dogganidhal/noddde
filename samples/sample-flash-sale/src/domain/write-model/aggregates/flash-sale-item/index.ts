@@ -4,5 +4,5 @@ export { initialFlashSaleState } from "./state";
 export type { FlashSaleCommand } from "./commands";
 export type { CreateFlashSalePayload } from "./commands/create-flash-sale";
 export type { PurchaseItemPayload } from "./commands/purchase-item";
-export { handleCreateFlashSale } from "./command-handlers/handle-create-flash-sale";
-export { handlePurchaseItem } from "./command-handlers/handle-purchase-item";
+export { decideCreateFlashSale } from "./deciders/decide-create-flash-sale";
+export { decidePurchaseItem } from "./deciders/decide-purchase-item";

@@ -34,8 +34,8 @@ A project generated with `noddde new project HotelBooking` produces:
               <File name="state.ts" />
               <File name="hotel-booking.ts" />
               <Folder name="commands" />
-              <Folder name="command-handlers" />
-              <Folder name="apply-handlers" />
+              <Folder name="deciders" />
+              <Folder name="evolvers" />
             </Folder>
           </Folder>
         </Folder>
@@ -86,13 +86,13 @@ Event payloads are defined as standalone interfaces — one file per event. This
           <File name="index.ts" />
           <File name="create-hotel-booking.ts" />
         </Folder>
-        <Folder name="command-handlers">
+        <Folder name="deciders">
           <File name="index.ts" />
-          <File name="handle-create-hotel-booking.ts" />
+          <File name="decide-create-hotel-booking.ts" />
         </Folder>
-        <Folder name="apply-handlers">
+        <Folder name="evolvers">
           <File name="index.ts" />
-          <File name="apply-hotel-booking-created.ts" />
+          <File name="evolve-hotel-booking-created.ts" />
         </Folder>
       </Folder>
     </Folder>
@@ -103,29 +103,23 @@ State is defined in a separate `state.ts` file next to the aggregate definition.
 
 Each aggregate owns its type unions. The aggregate file imports event payloads from `event-model/` and command payloads from `commands/`, then builds `DefineEvents` and `DefineCommands` types inline — the aggregate knows which events and commands it uses.
 
-**Command handlers** and **apply handlers** are standalone exported functions typed with `InferCommandHandler` and `InferApplyHandler`. They are imported into the `defineAggregate` `commands` and `apply` maps. This keeps each handler individually testable and the aggregate definition concise:
+**Decide handlers** and **evolve handlers** are standalone exported functions typed with `InferDecideHandler` and `InferEvolveHandler`. They are imported into the `defineAggregate` `decide` and `evolve` maps. This keeps each handler individually testable and the aggregate definition concise:
 
 ```ts
-// command-handlers/handle-create-hotel-booking.ts
-import type { InferCommandHandler } from "@noddde/core";
+// deciders/decide-create-hotel-booking.ts
+import type { InferDecideHandler } from "@noddde/core";
 import type { HotelBookingDef } from "../hotel-booking.js";
 
-export const handleCreateHotelBooking: InferCommandHandler<
-  HotelBookingDef,
-  "CreateHotelBooking"
-> = (command, _state) => ({
+export const decideCreateHotelBooking: InferDecideHandler<HotelBookingDef, "CreateHotelBooking"> = (command, _state) => ({
   name: "HotelBookingCreated" as const,
   payload: { id: command.targetAggregateId },
 });
 
-// apply-handlers/apply-hotel-booking-created.ts
-import type { InferApplyHandler } from "@noddde/core";
+// evolvers/evolve-hotel-booking-created.ts
+import type { InferEvolveHandler } from "@noddde/core";
 import type { HotelBookingDef } from "../hotel-booking.js";
 
-export const applyHotelBookingCreated: InferApplyHandler<
-  HotelBookingDef,
-  "HotelBookingCreated"
-> = (payload, state) => ({
+export const evolveHotelBookingCreated: InferEvolveHandler<HotelBookingDef, "HotelBookingCreated"> = (payload, state) => ({
   ...state,
   id: payload.id,
 });
@@ -136,8 +130,8 @@ export type HotelBookingDef = {
 };
 
 export const HotelBooking = defineAggregate<HotelBookingDef>({
-  commands: { CreateHotelBooking: handleCreateHotelBooking },
-  apply: { HotelBookingCreated: applyHotelBookingCreated },
+  decide: { CreateHotelBooking: decideCreateHotelBooking },
+  evolve: { HotelBookingCreated: evolveHotelBookingCreated },
   // ...
 });
 ```

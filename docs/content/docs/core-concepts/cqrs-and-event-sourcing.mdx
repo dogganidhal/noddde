@@ -58,7 +58,7 @@ const bankingDomain = defineDomain({
 const domain = await wireDomain(bankingDomain);
 ```
 
-For a complete treatment of how to define aggregates, commands, and apply handlers, see [Modeling Your Domain](/docs/modeling/defining-aggregates).
+For a complete treatment of how to define aggregates, commands, and evolve handlers, see [Modeling Your Domain](/docs/modeling/defining-aggregates).
 
 ## The Read Model
 
@@ -113,7 +113,7 @@ interface CQRSInfrastructure {
 }
 ```
 
-**CommandBus** routes commands to the correct handler -- either an aggregate's command handler or a standalone command handler, based on the command's `name`.
+**CommandBus** routes commands to the correct handler -- either an aggregate's decide handler or a standalone command handler, based on the command's `name`.
 
 ```typescript
 interface CommandBus {
@@ -204,9 +204,9 @@ interface EventSourcedAggregatePersistence {
 When a command arrives for an aggregate instance, the framework follows this sequence:
 
 1. **Load events** -- Retrieve the full event history for the aggregate instance.
-2. **Replay** -- Start with `initialState` and fold each event through the matching apply handler to reconstruct the current state.
-3. **Handle command** -- Pass the reconstructed state, the command, and infrastructure to the command handler.
-4. **Save new events** -- Append the events produced by the command handler.
+2. **Replay** -- Start with `initialState` and fold each event through the matching evolve handler to reconstruct the current state.
+3. **Handle command** -- Pass the reconstructed state, the command, and infrastructure to the decide handler.
+4. **Save new events** -- Append the events produced by the decide handler.
 5. **Apply new events** -- Fold the new events into the state for any subsequent commands in the same session.
 
 The conceptual replay logic looks like this:
@@ -217,13 +217,13 @@ function replayState<T extends AggregateTypes>(
   events: Event[],
 ): T["state"] {
   return events.reduce((state, event) => {
-    const handler = aggregate.apply[event.name];
+    const handler = aggregate.evolve[event.name];
     return handler(event.payload, state);
   }, aggregate.initialState);
 }
 ```
 
-This is why the apply handlers in a noddde aggregate are so important. They are not just updating state after a command -- they are the **canonical definition** of how state is derived from events. Every time an aggregate instance is loaded, the apply handlers run over the entire event history.
+This is why the evolve handlers in a noddde aggregate are so important. They are not just updating state after a command -- they are the **canonical definition** of how state is derived from events. Every time an aggregate instance is loaded, the evolve handlers run over the entire event history.
 
 ## The State-Stored Alternative
 
@@ -236,18 +236,18 @@ interface StateStoredAggregatePersistence {
 }
 ```
 
-With state-stored persistence, events are still produced by command handlers and still flow through the event bus to projections. The difference is that events are not persisted in an event store -- only the resulting state is saved.
+With state-stored persistence, events are still produced by decide handlers and still flow through the event bus to projections. The difference is that events are not persisted in an event store -- only the resulting state is saved.
 
-The key design choice: **the aggregate definition does not change** between event-sourced and state-stored persistence. The same `defineAggregate` with the same `commands` and `apply` handlers works with either strategy. The persistence strategy is a deployment decision, not a domain modeling decision.
+The key design choice: **the aggregate definition does not change** between event-sourced and state-stored persistence. The same `defineAggregate` with the same `decide` and `evolve` handlers works with either strategy. The persistence strategy is a deployment decision, not a domain modeling decision.
 
 ```typescript
 // This aggregate works identically with either persistence strategy
 const BankAccount = defineAggregate<BankAccountTypes>({
   initialState: { balance: 0, status: "active" },
-  commands: {
+  decide: {
     /* ... */
   },
-  apply: {
+  evolve: {
     /* ... */
   },
 });
@@ -263,7 +263,7 @@ You could start with state-stored persistence for simplicity and switch to event
 - Temporal queries matter ("What was the balance on March 1st?")
 - Your architecture is event-driven and events must be durably stored
 - Debugging and forensics benefit from a complete event history
-- You need schema evolution via upcasters or versioned apply handlers
+- You need schema evolution via upcasters or versioned evolve handlers
 
 **Choose state-stored persistence when:**
 
@@ -276,11 +276,11 @@ Different aggregates in the same domain can use different persistence strategies
 
 ## The Replay Guarantee
 
-Event sourcing works only if replaying the same events always produces the same state. This imposes a strict requirement: **apply handlers must be pure functions**.
+Event sourcing works only if replaying the same events always produces the same state. This imposes a strict requirement: **Evolve handlers must be pure functions**.
 
 A pure function depends only on its inputs, produces no side effects, and returns the same output for the same inputs every time.
 
-Apply handlers must **not** use non-deterministic values:
+Evolve handlers must **not** use non-deterministic values:
 
 ```typescript
 // BAD: Uses current time (different on each replay)
@@ -297,7 +297,7 @@ AccountCreated: (event, state) => ({
 });
 ```
 
-Apply handlers **should** derive all values from the event payload and current state:
+Evolve handlers **should** derive all values from the event payload and current state:
 
 ```typescript
 // GOOD: Pure computation from event payload and state
@@ -313,18 +313,18 @@ TransactionProcessed: (event, state) => ({
 });
 ```
 
-If you need a timestamp or a generated ID, compute it in the **command handler** (which has access to infrastructure) and include it in the event payload. The apply handler then reads it from the event, ensuring deterministic replay.
+If you need a timestamp or a generated ID, compute it in the **decide handler** (which has access to infrastructure) and include it in the event payload. The evolve handler then reads it from the event, ensuring deterministic replay.
 
-This is why noddde passes infrastructure to command handlers but **never** to apply handlers. The type system enforces this boundary:
+This is why noddde passes infrastructure to decide handlers but **never** to evolve handlers. The type system enforces this boundary:
 
 ```typescript
-type ApplyHandler<TEvent extends Event, TState> = (
+type EvolveHandler<TEvent extends Event, TState> = (
   event: TEvent["payload"],
   state: TState,
 ) => TState;
 ```
 
-There is no infrastructure parameter. If you try to access infrastructure in an apply handler, the compiler will prevent it.
+There is no infrastructure parameter. If you try to access infrastructure in an evolve handler, the compiler will prevent it.
 
 ## Event Sourcing + CQRS Together
 
@@ -335,7 +335,7 @@ Event sourcing and CQRS are independent patterns, but they complement each other
 
 Without CQRS, event sourcing would require replaying events every time you want to read data -- slow for complex queries. With CQRS, projections pre-compute the views you need, and queries are served from those pre-computed views.
 
-Without event sourcing, CQRS would need a separate mechanism to propagate changes from write to read. With event sourcing, events are the natural propagation mechanism -- they are already produced by command handlers and can be directly consumed by projections.
+Without event sourcing, CQRS would need a separate mechanism to propagate changes from write to read. With event sourcing, events are the natural propagation mechanism -- they are already produced by decide handlers and can be directly consumed by projections.
 
 ```
   Command -> Aggregate -> Events -> Event Store (write side, event sourcing)
@@ -359,14 +359,14 @@ Here is the complete flow of a command through a noddde application:
 3. Framework loads current state for "acc-1"
    { balance: 1000, status: "active" }
 
-4. Command handler runs
+4. Decide handler runs
    AuthorizeTransaction(command, state, infrastructure) -> event
 
 5. Event returned
    { name: "TransactionAuthorized",
      payload: { id: "acc-1", amount: 50, merchant: "Store" } }
 
-6. Apply handler updates state
+6. Evolve handler updates state
    TransactionAuthorized(event.payload, state) -> { balance: 950, status: "active" }
 
 7. Event persisted to event store

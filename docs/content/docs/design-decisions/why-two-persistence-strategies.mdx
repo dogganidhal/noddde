@@ -31,8 +31,8 @@ The same aggregate definition works with either strategy:
 // This aggregate works with EITHER persistence strategy
 export const BankAccount = defineAggregate<BankAccountDef>({
   initialState: { ... },
-  commands: { ... },
-  apply: { ... },
+  decide: { ... },
+  evolve: { ... },
 });
 ```
 
@@ -67,7 +67,7 @@ Benefits:
 
 - **Two interfaces** — Two persistence contracts to understand
 - **Two mental models** — Developers need to understand when each is appropriate
-- **Apply handlers still required** — Even with state storage, you define apply handlers (they are used to process events returned by command handlers within a single dispatch cycle)
+- **Evolve handlers still required** — Even with state storage, you define evolve handlers (they are used to process events returned by decide handlers within a single dispatch cycle)
 
 ## When to Use Each
 

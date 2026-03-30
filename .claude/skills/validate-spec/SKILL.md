@@ -51,7 +51,7 @@ For each numbered behavioral requirement in `## Behavioral Requirements`:
 
 ```
 Behavioral Requirements:
-  1. ✅ "CommandHandlerMap requires one handler per command name" — enforced via mapped type, tested
+  1. ✅ "DecideHandlerMap requires one handler per command name" — enforced via mapped type, tested
   2. ✅ "defineAggregate is a pass-through identity function" — implemented, tested
   3. ❌ "Command handler returns single event normalized to array" — stub in source
 ```
@@ -81,7 +81,7 @@ For each edge case in `## Edge Cases`:
 Edge Cases:
   ✅ "Command handler returns empty array" — handled, tested
   ❌ "Command handler throws" — no error handling in dispatch
-  🔧 "Async command handler" — handled, but no async test
+  🔧 "Async decide handler" — handled, but no async test
 ```
 
 ## Step 6: Stub Check
