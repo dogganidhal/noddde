@@ -67,6 +67,7 @@ docs:
 - **`defineSaga<T, TSagaId extends ID>(config): Saga<T, TSagaId>`** -- identity function for type inference.
 
 - **Infer utilities** (operate on `Saga` definition instances):
+
   - `InferSagaState<T extends Saga>` = inferred `U["state"]`.
   - `InferSagaEvents<T extends Saga>` = inferred `U["events"]`.
   - `InferSagaCommands<T extends Saga>` = inferred `U["commands"]`.

@@ -63,6 +63,7 @@ docs:
 - **`defineAggregate<T>(config): Aggregate<T>`** -- identity function returning `config` as-is, providing type inference.
 
 - **Infer utilities** (operate on `Aggregate` definition instances):
+
   - `InferAggregateID<T extends AggregateTypes>` = `T["commands"]["targetAggregateId"]`.
   - `InferAggregateState<T extends Aggregate>` = inferred `U["state"]`.
   - `InferAggregateEvents<T extends Aggregate>` = inferred `U["events"]`.
@@ -524,9 +525,7 @@ describe("InferCommandHandler", () => {
   it("should narrow the command to the specific variant", () => {
     type Handler = InferCommandHandler<MyTypes, "Update">;
     type Cmd = Parameters<Handler>[0];
-    expectTypeOf<Cmd>().toEqualTypeOf<
-      Extract<MyCommand, { name: "Update" }>
-    >();
+    expectTypeOf<Cmd>().toEqualTypeOf<Extract<MyCommand, { name: "Update" }>>();
   });
 
   it("should use the aggregate state as second parameter", () => {
@@ -618,7 +617,9 @@ describe("InferApplyHandler", () => {
 
   it("should narrow the event payload to the specific variant", () => {
     type Handler = InferApplyHandler<MyTypes, "Updated">;
-    expectTypeOf<Parameters<Handler>[0]>().toEqualTypeOf<{ newValue: number }>();
+    expectTypeOf<Parameters<Handler>[0]>().toEqualTypeOf<{
+      newValue: number;
+    }>();
   });
 
   it("should use the aggregate state as second parameter and return type", () => {

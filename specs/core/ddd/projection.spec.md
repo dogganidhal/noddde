@@ -77,6 +77,7 @@ docs:
 - **`defineProjection<T>(config): Projection<T>`** -- identity function for type inference.
 
 - **Infer utilities** (operate on `Projection` definition instances):
+
   - `InferProjectionView<T extends Projection>` = inferred `U["view"]`.
   - `InferProjectionEvents<T extends Projection>` = inferred `U["events"]`.
   - `InferProjectionQueries<T extends Projection>` = inferred `U["queries"]`.
@@ -836,7 +837,10 @@ describe("InferProjectionEventHandler", () => {
     type Handler = InferProjectionEventHandler<Def, "ItemCreated">;
     // id is optional
     expectTypeOf<Handler["id"]>().toEqualTypeOf<
-      ((event: Extract<ItemEvent, { name: "ItemCreated" }>) => string | number | bigint) | undefined
+      | ((
+          event: Extract<ItemEvent, { name: "ItemCreated" }>,
+        ) => string | number | bigint)
+      | undefined
     >();
   });
 
