@@ -199,7 +199,7 @@ This saga orchestrates the top-level booking flow. It starts on `BookingCreated`
 #### Transition handlers (extracted)
 
 ```ts
-// transition-handlers/on-booking-created.ts
+// on-entries/on-booking-created.ts
 import { randomUUID } from "crypto";
 import type { BookingFulfillmentState } from "../state";
 
@@ -237,7 +237,7 @@ export const onBookingCreated = (event: {
 ```
 
 ```ts
-// transition-handlers/on-payment-completed.ts
+// on-entries/on-payment-completed.ts
 import type { BookingFulfillmentState } from "../state";
 
 export const onPaymentCompleted = async (
@@ -287,7 +287,7 @@ export const onPaymentCompleted = async (
 ```
 
 ```ts
-// transition-handlers/on-booking-cancelled.ts
+// on-entries/on-booking-cancelled.ts
 import type { BookingFulfillmentState } from "../state";
 
 export const onBookingCancelled = (
@@ -308,7 +308,7 @@ export const onBookingCancelled = (
 });
 ```
 
-The `PaymentFailed`, `BookingConfirmed`, `BookingModified`, `PaymentRequested`, and `PaymentRefunded` handlers follow the same pattern — each in its own file under `transition-handlers/`.
+The `PaymentFailed`, `BookingConfirmed`, `BookingModified`, `PaymentRequested`, and `PaymentRefunded` handlers follow the same pattern — each in its own file under `on-entries/`.
 
 #### Saga definition (wiring)
 
@@ -324,7 +324,7 @@ import {
   onPaymentFailed,
   onPaymentRefunded,
   onPaymentRequested,
-} from "./transition-handlers";
+} from "./on-entries";
 
 type BookingFulfillmentDef = {
   state: BookingFulfillmentState;
@@ -362,7 +362,7 @@ This saga bridges the `RequestPayment` command (dispatched by `BookingFulfillmen
 #### Transition handlers (extracted)
 
 ```ts
-// transition-handlers/on-payment-requested.ts
+// on-entries/on-payment-requested.ts
 import type { PaymentProcessingState } from "../state";
 
 export const onPaymentRequested = async (
@@ -443,7 +443,7 @@ import {
   onPaymentRequested,
   onPaymentCompleted,
   onPaymentFailed,
-} from "./transition-handlers";
+} from "./on-entries";
 
 export const PaymentProcessingSaga = defineSaga<PaymentProcessingDef>({
   initialState: initialPaymentProcessingState,

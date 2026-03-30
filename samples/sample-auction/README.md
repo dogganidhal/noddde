@@ -71,7 +71,7 @@ Builds a query-optimized view of auction state, updated as events arrive.
 
 **Query:** `GetAuctionSummary(auctionId)` — returns the current auction summary or null
 
-**View reducers** are extracted to standalone functions following the CLI pattern:
+**On-entries** are extracted to standalone functions following the CLI pattern:
 
 - `onAuctionCreated` — initializes view
 - `onBidPlaced` — updates high bid, leader, increments count
@@ -149,7 +149,7 @@ src/
           auction-summary.ts             # AuctionSummaryView type
           queries/                       # Query payload + result types
           query-handlers/                # Standalone query handler functions
-          view-reducers/                 # Standalone reduce functions
+          on-entries/                 # Standalone reduce functions
 prisma/
   schema.prisma                          # Prisma schema (SQLite)
 ```
