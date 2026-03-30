@@ -4,16 +4,16 @@ import type { AuctionInfrastructure } from "../../../../infrastructure";
 import type { AuctionCommand } from "./commands";
 import { AuctionState, initialAuctionState } from "./state";
 import {
-  handleCreateAuction,
-  handlePlaceBid,
-  handleCloseAuction,
-} from "./command-handlers";
+  decideCreateAuction,
+  decidePlaceBid,
+  decideCloseAuction,
+} from "./deciders";
 import {
-  applyAuctionCreated,
-  applyBidPlaced,
-  applyBidRejected,
-  applyAuctionClosed,
-} from "./apply-handlers";
+  evolveAuctionCreated,
+  evolveBidPlaced,
+  evolveBidRejected,
+  evolveAuctionClosed,
+} from "./evolvers";
 import { auctionUpcasters } from "./upcasters";
 
 /** Type bundle for the auction aggregate. */
@@ -30,23 +30,23 @@ export type AuctionDef = {
  * Commands: CreateAuction, PlaceBid, CloseAuction
  * Events: AuctionCreated, BidPlaced, BidRejected, AuctionClosed
  *
- * Command handlers are extracted to standalone functions for testability.
- * Apply handlers are extracted to standalone functions for consistency.
+ * Deciders are extracted to standalone functions for testability.
+ * Evolvers are extracted to standalone functions for consistency.
  */
 export const Auction = defineAggregate<AuctionDef>({
   initialState: initialAuctionState,
 
-  commands: {
-    CreateAuction: handleCreateAuction,
-    PlaceBid: handlePlaceBid,
-    CloseAuction: handleCloseAuction,
+  decide: {
+    CreateAuction: decideCreateAuction,
+    PlaceBid: decidePlaceBid,
+    CloseAuction: decideCloseAuction,
   },
 
-  apply: {
-    AuctionCreated: applyAuctionCreated,
-    BidPlaced: applyBidPlaced,
-    BidRejected: applyBidRejected,
-    AuctionClosed: applyAuctionClosed,
+  evolve: {
+    AuctionCreated: evolveAuctionCreated,
+    BidPlaced: evolveBidPlaced,
+    BidRejected: evolveBidRejected,
+    AuctionClosed: evolveAuctionClosed,
   },
 
   upcasters: auctionUpcasters,

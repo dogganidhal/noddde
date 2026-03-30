@@ -1,14 +1,14 @@
 ---
-title: "Why Are Apply Handlers Pure?"
-description: Why noddde requires apply handlers to be pure functions with no infrastructure access.
+title: "Why Are Evolve Handlers Pure?"
+description: Why noddde requires evolve handlers to be pure functions with no infrastructure access.
 ---
 
 ## The Decision
 
-Apply handlers in noddde are pure functions that receive only the event payload and current state, returning the new state. They have no access to infrastructure, no async capability, and must produce no side effects.
+Evolve handlers in noddde are pure functions that receive only the event payload and current state, returning the new state. They have no access to infrastructure, no async capability, and must produce no side effects.
 
 ```ts
-type ApplyHandler<TEvent extends Event, TState> = (
+type EvolveHandler<TEvent extends Event, TState> = (
   event: TEvent["payload"],
   state: TState,
 ) => TState;
@@ -16,11 +16,11 @@ type ApplyHandler<TEvent extends Event, TState> = (
 
 ## The Problem
 
-If apply handlers could access infrastructure (databases, APIs, time), event replay becomes non-deterministic:
+If evolve handlers could access infrastructure (databases, APIs, time), event replay becomes non-deterministic:
 
 ```ts
-// Dangerous: apply handler with side effects (NOT how noddde works)
-apply: {
+// Dangerous: evolve handler with side effects (NOT how noddde works)
+evolve: {
   TransactionAuthorized: (event, state, { exchangeRateService }) => {
     const rate = exchangeRateService.getRate("USD"); // Different each time!
     return { ...state, balance: state.balance - event.amount * rate };
@@ -32,31 +32,31 @@ Replaying this event tomorrow would produce a different state because the exchan
 
 ## Alternatives Considered
 
-- **Allow infrastructure in apply handlers** — Some frameworks do this, trading correctness for convenience
+- **Allow infrastructure in evolve handlers** — Some frameworks do this, trading correctness for convenience
 - **Snapshot-only replay** — Only replay from the latest snapshot, reducing the window of non-determinism
-- **Version-tagged handlers** — Different apply handler per event version
+- **Version-tagged handlers** — Different evolve handler per event version
 
 ## Why This Approach
 
-Pure apply handlers guarantee the **deterministic replay** property:
+Pure evolve handlers guarantee the **deterministic replay** property:
 
-> Given the same sequence of events, apply handlers always produce the same state.
+> Given the same sequence of events, evolve handlers always produce the same state.
 
 This guarantee is foundational to event sourcing:
 
 - **Rebuild from history** — Replay all events to reconstruct current state. Always produces the same result.
 - **Rebuild projections** — When you fix a bug in a projection, replay all events to rebuild it
 - **Time travel** — Reconstruct the state at any point in history
-- **Testing** — Apply handlers are trivially testable (pure function, deterministic)
+- **Testing** — Evolve handlers are trivially testable (pure function, deterministic)
 - **Debugging** — If state is wrong, replay events step by step to find where it diverges
 
 ## What If You Need External Data?
 
-If your state transition needs external data, capture it in the **event payload** at decision time (in the command handler), not at replay time (in the apply handler):
+If your state transition needs external data, capture it in the **event payload** at decision time (in the decide handler), not at replay time (in the evolve handler):
 
 ```ts
-// Command handler captures all needed data AT DECISION TIME
-commands: {
+// Decide handler captures all needed data AT DECISION TIME
+decide: {
   AuthorizeTransaction: (command, state, { exchangeRateService }) => {
     const rate = exchangeRateService.getRate("USD");
     return {
@@ -70,8 +70,8 @@ commands: {
   },
 },
 
-// Apply handler uses the captured data — deterministic
-apply: {
+// Evolve handler uses the captured data — deterministic
+evolve: {
   TransactionAuthorized: (event, state) => ({
     ...state,
     balance: state.balance - event.convertedAmount, // Always the same
@@ -79,7 +79,7 @@ apply: {
 },
 ```
 
-The command handler is allowed to be impure (it has infrastructure access). The apply handler stays pure by working only with data that was captured in the event.
+The decide handler is allowed to be impure (it has infrastructure access). The evolve handler stays pure by working only with data that was captured in the event.
 
 ## Trade-offs
 
@@ -90,8 +90,8 @@ The command handler is allowed to be impure (it has infrastructure access). The 
 ## Example
 
 ```ts
-// Pure apply handler — same inputs always produce same outputs
-apply: {
+// Pure evolve handler — same inputs always produce same outputs
+evolve: {
   TransactionAuthorized: (event, state) => ({
     ...state,
     availableBalance: state.availableBalance - event.amount,

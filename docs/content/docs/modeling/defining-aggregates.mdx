@@ -7,7 +7,7 @@ description: How to define a complete aggregate in noddde — events, commands, 
 
 An aggregate is a **consistency boundary** in your domain. It groups together the state and business rules that must always be consistent with each other. When you dispatch a command, a single aggregate instance validates the rules, makes a decision, and produces events that record what happened.
 
-noddde models aggregates using the [Decider pattern](/docs/core-concepts/decider-pattern): commands go in, events come out, and a pure function evolves state. There are no base classes and no decorators -- an aggregate is a plain typed object with three properties: `initialState`, `commands`, and `apply`.
+noddde models aggregates using the [Decider pattern](/docs/core-concepts/decider-pattern): commands go in, events come out, and a pure function evolves state. There are no base classes and no decorators -- an aggregate is a plain typed object with three properties: `initialState`, `decide`, and `evolve`.
 
 An aggregate definition is a **blueprint**, not a singleton. You define the behavior once, and the framework creates as many instances as needed at runtime, each identified by a unique `targetAggregateId`.
 
@@ -99,7 +99,7 @@ interface BankAccountState {
 A few design tips:
 
 - **Use zero values for `initialState`.** Numbers start at `0`, arrays start empty, optional references start as `null`. This makes the initial state trivial to construct.
-- **Prefer flat structures.** Deeply nested state is harder to update immutably in apply handlers. Keep it as shallow as your domain allows.
+- **Prefer flat structures.** Deeply nested state is harder to update immutably in evolve handlers. Keep it as shallow as your domain allows.
 - **The aggregate ID is NOT part of the state.** It lives on the command as `targetAggregateId` and is managed by the framework. See [Why Is the Aggregate ID Not in State?](/docs/design-decisions/why-id-not-in-state) for the rationale.
 
 ## Step 4: Bundle Types
@@ -117,24 +117,24 @@ type BankAccountDef = {
 };
 ```
 
-The `infrastructure` field specifies what services your command handlers can access. The base `Infrastructure` type is an empty object -- use it when your aggregate needs no external services. If your handlers need a logger, a clock, or any other service, define a custom interface instead (see [Using Infrastructure](#using-infrastructure) below).
+The `infrastructure` field specifies what services your decide handlers can access. The base `Infrastructure` type is an empty object -- use it when your aggregate needs no external services. If your handlers need a logger, a clock, or any other service, define a custom interface instead (see [Using Infrastructure](#using-infrastructure) below).
 
 This bundle replaces what would otherwise be five or more positional generic parameters. For the reasoning behind this approach, see [Why AggregateTypes?](/docs/design-decisions/why-aggregate-types).
 
 ## Step 5: Extract Handlers
 
-The recommended pattern is to define command handlers and apply handlers as standalone functions in separate files, typed with `InferCommandHandler` and `InferApplyHandler`. This keeps each handler focused, independently testable, and makes the aggregate definition itself a clean table of references.
+The recommended pattern is to define decide handlers and evolve handlers as standalone functions in separate files, typed with `InferDecideHandler` and `InferEvolveHandler`. This keeps each handler focused, independently testable, and makes the aggregate definition itself a clean table of references.
 
-### Command handlers
+### Decide handlers
 
-Each command handler lives in its own file and is typed with `InferCommandHandler<TypesBundle, "CommandName">`:
+Each decide handler lives in its own file and is typed with `InferDecideHandler<TypesBundle, "CommandName">`:
 
 ```typescript
-// command-handlers/handle-create-bank-account.ts
-import type { InferCommandHandler } from "@noddde/core";
+// deciders/decide-create-bank-account.ts
+import type { InferDecideHandler } from "@noddde/core";
 import type { BankAccountDef } from "../bank-account";
 
-export const handleCreateBankAccount: InferCommandHandler<
+export const decideCreateBankAccount: InferDecideHandler<
   BankAccountDef,
   "CreateBankAccount"
 > = (command) => ({
@@ -144,11 +144,11 @@ export const handleCreateBankAccount: InferCommandHandler<
 ```
 
 ```typescript
-// command-handlers/handle-authorize-transaction.ts
-import type { InferCommandHandler } from "@noddde/core";
+// deciders/decide-authorize-transaction.ts
+import type { InferDecideHandler } from "@noddde/core";
 import type { BankAccountDef } from "../bank-account";
 
-export const handleAuthorizeTransaction: InferCommandHandler<
+export const decideAuthorizeTransaction: InferDecideHandler<
   BankAccountDef,
   "AuthorizeTransaction"
 > = (command, state) => {
@@ -178,16 +178,16 @@ export const handleAuthorizeTransaction: InferCommandHandler<
 };
 ```
 
-### Apply handlers
+### Evolve handlers
 
-Each apply handler lives in its own file and is typed with `InferApplyHandler<TypesBundle, "EventName">`:
+Each evolve handler lives in its own file and is typed with `InferEvolveHandler<TypesBundle, "EventName">`:
 
 ```typescript
-// apply-handlers/apply-bank-account-created.ts
-import type { InferApplyHandler } from "@noddde/core";
+// evolvers/evolve-bank-account-created.ts
+import type { InferEvolveHandler } from "@noddde/core";
 import type { BankAccountDef } from "../bank-account";
 
-export const applyBankAccountCreated: InferApplyHandler<
+export const evolveBankAccountCreated: InferEvolveHandler<
   BankAccountDef,
   "BankAccountCreated"
 > = (_event, _state) => ({
@@ -198,11 +198,11 @@ export const applyBankAccountCreated: InferApplyHandler<
 ```
 
 ```typescript
-// apply-handlers/apply-transaction-authorized.ts
-import type { InferApplyHandler } from "@noddde/core";
+// evolvers/evolve-transaction-authorized.ts
+import type { InferEvolveHandler } from "@noddde/core";
 import type { BankAccountDef } from "../bank-account";
 
-export const applyTransactionAuthorized: InferApplyHandler<
+export const evolveTransactionAuthorized: InferEvolveHandler<
   BankAccountDef,
   "TransactionAuthorized"
 > = (event, state) => ({
@@ -217,19 +217,19 @@ export const applyTransactionAuthorized: InferApplyHandler<
 
 ## Step 6: defineAggregate
 
-`defineAggregate` is an identity function -- it takes your aggregate object and returns it unchanged. Its only purpose is to provide type inference so TypeScript can verify that your command handlers, apply handlers, and initial state are all consistent.
+`defineAggregate` is an identity function -- it takes your aggregate object and returns it unchanged. Its only purpose is to provide type inference so TypeScript can verify that your decide handlers, evolve handlers, and initial state are all consistent.
 
 With extracted handlers, the aggregate definition becomes a concise wiring file that imports and maps each handler:
 
 ```typescript
 // bank-account.ts
 import { defineAggregate } from "@noddde/core";
-import { handleCreateBankAccount } from "./command-handlers/handle-create-bank-account";
-import { handleAuthorizeTransaction } from "./command-handlers/handle-authorize-transaction";
-import { applyBankAccountCreated } from "./apply-handlers/apply-bank-account-created";
-import { applyTransactionAuthorized } from "./apply-handlers/apply-transaction-authorized";
-import { applyTransactionDeclined } from "./apply-handlers/apply-transaction-declined";
-import { applyTransactionProcessed } from "./apply-handlers/apply-transaction-processed";
+import { decideCreateBankAccount } from "./deciders/decide-create-bank-account";
+import { decideAuthorizeTransaction } from "./deciders/decide-authorize-transaction";
+import { evolveBankAccountCreated } from "./evolvers/evolve-bank-account-created";
+import { evolveTransactionAuthorized } from "./evolvers/evolve-transaction-authorized";
+import { evolveTransactionDeclined } from "./evolvers/evolve-transaction-declined";
+import { evolveTransactionProcessed } from "./evolvers/evolve-transaction-processed";
 
 export const BankAccount = defineAggregate<BankAccountDef>({
   initialState: {
@@ -238,27 +238,27 @@ export const BankAccount = defineAggregate<BankAccountDef>({
     transactions: [],
   },
 
-  commands: {
-    CreateBankAccount: handleCreateBankAccount,
-    AuthorizeTransaction: handleAuthorizeTransaction,
+  decide: {
+    CreateBankAccount: decideCreateBankAccount,
+    AuthorizeTransaction: decideAuthorizeTransaction,
   },
 
-  apply: {
-    BankAccountCreated: applyBankAccountCreated,
-    TransactionAuthorized: applyTransactionAuthorized,
-    TransactionDeclined: applyTransactionDeclined,
-    TransactionProcessed: applyTransactionProcessed,
+  evolve: {
+    BankAccountCreated: evolveBankAccountCreated,
+    TransactionAuthorized: evolveTransactionAuthorized,
+    TransactionDeclined: evolveTransactionDeclined,
+    TransactionProcessed: evolveTransactionProcessed,
   },
 });
 ```
 
 TypeScript enforces the following at compile time:
 
-- Every command name in the union has a matching handler in the `commands` map.
-- Every event name in the union has a matching handler in the `apply` map.
-- Command handlers can only return events from the aggregate's event union.
-- Apply handlers must return the exact state shape.
-- Infrastructure access in command handlers is correctly typed.
+- Every command name in the union has a matching handler in the `decide` map.
+- Every event name in the union has a matching handler in the `evolve` map.
+- Decide handlers can only return events from the aggregate's event union.
+- Evolve handlers must return the exact state shape.
+- Infrastructure access in decide handlers is correctly typed.
 
 Because `defineAggregate` is an identity function, it adds **zero runtime overhead**. It exists purely for the type checker.
 
@@ -272,9 +272,9 @@ Extracting handlers is the recommended pattern in noddde for testability, readab
 
 ## Using Infrastructure
 
-When command handlers need external services -- a clock, a logger, a fraud-check client -- define a custom infrastructure type and include it in the types bundle.
+When decide handlers need external services -- a clock, a logger, a fraud-check client -- define a custom infrastructure type and include it in the types bundle.
 
-Here is the auction domain, which uses an injected `clock` to validate bid timing. The types are defined first, then the `PlaceBid` handler is extracted to its own file with `InferCommandHandler`:
+Here is the auction domain, which uses an injected `clock` to validate bid timing. The types are defined first, then the `PlaceBid` handler is extracted to its own file with `InferDecideHandler`:
 
 ```typescript
 // types.ts
@@ -313,14 +313,14 @@ export type AuctionDef = {
 };
 ```
 
-The `PlaceBid` handler destructures `{ clock }` from the infrastructure parameter. `InferCommandHandler` ensures TypeScript knows exactly which services are available:
+The `PlaceBid` handler destructures `{ clock }` from the infrastructure parameter. `InferDecideHandler` ensures TypeScript knows exactly which services are available:
 
 ```typescript
-// command-handlers/handle-place-bid.ts
-import type { InferCommandHandler } from "@noddde/core";
+// deciders/decide-place-bid.ts
+import type { InferDecideHandler } from "@noddde/core";
 import type { AuctionDef } from "../auction";
 
-export const handlePlaceBid: InferCommandHandler<AuctionDef, "PlaceBid"> = (
+export const decidePlaceBid: InferDecideHandler<AuctionDef, "PlaceBid"> = (
   command,
   state,
   { clock },
@@ -362,13 +362,13 @@ The aggregate definition then wires everything together:
 ```typescript
 // auction.ts
 import { defineAggregate } from "@noddde/core";
-import { handleCreateAuction } from "./command-handlers/handle-create-auction";
-import { handlePlaceBid } from "./command-handlers/handle-place-bid";
-import { handleCloseAuction } from "./command-handlers/handle-close-auction";
-import { applyAuctionCreated } from "./apply-handlers/apply-auction-created";
-import { applyBidPlaced } from "./apply-handlers/apply-bid-placed";
-import { applyBidRejected } from "./apply-handlers/apply-bid-rejected";
-import { applyAuctionClosed } from "./apply-handlers/apply-auction-closed";
+import { decideCreateAuction } from "./deciders/decide-create-auction";
+import { decidePlaceBid } from "./deciders/decide-place-bid";
+import { decideCloseAuction } from "./deciders/decide-close-auction";
+import { evolveAuctionCreated } from "./evolvers/evolve-auction-created";
+import { evolveBidPlaced } from "./evolvers/evolve-bid-placed";
+import { evolveBidRejected } from "./evolvers/evolve-bid-rejected";
+import { evolveAuctionClosed } from "./evolvers/evolve-auction-closed";
 
 export const Auction = defineAggregate<AuctionDef>({
   initialState: {
@@ -379,22 +379,22 @@ export const Auction = defineAggregate<AuctionDef>({
     highestBid: null,
   },
 
-  commands: {
-    CreateAuction: handleCreateAuction,
-    PlaceBid: handlePlaceBid,
-    CloseAuction: handleCloseAuction,
+  decide: {
+    CreateAuction: decideCreateAuction,
+    PlaceBid: decidePlaceBid,
+    CloseAuction: decideCloseAuction,
   },
 
-  apply: {
-    AuctionCreated: applyAuctionCreated,
-    BidPlaced: applyBidPlaced,
-    BidRejected: applyBidRejected,
-    AuctionClosed: applyAuctionClosed,
+  evolve: {
+    AuctionCreated: evolveAuctionCreated,
+    BidPlaced: evolveBidPlaced,
+    BidRejected: evolveBidRejected,
+    AuctionClosed: evolveAuctionClosed,
   },
 });
 ```
 
-Infrastructure is **never passed to apply handlers**. Apply handlers are pure reducers -- they receive only the event payload and the current state. This keeps state evolution deterministic and safe for event replay.
+Infrastructure is **never passed to evolve handlers**. Evolve handlers are pure reducers -- they receive only the event payload and the current state. This keeps state evolution deterministic and safe for event replay.
 
 ## Commands vs Events at a Glance
 
@@ -411,6 +411,6 @@ A single command may produce different events depending on business logic. For e
 
 ## Next Steps
 
-- [Command Handlers](/docs/modeling/command-handlers) -- Patterns for command handler logic: async handlers, returning multiple events, validation strategies
-- [State and Events](/docs/modeling/state-and-events) -- Apply handler patterns, immutable state updates, and modeling rejection events
+- [Decide Handlers](/docs/modeling/command-handlers) -- Patterns for decide handler logic: async handlers, returning multiple events, validation strategies
+- [State and Events](/docs/modeling/state-and-events) -- Evolve handler patterns, immutable state updates, and modeling rejection events
 - [Routing and Dispatch](/docs/modeling/routing-and-dispatch) -- How `targetAggregateId` routes commands to the right aggregate instance

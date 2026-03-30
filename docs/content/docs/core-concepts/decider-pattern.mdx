@@ -146,7 +146,7 @@ type BankAccountTypes = {
 const BankAccount = defineAggregate<BankAccountTypes>({
   initialState: { balance: 0, status: "active" },
 
-  commands: {
+  decide: {
     CreateBankAccount: (command) => ({
       name: "BankAccountCreated",
       payload: { id: command.targetAggregateId },
@@ -176,7 +176,7 @@ const BankAccount = defineAggregate<BankAccountTypes>({
     },
   },
 
-  apply: {
+  evolve: {
     BankAccountCreated: (_event, _state) => ({
       balance: 0,
       status: "active" as const,
@@ -201,8 +201,8 @@ The differences are significant:
 | `this` keyword    | Used throughout                    | Never used                         |
 | Decorators        | Often required                     | None                               |
 | State shape       | Implicit in fields                 | Explicit type (`BankAccountState`) |
-| Command handling  | Methods on the class               | Functions in a `commands` map      |
-| Event application | Protected methods on the class     | Functions in an `apply` map        |
+| Command handling  | Methods on the class               | Functions in a `decide` map        |
+| Event application | Protected methods on the class     | Functions in an `evolve` map       |
 | Testing           | Requires instantiation, mocks      | Call pure functions directly       |
 
 ## Benefits of the Decider Pattern
@@ -216,7 +216,7 @@ import { describe, it, expect } from "vitest";
 
 describe("AuthorizeTransaction", () => {
   const activeState: BankAccountState = { balance: 1000, status: "active" };
-  const handler = BankAccount.commands.AuthorizeTransaction;
+  const handler = BankAccount.decide.AuthorizeTransaction;
 
   it("authorizes when balance is sufficient", () => {
     const command = {
@@ -277,17 +277,17 @@ The entire state of a Decider is captured in a single, inspectable value. You ca
 
 ### No Framework Coupling
 
-A noddde aggregate is a plain TypeScript object with a specific shape. It does not extend a base class, implement a framework interface, or use decorators. If you ever want to migrate to a different framework, your domain logic — the `commands` and `apply` functions — are portable.
+A noddde aggregate is a plain TypeScript object with a specific shape. It does not extend a base class, implement a framework interface, or use decorators. If you ever want to migrate to a different framework, your domain logic — the `decide` and `evolve` functions — are portable.
 
 ## The Decider in noddde
 
 noddde's `defineAggregate` function maps directly to the three components of a Decider:
 
-| Decider Concept | noddde Equivalent | Purpose                                      |
-| --------------- | ----------------- | -------------------------------------------- |
-| `initialState`  | `initialState`    | Starting state for new aggregate instances   |
-| `decide`        | `commands` map    | Command handlers that return events          |
-| `evolve`        | `apply` map       | Apply handlers that evolve state from events |
+| Decider Concept | noddde Equivalent | Purpose                                        |
+| --------------- | ----------------- | ---------------------------------------------- |
+| `initialState`  | `initialState`    | Starting state for new aggregate instances     |
+| `decide`        | `decide` map      | Decide handlers that return events             |
+| `evolve`        | `evolve` map      | Evolve handlers that evolve state from events  |
 
 The `defineAggregate` function takes a configuration object and returns it with full type inference. It does not add behavior or register anything — it is an identity function that exists solely to provide type checking:
 
@@ -314,7 +314,7 @@ type BankAccountTypes = {
 };
 ```
 
-This bundle is passed as a single generic parameter to `defineAggregate<BankAccountTypes>(...)`. The framework then uses it to generate correctly typed handler maps — each command handler receives the narrowed command type and state, and each apply handler receives the narrowed event payload and state.
+This bundle is passed as a single generic parameter to `defineAggregate<BankAccountTypes>(...)`. The framework then uses it to generate correctly typed handler maps — each decide handler receives the narrowed command type and state, and each evolve handler receives the narrowed event payload and state.
 
 ### Infrastructure Injection
 
@@ -335,7 +335,7 @@ const Auction = defineAggregate<AuctionTypes>({
     /* ... */
   },
 
-  commands: {
+  decide: {
     PlaceBid: (command, state, { clock }) => {
       const now = clock.now();
       if (now > state.endTime) {
@@ -348,23 +348,23 @@ const Auction = defineAggregate<AuctionTypes>({
     },
   },
 
-  apply: {
-    // ... apply handlers (no infrastructure — always pure)
+  evolve: {
+    // ... evolve handlers (no infrastructure — always pure)
   },
 });
 ```
 
-Infrastructure is passed to command handlers but never to apply handlers. This is by design: apply handlers must be pure because they are used to replay events during state reconstruction. If apply handlers depended on infrastructure, replaying the same events could produce different states depending on external conditions, which would break the event sourcing guarantee.
+Infrastructure is passed to decide handlers but never to evolve handlers. This is by design: evolve handlers must be pure because they are used to replay events during state reconstruction. If evolve handlers depended on infrastructure, replaying the same events could produce different states depending on external conditions, which would break the event sourcing guarantee.
 
 ## Summary
 
 The Decider pattern gives you a simple, functional model for domain behavior:
 
-- **`decide`** (command handlers) contains your business rules and validation
-- **`evolve`** (apply handlers) contains your state transitions
+- **`decide`** (decide handlers) contains your business rules and validation
+- **`evolve`** (evolve handlers) contains your state transitions
 - **`initialState`** defines where new instances start
 
-noddde implements this pattern with `defineAggregate`, adding type-safe handler maps and infrastructure injection while preserving the pattern's core properties: no base classes, no decorators, no mutation, and full testability.
+noddde implements this pattern with `defineAggregate`, adding type-safe handler maps and infrastructure injection while preserving the pattern's core properties: no base classes, no decorators, no mutation, and full testability. The `decide` and `evolve` maps correspond directly to the Decider pattern's `decide` and `evolve` functions.
 
 ## Next Steps
 

@@ -18,12 +18,12 @@ Aggregates are consistency boundaries — the units that process commands and en
 ```ts
 const BankAccount = defineAggregate<BankAccountDef>({
   initialState: { balance: 0, transactions: [] },
-  commands: {
+  decide: {
     AuthorizeTransaction: (command, state, infra) => {
       /* return events */
     },
   },
-  apply: {
+  evolve: {
     TransactionAuthorized: (event, state) => {
       /* return new state */
     },
@@ -46,7 +46,7 @@ type BankAccountCommand = DefineCommands<{
 
 ### Events
 
-Events are **immutable facts about what happened**. They use past tense and are produced by command handlers:
+Events are **immutable facts about what happened**. They use past tense and are produced by decide handlers:
 
 ```ts
 type BankAccountEvent = DefineEvents<{
@@ -131,7 +131,7 @@ const domain = await wireDomain(myDomain, {
 |                   | Traditional DDD                   | noDDDe                                      |
 | ----------------- | --------------------------------- | ------------------------------------------- |
 | Aggregates        | Classes extending `AggregateRoot` | Plain objects via `defineAggregate`         |
-| State changes     | `this.apply(event)` mutates state | Apply handlers return new state (immutable) |
+| State changes     | `this.apply(event)` mutates state | evolve handlers return new state (immutable) |
 | Command handling  | Decorated methods                 | Typed handler maps                          |
 | Type safety       | Manual generic parameters         | Inferred from `AggregateTypes` bundle       |
 | Event definitions | Enum + interface + union          | `DefineEvents<{ ... }>` single declaration  |

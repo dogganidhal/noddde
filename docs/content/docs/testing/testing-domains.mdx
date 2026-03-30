@@ -71,7 +71,7 @@ type DomainSpy = {
 
 ## Spy: Published Events
 
-`spy.publishedEvents` records every event published on the event bus, in order. This captures events from aggregate command handlers after persistence:
+`spy.publishedEvents` records every event published on the event bus, in order. This captures events from aggregate decide handlers after persistence:
 
 ```ts
 const { domain, spy } = await testDomain({

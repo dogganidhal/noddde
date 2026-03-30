@@ -1,13 +1,13 @@
 ---
 title: Testing Aggregates & Projections
-description: Using testAggregate, evolveAggregate, and testProjection for Given-When-Then testing of command handlers and read models.
+description: Using testAggregate, evolveAggregate, and testProjection for Given-When-Then testing of decide handlers and read models.
 ---
 
 Aggregates and projections share a similar testing shape: replay events, then assert on the result. For aggregates you assert on produced events and state; for projections you assert on the final view. The `@noddde/testing` package provides type-safe harnesses for both.
 
 ## testAggregate
 
-The primary harness for testing command handlers. It replays given events through `apply` handlers to build state, executes the command handler, and returns the produced events and resulting state.
+The primary harness for testing decide handlers. It replays given events through `evolve` handlers to build state, executes the decide handler, and returns the produced events and resulting state.
 
 ```ts
 import { testAggregate } from "@noddde/testing";
@@ -46,7 +46,7 @@ expect(result.state.availableBalance).toBe(500);
 
 ```ts
 type AggregateTestResult<TState, TEvents> = {
-  events: TEvents[]; // Events produced by the command handler
+  events: TEvents[]; // Events produced by the decide handler
   state: TState; // State after applying produced events
   error?: Error; // Captured error (if handler threw)
 };
@@ -71,7 +71,7 @@ expect(result.events[0].name).toBe("BankAccountCreated");
 
 ## Testing Rejection Cases
 
-When a command handler throws (e.g., validation failure), the error is captured:
+When a decide handler throws (e.g., validation failure), the error is captured:
 
 ```ts
 const result = await testAggregate(BankAccount)
@@ -129,7 +129,7 @@ const result = await testAggregate(BankAccount)
 
 ## Testing Multiple Events from One Command
 
-When a command handler returns an array of events, all are captured and applied:
+When a decide handler returns an array of events, all are captured and applied:
 
 ```ts
 const result = await testAggregate(BankAccount)
@@ -151,7 +151,7 @@ expect(result.events).toHaveLength(3);
 
 ## evolveAggregate
 
-A standalone pure function for replaying events through apply handlers. Useful when you need to reconstruct state without executing a command:
+A standalone pure function for replaying events through evolve handlers. Useful when you need to reconstruct state without executing a command:
 
 ```ts
 import { evolveAggregate } from "@noddde/testing";
@@ -188,15 +188,15 @@ expect(state.balance).toBe(150);
 Since handlers are extracted to standalone functions, you can import and call them directly without going through the aggregate object:
 
 ```ts
-// Command handler — import the extracted function
-import { handleAuthorizeTransaction } from "./command-handlers/handle-authorize-transaction";
+// Decide handler — import the extracted function
+import { decideAuthorizeTransaction } from "./deciders/decide-authorize-transaction";
 
-const events = handleAuthorizeTransaction(command, state, infrastructure);
+const events = decideAuthorizeTransaction(command, state, infrastructure);
 
-// Apply handler — import the extracted function
-import { applyTransactionAuthorized } from "./apply-handlers/apply-transaction-authorized";
+// evolve handler — import the extracted function
+import { evolveTransactionAuthorized } from "./evolvers/evolve-transaction-authorized";
 
-const newState = applyTransactionAuthorized(payload, state);
+const newState = evolveTransactionAuthorized(payload, state);
 ```
 
 The harness is recommended for most tests because it manages state reconstruction from events and provides consistent error handling, but direct calls are useful for focused unit tests of individual handlers.
@@ -332,7 +332,7 @@ export const onAccountCreated: InferProjectionEventHandler<
 };
 ```
 
-This is consistent with the runtime behavior in `@noddde/engine` and different from aggregate apply handlers, which receive only the payload.
+This is consistent with the runtime behavior in `@noddde/engine` and different from aggregate evolve handlers, which receive only the payload.
 
 ## Testing Async Reducers
 

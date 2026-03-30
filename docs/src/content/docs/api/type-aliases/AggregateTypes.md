@@ -41,4 +41,4 @@ The discriminated union of all commands this aggregate can handle.
 
 > **infrastructure**: [`Infrastructure`](/api/type-aliases/infrastructure/)
 
-The external dependencies available to command handlers.
+The external dependencies available to decide handlers.

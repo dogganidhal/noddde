@@ -2,7 +2,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
   AggregateCommand,
-  CommandHandler,
+  DecideHandler,
   DefineCommands,
   DefineEvents,
   FrameworkInfrastructure,
@@ -11,8 +11,8 @@ import type {
   InferAggregateID,
   InferAggregateInfrastructure,
   InferAggregateState,
-  InferApplyHandler,
-  InferCommandHandler,
+  InferEvolveHandler,
+  InferDecideHandler,
   Infrastructure,
 } from "@noddde/core";
 import { defineAggregate } from "@noddde/core";
@@ -39,7 +39,7 @@ describe("defineAggregate", () => {
 
   const Counter = defineAggregate<CounterTypes>({
     initialState: { count: 0 },
-    commands: {
+    decide: {
       Increment: (command, _state, _infra) => ({
         name: "Incremented",
         payload: { amount: command.payload.amount },
@@ -49,7 +49,7 @@ describe("defineAggregate", () => {
         payload: { amount: command.payload.amount },
       }),
     },
-    apply: {
+    evolve: {
       Incremented: (payload, state) => ({
         count: state.count + payload.amount,
       }),
@@ -63,18 +63,18 @@ describe("defineAggregate", () => {
     expectTypeOf(Counter.initialState).toEqualTypeOf<CounterState>();
   });
 
-  it("should have typed command handlers", () => {
-    expectTypeOf(Counter.commands.Increment).toBeFunction();
-    expectTypeOf(Counter.commands.Decrement).toBeFunction();
+  it("should have typed decide handlers", () => {
+    expectTypeOf(Counter.decide.Increment).toBeFunction();
+    expectTypeOf(Counter.decide.Decrement).toBeFunction();
   });
 
-  it("should have typed apply handlers", () => {
-    expectTypeOf(Counter.apply.Incremented).toBeFunction();
-    expectTypeOf(Counter.apply.Decremented).toBeFunction();
+  it("should have typed evolve handlers", () => {
+    expectTypeOf(Counter.evolve.Incremented).toBeFunction();
+    expectTypeOf(Counter.evolve.Decremented).toBeFunction();
   });
 });
 
-describe("CommandHandler", () => {
+describe("DecideHandler", () => {
   interface CreateAccountCommand extends AggregateCommand {
     name: "CreateAccount";
     payload: { owner: string };
@@ -85,7 +85,7 @@ describe("CommandHandler", () => {
     payload: { id: string; owner: string };
   };
 
-  type Handler = CommandHandler<
+  type Handler = DecideHandler<
     CreateAccountCommand,
     { balance: number },
     AccountEvent,
@@ -134,7 +134,7 @@ describe("Aggregate exhaustive handlers", () => {
   it("should compile when all handlers are provided", () => {
     const cart = defineAggregate<CartTypes>({
       initialState: { items: [] },
-      commands: {
+      decide: {
         AddItem: (cmd) => ({
           name: "ItemAdded",
           payload: { item: cmd.payload.item },
@@ -144,7 +144,7 @@ describe("Aggregate exhaustive handlers", () => {
           payload: { item: cmd.payload.item },
         }),
       },
-      apply: {
+      evolve: {
         ItemAdded: (payload, state) => ({
           items: [...state.items, payload.item],
         }),
@@ -175,13 +175,13 @@ describe("Infer utilities", () => {
 
   const MyAggregate = defineAggregate<MyTypes>({
     initialState: { value: 0 },
-    commands: {
+    decide: {
       Update: (cmd) => ({
         name: "Updated",
         payload: { newValue: cmd.payload.newValue },
       }),
     },
-    apply: {
+    evolve: {
       Updated: (payload, _state) => ({ value: payload.newValue }),
     },
   });
@@ -215,7 +215,7 @@ describe("Infer utilities", () => {
   });
 });
 
-describe("Command handler return types", () => {
+describe("Decide handler return types", () => {
   type Events = DefineEvents<{ Done: { id: string } }>;
   type Commands = DefineCommands<{ DoIt: void; DoItTwice: void }>;
 
@@ -229,7 +229,7 @@ describe("Command handler return types", () => {
   it("should accept single event return", () => {
     const agg = defineAggregate<Types>({
       initialState: {},
-      commands: {
+      decide: {
         DoIt: (cmd) => ({
           name: "Done",
           payload: { id: cmd.targetAggregateId },
@@ -239,7 +239,7 @@ describe("Command handler return types", () => {
           { name: "Done", payload: { id: cmd.targetAggregateId } },
         ],
       },
-      apply: {
+      evolve: {
         Done: (_payload, state) => state,
       },
     });
@@ -276,13 +276,13 @@ describe("defineAggregate identity", () => {
   it("should return the exact same config object", () => {
     const config = {
       initialState: { v: 0 },
-      commands: {
+      decide: {
         Y: (cmd: any) => ({
           name: "X" as const,
           payload: { v: cmd.payload.v },
         }),
       },
-      apply: {
+      evolve: {
         X: (payload: any, _state: any) => ({ v: payload.v }),
       },
     };
@@ -291,7 +291,7 @@ describe("defineAggregate identity", () => {
   });
 });
 
-describe("InferCommandHandler", () => {
+describe("InferDecideHandler", () => {
   type MyState = { value: number };
 
   type MyEvent = DefineEvents<{
@@ -316,32 +316,32 @@ describe("InferCommandHandler", () => {
   };
 
   it("should narrow the command to the specific variant", () => {
-    type Handler = InferCommandHandler<MyTypes, "Update">;
+    type Handler = InferDecideHandler<MyTypes, "Update">;
     type Cmd = Parameters<Handler>[0];
     expectTypeOf<Cmd>().toEqualTypeOf<Extract<MyCommand, { name: "Update" }>>();
   });
 
   it("should use the aggregate state as second parameter", () => {
-    type Handler = InferCommandHandler<MyTypes, "Update">;
+    type Handler = InferDecideHandler<MyTypes, "Update">;
     expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<MyState>();
   });
 
   it("should merge infrastructure with FrameworkInfrastructure", () => {
-    type Handler = InferCommandHandler<MyTypes, "Update">;
+    type Handler = InferDecideHandler<MyTypes, "Update">;
     expectTypeOf<Parameters<Handler>[2]>().toEqualTypeOf<
       MyInfra & FrameworkInfrastructure
     >();
   });
 
   it("should return the event union", () => {
-    type Handler = InferCommandHandler<MyTypes, "Update">;
+    type Handler = InferDecideHandler<MyTypes, "Update">;
     expectTypeOf<ReturnType<Handler>>().toEqualTypeOf<
       MyEvent | MyEvent[] | Promise<MyEvent | MyEvent[]>
     >();
   });
 
-  it("should be usable in defineAggregate commands map", () => {
-    const handleUpdate: InferCommandHandler<MyTypes, "Update"> = (
+  it("should be usable in defineAggregate decide map", () => {
+    const handleUpdate: InferDecideHandler<MyTypes, "Update"> = (
       command,
       _state,
       _infra,
@@ -350,7 +350,7 @@ describe("InferCommandHandler", () => {
       payload: { newValue: command.payload.newValue },
     });
 
-    const handleReset: InferCommandHandler<MyTypes, "Reset"> = (
+    const handleReset: InferDecideHandler<MyTypes, "Reset"> = (
       _command,
       _state,
       _infra,
@@ -361,21 +361,21 @@ describe("InferCommandHandler", () => {
 
     const agg = defineAggregate<MyTypes>({
       initialState: { value: 0 },
-      commands: {
+      decide: {
         Update: handleUpdate,
         Reset: handleReset,
       },
-      apply: {
+      evolve: {
         Updated: (payload, _state) => ({ value: payload.newValue }),
         Reset: (_payload, _state) => ({ value: 0 }),
       },
     });
 
-    expectTypeOf(agg.commands.Update).toEqualTypeOf<typeof handleUpdate>();
+    expectTypeOf(agg.decide.Update).toEqualTypeOf<typeof handleUpdate>();
   });
 });
 
-describe("InferApplyHandler", () => {
+describe("InferEvolveHandler", () => {
   type MyState = { value: number };
 
   type MyEvent = DefineEvents<{
@@ -396,32 +396,32 @@ describe("InferApplyHandler", () => {
   };
 
   it("should narrow the event payload to the specific variant", () => {
-    type Handler = InferApplyHandler<MyTypes, "Updated">;
+    type Handler = InferEvolveHandler<MyTypes, "Updated">;
     expectTypeOf<Parameters<Handler>[0]>().toEqualTypeOf<{
       newValue: number;
     }>();
   });
 
   it("should use the aggregate state as second parameter and return type", () => {
-    type Handler = InferApplyHandler<MyTypes, "Updated">;
+    type Handler = InferEvolveHandler<MyTypes, "Updated">;
     expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<MyState>();
     expectTypeOf<ReturnType<Handler>>().toEqualTypeOf<MyState>();
   });
 
-  it("should be usable in defineAggregate apply map", () => {
-    const applyUpdated: InferApplyHandler<MyTypes, "Updated"> = (
+  it("should be usable in defineAggregate evolve map", () => {
+    const evolveUpdated: InferEvolveHandler<MyTypes, "Updated"> = (
       payload,
       _state,
     ) => ({ value: payload.newValue });
 
-    const applyReset: InferApplyHandler<MyTypes, "Reset"> = (
+    const evolveReset: InferEvolveHandler<MyTypes, "Reset"> = (
       _payload,
       _state,
     ) => ({ value: 0 });
 
     const agg = defineAggregate<MyTypes>({
       initialState: { value: 0 },
-      commands: {
+      decide: {
         Update: (cmd) => ({
           name: "Updated",
           payload: { newValue: cmd.payload.newValue },
@@ -431,12 +431,12 @@ describe("InferApplyHandler", () => {
           payload: {},
         }),
       },
-      apply: {
-        Updated: applyUpdated,
-        Reset: applyReset,
+      evolve: {
+        Updated: evolveUpdated,
+        Reset: evolveReset,
       },
     });
 
-    expectTypeOf(agg.apply.Updated).toEqualTypeOf<typeof applyUpdated>();
+    expectTypeOf(agg.evolve.Updated).toEqualTypeOf<typeof evolveUpdated>();
   });
 });

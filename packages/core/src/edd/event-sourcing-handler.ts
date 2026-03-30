@@ -3,7 +3,7 @@ import { Event } from "./event";
 
 /**
  * A pure, synchronous function that evolves aggregate state in response to an event.
- * Apply handlers are the replay engine of event sourcing — they must be deterministic
+ * Evolve handlers are the replay engine of event sourcing — they must be deterministic
  * and free of side effects so that replaying events always produces the same state.
  *
  * **Constraints:**
@@ -16,9 +16,9 @@ import { Event } from "./event";
  *
  * @param event - The event payload (not the full event envelope).
  * @param state - The current aggregate state before this event.
- * @returns The new aggregate state after applying this event.
+ * @returns The new aggregate state after evolving with this event.
  */
-export type ApplyHandler<TEvent extends Event, TState> = (
+export type EvolveHandler<TEvent extends Event, TState> = (
   event: TEvent["payload"],
   state: TState,
 ) => TState;

@@ -649,7 +649,7 @@ States and event payloads are serialized as JSON strings, making the schema data
 
 ### Event Metadata Column
 
-The `metadata` column on `noddde_events` stores the [event metadata envelope](/docs/running/domain-configuration#event-metadata) as a nullable JSON value. The engine auto-populates metadata (eventId, timestamp, correlationId, causationId, userId, aggregate info, sequence number) before persistence -- command handlers do not need to produce it.
+The `metadata` column on `noddde_events` stores the [event metadata envelope](/docs/running/domain-configuration#event-metadata) as a nullable JSON value. The engine auto-populates metadata (eventId, timestamp, correlationId, causationId, userId, aggregate info, sequence number) before persistence -- decide handlers do not need to produce it.
 
 The column type varies by dialect:
 

@@ -35,7 +35,7 @@ PaymentCompleted: {
 
 ### Mirrors the Aggregate Pattern
 
-In noddde, aggregate command handlers return events — they don't persist events themselves. The framework handles persistence and dispatch. Sagas follow the same pattern: handlers return commands, and the framework handles dispatch after persisting the new state.
+In noddde, aggregate decide handlers return events — they don't persist events themselves. The framework handles persistence and dispatch. Sagas follow the same pattern: handlers return commands, and the framework handles dispatch after persisting the new state.
 
 This consistency makes the framework predictable: **handlers declare outputs, the framework executes side effects**.
 

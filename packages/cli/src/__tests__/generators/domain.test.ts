@@ -30,10 +30,10 @@ describe("generateDomain", () => {
       "domain/write-model/aggregates/bank-account/bank-account.ts",
       "domain/write-model/aggregates/bank-account/commands/index.ts",
       "domain/write-model/aggregates/bank-account/commands/create-bank-account.ts",
-      "domain/write-model/aggregates/bank-account/command-handlers/index.ts",
-      "domain/write-model/aggregates/bank-account/command-handlers/handle-create-bank-account.ts",
-      "domain/write-model/aggregates/bank-account/apply-handlers/index.ts",
-      "domain/write-model/aggregates/bank-account/apply-handlers/apply-bank-account-created.ts",
+      "domain/write-model/aggregates/bank-account/deciders/index.ts",
+      "domain/write-model/aggregates/bank-account/deciders/decide-create-bank-account.ts",
+      "domain/write-model/aggregates/bank-account/evolvers/index.ts",
+      "domain/write-model/aggregates/bank-account/evolvers/evolve-bank-account-created.ts",
       // Read model
       "domain/read-model/projections/bank-account/index.ts",
       "domain/read-model/projections/bank-account/bank-account.ts",
@@ -64,36 +64,36 @@ describe("generateDomain", () => {
     const content = await readFile(aggPath, "utf-8");
     expect(content).toContain("defineAggregate");
     expect(content).toContain("BankAccountDef");
-    expect(content).toContain("handleCreateBankAccount");
+    expect(content).toContain("decideCreateBankAccount");
     expect(content).toContain("DefineEvents");
     expect(content).toContain("DefineCommands");
   });
 
-  it("generates standalone command handler using InferCommandHandler", async () => {
+  it("generates standalone decide handler using InferDecideHandler", async () => {
     await generateDomain("BankAccount", tmpDir);
 
     const handlerPath = path.join(
       tmpDir,
-      "bank-account/domain/write-model/aggregates/bank-account/command-handlers/handle-create-bank-account.ts",
+      "bank-account/domain/write-model/aggregates/bank-account/deciders/decide-create-bank-account.ts",
     );
     const content = await readFile(handlerPath, "utf-8");
-    expect(content).toContain("InferCommandHandler");
+    expect(content).toContain("InferDecideHandler");
     expect(content).toContain("BankAccountDef");
-    expect(content).toContain("handleCreateBankAccount");
+    expect(content).toContain("decideCreateBankAccount");
     expect(content).toContain('"BankAccountCreated" as const');
   });
 
-  it("generates standalone apply handler using InferApplyHandler", async () => {
+  it("generates standalone evolve handler using InferEvolveHandler", async () => {
     await generateDomain("BankAccount", tmpDir);
 
     const handlerPath = path.join(
       tmpDir,
-      "bank-account/domain/write-model/aggregates/bank-account/apply-handlers/apply-bank-account-created.ts",
+      "bank-account/domain/write-model/aggregates/bank-account/evolvers/evolve-bank-account-created.ts",
     );
     const content = await readFile(handlerPath, "utf-8");
-    expect(content).toContain("InferApplyHandler");
+    expect(content).toContain("InferEvolveHandler");
     expect(content).toContain("BankAccountDef");
-    expect(content).toContain("applyBankAccountCreated");
+    expect(content).toContain("evolveBankAccountCreated");
   });
 
   it("generates projection with on map and exported Def type", async () => {

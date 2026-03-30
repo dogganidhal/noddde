@@ -177,7 +177,7 @@ describe("Domain bootstrap - full configuration", () => {
     infrastructure: {};
   }>({
     initialState: { resolved: false },
-    commands: {
+    decide: {
       CreateTicket: (cmd) => ({
         name: "TicketCreated",
         payload: { id: cmd.targetAggregateId, title: cmd.payload.title },
@@ -187,7 +187,7 @@ describe("Domain bootstrap - full configuration", () => {
         payload: { id: cmd.targetAggregateId },
       }),
     },
-    apply: {
+    evolve: {
       TicketCreated: (payload, state) => ({ resolved: false }),
       TicketResolved: (payload, state) => ({ resolved: true }),
     },

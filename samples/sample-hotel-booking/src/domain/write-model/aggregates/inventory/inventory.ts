@@ -4,16 +4,16 @@ import type { InventoryEvent } from "../../../event-model";
 import type { InventoryCommand } from "./commands";
 import type { InventoryState } from "./state";
 import { initialInventoryState } from "./state";
-import { handleInitializeInventory } from "./command-handlers/handle-initialize-inventory";
-import { handleUpdateRoomTypeCount } from "./command-handlers/handle-update-room-type-count";
-import { handleDecrementAvailability } from "./command-handlers/handle-decrement-availability";
-import { handleIncrementAvailability } from "./command-handlers/handle-increment-availability";
+import { decideInitializeInventory } from "./deciders/decide-initialize-inventory";
+import { decideUpdateRoomTypeCount } from "./deciders/decide-update-room-type-count";
+import { decideDecrementAvailability } from "./deciders/decide-decrement-availability";
+import { decideIncrementAvailability } from "./deciders/decide-increment-availability";
 import {
-  applyInventoryInitialized,
-  applyRoomTypeCountUpdated,
-  applyAvailabilityDecremented,
-  applyAvailabilityIncremented,
-} from "./apply-handlers";
+  evolveInventoryInitialized,
+  evolveRoomTypeCountUpdated,
+  evolveAvailabilityDecremented,
+  evolveAvailabilityIncremented,
+} from "./evolvers";
 
 /** Type bundle for the Inventory aggregate. */
 export type InventoryDef = {
@@ -32,17 +32,17 @@ export type InventoryDef = {
 export const Inventory = defineAggregate<InventoryDef>({
   initialState: initialInventoryState,
 
-  commands: {
-    InitializeInventory: handleInitializeInventory,
-    UpdateRoomTypeCount: handleUpdateRoomTypeCount,
-    DecrementAvailability: handleDecrementAvailability,
-    IncrementAvailability: handleIncrementAvailability,
+  decide: {
+    InitializeInventory: decideInitializeInventory,
+    UpdateRoomTypeCount: decideUpdateRoomTypeCount,
+    DecrementAvailability: decideDecrementAvailability,
+    IncrementAvailability: decideIncrementAvailability,
   },
 
-  apply: {
-    InventoryInitialized: applyInventoryInitialized,
-    RoomTypeCountUpdated: applyRoomTypeCountUpdated,
-    AvailabilityDecremented: applyAvailabilityDecremented,
-    AvailabilityIncremented: applyAvailabilityIncremented,
+  evolve: {
+    InventoryInitialized: evolveInventoryInitialized,
+    RoomTypeCountUpdated: evolveRoomTypeCountUpdated,
+    AvailabilityDecremented: evolveAvailabilityDecremented,
+    AvailabilityIncremented: evolveAvailabilityIncremented,
   },
 });

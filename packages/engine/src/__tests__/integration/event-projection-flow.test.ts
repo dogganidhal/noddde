@@ -35,7 +35,7 @@ describe("Event-to-projection flow", () => {
 
   const Todo = defineAggregate<TodoTypes>({
     initialState: { completed: false },
-    commands: {
+    decide: {
       AddTodo: (command, state) => ({
         name: "TodoAdded",
         payload: {
@@ -48,7 +48,7 @@ describe("Event-to-projection flow", () => {
         payload: { id: command.targetAggregateId },
       }),
     },
-    apply: {
+    evolve: {
       TodoAdded: (payload, state) => ({ completed: false }),
       TodoCompleted: (payload, state) => ({ completed: true }),
     },
@@ -172,7 +172,7 @@ describe("Multiple projections for same event", () => {
     infrastructure: {};
   }>({
     initialState: { name: null },
-    commands: {
+    decide: {
       CreateItem: (cmd, state) => ({
         name: "ItemCreated",
         payload: {
@@ -182,7 +182,7 @@ describe("Multiple projections for same event", () => {
         },
       }),
     },
-    apply: {
+    evolve: {
       ItemCreated: (payload, state) => ({ name: payload.name }),
     },
   });
@@ -299,13 +299,13 @@ describe("Async projection reducer", () => {
     infrastructure: {};
   }>({
     initialState: {},
-    commands: {
+    decide: {
       LogEntry: (cmd) => ({
         name: "EntryLogged",
         payload: { message: cmd.payload.message },
       }),
     },
-    apply: {
+    evolve: {
       EntryLogged: (payload, state) => state,
     },
   });
@@ -385,7 +385,7 @@ describe("Sequential events produce cumulative view", () => {
     infrastructure: {};
   }>({
     initialState: { balance: 0 },
-    commands: {
+    decide: {
       Deposit: (cmd) => ({
         name: "Deposited",
         payload: { amount: cmd.payload.amount },
@@ -395,7 +395,7 @@ describe("Sequential events produce cumulative view", () => {
         payload: { amount: cmd.payload.amount },
       }),
     },
-    apply: {
+    evolve: {
       Deposited: (payload, state) => ({
         balance: state.balance + payload.amount,
       }),

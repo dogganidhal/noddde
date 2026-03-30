@@ -133,8 +133,8 @@ export const BankAccount = defineAggregate<BankAccountDef>({
     transactions: [],
   },
 
-  // Command handlers — decide what events to produce
-  commands: {
+  // Decide handlers — decide what events to produce
+  decide: {
     CreateBankAccount: (command) => ({
       name: "BankAccountCreated",
       payload: { id: command.targetAggregateId },
@@ -167,8 +167,8 @@ export const BankAccount = defineAggregate<BankAccountDef>({
     },
   },
 
-  // Apply handlers — evolve state from events (pure functions)
-  apply: {
+  // Evolve handlers — evolve state from events (pure functions)
+  evolve: {
     BankAccountCreated: () => ({
       balance: 0,
       availableBalance: 0,
@@ -244,11 +244,11 @@ await domain.dispatchCommand({
 The full flow for each `dispatchCommand` call:
 
 1. **Command dispatched** — `{ name: "AuthorizeTransaction", targetAggregateId: "...", payload: { amount: 100, merchant: "Amazon" } }`
-2. **State loaded** — Framework loads the aggregate's event history and replays through apply handlers
-3. **Command handler called** — `commands.AuthorizeTransaction(command, currentState, infrastructure)`
+2. **State loaded** — Framework loads the aggregate's event history and replays through evolve handlers
+3. **Decide handler called** — `decide.AuthorizeTransaction(command, currentState, infrastructure)`
 4. **Event returned** — Handler decides: `TransactionAuthorized` or `TransactionDeclined`
 5. **Event persisted** — Saved to the event store
-6. **State updated** — Apply handler called: `apply.TransactionAuthorized(event, state)` returns new state
+6. **State updated** — Evolve handler called: `evolve.TransactionAuthorized(event, state)` returns new state
 7. **Event published** — Sent to EventBus for projections to consume
 
 This example uses optimistic concurrency with no retries (the default). For high-contention aggregates, you can configure automatic retries or pessimistic locking — see [Concurrency Strategies](/docs/running/persistence#concurrency-control).

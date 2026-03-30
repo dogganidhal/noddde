@@ -302,7 +302,7 @@ const Ticket = defineAggregate<{
   infrastructure: {};
 }>({
   initialState: { resolved: false },
-  commands: {
+  decide: {
     CreateTicket: (cmd) => ({
       name: "TicketCreated",
       payload: { id: cmd.targetAggregateId, title: cmd.payload.title },
@@ -312,7 +312,7 @@ const Ticket = defineAggregate<{
       payload: { id: cmd.targetAggregateId },
     }),
   },
-  apply: {
+  evolve: {
     TicketCreated: (payload, state) => ({ resolved: false }),
     TicketResolved: (payload, state) => ({ resolved: true }),
   },

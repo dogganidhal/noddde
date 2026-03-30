@@ -115,7 +115,7 @@ type CounterTypes = AggregateTypes & {
 
 const Counter = defineAggregate<CounterTypes>({
   initialState: { count: 0 },
-  commands: {
+  decide: {
     CreateCounter: (command) => ({
       name: "CounterCreated",
       payload: { id: command.targetAggregateId },
@@ -125,7 +125,7 @@ const Counter = defineAggregate<CounterTypes>({
       payload: { by: command.payload.by },
     }),
   },
-  apply: {
+  evolve: {
     CounterCreated: (_payload, state) => state,
     Incremented: (payload, state) => ({ count: state.count + payload.by }),
   },
@@ -224,7 +224,7 @@ type BalanceTypes = AggregateTypes & {
 
 const BankAccount = defineAggregate<BalanceTypes>({
   initialState: { balance: 0 },
-  commands: {
+  decide: {
     OpenAccount: (cmd) => ({
       name: "AccountOpened",
       payload: { id: cmd.targetAggregateId },
@@ -237,7 +237,7 @@ const BankAccount = defineAggregate<BalanceTypes>({
       };
     },
   },
-  apply: {
+  evolve: {
     AccountOpened: (_p, state) => state,
     DepositMade: (payload, state) => ({
       balance: state.balance + payload.amount,
@@ -382,7 +382,7 @@ type OrderTypes = AggregateTypes & {
 
 const OrderAggregate = defineAggregate<OrderTypes>({
   initialState: { status: "new", total: 0 },
-  commands: {
+  decide: {
     PlaceOrder: (cmd) => ({
       name: "OrderPlaced",
       payload: { orderId: cmd.targetAggregateId, total: cmd.payload.total },
@@ -392,7 +392,7 @@ const OrderAggregate = defineAggregate<OrderTypes>({
       payload: { orderId: cmd.targetAggregateId },
     }),
   },
-  apply: {
+  evolve: {
     OrderPlaced: (payload, state) => ({
       ...state,
       status: "placed",
@@ -526,13 +526,13 @@ type TodoTypes = AggregateTypes & {
 
 const TodoList = defineAggregate<TodoTypes>({
   initialState: { items: [] },
-  commands: {
+  decide: {
     AddTodo: (cmd) => ({
       name: "TodoAdded",
       payload: { item: cmd.payload.item },
     }),
   },
-  apply: {
+  evolve: {
     TodoAdded: (payload, state) => ({
       items: [...state.items, payload.item],
     }),
@@ -643,13 +643,13 @@ type SimpleTypes = AggregateTypes & {
 
 const SimpleAggregate = defineAggregate<SimpleTypes>({
   initialState: {},
-  commands: {
+  decide: {
     DoThing: (cmd) => ({
       name: "ThingHappened",
       payload: { id: cmd.targetAggregateId },
     }),
   },
-  apply: {
+  evolve: {
     ThingHappened: (_p, state) => state,
   },
 });
@@ -911,7 +911,7 @@ describe("Domain.withUnitOfWork", () => {
     // Create a "broken" aggregate that throws on Increment
     const BrokenCounter = defineAggregate<CounterTypes>({
       initialState: { count: 0 },
-      commands: {
+      decide: {
         CreateCounter: (cmd) => ({
           name: "CounterCreated",
           payload: { id: cmd.targetAggregateId },
@@ -920,7 +920,7 @@ describe("Domain.withUnitOfWork", () => {
           throw new Error("Command handler failure");
         },
       },
-      apply: {
+      evolve: {
         CounterCreated: (_payload, state) => state,
         Incremented: (payload, state) => ({
           count: state.count + payload.by,
@@ -1104,7 +1104,7 @@ describe("Domain - pessimistic concurrency", () => {
     // Aggregate that throws on a specific command
     const FailingCounter = defineAggregate<CounterTypes>({
       initialState: { count: 0 },
-      commands: {
+      decide: {
         CreateCounter: (cmd) => ({
           name: "CounterCreated",
           payload: { id: cmd.targetAggregateId },
@@ -1113,7 +1113,7 @@ describe("Domain - pessimistic concurrency", () => {
           throw new Error("Handler failure");
         },
       },
-      apply: {
+      evolve: {
         CounterCreated: (_payload, state) => state,
         Incremented: (payload, state) => ({
           count: state.count + payload.by,
@@ -1603,10 +1603,10 @@ describe("defineDomain", () => {
 
     const Pinger = defineAggregate<PingTypes>({
       initialState: { pinged: false },
-      commands: {
+      decide: {
         Ping: () => ({ name: "Pinged", payload: {} }),
       },
-      apply: {
+      evolve: {
         Pinged: () => ({ pinged: true }),
       },
     });
@@ -1645,7 +1645,7 @@ describe("wireDomain", () => {
 
   const Counter = defineAggregate<CounterTypes>({
     initialState: { count: 0 },
-    commands: {
+    decide: {
       CreateCounter: (cmd) => ({
         name: "CounterCreated",
         payload: { id: cmd.targetAggregateId },
@@ -1655,7 +1655,7 @@ describe("wireDomain", () => {
         payload: { by: cmd.payload.by },
       }),
     },
-    apply: {
+    evolve: {
       CounterCreated: (_p, state) => state,
       Incremented: (payload, state) => ({ count: state.count + payload.by }),
     },
@@ -1710,10 +1710,10 @@ describe("wireDomain", () => {
 
     const Pinger = defineAggregate<PingTypes>({
       initialState: { pinged: false },
-      commands: {
+      decide: {
         Ping: () => ({ name: "Pinged", payload: {} }),
       },
-      apply: {
+      evolve: {
         Pinged: () => ({ pinged: true }),
       },
     });
@@ -1749,13 +1749,13 @@ describe("wireDomain", () => {
 
     const Pinger = defineAggregate<PingTypes>({
       initialState: { lastPing: null },
-      commands: {
+      decide: {
         Ping: (_cmd, _state, infra) => ({
           name: "Pinged",
           payload: { at: infra.clock.now().toISOString() },
         }),
       },
-      apply: {
+      evolve: {
         Pinged: (payload) => ({ lastPing: new Date(payload.at) }),
       },
     });
@@ -1803,13 +1803,13 @@ describe("wireDomain per-aggregate config", () => {
 
   const Counter = defineAggregate<CounterTypes>({
     initialState: { count: 0 },
-    commands: {
+    decide: {
       Increment: (cmd) => ({
         name: "Incremented",
         payload: { by: cmd.payload.by },
       }),
     },
-    apply: {
+    evolve: {
       Incremented: (payload, state) => ({ count: state.count + payload.by }),
     },
   });
@@ -1826,13 +1826,13 @@ describe("wireDomain per-aggregate config", () => {
 
   const BankAccount = defineAggregate<BalanceTypes>({
     initialState: { balance: 0 },
-    commands: {
+    decide: {
       Deposit: (cmd) => ({
         name: "DepositMade",
         payload: { amount: cmd.payload.amount },
       }),
     },
-    apply: {
+    evolve: {
       DepositMade: (payload, state) => ({
         balance: state.balance + payload.amount,
       }),
@@ -1944,13 +1944,13 @@ describe("wireDomain projection wiring", () => {
 
     const ItemAggregate = defineAggregate<ItemAggregateTypes>({
       initialState: {},
-      commands: {
+      decide: {
         AddItem: (cmd) => ({
           name: "ItemAdded",
           payload: { id: cmd.payload.id, name: cmd.payload.name },
         }),
       },
-      apply: {
+      evolve: {
         ItemAdded: (_p, state) => state,
       },
     });
@@ -2011,10 +2011,10 @@ describe("wireDomain hello world", () => {
 
     const Pinger = defineAggregate<PingTypes>({
       initialState: { pinged: false },
-      commands: {
+      decide: {
         Ping: () => ({ name: "Pinged", payload: {} }),
       },
-      apply: {
+      evolve: {
         Pinged: () => ({ pinged: true }),
       },
     });
@@ -2051,10 +2051,10 @@ describe("wireDomain hello world", () => {
 
     const Pinger = defineAggregate<PingTypes>({
       initialState: { pinged: false },
-      commands: {
+      decide: {
         Ping: () => ({ name: "Pinged", payload: {} }),
       },
-      apply: {
+      evolve: {
         Pinged: () => ({ pinged: true }),
       },
     });
@@ -2092,10 +2092,10 @@ describe("wireDomain hello world", () => {
 
     const Pinger = defineAggregate<PingTypes>({
       initialState: { pinged: false },
-      commands: {
+      decide: {
         Ping: () => ({ name: "Pinged", payload: {} }),
       },
-      apply: {
+      evolve: {
         Pinged: () => ({ pinged: true }),
       },
     });
@@ -2142,13 +2142,13 @@ describe("wireDomain hello world", () => {
 
     const Order = defineAggregate<OrderTypes>({
       initialState: { placed: false },
-      commands: {
+      decide: {
         PlaceOrder: (cmd) => ({
           name: "OrderPlaced",
           payload: { orderId: cmd.targetAggregateId },
         }),
       },
-      apply: {
+      evolve: {
         OrderPlaced: () => ({ placed: true }),
       },
     });
@@ -2202,7 +2202,7 @@ describe("standalone event handlers", () => {
   // Reuse the Counter aggregate defined earlier in this file
   const CounterAggregate = defineAggregate<CounterTypes>({
     initialState: { count: 0 },
-    commands: {
+    decide: {
       CreateCounter: (cmd) => ({
         name: "CounterCreated",
         payload: { id: cmd.targetAggregateId },
@@ -2212,7 +2212,7 @@ describe("standalone event handlers", () => {
         payload: { by: cmd.payload.by },
       }),
     },
-    apply: {
+    evolve: {
       CounterCreated: (_p, state) => state,
       Incremented: (payload, state) => ({ count: state.count + payload.by }),
     },

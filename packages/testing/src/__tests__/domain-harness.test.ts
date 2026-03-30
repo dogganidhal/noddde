@@ -31,13 +31,13 @@ type CounterTypes = {
 
 const Counter = defineAggregate<CounterTypes>({
   initialState: { count: 0 },
-  commands: {
+  decide: {
     Increment: (command) => ({
       name: "Incremented",
       payload: { amount: command.payload.amount },
     }),
   },
-  apply: {
+  evolve: {
     Incremented: (payload, state) => ({ count: state.count + payload.amount }),
   },
 });

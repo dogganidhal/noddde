@@ -93,7 +93,7 @@ docs:
 
 ## Behavioral Requirements
 
-1. Reducers receive the FULL event object (with narrowed type via `Extract`), not just the payload. This differs from `ApplyHandler` which receives only the payload.
+1. Reducers receive the FULL event object (with narrowed type via `Extract`), not just the payload. This differs from `EvolveHandler` which receives only the payload.
 2. Reducers may be sync or async (`T["view"] | Promise<T["view"]>`).
 3. The `on` map is **partial** over the event union — only events the projection cares about need entries. Unhandled events are silently ignored. This replaces the old exhaustive `reducers` map.
 4. Query handlers are OPTIONAL per query name (the `?` modifier). A projection may handle events without directly serving queries.

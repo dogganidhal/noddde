@@ -110,7 +110,7 @@ Specs declare their dependencies via the `depends_on` frontmatter field. This cr
 ```
 Layer 1 (leaves):     event, command, query, infrastructure
                            ↓
-Layer 2 (handlers):   event-bus, event-handler, apply-handler,
+Layer 2 (handlers):   event-bus, event-handler, evolve-handler,
                       command-bus, command-handler, query-bus, query-handler
                            ↓
 Layer 3 (definitions): aggregate, projection, saga

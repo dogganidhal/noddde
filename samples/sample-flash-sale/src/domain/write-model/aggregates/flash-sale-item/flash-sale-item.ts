@@ -4,13 +4,13 @@ import type { FlashSaleEvent } from "../../../event-model";
 import type { FlashSaleCommand } from "./commands";
 import type { FlashSaleState } from "./state";
 import { initialFlashSaleState } from "./state";
-import { handleCreateFlashSale } from "./command-handlers/handle-create-flash-sale";
-import { handlePurchaseItem } from "./command-handlers/handle-purchase-item";
+import { decideCreateFlashSale } from "./deciders/decide-create-flash-sale";
+import { decidePurchaseItem } from "./deciders/decide-purchase-item";
 import {
-  applyFlashSaleCreated,
-  applyItemPurchased,
-  applyPurchaseRejected,
-} from "./apply-handlers";
+  evolveFlashSaleCreated,
+  evolveItemPurchased,
+  evolvePurchaseRejected,
+} from "./evolvers";
 
 /** Type bundle for the FlashSaleItem aggregate. */
 export type FlashSaleItemTypes = AggregateTypes & {
@@ -29,13 +29,13 @@ export type FlashSaleItemTypes = AggregateTypes & {
  */
 export const FlashSaleItem = defineAggregate<FlashSaleItemTypes>({
   initialState: initialFlashSaleState,
-  commands: {
-    CreateFlashSale: handleCreateFlashSale,
-    PurchaseItem: handlePurchaseItem,
+  decide: {
+    CreateFlashSale: decideCreateFlashSale,
+    PurchaseItem: decidePurchaseItem,
   },
-  apply: {
-    FlashSaleCreated: applyFlashSaleCreated,
-    ItemPurchased: applyItemPurchased,
-    PurchaseRejected: applyPurchaseRejected,
+  evolve: {
+    FlashSaleCreated: evolveFlashSaleCreated,
+    ItemPurchased: evolveItemPurchased,
+    PurchaseRejected: evolvePurchaseRejected,
   },
 });

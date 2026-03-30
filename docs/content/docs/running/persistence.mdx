@@ -11,7 +11,7 @@ For the conceptual foundation of event sourcing and CQRS, see [CQRS and Event So
 
 ### Event-Sourced Persistence
 
-With event sourcing, events are the source of truth. State is ephemeral -- derived on every load by replaying the complete event history through the aggregate's apply handlers.
+With event sourcing, events are the source of truth. State is ephemeral -- derived on every load by replaying the complete event history through the aggregate's evolve handlers.
 
 ```ts
 interface EventSourcedAggregatePersistence {
@@ -250,7 +250,7 @@ const domain = await wireDomain(myDomain, {
 });
 ```
 
-Command handlers may be called multiple times during retry and should be side-effect-free (the Decider pattern already ensures this: handlers only produce events).
+Decide handlers may be called multiple times during retry and should be side-effect-free (the Decider pattern already ensures this: handlers only produce events).
 
 ### Pessimistic Concurrency
 

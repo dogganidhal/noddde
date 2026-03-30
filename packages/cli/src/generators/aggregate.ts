@@ -10,15 +10,15 @@ import {
   commandPayloadTemplate,
 } from "../templates/domain/aggregate-commands.js";
 import {
-  commandHandlersIndexTemplate,
-  commandHandlerTemplate,
-} from "../templates/domain/aggregate-command-handlers.js";
+  decidersIndexTemplate,
+  deciderTemplate,
+} from "../templates/domain/aggregate-deciders.js";
 import {
-  applyHandlersIndexTemplate,
-  applyHandlerTemplate,
-} from "../templates/domain/aggregate-apply-handlers.js";
+  evolversIndexTemplate,
+  evolverTemplate,
+} from "../templates/domain/aggregate-evolvers.js";
 
-/** Generates an aggregate folder with commands, command-handlers, and apply-handlers subdirectories. */
+/** Generates an aggregate folder with commands, deciders, and evolvers subdirectories. */
 export async function generateAggregate(
   name: string,
   basePath: string,
@@ -40,20 +40,20 @@ export async function generateAggregate(
       content: commandPayloadTemplate(ctx),
     },
     {
-      relativePath: "command-handlers/index.ts",
-      content: commandHandlersIndexTemplate(ctx),
+      relativePath: "deciders/index.ts",
+      content: decidersIndexTemplate(ctx),
     },
     {
-      relativePath: `command-handlers/handle-create-${ctx.kebabName}.ts`,
-      content: commandHandlerTemplate(ctx),
+      relativePath: `deciders/decide-create-${ctx.kebabName}.ts`,
+      content: deciderTemplate(ctx),
     },
     {
-      relativePath: "apply-handlers/index.ts",
-      content: applyHandlersIndexTemplate(ctx),
+      relativePath: "evolvers/index.ts",
+      content: evolversIndexTemplate(ctx),
     },
     {
-      relativePath: `apply-handlers/apply-${ctx.kebabName}-created.ts`,
-      content: applyHandlerTemplate(ctx),
+      relativePath: `evolvers/evolve-${ctx.kebabName}-created.ts`,
+      content: evolverTemplate(ctx),
     },
   ];
 

@@ -54,8 +54,8 @@ Replace `throw new Error("Not implemented")` stubs with working code.
 - JSDoc on all public exports
 - No decorators, no DI containers, no base classes for domain concepts
 - Handler signatures must match exactly:
-  - Command handlers: `(command, state, infrastructure) => Event | Event[] | Promise<Event | Event[]>`
-  - Apply handlers: `(event.payload, state) => newState` — pure, sync
+  - Decide handlers: `(command, state, infrastructure) => Event | Event[] | Promise<Event | Event[]>`
+  - Evolve handlers: `(event.payload, state) => newState` — pure, sync
   - Event handlers: `(event.payload, infrastructure) => void | Promise<void>`
   - Saga handlers: `(event, state, infrastructure & CQRSInfrastructure) => SagaReaction | Promise<SagaReaction>`
   - Query handlers: `(query.payload, infrastructure) => Result | Promise<Result>`

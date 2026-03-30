@@ -101,7 +101,7 @@ type TodoTypes = {
 
 const Todo = defineAggregate<TodoTypes>({
   initialState: { completed: false },
-  commands: {
+  decide: {
     AddTodo: (command, state) => ({
       name: "TodoAdded",
       payload: { id: command.targetAggregateId, title: command.payload.title },
@@ -111,7 +111,7 @@ const Todo = defineAggregate<TodoTypes>({
       payload: { id: command.targetAggregateId },
     }),
   },
-  apply: {
+  evolve: {
     TodoAdded: (payload, state) => ({ completed: false }),
     TodoCompleted: (payload, state) => ({ completed: true }),
   },
@@ -238,7 +238,7 @@ const Item = defineAggregate<{
   infrastructure: {};
 }>({
   initialState: { name: null },
-  commands: {
+  decide: {
     CreateItem: (cmd, state) => ({
       name: "ItemCreated",
       payload: {
@@ -248,7 +248,7 @@ const Item = defineAggregate<{
       },
     }),
   },
-  apply: {
+  evolve: {
     ItemCreated: (payload, state) => ({ name: payload.name }),
   },
 });
@@ -358,13 +358,13 @@ const Logger = defineAggregate<{
   infrastructure: {};
 }>({
   initialState: {},
-  commands: {
+  decide: {
     LogEntry: (cmd) => ({
       name: "EntryLogged",
       payload: { message: cmd.payload.message },
     }),
   },
-  apply: {
+  evolve: {
     EntryLogged: (payload, state) => state,
   },
 });
@@ -453,7 +453,7 @@ const Account = defineAggregate<{
   infrastructure: {};
 }>({
   initialState: { balance: 0 },
-  commands: {
+  decide: {
     Deposit: (cmd) => ({
       name: "Deposited",
       payload: { amount: cmd.payload.amount },
@@ -463,7 +463,7 @@ const Account = defineAggregate<{
       payload: { amount: cmd.payload.amount },
     }),
   },
-  apply: {
+  evolve: {
     Deposited: (payload, state) => ({
       balance: state.balance + payload.amount,
     }),

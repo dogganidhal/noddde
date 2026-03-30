@@ -9,12 +9,12 @@ With the `defineDomain` + `wireDomain` API, infrastructure is cleanly separated 
 
 ## The Core Principle
 
-A command handler that decides whether a transaction is authorized should not know whether it is logging to the console or to CloudWatch. It should not know whether its state came from PostgreSQL or an in-memory store.
+A decide handler that decides whether a transaction is authorized should not know whether it is logging to the console or to CloudWatch. It should not know whether its state came from PostgreSQL or an in-memory store.
 
 noddde enforces this by injecting infrastructure as a function parameter, never as a direct import:
 
 ```ts
-commands: {
+decide: {
   AuthorizeTransaction: (command, state, { logger }) => {
     logger.info(`Processing transaction for ${command.payload.merchant}`);
     // Business logic here -- no knowledge of concrete logger
@@ -77,13 +77,13 @@ Infrastructure appears as a parameter in three handler types:
 
 | Handler Type                | Parameter Position | Receives                               |
 | --------------------------- | ------------------ | -------------------------------------- |
-| Aggregate command handlers  | Third parameter    | `TInfrastructure`                      |
+| Aggregate decide handlers  | Third parameter    | `TInfrastructure`                      |
 | Projection event handlers   | Second parameter   | `TInfrastructure`                      |
 | Query handlers              | Second parameter   | `TInfrastructure`                      |
 | Standalone command handlers | Second parameter   | `TInfrastructure & CQRSInfrastructure` |
 | Saga handlers               | Third parameter    | `TInfrastructure & CQRSInfrastructure` |
 
-[Apply handlers](/docs/core-concepts/cqrs-and-event-sourcing) deliberately do **not** receive infrastructure. They are pure, synchronous functions for deterministic event replay -- no side effects allowed.
+[Evolve handlers](/docs/core-concepts/cqrs-and-event-sourcing) deliberately do **not** receive infrastructure. They are pure, synchronous functions for deterministic event replay -- no side effects allowed.
 
 ## CQRSInfrastructure
 
@@ -249,7 +249,7 @@ buses: (infra) => ({
 }),
 ```
 
-Notice how `buses` receives the custom infrastructure as a parameter. This allows the logging bus to use the same logger that command handlers use.
+Notice how `buses` receives the custom infrastructure as a parameter. This allows the logging bus to use the same logger that decide handlers use.
 
 ## Testing with Different Infrastructure
 

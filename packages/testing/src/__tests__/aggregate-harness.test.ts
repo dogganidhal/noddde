@@ -27,7 +27,7 @@ type CounterTypes = {
 
 const Counter = defineAggregate<CounterTypes>({
   initialState: { count: 0 },
-  commands: {
+  decide: {
     Increment: (command, state) => ({
       name: "Incremented",
       payload: { amount: command.payload.amount },
@@ -42,7 +42,7 @@ const Counter = defineAggregate<CounterTypes>({
       };
     },
   },
-  apply: {
+  evolve: {
     Incremented: (payload, state) => ({ count: state.count + payload.amount }),
     Decremented: (payload, state) => ({ count: state.count - payload.amount }),
   },
@@ -67,7 +67,7 @@ type AsyncTypes = {
 
 const AsyncAggregate = defineAggregate<AsyncTypes>({
   initialState: { result: null },
-  commands: {
+  decide: {
     DoAsync: async (command) => {
       await new Promise((resolve) => setTimeout(resolve, 1));
       return {
@@ -76,7 +76,7 @@ const AsyncAggregate = defineAggregate<AsyncTypes>({
       };
     },
   },
-  apply: {
+  evolve: {
     Done: (payload) => ({ result: payload.result }),
   },
 });
@@ -102,13 +102,13 @@ type InfraTypes = {
 
 const InfraAggregate = defineAggregate<InfraTypes>({
   initialState: { timestamp: null },
-  commands: {
+  decide: {
     RecordTimestamp: (_command, _state, infrastructure) => ({
       name: "TimestampRecorded",
       payload: { timestamp: infrastructure.clock.now() },
     }),
   },
-  apply: {
+  evolve: {
     TimestampRecorded: (payload) => ({ timestamp: payload.timestamp }),
   },
 });
@@ -132,13 +132,13 @@ type MultiTypes = {
 
 const MultiAggregate = defineAggregate<MultiTypes>({
   initialState: { steps: [] },
-  commands: {
+  decide: {
     StepTwice: (command) => [
       { name: "Stepped", payload: { step: command.payload.base } },
       { name: "Stepped", payload: { step: command.payload.base + 1 } },
     ],
   },
-  apply: {
+  evolve: {
     Stepped: (payload, state) => ({ steps: [...state.steps, payload.step] }),
   },
 });

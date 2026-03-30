@@ -69,7 +69,7 @@ The fully resolved infrastructure (custom + CQRS buses).
 
 Defined in: [engine/domain.ts:332](https://github.com/dogganidhal/noddde/blob/main/packages/engine/src/domain.ts#L332)
 
-Initializes the domain by calling all infrastructure factories in order: custom infrastructure, CQRS buses, persistence. Then registers command handlers, query handlers, projection event listeners, and saga event listeners.
+Initializes the domain by calling all infrastructure factories in order: custom infrastructure, CQRS buses, persistence. Then registers decide handlers, query handlers, projection event listeners, and saga event listeners.
 
 #### Returns
 

@@ -74,13 +74,13 @@ const Order = defineAggregate<{
 }>({
   name: "Order",
   initialState: { placed: false },
-  commands: {
+  decide: {
     PlaceOrder: (cmd) => ({
       name: "OrderPlaced" as const,
       payload: { total: cmd.payload.total },
     }),
   },
-  apply: {
+  evolve: {
     OrderPlaced: (payload, state) => ({ ...state, placed: true }),
   },
 });

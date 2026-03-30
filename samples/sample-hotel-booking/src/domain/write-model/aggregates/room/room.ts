@@ -4,20 +4,20 @@ import type { RoomEvent } from "../../../event-model";
 import type { RoomCommand } from "./commands";
 import type { RoomState } from "./state";
 import { initialRoomState } from "./state";
-import { handleCreateRoom } from "./command-handlers/handle-create-room";
-import { handleMakeRoomAvailable } from "./command-handlers/handle-make-room-available";
-import { handleReserveRoom } from "./command-handlers/handle-reserve-room";
-import { handleCheckInGuest } from "./command-handlers/handle-check-in-guest";
-import { handleCheckOutGuest } from "./command-handlers/handle-check-out-guest";
-import { handlePutUnderMaintenance } from "./command-handlers/handle-put-under-maintenance";
+import { decideCreateRoom } from "./deciders/decide-create-room";
+import { decideMakeRoomAvailable } from "./deciders/decide-make-room-available";
+import { decideReserveRoom } from "./deciders/decide-reserve-room";
+import { decideCheckInGuest } from "./deciders/decide-check-in-guest";
+import { decideCheckOutGuest } from "./deciders/decide-check-out-guest";
+import { decidePutUnderMaintenance } from "./deciders/decide-put-under-maintenance";
 import {
-  applyRoomCreated,
-  applyRoomMadeAvailable,
-  applyRoomReserved,
-  applyGuestCheckedIn,
-  applyGuestCheckedOut,
-  applyRoomUnderMaintenance,
-} from "./apply-handlers";
+  evolveRoomCreated,
+  evolveRoomMadeAvailable,
+  evolveRoomReserved,
+  evolveGuestCheckedIn,
+  evolveGuestCheckedOut,
+  evolveRoomUnderMaintenance,
+} from "./evolvers";
 
 /** Type bundle for the Room aggregate. */
 export type RoomDef = {
@@ -37,21 +37,21 @@ export type RoomDef = {
 export const Room = defineAggregate<RoomDef>({
   initialState: initialRoomState,
 
-  commands: {
-    CreateRoom: handleCreateRoom,
-    MakeRoomAvailable: handleMakeRoomAvailable,
-    ReserveRoom: handleReserveRoom,
-    CheckInGuest: handleCheckInGuest,
-    CheckOutGuest: handleCheckOutGuest,
-    PutUnderMaintenance: handlePutUnderMaintenance,
+  decide: {
+    CreateRoom: decideCreateRoom,
+    MakeRoomAvailable: decideMakeRoomAvailable,
+    ReserveRoom: decideReserveRoom,
+    CheckInGuest: decideCheckInGuest,
+    CheckOutGuest: decideCheckOutGuest,
+    PutUnderMaintenance: decidePutUnderMaintenance,
   },
 
-  apply: {
-    RoomCreated: applyRoomCreated,
-    RoomMadeAvailable: applyRoomMadeAvailable,
-    RoomReserved: applyRoomReserved,
-    GuestCheckedIn: applyGuestCheckedIn,
-    GuestCheckedOut: applyGuestCheckedOut,
-    RoomUnderMaintenance: applyRoomUnderMaintenance,
+  evolve: {
+    RoomCreated: evolveRoomCreated,
+    RoomMadeAvailable: evolveRoomMadeAvailable,
+    RoomReserved: evolveRoomReserved,
+    GuestCheckedIn: evolveGuestCheckedIn,
+    GuestCheckedOut: evolveGuestCheckedOut,
+    RoomUnderMaintenance: evolveRoomUnderMaintenance,
   },
 });

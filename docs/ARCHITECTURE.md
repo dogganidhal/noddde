@@ -15,9 +15,9 @@ Teams building event-sourced business applications in TypeScript — particularl
 
 ## Design Priorities (ordered)
 
-1. **Type safety** — The type system should catch incorrect wiring at compile time, not at runtime. If a command handler returns the wrong event type, `tsc` should reject it.
+1. **Type safety** — The type system should catch incorrect wiring at compile time, not at runtime. If a decide handler returns the wrong event type, `tsc` should reject it.
 2. **Explicitness** — No hidden behavior. Infrastructure is passed as function parameters. Handlers are plain functions. Configuration is a data object.
-3. **Testability** — Domain logic (command handlers, apply handlers) must be testable without infrastructure. Pure functions in, assertions out.
+3. **Testability** — Domain logic (decide handlers, evolve handlers) must be testable without infrastructure. Pure functions in, assertions out.
 4. **Simplicity** — Minimize concepts. The Decider pattern (initialState + decide + evolve) is the only pattern for aggregates. No competing abstractions.
 5. **Composability** — Small, focused interfaces that combine. Two persistence strategies, not a universal adapter. Buses are interfaces, not base classes.
 
@@ -42,7 +42,7 @@ Detailed rationale lives in `docs/content/docs/design-decisions/`:
 | Why DefineCommands/Events      | Mapped type builders for discriminated unions                            |
 | Why ID Not in State            | ID as aggregate coordinate, separate from payload                        |
 | Why Injectable Infrastructure  | Function parameters vs DI containers                                     |
-| Why Pure Apply Handlers        | Deterministic replay guarantee                                           |
+| Why Pure Evolve Handlers       | Deterministic replay guarantee                                           |
 | Why Sagas Return Commands      | State machines, not orchestrators                                        |
 | Why Two Persistence Strategies | Event sourcing vs state snapshots, swappable                             |
 

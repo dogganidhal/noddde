@@ -6,8 +6,8 @@ export function aggregateTemplate(ctx: TemplateContext): string {
 import type { ${ctx.name}State } from "./state.js";
 import { initial${ctx.name}State } from "./state.js";
 import type { Create${ctx.name}Payload } from "./commands/create-${ctx.kebabName}.js";
-import { handleCreate${ctx.name} } from "./command-handlers/index.js";
-import { apply${ctx.name}Created } from "./apply-handlers/index.js";
+import { decideCreate${ctx.name} } from "./deciders/index.js";
+import { evolve${ctx.name}Created } from "./evolvers/index.js";
 
 // ── Type unions ─────────────────────────────────────────────────
 
@@ -35,12 +35,12 @@ export type ${ctx.name}Def = {
 export const ${ctx.name} = defineAggregate<${ctx.name}Def>({
   initialState: initial${ctx.name}State,
 
-  commands: {
-    Create${ctx.name}: handleCreate${ctx.name},
+  decide: {
+    Create${ctx.name}: decideCreate${ctx.name},
   },
 
-  apply: {
-    ${ctx.name}Created: apply${ctx.name}Created,
+  evolve: {
+    ${ctx.name}Created: evolve${ctx.name}Created,
   },
 });
 `;

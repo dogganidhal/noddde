@@ -25,7 +25,7 @@ noddde is a TypeScript framework for DDD, CQRS, and Event Sourcing using the fun
 
 **Engine** (`packages/engine/src/`): `domain.ts` (orchestrator), `implementations/` (in-memory backends for all buses, persistence, snapshots, locking).
 
-**Key patterns**: `*Types` bundles (named type containing state/events/commands/infrastructure), `Define*` mapped type builders, `define*` identity functions for inference, Decider pattern (initialState + commands + apply), infrastructure as function parameters.
+**Key patterns**: `*Types` bundles (named type containing state/events/commands/infrastructure), `Define*` mapped type builders, `define*` identity functions for inference, Decider pattern (initialState + decide + evolve), infrastructure as function parameters.
 
 ## Spec System
 
@@ -58,8 +58,8 @@ Drives the full pipeline: spec → RED tests → implement → GREEN tests → v
 
 ### Handler Signatures
 
-- **Command** (aggregate): `(command, state, infrastructure) => Event | Event[] | Promise<Event | Event[]>`
-- **Apply**: `(event.payload, state) => newState` — pure, sync, no infrastructure
+- **Decide** (aggregate): `(command, state, infrastructure) => Event | Event[] | Promise<Event | Event[]>`
+- **Evolve**: `(event.payload, state) => newState` — pure, sync, no infrastructure
 - **Event**: `(event.payload, infrastructure) => void | Promise<void>` — impure, async OK
 - **Saga**: `(event, state, infrastructure & CQRSInfrastructure) => SagaReaction | Promise<SagaReaction>`
 - **Query**: `(query.payload, infrastructure) => Result | Promise<Result>`

@@ -45,8 +45,8 @@ title: "@noddde/core"
 ## Type Aliases
 
 - [AggregateTypes](/api/type-aliases/aggregatetypes/)
-- [ApplyHandler](/api/type-aliases/applyhandler/)
-- [CommandHandler](/api/type-aliases/commandhandler/)
+- [DecideHandler](/api/type-aliases/decidehandler/)
+- [EvolveHandler](/api/type-aliases/evolvehandler/)
 - [DefineCommands](/api/type-aliases/definecommands/)
 - [DefineEvents](/api/type-aliases/defineevents/)
 - [DefineQueries](/api/type-aliases/definequeries/)

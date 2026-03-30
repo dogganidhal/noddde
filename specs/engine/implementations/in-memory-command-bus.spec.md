@@ -50,8 +50,8 @@ class InMemoryCommandBus implements CommandBus {
 
 ## Integration Points
 
-- **Domain.init()** -- The domain registers one handler per aggregate command (derived from `Aggregate.commands`) and one handler per standalone command handler in the write model.
-- **Domain.dispatchCommand()** -- Aggregate commands flow through the command bus. The bus invokes the handler that the domain registered, which internally loads the aggregate, executes the command handler, persists, and publishes events.
+- **Domain.init()** -- The domain registers one handler per aggregate command (derived from `Aggregate.decide`) and one handler per standalone command handler in the write model.
+- **Domain.dispatchCommand()** -- Aggregate commands flow through the command bus. The bus invokes the handler that the domain registered, which internally loads the aggregate, executes the decide handler, persists, and publishes events.
 - **Saga reactions** -- Sagas return commands that are dispatched through the command bus, closing the event-command loop.
 - **CQRSInfrastructure** -- This bus is provided as `commandBus` in the merged infrastructure object.
 

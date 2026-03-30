@@ -4,24 +4,24 @@ import type { BookingEvent } from "../../../event-model";
 import type { BookingCommand } from "./commands";
 import type { BookingState } from "./state";
 import { initialBookingState } from "./state";
-import { handleCreateBooking } from "./command-handlers/handle-create-booking";
-import { handleConfirmBooking } from "./command-handlers/handle-confirm-booking";
-import { handleCancelBooking } from "./command-handlers/handle-cancel-booking";
-import { handleModifyBooking } from "./command-handlers/handle-modify-booking";
-import { handleRequestPayment } from "./command-handlers/handle-request-payment";
-import { handleCompletePayment } from "./command-handlers/handle-complete-payment";
-import { handleFailPayment } from "./command-handlers/handle-fail-payment";
-import { handleRefundPayment } from "./command-handlers/handle-refund-payment";
+import { decideCreateBooking } from "./deciders/decide-create-booking";
+import { decideConfirmBooking } from "./deciders/decide-confirm-booking";
+import { decideCancelBooking } from "./deciders/decide-cancel-booking";
+import { decideModifyBooking } from "./deciders/decide-modify-booking";
+import { decideRequestPayment } from "./deciders/decide-request-payment";
+import { decideCompletePayment } from "./deciders/decide-complete-payment";
+import { decideFailPayment } from "./deciders/decide-fail-payment";
+import { decideRefundPayment } from "./deciders/decide-refund-payment";
 import {
-  applyBookingCreated,
-  applyBookingConfirmed,
-  applyBookingCancelled,
-  applyBookingModified,
-  applyPaymentRequested,
-  applyPaymentCompleted,
-  applyPaymentFailed,
-  applyPaymentRefunded,
-} from "./apply-handlers";
+  evolveBookingCreated,
+  evolveBookingConfirmed,
+  evolveBookingCancelled,
+  evolveBookingModified,
+  evolvePaymentRequested,
+  evolvePaymentCompleted,
+  evolvePaymentFailed,
+  evolvePaymentRefunded,
+} from "./evolvers";
 
 /** Type bundle for the Booking aggregate. */
 export type BookingDef = {
@@ -41,25 +41,25 @@ export type BookingDef = {
 export const Booking = defineAggregate<BookingDef>({
   initialState: initialBookingState,
 
-  commands: {
-    CreateBooking: handleCreateBooking,
-    ConfirmBooking: handleConfirmBooking,
-    CancelBooking: handleCancelBooking,
-    ModifyBooking: handleModifyBooking,
-    RequestPayment: handleRequestPayment,
-    CompletePayment: handleCompletePayment,
-    FailPayment: handleFailPayment,
-    RefundPayment: handleRefundPayment,
+  decide: {
+    CreateBooking: decideCreateBooking,
+    ConfirmBooking: decideConfirmBooking,
+    CancelBooking: decideCancelBooking,
+    ModifyBooking: decideModifyBooking,
+    RequestPayment: decideRequestPayment,
+    CompletePayment: decideCompletePayment,
+    FailPayment: decideFailPayment,
+    RefundPayment: decideRefundPayment,
   },
 
-  apply: {
-    BookingCreated: applyBookingCreated,
-    BookingConfirmed: applyBookingConfirmed,
-    BookingCancelled: applyBookingCancelled,
-    BookingModified: applyBookingModified,
-    PaymentRequested: applyPaymentRequested,
-    PaymentCompleted: applyPaymentCompleted,
-    PaymentFailed: applyPaymentFailed,
-    PaymentRefunded: applyPaymentRefunded,
+  evolve: {
+    BookingCreated: evolveBookingCreated,
+    BookingConfirmed: evolveBookingConfirmed,
+    BookingCancelled: evolveBookingCancelled,
+    BookingModified: evolveBookingModified,
+    PaymentRequested: evolvePaymentRequested,
+    PaymentCompleted: evolvePaymentCompleted,
+    PaymentFailed: evolvePaymentFailed,
+    PaymentRefunded: evolvePaymentRefunded,
   },
 });

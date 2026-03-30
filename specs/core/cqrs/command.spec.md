@@ -56,7 +56,7 @@ docs:
 ## Integration Points
 
 - `Command` is the base constraint for `CommandBus.dispatch` and `SagaTypes["commands"]`.
-- `AggregateCommand` is the constraint for `AggregateTypes["commands"]` and the aggregate `CommandHandler`.
+- `AggregateCommand` is the constraint for `AggregateTypes["commands"]` and the aggregate `DecideHandler`.
 - `StandaloneCommand` is the constraint for `StandaloneCommandHandler`.
 - `DefineCommands` is the primary way users define command unions that flow into `AggregateTypes`.
 

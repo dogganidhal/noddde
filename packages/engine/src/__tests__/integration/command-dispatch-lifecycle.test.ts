@@ -37,7 +37,7 @@ type CounterTypes = {
 
 const Counter = defineAggregate<CounterTypes>({
   initialState: { count: 0 },
-  commands: {
+  decide: {
     Increment: (command, state) => ({
       name: "Incremented",
       payload: { amount: command.payload.amount },
@@ -47,7 +47,7 @@ const Counter = defineAggregate<CounterTypes>({
       payload: { amount: command.payload.amount },
     }),
   },
-  apply: {
+  evolve: {
     Incremented: (payload, state) => ({ count: state.count + payload.amount }),
     Decremented: (payload, state) => ({ count: state.count - payload.amount }),
   },
@@ -246,13 +246,13 @@ describe("Multiple events from one command", () => {
 
   const BatchCounter = defineAggregate<BatchCounterTypes>({
     initialState: { count: 0 },
-    commands: {
+    decide: {
       IncrementTwice: (command, state) => [
         { name: "Incremented", payload: { amount: command.payload.amount } },
         { name: "Incremented", payload: { amount: command.payload.amount } },
       ],
     },
-    apply: {
+    evolve: {
       Incremented: (payload, state) => ({
         count: state.count + payload.amount,
       }),
@@ -311,7 +311,7 @@ describe("Async command handler", () => {
 
   const AsyncAggregate = defineAggregate<AsyncTypes>({
     initialState: { result: null },
-    commands: {
+    decide: {
       DoAsync: async (command, state) => {
         // Simulate async work
         await new Promise((resolve) => setTimeout(resolve, 1));
@@ -321,7 +321,7 @@ describe("Async command handler", () => {
         };
       },
     },
-    apply: {
+    evolve: {
       AsyncDone: (payload, state) => ({ result: payload.result }),
     },
   });

@@ -158,5 +158,5 @@ src/
           flash-sale-item.ts             # defineAggregate (refs extracted handlers)
           state.ts                       # FlashSaleState + initialFlashSaleState
           commands/                      # One file per command payload
-          command-handlers/              # One file per handler (standalone fn)
+          deciders/              # One file per handler (standalone fn)
 ```

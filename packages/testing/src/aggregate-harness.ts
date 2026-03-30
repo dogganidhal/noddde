@@ -29,7 +29,7 @@ export function evolveAggregate<T extends AggregateTypes>(
   initialState?: T["state"],
 ): T["state"] {
   return events.reduce((state: T["state"], event: T["events"]) => {
-    const handler = (aggregate.apply as Record<string, any>)[event.name];
+    const handler = (aggregate.evolve as Record<string, any>)[event.name];
     return handler ? handler(event.payload, state) : state;
   }, initialState ?? aggregate.initialState);
 }
@@ -135,7 +135,7 @@ export function testAggregate<T extends AggregateTypes>(
         const priorState = evolveAggregate(aggregate, givenEvents);
 
         try {
-          const handler = (aggregate.commands as Record<string, any>)[
+          const handler = (aggregate.decide as Record<string, any>)[
             command!.name
           ];
           const infra = {

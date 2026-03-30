@@ -104,10 +104,10 @@ export const BankAccount = defineAggregate<BankAccountDef>({
   initialState: {
     /* TypeScript knows this must be BankAccountState */
   },
-  commands: {
+  decide: {
     /* TypeScript knows each handler's parameter types */
   },
-  apply: {
+  evolve: {
     /* TypeScript knows each handler's parameter types */
   },
 });

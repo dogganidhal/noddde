@@ -50,7 +50,7 @@ type CounterTypes = AggregateTypes & {
 
 const Counter = defineAggregate<CounterTypes>({
   initialState: { count: 0 },
-  commands: {
+  decide: {
     CreateCounter: (command) => ({
       name: "CounterCreated",
       payload: { id: command.targetAggregateId },
@@ -60,7 +60,7 @@ const Counter = defineAggregate<CounterTypes>({
       payload: { by: command.payload.by },
     }),
   },
-  apply: {
+  evolve: {
     CounterCreated: (_payload, state) => state,
     Incremented: (payload, state) => ({ count: state.count + payload.by }),
   },
@@ -132,10 +132,10 @@ describe("CommandLifecycleExecutor", () => {
 
     const Toggle = defineAggregate<ToggleTypes>({
       initialState: { on: false },
-      commands: {
+      decide: {
         Toggle: () => ({ name: "Toggled", payload: {} }),
       },
-      apply: {
+      evolve: {
         Toggled: (_payload, state) => ({ on: !state.on }),
       },
     });
@@ -187,8 +187,8 @@ describe("CommandLifecycleExecutor", () => {
       }
     >({
       initialState: {},
-      commands: {},
-      apply: {},
+      decide: {},
+      evolve: {},
     });
 
     const persistence = new InMemoryEventSourcedAggregatePersistence();
@@ -239,13 +239,13 @@ describe("CommandLifecycleExecutor", () => {
 
     const ItemList = defineAggregate<ItemTypes>({
       initialState: { items: [] },
-      commands: {
+      decide: {
         AddItem: (command) => ({
           name: "ItemAdded",
           payload: { item: command.payload.item },
         }),
       },
-      apply: {
+      evolve: {
         ItemAdded: (payload, state) => ({
           items: [...state.items, payload.item],
         }),
@@ -320,13 +320,13 @@ describe("CommandLifecycleExecutor", () => {
 
     const Accumulator = defineAggregate<AccTypes>({
       initialState: { total: 0 },
-      commands: {
+      decide: {
         Add: (command) => ({
           name: "Added",
           payload: { n: command.payload.n },
         }),
       },
-      apply: {
+      evolve: {
         Added: (payload, state) => ({ total: state.total + payload.n }),
       },
     });
@@ -387,13 +387,13 @@ describe("CommandLifecycleExecutor", () => {
 
     const ValueAgg = defineAggregate<ValTypes>({
       initialState: { value: 0 },
-      commands: {
+      decide: {
         SetValue: (command) => ({
           name: "ValueSet",
           payload: { v: command.payload.v },
         }),
       },
-      apply: {
+      evolve: {
         ValueSet: (payload) => ({ value: payload.v }),
       },
     });
@@ -472,12 +472,12 @@ describe("CommandLifecycleExecutor", () => {
 
     const FailingAggregate = defineAggregate<ErrTypes>({
       initialState: {},
-      commands: {
+      decide: {
         Fail: () => {
           throw new Error("Handler exploded");
         },
       },
-      apply: {
+      evolve: {
         Happened: (_payload, state) => state,
       },
     });
@@ -537,13 +537,13 @@ describe("CommandLifecycleExecutor", () => {
 
     const SimpleAgg = defineAggregate<SimpleTypes>({
       initialState: { value: 0 },
-      commands: {
+      decide: {
         Update: (command) => ({
           name: "Updated",
           payload: { v: command.payload.v },
         }),
       },
-      apply: {
+      evolve: {
         Updated: (payload) => ({ value: payload.v }),
       },
     });

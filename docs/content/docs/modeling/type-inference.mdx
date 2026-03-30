@@ -246,14 +246,14 @@ function createTestInfrastructure(): AuctionInfra {
 
 ## Handler-Level Inference
 
-When you extract command handlers, apply handlers, saga handlers, or projection handlers to separate files, you need to type the function signature. The handler-level inference utilities derive the exact function type from your `*Types` bundle and a command/event/query name -- no manual reconstruction needed.
+When you extract decide handlers, evolve handlers, saga handlers, or projection handlers to separate files, you need to type the function signature. The handler-level inference utilities derive the exact function type from your `*Types` bundle and a command/event/query name -- no manual reconstruction needed.
 
-### InferCommandHandler
+### InferDecideHandler
 
-Types an extracted aggregate command handler:
+Types an extracted aggregate decide handler:
 
 ```typescript
-import type { InferCommandHandler } from "@noddde/core";
+import type { InferDecideHandler } from "@noddde/core";
 
 type BookingDef = {
   state: BookingState;
@@ -263,7 +263,7 @@ type BookingDef = {
 };
 
 // Before: manual, verbose
-export const handleConfirmBooking = (
+export const decideConfirmBooking = (
   command: { targetAggregateId: string; payload: ConfirmBookingPayload },
   state: BookingState,
   { clock }: HotelInfrastructure,
@@ -272,7 +272,7 @@ export const handleConfirmBooking = (
 };
 
 // After: one annotation, full inference
-export const handleConfirmBooking: InferCommandHandler<
+export const decideConfirmBooking: InferDecideHandler<
   BookingDef,
   "ConfirmBooking"
 > = (command, state, { clock }) => {
@@ -280,14 +280,14 @@ export const handleConfirmBooking: InferCommandHandler<
 };
 ```
 
-### InferApplyHandler
+### InferEvolveHandler
 
-Types an extracted aggregate apply handler (event reducer):
+Types an extracted aggregate evolve handler (event reducer):
 
 ```typescript
-import type { InferApplyHandler } from "@noddde/core";
+import type { InferEvolveHandler } from "@noddde/core";
 
-export const applyBookingConfirmed: InferApplyHandler<
+export const evolveBookingConfirmed: InferEvolveHandler<
   BookingDef,
   "BookingConfirmed"
 > = (payload, state) => ({
@@ -370,8 +370,8 @@ type Infra = InferProjectionQueryInfrastructure<RevenueDef>;
 
 | Helper                                          | Input                    | Extracts                                          |
 | ----------------------------------------------- | ------------------------ | ------------------------------------------------- |
-| `InferCommandHandler<Def, "CmdName">`           | `AggregateTypes` bundle  | Command handler function type                     |
-| `InferApplyHandler<Def, "EventName">`           | `AggregateTypes` bundle  | Apply handler function type                       |
+| `InferDecideHandler<Def, "CmdName">`            | `AggregateTypes` bundle  | Decide handler function type                      |
+| `InferEvolveHandler<Def, "EventName">`          | `AggregateTypes` bundle  | Evolve handler function type                      |
 | `InferSagaEventHandler<Def, "EventName">`       | `SagaTypes` bundle       | Saga event handler function type                  |
 | `InferSagaOnEntry<Def, "EventName">`            | `SagaTypes` bundle       | Saga on-entry `{ id, handle }` object type        |
 | `InferProjectionEventHandler<Def, "EventName">` | `ProjectionTypes` bundle | Projection `{ id?, reduce }` object type          |

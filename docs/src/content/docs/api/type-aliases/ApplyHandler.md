@@ -2,10 +2,10 @@
 editUrl: false
 next: false
 prev: false
-title: "ApplyHandler"
+title: "EvolveHandler"
 ---
 
-> **ApplyHandler**\<`TEvent`, `TState`\> = (`event`, `state`) => `TState`
+> **EvolveHandler**\<`TEvent`, `TState`\> = (`event`, `state`) => `TState`
 
 Defined in: [edd/event-sourcing-handler.ts:21](https://github.com/dogganidhal/noddde/blob/main/packages/core/src/edd/event-sourcing-handler.ts#L21)
 
