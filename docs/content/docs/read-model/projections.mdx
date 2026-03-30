@@ -53,14 +53,17 @@ This follows the same pattern as `AggregateTypes` in [defining aggregates](/docs
 
 ## Defining a Projection
 
-Use `defineProjection` to create a projection with full type inference:
+Use `defineProjection` to create a projection with full type inference. The recommended pattern is to extract event handlers and query handlers into separate files, typed with `InferProjectionEventHandler` and `InferProjectionQueryHandler`, then import them into the projection definition.
 
-```ts
-import type { ViewStore } from "@noddde/core";
-import { defineProjection, DefineQueries } from "@noddde/core";
+### Extracted handlers (recommended)
+
+Each event handler lives in its own file inside an `on-entries/` directory, and each query handler in a `query-handlers/` directory. The `Infer*` helpers derive the exact type from your `ProjectionTypes` bundle and an event/query name.
+
+```ts title="types.ts"
+import type { ViewStore, DefineQueries } from "@noddde/core";
 
 // View model -- read-optimized, display-focused
-type BankAccountView = {
+export type BankAccountView = {
   id: string;
   balance: number;
   transactions: {
@@ -72,30 +75,109 @@ type BankAccountView = {
 };
 
 // Queries this projection serves
-type BankAccountQuery = DefineQueries<{
+export type BankAccountQuery = DefineQueries<{
   GetBankAccountById: {
     payload: { id: string };
     result: BankAccountView | null;
   };
 }>;
 
-// Infrastructure provides the view store instance
-type BankingInfrastructure = {
-  bankAccountViewStore: ViewStore<BankAccountView>;
-};
-
 // The ProjectionTypes bundle
-type BankAccountProjectionDef = {
+export type BankAccountProjectionDef = {
   events: BankAccountEvent;
   queries: BankAccountQuery;
   view: BankAccountView;
   infrastructure: BankingInfrastructure;
-  viewStore: ViewStore<BankAccountView>; // type hint for { views } injection
+  viewStore: ViewStore<BankAccountView>;
 };
+```
+
+```ts title="on-entries/on-bank-account-created.ts"
+import type { InferProjectionEventHandler } from "@noddde/core";
+import type { BankAccountProjectionDef } from "../types";
+
+export const onBankAccountCreated: InferProjectionEventHandler<
+  BankAccountProjectionDef,
+  "BankAccountCreated"
+> = {
+  id: (event) => event.payload.id,
+  reduce: (event) => ({
+    id: event.payload.id,
+    balance: 0,
+    transactions: [],
+  }),
+};
+```
+
+```ts title="on-entries/on-transaction-processed.ts"
+import type { InferProjectionEventHandler } from "@noddde/core";
+import type { BankAccountProjectionDef } from "../types";
+
+export const onTransactionProcessed: InferProjectionEventHandler<
+  BankAccountProjectionDef,
+  "TransactionProcessed"
+> = {
+  id: (event) => event.payload.accountId,
+  reduce: (event, view) => ({
+    ...view,
+    balance: view.balance + event.payload.amount,
+    transactions: [
+      ...view.transactions,
+      {
+        id: event.payload.id,
+        timestamp: event.payload.timestamp,
+        amount: event.payload.amount,
+        status: "processed" as const,
+      },
+    ],
+  }),
+};
+```
+
+```ts title="query-handlers/handle-get-bank-account-by-id.ts"
+import type { InferProjectionQueryHandler } from "@noddde/core";
+import type { BankAccountProjectionDef } from "../types";
+
+export const handleGetBankAccountById: InferProjectionQueryHandler<
+  BankAccountProjectionDef,
+  "GetBankAccountById"
+> = async (query, { views }) => (await views.load(query.id)) ?? null;
+```
+
+Then the projection definition imports them all:
+
+```ts title="projection.ts"
+import { defineProjection } from "@noddde/core";
+import type { BankAccountProjectionDef } from "./types";
+import { onBankAccountCreated } from "./on-entries/on-bank-account-created";
+import { onTransactionProcessed } from "./on-entries/on-transaction-processed";
+import { onTransactionDeclined } from "./on-entries/on-transaction-declined";
+import { handleGetBankAccountById } from "./query-handlers/handle-get-bank-account-by-id";
 
 export const BankAccountProjection = defineProjection<BankAccountProjectionDef>(
   {
     on: {
+      BankAccountCreated: onBankAccountCreated,
+      TransactionProcessed: onTransactionProcessed,
+      TransactionDeclined: onTransactionDeclined,
+    },
+
+    queryHandlers: {
+      GetBankAccountById: handleGetBankAccountById,
+    },
+  },
+);
+```
+
+### Inline handlers
+
+For simple projections, inline handlers are still valid:
+
+```ts
+export const BankAccountProjection = defineProjection<BankAccountProjectionDef>(
+  {
+    on: {
+      // Inline is fine for trivial reducers
       BankAccountCreated: {
         id: (event) => event.payload.id,
         reduce: (event) => ({
@@ -104,48 +186,22 @@ export const BankAccountProjection = defineProjection<BankAccountProjectionDef>(
           transactions: [],
         }),
       },
-
-      TransactionProcessed: {
-        id: (event) => event.payload.accountId,
-        reduce: (event, view) => ({
-          ...view,
-          balance: view.balance + event.payload.amount,
-          transactions: [
-            ...view.transactions,
-            {
-              id: event.payload.id,
-              timestamp: event.payload.timestamp,
-              amount: event.payload.amount,
-              status: "processed" as const,
-            },
-          ],
-        }),
-      },
-
-      TransactionDeclined: {
-        id: (event) => event.payload.accountId,
-        reduce: (event, view) => ({
-          ...view,
-          transactions: [
-            ...view.transactions,
-            {
-              id: event.payload.id,
-              timestamp: event.payload.timestamp,
-              amount: event.payload.amount,
-              status: "declined" as const,
-            },
-          ],
-        }),
-      },
+      // But extract complex handlers to separate files
+      TransactionProcessed: onTransactionProcessed,
     },
-
     queryHandlers: {
-      GetBankAccountById: async (query, { views }) =>
-        (await views.load(query.id)) ?? null,
+      GetBankAccountById: handleGetBankAccountById,
     },
   },
 );
 ```
+
+<Callout type="info">
+  Inline handlers work for trivial cases, but extracted handlers with
+  `InferProjectionEventHandler` and `InferProjectionQueryHandler` are the
+  recommended pattern. Each handler gets its own file, its own tests, and a
+  single type annotation that validates the entire shape.
+</Callout>
 
 `defineProjection` is an identity function -- it returns the same object you pass in, but with full type inference applied. The framework uses the `ProjectionTypes` bundle to narrow event types inside each handler and validate query handler return types.
 
@@ -156,17 +212,22 @@ The `on` map contains one entry per event the projection cares about. Each entry
 - **`id`** (optional) -- A function that extracts the view instance ID from the event. Required when the projection uses automatic view persistence.
 - **`reduce`** -- Receives the **full event** (not just the payload) and the current view, then returns the updated view.
 
-```ts
-on: {
-  // `event` is narrowed to the specific event variant, not the full union
-  BankAccountCreated: {
-    id: (event) => event.payload.id,
-    reduce: (event, view) => ({
-      ...view,
-      id: event.payload.id,
-    }),
-  },
-}
+Whether inline or extracted, the shape is the same. When extracted, use `InferProjectionEventHandler` to type the entry:
+
+```ts title="on-entries/on-bank-account-created.ts"
+import type { InferProjectionEventHandler } from "@noddde/core";
+import type { BankAccountProjectionDef } from "../types";
+
+export const onBankAccountCreated: InferProjectionEventHandler<
+  BankAccountProjectionDef,
+  "BankAccountCreated"
+> = {
+  id: (event) => event.payload.id,
+  reduce: (event, view) => ({
+    ...view,
+    id: event.payload.id,
+  }),
+};
 ```
 
 Key properties of event handlers:
@@ -192,12 +253,18 @@ The `on` map pattern mirrors the apply handler pattern used in aggregates. Both 
 
 ## Query Handlers
 
-The `queryHandlers` map contains handlers for serving queries from the projection's view. When the projection's `ProjectionTypes` bundle includes a `viewStore` type hint and the domain configuration provides the corresponding view store, handlers automatically receive `{ views }` -- a typed view store instance -- in their infrastructure parameter:
+The `queryHandlers` map contains handlers for serving queries from the projection's view. When the projection's `ProjectionTypes` bundle includes a `viewStore` type hint and the domain configuration provides the corresponding view store, handlers automatically receive `{ views }` -- a typed view store instance -- in their infrastructure parameter.
 
-```ts
-queryHandlers: {
-  GetBankAccountById: (query, { views }) => views.load(query.id),
-}
+Extracted query handlers use `InferProjectionQueryHandler` to derive the full function type:
+
+```ts title="query-handlers/handle-get-bank-account-by-id.ts"
+import type { InferProjectionQueryHandler } from "@noddde/core";
+import type { BankAccountProjectionDef } from "../types";
+
+export const handleGetBankAccountById: InferProjectionQueryHandler<
+  BankAccountProjectionDef,
+  "GetBankAccountById"
+> = async (query, { views }) => (await views.load(query.id)) ?? null;
 ```
 
 The `views` object is typed to the projection's view store, giving you access to both the base `save`/`load` methods and any custom query methods you defined on the store interface. The handler's return type is validated against the `result` type declared in the `DefineQueries` map.
@@ -206,7 +273,28 @@ Query handlers are optional. A projection may handle events (updating a view) wi
 
 ## Type Inference Helpers
 
-noddde provides `Infer*` helpers to extract individual types from a projection definition:
+noddde provides `Infer*` helpers at two levels. The handler-level helpers are the most commonly used -- they type extracted event handlers and query handlers in separate files:
+
+```ts
+import type {
+  InferProjectionEventHandler,
+  InferProjectionQueryHandler,
+} from "@noddde/core";
+
+// Types the { id?, reduce } object for a specific event
+type Handler = InferProjectionEventHandler<
+  BankAccountProjectionDef,
+  "TransactionProcessed"
+>;
+
+// Types the query handler function (with { views } injection)
+type QHandler = InferProjectionQueryHandler<
+  BankAccountProjectionDef,
+  "GetBankAccountById"
+>;
+```
+
+Definition-level helpers extract types from the built projection:
 
 ```ts
 import type {
@@ -222,52 +310,46 @@ type Queries = InferProjectionQueries<typeof BankAccountProjection>; // BankAcco
 type Infra = InferProjectionInfrastructure<typeof BankAccountProjection>; // BankingInfrastructure
 ```
 
-These are useful when other modules need to reference projection types without importing the underlying type aliases directly.
+These are useful when other modules need to reference projection types without importing the underlying type aliases directly. See [Type Inference Helpers](/docs/modeling/type-inference#handler-level-inference) for the full list.
 
 ## Multiple Projections from the Same Events
 
-A single stream of events can feed multiple projections, each optimized for a different query pattern:
+A single stream of events can feed multiple projections, each optimized for a different query pattern. Each projection extracts its own event handler for the same event:
 
-```ts
-// Projection 1: Account balance view
-const AccountBalanceProjection = defineProjection<BalanceDef>({
-  on: {
-    TransactionProcessed: {
-      reduce: (event, view) => ({
-        ...view,
-        balance: view.balance + event.payload.amount,
-      }),
-    },
-  },
-  queryHandlers: {
-    /* ... */
-  },
-});
-
-// Projection 2: Transaction history view
-const TransactionHistoryProjection = defineProjection<HistoryDef>({
-  on: {
-    TransactionProcessed: {
-      reduce: (event, view) => ({
-        ...view,
-        transactions: [
-          ...view.transactions,
-          {
-            id: event.payload.id,
-            amount: event.payload.amount,
-            merchant: event.payload.merchant,
-          },
-        ],
-      }),
-    },
-  },
-  queryHandlers: {
-    /* ... */
-  },
-});
+```ts title="balance/on-entries/on-transaction-processed.ts"
+export const onTransactionProcessed: InferProjectionEventHandler<
+  BalanceDef,
+  "TransactionProcessed"
+> = {
+  id: (event) => event.payload.accountId,
+  reduce: (event, view) => ({
+    ...view,
+    balance: view.balance + event.payload.amount,
+  }),
+};
 ```
 
-Both projections consume the same `TransactionProcessed` event but build entirely different views.
+```ts title="history/on-entries/on-transaction-processed.ts"
+export const onTransactionProcessed: InferProjectionEventHandler<
+  HistoryDef,
+  "TransactionProcessed"
+> = {
+  id: (event) => event.payload.accountId,
+  reduce: (event, view) => ({
+    ...view,
+    transactions: [
+      ...view.transactions,
+      {
+        id: event.payload.id,
+        amount: event.payload.amount,
+        merchant: event.payload.merchant,
+      },
+    ],
+  }),
+};
+```
+
+Both projections consume the same `TransactionProcessed` event but build entirely different views. Each handler is typed against its own `ProjectionTypes` bundle.
 
 ### Cross-Aggregate Projections
 
@@ -324,17 +406,18 @@ The `EventBus` implementation determines delivery guarantees:
 
 ## Testing Reducers
 
-Because reducers are pure functions, testing them is straightforward -- call the function with inputs and assert the output:
+Because reducers are pure functions, testing them is straightforward -- call the function with inputs and assert the output. With extracted handlers, you can import and test each handler independently:
 
 ```ts
 import { describe, it, expect } from "vitest";
-import { BankAccountProjection } from "./projection";
+import { onBankAccountCreated } from "./on-entries/on-bank-account-created";
+import { onTransactionProcessed } from "./on-entries/on-transaction-processed";
 
-describe("BankAccountProjection", () => {
+describe("BankAccountProjection handlers", () => {
   const emptyView = { id: "", balance: 0, transactions: [] };
 
   it("initializes the view on BankAccountCreated", () => {
-    const result = BankAccountProjection.on.BankAccountCreated!.reduce(
+    const result = onBankAccountCreated.reduce(
       { name: "BankAccountCreated", payload: { id: "acc-123" } },
       emptyView,
     );
@@ -346,7 +429,7 @@ describe("BankAccountProjection", () => {
   it("adds to balance on TransactionProcessed", () => {
     const view = { id: "acc-123", balance: 100, transactions: [] };
 
-    const result = BankAccountProjection.on.TransactionProcessed!.reduce(
+    const result = onTransactionProcessed.reduce(
       {
         name: "TransactionProcessed",
         payload: {
@@ -419,15 +502,16 @@ The view store itself is provided in the domain configuration (not in the projec
 
 ### Query Handler Views Injection
 
-When a projection's `ProjectionTypes` bundle declares a `viewStore` type hint and the domain configuration provides the corresponding view store, query handlers automatically receive `{ views }` in their infrastructure parameter, typed to the projection's view store:
+When a projection's `ProjectionTypes` bundle declares a `viewStore` type hint and the domain configuration provides the corresponding view store, query handlers automatically receive `{ views }` in their infrastructure parameter, typed to the projection's view store. Extracted query handlers use `InferProjectionQueryHandler` to get this injection typed automatically:
 
-```ts
-queryHandlers: {
-  GetBankAccountById: (query, { views }) =>
-    views.load(query.id),                           // views is BankAccountViewStore
-  GetAccountsInRange: (query, { views }) =>
-    views.findByBalanceRange(query.min, query.max),  // custom method
-},
+```ts title="query-handlers/handle-get-accounts-in-range.ts"
+import type { InferProjectionQueryHandler } from "@noddde/core";
+import type { BankAccountProjectionDef } from "../types";
+
+export const handleGetAccountsInRange: InferProjectionQueryHandler<
+  BankAccountProjectionDef,
+  "GetAccountsInRange"
+> = (query, { views }) => views.findByBalanceRange(query.min, query.max); // custom method on the view store
 ```
 
 ### Consistency Modes

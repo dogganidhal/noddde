@@ -112,8 +112,12 @@ const myDomain = defineDomain<MyInfrastructure>({
 });
 
 const domain = await wireDomain(myDomain, {
-  infrastructure: () => ({ /* custom infra */ }),
-  aggregates: { persistence: () => new InMemoryEventSourcedAggregatePersistence() },
+  infrastructure: () => ({
+    /* custom infra */
+  }),
+  aggregates: {
+    persistence: () => new InMemoryEventSourcedAggregatePersistence(),
+  },
   buses: () => ({
     commandBus: new InMemoryCommandBus(),
     eventBus: new EventEmitterEventBus(),

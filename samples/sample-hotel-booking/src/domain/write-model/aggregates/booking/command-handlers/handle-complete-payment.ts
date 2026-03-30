@@ -1,14 +1,11 @@
-import type { CompletePaymentPayload } from "../commands/complete-payment";
-import type { BookingState } from "../state";
-import type { HotelInfrastructure } from "../../../../../infrastructure/types";
-import type { BookingEvent } from "../../../../event-model";
+import type { InferCommandHandler } from "@noddde/core";
+import type { BookingDef } from "../booking";
 
 /** Handles the CompletePayment command by emitting a PaymentCompleted event. */
-export const handleCompletePayment = (
-  command: { targetAggregateId: string; payload: CompletePaymentPayload },
-  state: BookingState,
-  { clock }: HotelInfrastructure,
-): BookingEvent => {
+export const handleCompletePayment: InferCommandHandler<
+  BookingDef,
+  "CompletePayment"
+> = (command, state, { clock }) => {
   if (state.status !== "awaiting_payment") {
     throw new Error(`Cannot complete payment in ${state.status} status`);
   }

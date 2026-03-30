@@ -194,3 +194,58 @@ export type InferAggregateCommands<T extends Aggregate> =
  */
 export type InferAggregateInfrastructure<T extends Aggregate> =
   T extends Aggregate<infer U> ? U["infrastructure"] : never;
+
+// ---- Handler-level inference utilities ----
+
+/**
+ * Infers the fully-typed command handler function for a specific command name
+ * within an {@link AggregateTypes} bundle. Use this to type extracted handlers
+ * in separate files without manually reconstructing the function signature.
+ *
+ * Operates on the `AggregateTypes` bundle (not the `Aggregate` definition),
+ * so it can be used before `defineAggregate` is called.
+ *
+ * @typeParam T - The {@link AggregateTypes} bundle.
+ * @typeParam K - The command name literal (a member of `T["commands"]["name"]`).
+ *
+ * @example
+ * ```ts
+ * // handle-confirm-booking.ts
+ * export const handleConfirmBooking: InferCommandHandler<BookingDef, "ConfirmBooking"> = (
+ *   command, state, { clock }
+ * ) => ({ name: "BookingConfirmed", payload: { confirmedAt: clock.now() } });
+ * ```
+ */
+export type InferCommandHandler<
+  T extends AggregateTypes,
+  K extends T["commands"]["name"],
+> = CommandHandler<
+  Extract<T["commands"], { name: K }>,
+  T["state"],
+  T["events"],
+  T["infrastructure"]
+>;
+
+/**
+ * Infers the fully-typed apply handler function for a specific event name
+ * within an {@link AggregateTypes} bundle. Use this to type extracted apply
+ * handlers (event reducers) in separate files.
+ *
+ * Operates on the `AggregateTypes` bundle (not the `Aggregate` definition),
+ * so it can be used before `defineAggregate` is called.
+ *
+ * @typeParam T - The {@link AggregateTypes} bundle.
+ * @typeParam K - The event name literal (a member of `T["events"]["name"]`).
+ *
+ * @example
+ * ```ts
+ * // apply-booking-confirmed.ts
+ * export const applyBookingConfirmed: InferApplyHandler<BookingDef, "BookingConfirmed"> = (
+ *   payload, state
+ * ) => ({ ...state, status: "confirmed", confirmedAt: payload.confirmedAt });
+ * ```
+ */
+export type InferApplyHandler<
+  T extends AggregateTypes,
+  K extends T["events"]["name"],
+> = ApplyHandler<Extract<T["events"], { name: K }>, T["state"]>;

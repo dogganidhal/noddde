@@ -16,6 +16,8 @@ exports:
     InferSagaCommands,
     InferSagaInfrastructure,
     InferSagaId,
+    InferSagaEventHandler,
+    InferSagaOnEntry,
   ]
 depends_on: [id, edd/event, cqrs/command/command, infrastructure/index]
 docs:
@@ -64,12 +66,18 @@ docs:
 
 - **`defineSaga<T, TSagaId extends ID>(config): Saga<T, TSagaId>`** -- identity function for type inference.
 
-- **Infer utilities**:
+- **Infer utilities** (operate on `Saga` definition instances):
   - `InferSagaState<T extends Saga>` = inferred `U["state"]`.
   - `InferSagaEvents<T extends Saga>` = inferred `U["events"]`.
   - `InferSagaCommands<T extends Saga>` = inferred `U["commands"]`.
   - `InferSagaInfrastructure<T extends Saga>` = inferred `U["infrastructure"]`.
   - `InferSagaId<T extends Saga>` = inferred `TSagaId`.
+
+- **Handler-level inference utilities** (operate on `SagaTypes` bundle, for typing extracted handlers in separate files):
+
+  - `InferSagaEventHandler<T extends SagaTypes, K extends T["events"]["name"]>` = `SagaEventHandler<Extract<T["events"], { name: K }>, T["state"], T["commands"], T["infrastructure"]>`. Resolves to the exact saga event handler function type for event `K`, with the event narrowed via `Extract`, and infrastructure merged with `CQRSInfrastructure` and `FrameworkInfrastructure` (via `SagaEventHandler`).
+
+  - `InferSagaOnEntry<T extends SagaTypes, K extends T["events"]["name"], TSagaId extends ID = string>` = `SagaOnEntry<Extract<T["events"], { name: K }>, T["state"], T["commands"], T["infrastructure"], TSagaId>`. Resolves to the full `{ id, handle }` bundle for event `K`, with a customizable saga ID type.
 
 ## Behavioral Requirements
 
@@ -83,6 +91,9 @@ docs:
 - Commands can be a single command or an array of commands.
 - `defineSaga` is an identity function returning the same config object.
 - `TSagaId` is bounded by `ID`, defaults to `string`, and can be customized (e.g., `number`, `bigint`, branded type).
+- `InferSagaEventHandler<T, K>` resolves to a function receiving the narrowed event (via `Extract<T["events"], { name: K }>`), the saga state, and infrastructure merged with `CQRSInfrastructure` and `FrameworkInfrastructure`, returning `SagaReaction` or `Promise<SagaReaction>`.
+- `InferSagaOnEntry<T, K, TSagaId>` resolves to an object with `id: (event) => TSagaId` and `handle: InferSagaEventHandler<T, K>`.
+- Both `InferSagaEventHandler` and `InferSagaOnEntry` operate on the `SagaTypes` bundle (not the `Saga` definition instance), enabling use before `defineSaga` is called.
 
 ## Invariants
 
@@ -94,6 +105,8 @@ docs:
 - Infrastructure parameter in handlers always includes `CQRSInfrastructure` and `FrameworkInfrastructure` via `&`.
 - `defineSaga` returns the exact same object reference.
 - `SagaTypes["commands"]` is constrained to `Command` (not `AggregateCommand`), allowing sagas to dispatch both aggregate and standalone commands.
+- `InferSagaEventHandler<T, K>` always produces the same type as the `handle` field of `SagaOnMap<T>[K]`.
+- `InferSagaOnEntry<T, K, TSagaId>` always produces the same type as `SagaOnMap<T, TSagaId>[K]`.
 
 ## Edge Cases
 
@@ -513,6 +526,165 @@ describe("defineSaga identity", () => {
     };
     const result = defineSaga<T>(config as any);
     expect(result).toBe(config);
+  });
+});
+```
+
+### InferSagaEventHandler narrows event with merged infrastructure
+
+```ts
+import { describe, it, expectTypeOf } from "vitest";
+import type {
+  DefineEvents,
+  DefineCommands,
+  Infrastructure,
+  InferSagaEventHandler,
+  SagaReaction,
+  CQRSInfrastructure,
+  FrameworkInfrastructure,
+} from "@noddde/core";
+
+describe("InferSagaEventHandler", () => {
+  type OrderEvent = DefineEvents<{
+    OrderPlaced: { orderId: string; total: number };
+    PaymentReceived: { orderId: string; amount: number };
+  }>;
+
+  type PaymentCommand = DefineCommands<{
+    RequestPayment: { orderId: string; amount: number };
+    ConfirmOrder: void;
+  }>;
+
+  type FulfillmentState = {
+    status: "pending" | "awaiting_payment" | "paid";
+    orderId: string | null;
+  };
+
+  interface FulfillmentInfra extends Infrastructure {
+    notifier: { notify(msg: string): void };
+  }
+
+  type FulfillmentTypes = {
+    state: FulfillmentState;
+    events: OrderEvent;
+    commands: PaymentCommand;
+    infrastructure: FulfillmentInfra;
+  };
+
+  it("should narrow the event to the specific variant", () => {
+    type Handler = InferSagaEventHandler<FulfillmentTypes, "OrderPlaced">;
+    expectTypeOf<Parameters<Handler>[0]>().toEqualTypeOf<
+      Extract<OrderEvent, { name: "OrderPlaced" }>
+    >();
+  });
+
+  it("should use the saga state as second parameter", () => {
+    type Handler = InferSagaEventHandler<FulfillmentTypes, "OrderPlaced">;
+    expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<FulfillmentState>();
+  });
+
+  it("should merge infrastructure with CQRSInfrastructure and FrameworkInfrastructure", () => {
+    type Handler = InferSagaEventHandler<FulfillmentTypes, "OrderPlaced">;
+    expectTypeOf<Parameters<Handler>[2]>().toEqualTypeOf<
+      FulfillmentInfra & CQRSInfrastructure & FrameworkInfrastructure
+    >();
+  });
+
+  it("should return SagaReaction or Promise of it", () => {
+    type Handler = InferSagaEventHandler<FulfillmentTypes, "OrderPlaced">;
+    expectTypeOf<ReturnType<Handler>>().toEqualTypeOf<
+      | SagaReaction<FulfillmentState, PaymentCommand>
+      | Promise<SagaReaction<FulfillmentState, PaymentCommand>>
+    >();
+  });
+});
+```
+
+### InferSagaOnEntry bundles id and handle for one event
+
+```ts
+import { describe, it, expectTypeOf } from "vitest";
+import type {
+  DefineEvents,
+  DefineCommands,
+  Infrastructure,
+  InferSagaOnEntry,
+  SagaEventHandler,
+} from "@noddde/core";
+import { defineSaga } from "@noddde/core";
+
+describe("InferSagaOnEntry", () => {
+  type OrderEvent = DefineEvents<{
+    OrderPlaced: { orderId: string; total: number };
+    PaymentReceived: { orderId: string; amount: number };
+  }>;
+
+  type PaymentCommand = DefineCommands<{
+    RequestPayment: { orderId: string; amount: number };
+    ConfirmOrder: void;
+  }>;
+
+  type FulfillmentState = {
+    status: "pending" | "awaiting_payment" | "paid";
+    orderId: string | null;
+  };
+
+  type FulfillmentTypes = {
+    state: FulfillmentState;
+    events: OrderEvent;
+    commands: PaymentCommand;
+    infrastructure: Infrastructure;
+  };
+
+  it("should have id and handle fields", () => {
+    type Entry = InferSagaOnEntry<FulfillmentTypes, "OrderPlaced">;
+    expectTypeOf<Entry["id"]>().toBeFunction();
+    expectTypeOf<Entry["handle"]>().toBeFunction();
+  });
+
+  it("should narrow the event in id function", () => {
+    type Entry = InferSagaOnEntry<FulfillmentTypes, "OrderPlaced">;
+    type IdParam = Parameters<Entry["id"]>[0];
+    expectTypeOf<IdParam>().toEqualTypeOf<
+      Extract<OrderEvent, { name: "OrderPlaced" }>
+    >();
+  });
+
+  it("should support custom saga ID type", () => {
+    type Entry = InferSagaOnEntry<FulfillmentTypes, "OrderPlaced", number>;
+    type IdReturn = ReturnType<Entry["id"]>;
+    expectTypeOf<IdReturn>().toBeNumber();
+  });
+
+  it("should be usable in defineSaga on map", () => {
+    const onOrderPlaced: InferSagaOnEntry<FulfillmentTypes, "OrderPlaced"> = {
+      id: (event) => event.payload.orderId,
+      handle: (event, state) => ({
+        state: {
+          ...state,
+          status: "awaiting_payment",
+          orderId: event.payload.orderId,
+        },
+        commands: {
+          name: "RequestPayment",
+          targetAggregateId: event.payload.orderId,
+          payload: {
+            orderId: event.payload.orderId,
+            amount: event.payload.total,
+          },
+        },
+      }),
+    };
+
+    const saga = defineSaga<FulfillmentTypes>({
+      initialState: { status: "pending", orderId: null },
+      startedBy: ["OrderPlaced"],
+      on: {
+        OrderPlaced: onOrderPlaced,
+      },
+    });
+
+    expectTypeOf(saga.on.OrderPlaced).not.toBeUndefined();
   });
 });
 ```

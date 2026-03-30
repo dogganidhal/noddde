@@ -1,12 +1,11 @@
-import type { CreateRoomPayload } from "../commands/create-room";
-import type { RoomState } from "../state";
-import type { RoomEvent } from "../../../../event-model";
+import type { InferCommandHandler } from "@noddde/core";
+import type { RoomDef } from "../room";
 
 /** Handles the CreateRoom command by emitting a RoomCreated event. */
-export const handleCreateRoom = (
-  command: { targetAggregateId: string; payload: CreateRoomPayload },
-  state: RoomState,
-): RoomEvent => {
+export const handleCreateRoom: InferCommandHandler<RoomDef, "CreateRoom"> = (
+  command,
+  state,
+) => {
   if (state.roomNumber !== null) {
     throw new Error("Room already created");
   }

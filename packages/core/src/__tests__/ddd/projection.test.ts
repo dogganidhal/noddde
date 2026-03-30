@@ -3,9 +3,13 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
   DefineEvents,
   DefineQueries,
+  FrameworkInfrastructure,
+  InferProjectionEventHandler,
   InferProjectionEvents,
   InferProjectionInfrastructure,
   InferProjectionQueries,
+  InferProjectionQueryHandler,
+  InferProjectionQueryInfrastructure,
   InferProjectionView,
   Infrastructure,
   Query,
@@ -528,5 +532,164 @@ describe("Optional id in on entries", () => {
     });
 
     expect(projection.on.Created!.id).toBeUndefined();
+  });
+});
+
+describe("InferProjectionEventHandler", () => {
+  interface ItemView {
+    id: string;
+    name: string;
+  }
+
+  type ItemEvent = DefineEvents<{
+    ItemCreated: { id: string; name: string };
+    ItemUpdated: { id: string; newName: string };
+  }>;
+
+  type Def = {
+    events: ItemEvent;
+    queries: Query<any>;
+    view: ItemView;
+    infrastructure: Infrastructure;
+  };
+
+  it("should narrow the event to the specific variant in reduce", () => {
+    type Handler = InferProjectionEventHandler<Def, "ItemCreated">;
+    type ReduceParams = Parameters<Handler["reduce"]>;
+    expectTypeOf<ReduceParams[0]>().toEqualTypeOf<
+      Extract<ItemEvent, { name: "ItemCreated" }>
+    >();
+    expectTypeOf<ReduceParams[1]>().toEqualTypeOf<ItemView>();
+  });
+
+  it("should have optional id function with narrowed event", () => {
+    type Handler = InferProjectionEventHandler<Def, "ItemCreated">;
+    expectTypeOf<Handler["id"]>().toEqualTypeOf<
+      | ((
+          event: Extract<ItemEvent, { name: "ItemCreated" }>,
+        ) => string | number | bigint)
+      | undefined
+    >();
+  });
+
+  it("should be usable in defineProjection on map", () => {
+    const onItemCreated: InferProjectionEventHandler<Def, "ItemCreated"> = {
+      id: (event) => event.payload.id,
+      reduce: (event, _view) => ({
+        id: event.payload.id,
+        name: event.payload.name,
+      }),
+    };
+
+    const projection = defineProjection<Def>({
+      on: {
+        ItemCreated: onItemCreated,
+      },
+      queryHandlers: {},
+    });
+
+    expectTypeOf(projection.on.ItemCreated).not.toBeUndefined();
+  });
+});
+
+describe("InferProjectionQueryHandler", () => {
+  interface ItemView {
+    id: string;
+    name: string;
+  }
+
+  interface ItemViewStore extends ViewStore<ItemView> {
+    findByName(name: string): Promise<ItemView[]>;
+  }
+
+  type ItemEvent = DefineEvents<{ ItemCreated: { id: string; name: string } }>;
+
+  type ItemQuery = DefineQueries<{
+    GetItem: { payload: { id: string }; result: ItemView | null };
+    FindByName: { payload: { name: string }; result: ItemView[] };
+  }>;
+
+  type DefWithViewStore = {
+    events: ItemEvent;
+    queries: ItemQuery;
+    view: ItemView;
+    infrastructure: Infrastructure;
+    viewStore: ItemViewStore;
+  };
+
+  type DefWithoutViewStore = {
+    events: ItemEvent;
+    queries: ItemQuery;
+    view: ItemView;
+    infrastructure: Infrastructure;
+  };
+
+  it("should include views in infrastructure when viewStore is defined", () => {
+    type Handler = InferProjectionQueryHandler<DefWithViewStore, "GetItem">;
+    type InfraParam = Parameters<Handler>[1];
+    expectTypeOf<InfraParam>().toEqualTypeOf<
+      Infrastructure & { views: ItemViewStore } & FrameworkInfrastructure
+    >();
+  });
+
+  it("should use plain infrastructure when viewStore is absent", () => {
+    type Handler = InferProjectionQueryHandler<DefWithoutViewStore, "GetItem">;
+    type InfraParam = Parameters<Handler>[1];
+    expectTypeOf<InfraParam>().toEqualTypeOf<
+      Infrastructure & FrameworkInfrastructure
+    >();
+  });
+
+  it("should narrow the query payload", () => {
+    type Handler = InferProjectionQueryHandler<DefWithViewStore, "GetItem">;
+    expectTypeOf<Parameters<Handler>[0]>().toEqualTypeOf<{ id: string }>();
+  });
+
+  it("should return the query result type", () => {
+    type Handler = InferProjectionQueryHandler<DefWithViewStore, "GetItem">;
+    expectTypeOf<ReturnType<Handler>>().toEqualTypeOf<
+      (ItemView | null) | Promise<ItemView | null>
+    >();
+  });
+});
+
+describe("InferProjectionQueryInfrastructure", () => {
+  interface MyView {
+    id: string;
+  }
+
+  interface MyViewStore extends ViewStore<MyView> {
+    custom(): Promise<MyView[]>;
+  }
+
+  interface MyInfra extends Infrastructure {
+    db: { query(): Promise<MyView[]> };
+  }
+
+  type WithViewStore = {
+    events: DefineEvents<{ Created: { id: string } }>;
+    queries: Query<any>;
+    view: MyView;
+    infrastructure: MyInfra;
+    viewStore: MyViewStore;
+  };
+
+  type WithoutViewStore = {
+    events: DefineEvents<{ Created: { id: string } }>;
+    queries: Query<any>;
+    view: MyView;
+    infrastructure: MyInfra;
+  };
+
+  it("should include views when viewStore is present", () => {
+    expectTypeOf<
+      InferProjectionQueryInfrastructure<WithViewStore>
+    >().toEqualTypeOf<MyInfra & { views: MyViewStore }>();
+  });
+
+  it("should be plain infrastructure when viewStore is absent", () => {
+    expectTypeOf<
+      InferProjectionQueryInfrastructure<WithoutViewStore>
+    >().toEqualTypeOf<MyInfra>();
   });
 });

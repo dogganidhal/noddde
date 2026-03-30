@@ -39,103 +39,148 @@ Guest creates booking
 
 Three aggregates support the write model:
 
-| Aggregate   | Responsibility                          | Persistence     |
-| ----------- | --------------------------------------- | --------------- |
-| `Booking`   | Payment state machine for one booking   | Event-sourced   |
+| Aggregate   | Responsibility                             | Persistence   |
+| ----------- | ------------------------------------------ | ------------- |
+| `Booking`   | Payment state machine for one booking      | Event-sourced |
 | `Room`      | Physical room lifecycle (reserve → occupy) | Event-sourced |
-| `Inventory` | Aggregate availability counts by type   | State-stored    |
+| `Inventory` | Aggregate availability counts by type      | State-stored  |
 
 ## Write Model
 
 ### Booking aggregate — payment state machine
 
-The `Booking` aggregate is the most instructive of the three. Its status field is a strict state machine: every payment command validates the current status before emitting an event.
+The `Booking` aggregate is the most instructive of the three. Its status field is a strict state machine: every payment command validates the current status before emitting an event. All handlers are extracted to separate files typed with `InferCommandHandler` and `InferApplyHandler`.
+
+#### Command handlers (extracted)
 
 ```ts
-// domain/write-model/booking/aggregate.ts
-export const Booking = defineAggregate<BookingDef>({
-  initialState: {
-    guestId: null,
-    status: "pending",   // pending → awaiting_payment → confirmed | cancelled
-    paymentId: null,
-    transactionId: null,
-    // ...
-  },
+// command-handlers/handle-request-payment.ts
+import type { InferCommandHandler } from "@noddde/core";
+import type { BookingDef } from "../booking";
 
-  commands: {
-    // Transition: pending → awaiting_payment
-    RequestPayment: (command, state) => {
-      if (state.status !== "pending") {
-        throw new Error(`Cannot request payment in ${state.status} status`);
-      }
-      return {
-        name: "PaymentRequested",
-        payload: {
-          bookingId: command.targetAggregateId,
-          guestId: state.guestId!,
-          paymentId: command.payload.paymentId,
-          amount: command.payload.amount,
-        },
-      };
+// Transition: pending → awaiting_payment
+export const handleRequestPayment: InferCommandHandler<
+  BookingDef,
+  "RequestPayment"
+> = (command, state) => {
+  if (state.status !== "pending") {
+    throw new Error(`Cannot request payment in ${state.status} status`);
+  }
+  return {
+    name: "PaymentRequested",
+    payload: {
+      bookingId: command.targetAggregateId,
+      guestId: state.guestId!,
+      paymentId: command.payload.paymentId,
+      amount: command.payload.amount,
     },
+  };
+};
+```
 
-    // Transition: awaiting_payment → (status unchanged, transactionId recorded)
-    CompletePayment: (command, state, { clock }) => {
-      if (state.status !== "awaiting_payment") {
-        throw new Error(`Cannot complete payment in ${state.status} status`);
-      }
-      return {
-        name: "PaymentCompleted",
-        payload: {
-          bookingId: command.targetAggregateId,
-          paymentId: command.payload.paymentId,
-          transactionId: command.payload.transactionId,
-          amount: command.payload.amount,
-          completedAt: clock.now().toISOString(),
-        },
-      };
+```ts
+// command-handlers/handle-complete-payment.ts
+import type { InferCommandHandler } from "@noddde/core";
+import type { BookingDef } from "../booking";
+
+// Transition: awaiting_payment → (transactionId recorded)
+export const handleCompletePayment: InferCommandHandler<
+  BookingDef,
+  "CompletePayment"
+> = (command, state, { clock }) => {
+  if (state.status !== "awaiting_payment") {
+    throw new Error(`Cannot complete payment in ${state.status} status`);
+  }
+  return {
+    name: "PaymentCompleted",
+    payload: {
+      bookingId: command.targetAggregateId,
+      paymentId: command.payload.paymentId,
+      transactionId: command.payload.transactionId,
+      amount: command.payload.amount,
+      completedAt: clock.now().toISOString(),
     },
+  };
+};
+```
 
-    // Transition: awaiting_payment → pending (payment can be retried)
-    FailPayment: (command, state) => {
-      if (state.status !== "awaiting_payment") {
-        throw new Error(`Cannot fail payment in ${state.status} status`);
-      }
-      return { name: "PaymentFailed", payload: { /* ... */ } };
-    },
+The remaining command handlers (`FailPayment`, `RefundPayment`, `CreateBooking`, `ConfirmBooking`, `CancelBooking`, `ModifyBooking`) follow the same pattern — each in its own file, each typed with `InferCommandHandler<BookingDef, "CommandName">`.
 
-    // Transition: confirmed → refund if a transactionId exists
-    RefundPayment: (command, state, { clock }) => {
-      if (state.transactionId === null) {
-        throw new Error("No payment to refund");
-      }
-      return { name: "PaymentRefunded", payload: { /* ... */ } };
-    },
-  },
+#### Apply handlers (extracted)
 
-  apply: {
-    PaymentRequested: (event, state) => ({
-      ...state,
-      status: "awaiting_payment" as const,
-      paymentId: event.paymentId,
-    }),
+```ts
+// apply-handlers/apply-payment-requested.ts
+import type { InferApplyHandler } from "@noddde/core";
+import type { BookingDef } from "../booking";
 
-    PaymentCompleted: (event, state) => ({
-      ...state,
-      transactionId: event.transactionId,
-      // status stays awaiting_payment until ConfirmBooking is dispatched
-    }),
-
-    PaymentFailed: (_event, state) => ({
-      ...state,
-      status: "pending" as const,  // reset: payment can be reattempted
-      paymentId: null,
-    }),
-  },
+export const applyPaymentRequested: InferApplyHandler<
+  BookingDef,
+  "PaymentRequested"
+> = (event, state) => ({
+  ...state,
+  status: "awaiting_payment" as const,
+  paymentId: event.paymentId,
 });
 ```
 
-Notice that `PaymentFailed` resets status back to `"pending"` rather than `"cancelled"`. This lets the guest retry payment without creating a new booking.
+```ts
+// apply-handlers/apply-payment-failed.ts
+import type { InferApplyHandler } from "@noddde/core";
+import type { BookingDef } from "../booking";
+
+export const applyPaymentFailed: InferApplyHandler<
+  BookingDef,
+  "PaymentFailed"
+> = (_event, state) => ({
+  ...state,
+  status: "pending" as const, // reset: payment can be reattempted
+  paymentId: null,
+});
+```
+
+Notice that `PaymentFailed` resets status back to `"pending"` rather than `"cancelled"`. This lets the guest retry payment without creating a new booking. The other apply handlers (`PaymentCompleted`, `BookingCreated`, `BookingConfirmed`, `BookingCancelled`, `BookingModified`, `PaymentRefunded`) follow the same pattern.
+
+#### Aggregate definition (wiring)
+
+The aggregate definition imports all handlers and wires them. This file contains no business logic — only composition.
+
+```ts
+// booking.ts
+import { defineAggregate } from "@noddde/core";
+
+type BookingDef = {
+  state: BookingState;
+  events: BookingEvent;
+  commands: BookingCommand;
+  infrastructure: HotelInfrastructure;
+};
+
+export const Booking = defineAggregate<BookingDef>({
+  initialState: initialBookingState,
+
+  commands: {
+    CreateBooking: handleCreateBooking,
+    ConfirmBooking: handleConfirmBooking,
+    CancelBooking: handleCancelBooking,
+    ModifyBooking: handleModifyBooking,
+    RequestPayment: handleRequestPayment,
+    CompletePayment: handleCompletePayment,
+    FailPayment: handleFailPayment,
+    RefundPayment: handleRefundPayment,
+  },
+
+  apply: {
+    BookingCreated: applyBookingCreated,
+    BookingConfirmed: applyBookingConfirmed,
+    BookingCancelled: applyBookingCancelled,
+    BookingModified: applyBookingModified,
+    PaymentRequested: applyPaymentRequested,
+    PaymentCompleted: applyPaymentCompleted,
+    PaymentFailed: applyPaymentFailed,
+    PaymentRefunded: applyPaymentRefunded,
+  },
+});
+```
 
 ### Room and Inventory aggregates
 
@@ -149,165 +194,265 @@ Sagas are the main teaching content of this sample. Three independent sagas coll
 
 ### BookingFulfillmentSaga
 
-This saga orchestrates the top-level booking flow. It starts on `BookingCreated`, waits for payment to complete, then queries for an available room and dispatches commands to two different aggregates atomically.
+This saga orchestrates the top-level booking flow. It starts on `BookingCreated`, waits for payment to complete, then queries for an available room and dispatches commands to two different aggregates atomically. Like aggregates, sagas use extracted transition handlers — each event handler lives in its own file.
+
+#### Transition handlers (extracted)
 
 ```ts
-// domain/process-model/booking-fulfillment.ts
+// transition-handlers/on-booking-created.ts
+import { randomUUID } from "crypto";
+import type { BookingFulfillmentState } from "../state";
+
+export const onBookingCreated = (event: {
+  payload: {
+    bookingId: string;
+    guestId: string;
+    roomType: any;
+    checkIn: string;
+    checkOut: string;
+    totalAmount: number;
+    createdAt: string;
+  };
+}) => {
+  const paymentId = randomUUID();
+  return {
+    state: {
+      bookingId: event.payload.bookingId,
+      guestId: event.payload.guestId,
+      roomType: event.payload.roomType,
+      checkIn: event.payload.checkIn,
+      checkOut: event.payload.checkOut,
+      totalAmount: event.payload.totalAmount,
+      paymentId,
+      roomId: null,
+      status: "awaiting_payment" as const,
+    } satisfies BookingFulfillmentState,
+    commands: {
+      name: "RequestPayment" as const,
+      targetAggregateId: event.payload.bookingId,
+      payload: { paymentId, amount: event.payload.totalAmount },
+    },
+  };
+};
+```
+
+```ts
+// transition-handlers/on-payment-completed.ts
+import type { BookingFulfillmentState } from "../state";
+
+export const onPaymentCompleted = async (
+  event: { payload: { bookingId: string /* ... */ } },
+  state: BookingFulfillmentState,
+  infrastructure: any,
+) => {
+  const availableRooms = (await infrastructure.queryBus.dispatch({
+    name: "SearchAvailableRooms",
+    payload: { type: state.roomType },
+  })) as any[];
+
+  const room = availableRooms?.[0];
+  if (!room) {
+    return {
+      state: { ...state, status: "cancelled" as const },
+      commands: {
+        name: "CancelBooking" as const,
+        targetAggregateId: state.bookingId,
+        payload: { reason: "No available room of requested type" },
+      },
+    };
+  }
+
+  // Multi-command dispatch across two aggregates
+  return {
+    state: { ...state, status: "confirmed" as const, roomId: room.roomId },
+    commands: [
+      {
+        name: "ConfirmBooking" as const,
+        targetAggregateId: state.bookingId,
+        payload: { roomId: room.roomId },
+      },
+      {
+        name: "ReserveRoom" as const,
+        targetAggregateId: room.roomId,
+        payload: {
+          bookingId: state.bookingId,
+          guestId: state.guestId,
+          checkIn: state.checkIn,
+          checkOut: state.checkOut,
+        },
+      },
+    ],
+  };
+};
+```
+
+```ts
+// transition-handlers/on-booking-cancelled.ts
+import type { BookingFulfillmentState } from "../state";
+
+export const onBookingCancelled = (
+  _event: {
+    payload: { bookingId: string; reason: string; cancelledAt: string };
+  },
+  state: BookingFulfillmentState,
+) => ({
+  state: { ...state, status: "cancelled" as const },
+  commands:
+    state.status === "confirmed" && state.paymentId
+      ? {
+          name: "RefundPayment" as const,
+          targetAggregateId: state.bookingId,
+          payload: { paymentId: state.paymentId, amount: state.totalAmount },
+        }
+      : undefined, // no refund if payment never completed
+});
+```
+
+The `PaymentFailed`, `BookingConfirmed`, `BookingModified`, `PaymentRequested`, and `PaymentRefunded` handlers follow the same pattern — each in its own file under `transition-handlers/`.
+
+#### Saga definition (wiring)
+
+```ts
+// saga.ts
+import { defineSaga } from "@noddde/core";
+import {
+  onBookingCancelled,
+  onBookingConfirmed,
+  onBookingCreated,
+  onBookingModified,
+  onPaymentCompleted,
+  onPaymentFailed,
+  onPaymentRefunded,
+  onPaymentRequested,
+} from "./transition-handlers";
+
+type BookingFulfillmentDef = {
+  state: BookingFulfillmentState;
+  events: BookingEvent;
+  commands: BookingCommand | RoomCommand;
+  infrastructure: HotelInfrastructure;
+};
+
 export const BookingFulfillmentSaga = defineSaga<BookingFulfillmentDef>({
+  initialState: initialBookingFulfillmentState,
   startedBy: ["BookingCreated"],
 
   on: {
-    // Step 1: booking created → ask Booking aggregate to request payment
-    BookingCreated: {
-      id: (event) => event.payload.bookingId,
-      handle: (event) => {
-        const paymentId = randomUUID();
-        return {
-          state: { /* ... bookingId, guestId, roomType, status: "awaiting_payment" */ },
-          commands: {
-            name: "RequestPayment",
-            targetAggregateId: event.payload.bookingId,
-            payload: { paymentId, amount: event.payload.totalAmount },
-          },
-        };
-      },
-    },
-
-    // Step 3: payment confirmed → find a room, dispatch two commands atomically
-    PaymentCompleted: {
-      id: (event) => event.payload.bookingId,
-      handle: async (event, state, infrastructure) => {
-        const availableRooms = (await infrastructure.queryBus.dispatch({
-          name: "SearchAvailableRooms",
-          payload: { type: state.roomType },
-        })) as any[];
-
-        const room = availableRooms?.[0];
-
-        // Compensation: no room available → cancel the booking
-        if (!room) {
-          return {
-            state: { ...state, status: "cancelled" as const },
-            commands: {
-              name: "CancelBooking",
-              targetAggregateId: state.bookingId,
-              payload: { reason: "No available room of requested type" },
-            },
-          };
-        }
-
-        // Success path: multi-command dispatch across two aggregates
-        return {
-          state: { ...state, status: "confirmed" as const, roomId: room.roomId },
-          commands: [
-            {
-              name: "ConfirmBooking",
-              targetAggregateId: state.bookingId,
-              payload: { roomId: room.roomId },
-            },
-            {
-              name: "ReserveRoom",
-              targetAggregateId: room.roomId,
-              payload: { bookingId: state.bookingId, /* checkIn, checkOut, guestId */ },
-            },
-          ],
-        };
-      },
-    },
-
-    // Compensation: payment failed → cancel booking
-    PaymentFailed: {
-      id: (event) => event.payload.bookingId,
-      handle: (event, state) => ({
-        state: { ...state, status: "cancelled" as const },
-        commands: {
-          name: "CancelBooking",
-          targetAggregateId: state.bookingId,
-          payload: { reason: `Payment failed: ${event.payload.reason}` },
-        },
-      }),
-    },
-
-    // Conditional compensation: refund only if payment was previously completed
-    BookingCancelled: {
-      id: (event) => event.payload.bookingId,
-      handle: (_event, state) => ({
-        state: { ...state, status: "cancelled" as const },
-        commands:
-          state.status === "confirmed" && state.paymentId
-            ? {
-                name: "RefundPayment" as const,
-                targetAggregateId: state.bookingId,
-                payload: { paymentId: state.paymentId, amount: state.totalAmount },
-              }
-            : undefined,  // no refund if payment never completed
-      }),
-    },
+    BookingCreated: onBookingCreated,
+    PaymentCompleted: onPaymentCompleted,
+    PaymentFailed: onPaymentFailed,
+    BookingCancelled: onBookingCancelled,
+    BookingConfirmed: onBookingConfirmed,
+    BookingModified: onBookingModified,
+    PaymentRequested: onPaymentRequested,
+    PaymentRefunded: onPaymentRefunded,
   },
 });
 ```
 
 Two patterns to note here:
 
-- **Multi-command dispatch**: returning an array from a handler dispatches both commands before the saga persists its updated state. `ConfirmBooking` and `ReserveRoom` target different aggregates.
-- **Conditional compensation**: the `BookingCancelled` handler checks `state.status === "confirmed"` before issuing a refund. If payment never completed, the command is `undefined` and nothing is dispatched.
+- **Multi-command dispatch**: returning an array from `onPaymentCompleted` dispatches both commands before the saga persists its updated state. `ConfirmBooking` and `ReserveRoom` target different aggregates.
+- **Conditional compensation**: the `onBookingCancelled` handler checks `state.status === "confirmed"` before issuing a refund. If payment never completed, the command is `undefined` and nothing is dispatched.
 
 ### PaymentProcessingSaga
 
-This saga bridges the `RequestPayment` command (dispatched by `BookingFulfillmentSaga`) and the external payment gateway. It starts on `PaymentRequested`, calls the gateway synchronously, and closes the loop by dispatching `CompletePayment` or `FailPayment` back to the `Booking` aggregate.
+This saga bridges the `RequestPayment` command (dispatched by `BookingFulfillmentSaga`) and the external payment gateway. It starts on `PaymentRequested`, calls the gateway synchronously, and closes the loop by dispatching `CompletePayment` or `FailPayment` back to the `Booking` aggregate. Its transition handlers are extracted the same way.
+
+#### Transition handlers (extracted)
 
 ```ts
-// domain/process-model/payment-processing.ts
+// transition-handlers/on-payment-requested.ts
+import type { PaymentProcessingState } from "../state";
+
+export const onPaymentRequested = async (
+  event: {
+    payload: {
+      bookingId: string;
+      guestId: string;
+      paymentId: string;
+      amount: number;
+    };
+  },
+  _state: PaymentProcessingState,
+  {
+    paymentGateway,
+  }: {
+    paymentGateway: {
+      charge(
+        guestId: string,
+        amount: number,
+      ): Promise<{ transactionId: string }>;
+    };
+  },
+) => {
+  try {
+    const { transactionId } = await paymentGateway.charge(
+      event.payload.guestId,
+      event.payload.amount,
+    );
+
+    return {
+      state: {
+        bookingId: event.payload.bookingId,
+        guestId: event.payload.guestId,
+        paymentId: event.payload.paymentId,
+        amount: event.payload.amount,
+        status: "charging" as const,
+      } satisfies PaymentProcessingState,
+      commands: {
+        name: "CompletePayment" as const,
+        targetAggregateId: event.payload.bookingId,
+        payload: {
+          paymentId: event.payload.paymentId,
+          transactionId,
+          amount: event.payload.amount,
+        },
+      },
+    };
+  } catch (error: any) {
+    return {
+      state: {
+        bookingId: event.payload.bookingId,
+        guestId: event.payload.guestId,
+        paymentId: event.payload.paymentId,
+        amount: event.payload.amount,
+        status: "failed" as const,
+      } satisfies PaymentProcessingState,
+      commands: {
+        name: "FailPayment" as const,
+        targetAggregateId: event.payload.bookingId,
+        payload: {
+          paymentId: event.payload.paymentId,
+          reason: error.message ?? "Payment gateway error",
+        },
+      },
+    };
+  }
+};
+```
+
+The `PaymentCompleted` and `PaymentFailed` handlers observe terminal states for saga record-keeping — they update the saga's status without dispatching commands.
+
+#### Saga definition (wiring)
+
+```ts
+// saga.ts
+import { defineSaga } from "@noddde/core";
+import {
+  onPaymentRequested,
+  onPaymentCompleted,
+  onPaymentFailed,
+} from "./transition-handlers";
+
 export const PaymentProcessingSaga = defineSaga<PaymentProcessingDef>({
+  initialState: initialPaymentProcessingState,
   startedBy: ["PaymentRequested"],
 
   on: {
-    PaymentRequested: {
-      id: (event) => event.payload.bookingId,
-      handle: async (event, _state, { paymentGateway }) => {
-        try {
-          const { transactionId } = await paymentGateway.charge(
-            event.payload.guestId,
-            event.payload.amount,
-          );
-
-          return {
-            state: { /* ..., status: "charging" */ },
-            commands: {
-              name: "CompletePayment" as const,
-              targetAggregateId: event.payload.bookingId,
-              payload: {
-                paymentId: event.payload.paymentId,
-                transactionId,
-                amount: event.payload.amount,
-              },
-            },
-          };
-        } catch (error: any) {
-          return {
-            state: { /* ..., status: "failed" */ },
-            commands: {
-              name: "FailPayment" as const,
-              targetAggregateId: event.payload.bookingId,
-              payload: {
-                paymentId: event.payload.paymentId,
-                reason: error.message ?? "Payment gateway error",
-              },
-            },
-          };
-        }
-      },
-    },
-
-    // Observe terminal states for saga record-keeping
-    PaymentCompleted: {
-      id: (event) => event.payload.bookingId,
-      handle: (_event, state) => ({ state: { ...state, status: "completed" as const } }),
-    },
-    PaymentFailed: {
-      id: (event) => event.payload.bookingId,
-      handle: (_event, state) => ({ state: { ...state, status: "failed" as const } }),
-    },
+    PaymentRequested: onPaymentRequested,
+    PaymentCompleted: onPaymentCompleted,
+    PaymentFailed: onPaymentFailed,
   },
 });
 ```
@@ -336,6 +481,103 @@ export interface RoomAvailabilityViewStore
 ```
 
 The Drizzle implementation (`DrizzleRoomAvailabilityViewStore`) translates this into a SQL `WHERE status = 'available'` clause. The in-memory fallback would load all views and filter in JavaScript — both are valid implementations behind the same interface.
+
+### RoomAvailabilityProjection — extracted event handlers
+
+Projections follow the same extracted pattern. Each event handler is in its own file, typed with `InferProjectionEventHandler`.
+
+#### Event handlers (extracted)
+
+```ts
+// on-entries/on-room-created.ts
+import type { InferProjectionEventHandler } from "@noddde/core";
+import type { RoomAvailabilityProjectionDef } from "../room-availability";
+
+export const onRoomCreated: InferProjectionEventHandler<
+  RoomAvailabilityProjectionDef,
+  "RoomCreated"
+> = {
+  id: (event) => event.payload.roomId,
+  reduce: (event) => ({
+    roomId: event.payload.roomId,
+    roomNumber: event.payload.roomNumber,
+    type: event.payload.type,
+    floor: event.payload.floor,
+    pricePerNight: event.payload.pricePerNight,
+    status: "created",
+    currentGuestId: null,
+  }),
+};
+```
+
+```ts
+// on-entries/on-room-reserved.ts
+import type { InferProjectionEventHandler } from "@noddde/core";
+import type { RoomAvailabilityProjectionDef } from "../room-availability";
+
+export const onRoomReserved: InferProjectionEventHandler<
+  RoomAvailabilityProjectionDef,
+  "RoomReserved"
+> = {
+  id: (event) => event.payload.roomId,
+  reduce: (event, view) => ({
+    ...view,
+    status: "reserved",
+    currentGuestId: event.payload.guestId,
+  }),
+};
+```
+
+The `RoomMadeAvailable`, `GuestCheckedIn`, `GuestCheckedOut`, and `RoomUnderMaintenance` handlers follow the same pattern.
+
+#### Projection definition (wiring)
+
+```ts
+// room-availability.ts
+import { defineProjection } from "@noddde/core";
+import {
+  onRoomCreated,
+  onRoomMadeAvailable,
+  onRoomReserved,
+  onGuestCheckedIn,
+  onGuestCheckedOut,
+  onRoomUnderMaintenance,
+} from "./on-entries";
+import {
+  handleGetRoomAvailability,
+  handleListAvailableRooms,
+} from "./query-handlers";
+
+type RoomAvailabilityProjectionDef = {
+  events: RoomEvent;
+  queries: RoomAvailabilityQuery;
+  view: RoomAvailabilityView;
+  infrastructure: HotelInfrastructure;
+  viewStore: RoomAvailabilityViewStore;
+};
+
+export const RoomAvailabilityProjection =
+  defineProjection<RoomAvailabilityProjectionDef>({
+    consistency: "strong",
+    initialView: {
+      /* ... */
+    },
+
+    on: {
+      RoomCreated: onRoomCreated,
+      RoomMadeAvailable: onRoomMadeAvailable,
+      RoomReserved: onRoomReserved,
+      GuestCheckedIn: onGuestCheckedIn,
+      GuestCheckedOut: onGuestCheckedOut,
+      RoomUnderMaintenance: onRoomUnderMaintenance,
+    },
+
+    queryHandlers: {
+      GetRoomAvailability: handleGetRoomAvailability,
+      ListAvailableRooms: handleListAvailableRooms,
+    },
+  });
+```
 
 ### Strong vs eventual consistency
 
@@ -462,12 +704,15 @@ fastify.post("/bookings/group", async (request, reply) => {
       await domain.dispatchCommand({
         name: "CreateBooking",
         targetAggregateId: bookingId,
-        payload: { guestId, roomType: room.roomType, /* checkIn, checkOut, totalAmount */ },
+        payload: {
+          guestId,
+          roomType: room.roomType /* checkIn, checkOut, totalAmount */,
+        },
       });
       await domain.dispatchCommand({
         name: "ReserveRoom",
         targetAggregateId: room.roomId,
-        payload: { bookingId, guestId, /* checkIn, checkOut */ },
+        payload: { bookingId, guestId /* checkIn, checkOut */ },
       });
     }
   });

@@ -1,14 +1,11 @@
-import type { CheckOutGuestPayload } from "../commands/check-out-guest";
-import type { RoomState } from "../state";
-import type { HotelInfrastructure } from "../../../../../infrastructure/types";
-import type { RoomEvent } from "../../../../event-model";
+import type { InferCommandHandler } from "@noddde/core";
+import type { RoomDef } from "../room";
 
 /** Handles the CheckOutGuest command by emitting a GuestCheckedOut event. */
-export const handleCheckOutGuest = (
-  command: { targetAggregateId: string; payload: CheckOutGuestPayload },
-  state: RoomState,
-  { clock }: HotelInfrastructure,
-): RoomEvent => {
+export const handleCheckOutGuest: InferCommandHandler<
+  RoomDef,
+  "CheckOutGuest"
+> = (command, state, { clock }) => {
   if (state.status !== "occupied") {
     throw new Error(`Cannot check out from room in ${state.status} status`);
   }

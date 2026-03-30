@@ -1,12 +1,11 @@
-import type { InitializeInventoryPayload } from "../commands/initialize-inventory";
-import type { InventoryState } from "../state";
-import type { InventoryEvent } from "../../../../event-model";
+import type { InferCommandHandler } from "@noddde/core";
+import type { InventoryDef } from "../inventory";
 
 /** Handles the InitializeInventory command by emitting an InventoryInitialized event. */
-export const handleInitializeInventory = (
-  command: { targetAggregateId: string; payload: InitializeInventoryPayload },
-  state: InventoryState,
-): InventoryEvent => {
+export const handleInitializeInventory: InferCommandHandler<
+  InventoryDef,
+  "InitializeInventory"
+> = (command, state) => {
   if (state.initialized) {
     throw new Error("Inventory already initialized");
   }

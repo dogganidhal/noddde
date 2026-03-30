@@ -85,7 +85,130 @@ See [The Clock Pattern](/docs/patterns/clock-pattern) for the full rationale.
 
 ## The Aggregate
 
+The recommended pattern extracts command handlers and apply handlers into separate files, typed with `InferCommandHandler` and `InferApplyHandler`. The aggregate definition then imports and wires them together.
+
+### Command handlers (extracted)
+
+Each command handler is a standalone, independently testable function. The type is inferred from the aggregate's type bundle (`AuctionDef`) and the command name.
+
 ```ts
+// command-handlers/handle-create-auction.ts
+import type { InferCommandHandler } from "@noddde/core";
+import type { AuctionDef } from "../auction";
+
+export const handleCreateAuction: InferCommandHandler<
+  AuctionDef,
+  "CreateAuction"
+> = (command) => ({
+  name: "AuctionCreated",
+  payload: command.payload,
+});
+```
+
+```ts
+// command-handlers/handle-place-bid.ts
+import type { InferCommandHandler } from "@noddde/core";
+import type { AuctionDef } from "../auction";
+
+export const handlePlaceBid: InferCommandHandler<AuctionDef, "PlaceBid"> = (
+  command,
+  state,
+  { clock },
+) => {
+  const { bidderId, amount } = command.payload;
+  const now = clock.now();
+
+  if (state.status === "closed") {
+    return {
+      name: "BidRejected",
+      payload: { bidderId, amount, reason: "Auction is closed" },
+    };
+  }
+
+  if (now > state.endsAt) {
+    return {
+      name: "BidRejected",
+      payload: { bidderId, amount, reason: "Auction has ended" },
+    };
+  }
+
+  const minimumBid = state.highestBid?.amount ?? state.startingPrice;
+  if (amount <= minimumBid) {
+    return {
+      name: "BidRejected",
+      payload: {
+        bidderId,
+        amount,
+        reason: `Bid must exceed ${minimumBid}`,
+      },
+    };
+  }
+
+  return {
+    name: "BidPlaced",
+    payload: { bidderId, amount, timestamp: now },
+  };
+};
+```
+
+The `CloseAuction` handler follows the same pattern. Each file imports only `InferCommandHandler` and the type bundle — no runtime dependencies beyond the function itself.
+
+### Apply handlers (extracted)
+
+Apply handlers are also extracted. They are pure functions — no infrastructure access, no async.
+
+```ts
+// apply-handlers/apply-auction-created.ts
+import type { InferApplyHandler } from "@noddde/core";
+import type { AuctionDef } from "../auction";
+
+export const applyAuctionCreated: InferApplyHandler<
+  AuctionDef,
+  "AuctionCreated"
+> = (event) => ({
+  item: event.item,
+  startingPrice: event.startingPrice,
+  endsAt: event.endsAt,
+  status: "open" as const,
+  highestBid: null,
+  bidCount: 0,
+});
+```
+
+```ts
+// apply-handlers/apply-bid-placed.ts
+import type { InferApplyHandler } from "@noddde/core";
+import type { AuctionDef } from "../auction";
+
+export const applyBidPlaced: InferApplyHandler<AuctionDef, "BidPlaced"> = (
+  event,
+  state,
+) => ({
+  ...state,
+  highestBid: { bidderId: event.bidderId, amount: event.amount },
+  bidCount: state.bidCount + 1,
+});
+```
+
+```ts
+// apply-handlers/apply-bid-rejected.ts
+import type { InferApplyHandler } from "@noddde/core";
+import type { AuctionDef } from "../auction";
+
+export const applyBidRejected: InferApplyHandler<AuctionDef, "BidRejected"> = (
+  _event,
+  state,
+) => state; // No state change
+```
+
+The `AuctionClosed` apply handler follows the same pattern.
+
+### Aggregate definition (wiring)
+
+The aggregate definition imports all handlers and wires them together. This file is thin — it contains no business logic, only composition.
+
+```ts
+// auction.ts
 import { defineAggregate } from "@noddde/core";
 
 type AuctionDef = {
@@ -96,91 +219,19 @@ type AuctionDef = {
 };
 
 export const Auction = defineAggregate<AuctionDef>({
-  initialState: {
-    item: "",
-    startingPrice: 0,
-    endsAt: new Date(0),
-    status: "open",
-    highestBid: null,
-    bidCount: 0,
-  },
+  initialState: initialAuctionState,
 
   commands: {
-    CreateAuction: (command) => ({
-      name: "AuctionCreated",
-      payload: command.payload,
-    }),
-
-    PlaceBid: (command, state, { clock }) => {
-      const { bidderId, amount } = command.payload;
-      const now = clock.now();
-
-      // Validation 1: auction must be open
-      if (state.status === "closed") {
-        return {
-          name: "BidRejected",
-          payload: { bidderId, amount, reason: "Auction is closed" },
-        };
-      }
-
-      // Validation 2: auction must not have ended
-      if (now > state.endsAt) {
-        return {
-          name: "BidRejected",
-          payload: { bidderId, amount, reason: "Auction has ended" },
-        };
-      }
-
-      // Validation 3: bid must exceed current highest (or starting price)
-      const minimumBid = state.highestBid?.amount ?? state.startingPrice;
-      if (amount <= minimumBid) {
-        return {
-          name: "BidRejected",
-          payload: {
-            bidderId,
-            amount,
-            reason: `Bid must exceed ${minimumBid}`,
-          },
-        };
-      }
-
-      return {
-        name: "BidPlaced",
-        payload: { bidderId, amount, timestamp: now },
-      };
-    },
-
-    CloseAuction: (_command, state) => ({
-      name: "AuctionClosed",
-      payload: {
-        winnerId: state.highestBid?.bidderId ?? null,
-        winningBid: state.highestBid?.amount ?? null,
-      },
-    }),
+    CreateAuction: handleCreateAuction,
+    PlaceBid: handlePlaceBid,
+    CloseAuction: handleCloseAuction,
   },
 
   apply: {
-    AuctionCreated: (event) => ({
-      item: event.item,
-      startingPrice: event.startingPrice,
-      endsAt: event.endsAt,
-      status: "open" as const,
-      highestBid: null,
-      bidCount: 0,
-    }),
-
-    BidPlaced: (event, state) => ({
-      ...state,
-      highestBid: { bidderId: event.bidderId, amount: event.amount },
-      bidCount: state.bidCount + 1,
-    }),
-
-    BidRejected: (_event, state) => state, // No state change
-
-    AuctionClosed: (_event, state) => ({
-      ...state,
-      status: "closed" as const,
-    }),
+    AuctionCreated: applyAuctionCreated,
+    BidPlaced: applyBidPlaced,
+    BidRejected: applyBidRejected,
+    AuctionClosed: applyAuctionClosed,
   },
 });
 ```

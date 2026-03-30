@@ -1,8 +1,5 @@
-import type { Command } from "@noddde/core";
-import type { AuctionState } from "../state";
-import type { AuctionEvent } from "../../../../event-model";
-import type { AuctionInfrastructure } from "../../../../../infrastructure";
-import type { PlaceBidPayload } from "../commands/place-bid";
+import type { InferCommandHandler } from "@noddde/core";
+import type { AuctionDef } from "../auction";
 
 /**
  * Handles the PlaceBid command. Validates the bid against the auction state
@@ -13,11 +10,11 @@ import type { PlaceBidPayload } from "../commands/place-bid";
  * - Auction has ended (clock.now() > endsAt)
  * - Bid does not exceed the current highest bid (or starting price)
  */
-export const handlePlaceBid = (
-  command: Command & { name: "PlaceBid"; payload: PlaceBidPayload },
-  state: AuctionState,
-  { clock }: AuctionInfrastructure,
-): AuctionEvent => {
+export const handlePlaceBid: InferCommandHandler<AuctionDef, "PlaceBid"> = (
+  command,
+  state,
+  { clock },
+) => {
   const { bidderId, amount } = command.payload;
   const now = clock.now();
 

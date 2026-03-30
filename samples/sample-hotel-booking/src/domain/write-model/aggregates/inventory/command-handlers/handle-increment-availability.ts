@@ -1,12 +1,11 @@
-import type { IncrementAvailabilityPayload } from "../commands/increment-availability";
-import type { InventoryState } from "../state";
-import type { InventoryEvent } from "../../../../event-model";
+import type { InferCommandHandler } from "@noddde/core";
+import type { InventoryDef } from "../inventory";
 
 /** Handles the IncrementAvailability command by emitting an AvailabilityIncremented event. */
-export const handleIncrementAvailability = (
-  command: { targetAggregateId: string; payload: IncrementAvailabilityPayload },
-  state: InventoryState,
-): InventoryEvent => {
+export const handleIncrementAvailability: InferCommandHandler<
+  InventoryDef,
+  "IncrementAvailability"
+> = (command, state) => {
   if (!state.initialized) {
     throw new Error("Inventory not initialized");
   }

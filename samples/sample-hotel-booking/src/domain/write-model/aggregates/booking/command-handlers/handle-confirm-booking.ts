@@ -1,14 +1,11 @@
-import type { ConfirmBookingPayload } from "../commands/confirm-booking";
-import type { BookingState } from "../state";
-import type { HotelInfrastructure } from "../../../../../infrastructure/types";
-import type { BookingEvent } from "../../../../event-model";
+import type { InferCommandHandler } from "@noddde/core";
+import type { BookingDef } from "../booking";
 
 /** Handles the ConfirmBooking command by emitting a BookingConfirmed event. */
-export const handleConfirmBooking = (
-  command: { targetAggregateId: string; payload: ConfirmBookingPayload },
-  state: BookingState,
-  { clock }: HotelInfrastructure,
-): BookingEvent => {
+export const handleConfirmBooking: InferCommandHandler<
+  BookingDef,
+  "ConfirmBooking"
+> = (command, state, { clock }) => {
   if (state.status !== "awaiting_payment" && state.status !== "pending") {
     throw new Error(`Cannot confirm booking in ${state.status} status`);
   }

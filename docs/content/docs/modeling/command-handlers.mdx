@@ -20,6 +20,40 @@ Every aggregate command handler has this shape:
 
 The return value is always one or more events describing what happened. The framework narrows the `command` parameter per handler -- when you write the handler for `AuthorizeTransaction`, the `command` type is narrowed to `{ name: "AuthorizeTransaction"; payload: { amount: number; merchant: string }; targetAggregateId: string }`. You never need to check the command name or cast anything.
 
+The recommended pattern is to define each command handler as a standalone function in its own file, typed with `InferCommandHandler`. This gives you full type inference from the `AggregateTypes` bundle without manually reconstructing parameter types:
+
+```typescript
+// command-handlers/handle-create-bank-account.ts
+import type { InferCommandHandler } from "@noddde/core";
+import type { BankAccountDef } from "../bank-account";
+
+export const handleCreateBankAccount: InferCommandHandler<
+  BankAccountDef,
+  "CreateBankAccount"
+> = (command, _state, { logger }) => {
+  logger.info(`Creating bank account ${command.targetAggregateId}`);
+  return {
+    name: "BankAccountCreated",
+    payload: { id: command.targetAggregateId },
+  };
+};
+```
+
+The handler is then referenced by name in the aggregate definition:
+
+```typescript
+commands: {
+  CreateBankAccount: handleCreateBankAccount,
+  AuthorizeTransaction: handleAuthorizeTransaction,
+},
+```
+
+<Callout type="info">
+  For simple handlers with minimal logic, you can define them inline directly in
+  the `commands` map. But extracted handlers are preferred as they are
+  independently testable and keep the aggregate definition concise.
+</Callout>
+
 ## Returning Events
 
 ### Single Event
@@ -27,13 +61,20 @@ The return value is always one or more events describing what happened. The fram
 The simplest case: the handler returns one event object.
 
 ```typescript
-CreateBankAccount: (command, _state, { logger }) => {
+// command-handlers/handle-create-bank-account.ts
+import type { InferCommandHandler } from "@noddde/core";
+import type { BankAccountDef } from "../bank-account";
+
+export const handleCreateBankAccount: InferCommandHandler<
+  BankAccountDef,
+  "CreateBankAccount"
+> = (command, _state, { logger }) => {
   logger.info(`Creating bank account ${command.targetAggregateId}`);
   return {
     name: "BankAccountCreated",
     payload: { id: command.targetAggregateId },
   };
-},
+};
 ```
 
 ### Conditional Returns
@@ -41,7 +82,14 @@ CreateBankAccount: (command, _state, { logger }) => {
 A handler can return different events depending on the current state. This is how you model business rule validation:
 
 ```typescript
-AuthorizeTransaction: (command, state, { logger }) => {
+// command-handlers/handle-authorize-transaction.ts
+import type { InferCommandHandler } from "@noddde/core";
+import type { BankAccountDef } from "../bank-account";
+
+export const handleAuthorizeTransaction: InferCommandHandler<
+  BankAccountDef,
+  "AuthorizeTransaction"
+> = (command, state, { logger }) => {
   const { amount, merchant } = command.payload;
 
   if (state.availableBalance < amount) {
@@ -67,7 +115,7 @@ AuthorizeTransaction: (command, state, { logger }) => {
       merchant,
     },
   };
-},
+};
 ```
 
 Notice that both branches return an event. The handler does not throw an exception for insufficient funds -- it returns a `TransactionDeclined` event instead. This is a deliberate design choice covered in detail below.
@@ -77,7 +125,14 @@ Notice that both branches return an event. The handler does not throw an excepti
 Return an array when a single command produces multiple events:
 
 ```typescript
-CloseMonth: (command, state) => {
+// command-handlers/handle-close-month.ts
+import type { InferCommandHandler } from "@noddde/core";
+import type { BankAccountDef } from "../bank-account";
+
+export const handleCloseMonth: InferCommandHandler<
+  BankAccountDef,
+  "CloseMonth"
+> = (command, state) => {
   const events: BankAccountEvent[] = [];
 
   for (const txn of state.transactions) {
@@ -95,7 +150,7 @@ CloseMonth: (command, state) => {
   }
 
   return events;
-},
+};
 ```
 
 All events in the array are applied in order to update the aggregate's state and then dispatched to the event bus.
@@ -107,7 +162,14 @@ Command handlers are where business rules live. The `state` parameter contains t
 ### Balance Checking
 
 ```typescript
-AuthorizeTransaction: (command, state) => {
+// command-handlers/handle-authorize-transaction.ts
+import type { InferCommandHandler } from "@noddde/core";
+import type { BankAccountDef } from "../bank-account";
+
+export const handleAuthorizeTransaction: InferCommandHandler<
+  BankAccountDef,
+  "AuthorizeTransaction"
+> = (command, state) => {
   const { amount, merchant } = command.payload;
 
   if (state.availableBalance < amount) {
@@ -131,13 +193,21 @@ AuthorizeTransaction: (command, state) => {
       merchant,
     },
   };
-},
+};
 ```
 
 ### Status Checking
 
 ```typescript
-PlaceBid: (command, state, { clock }) => {
+// command-handlers/handle-place-bid.ts
+import type { InferCommandHandler } from "@noddde/core";
+import type { AuctionDef } from "../auction";
+
+export const handlePlaceBid: InferCommandHandler<AuctionDef, "PlaceBid"> = (
+  command,
+  state,
+  { clock },
+) => {
   const { bidderId, amount } = command.payload;
 
   if (state.status !== "open") {
@@ -166,7 +236,7 @@ PlaceBid: (command, state, { clock }) => {
     name: "BidPlaced",
     payload: { ...command.payload, timestamp: clock.now() },
   };
-},
+};
 ```
 
 Each check inspects the current state and returns an appropriate rejection event when an invariant is violated. The handler never mutates state directly -- it returns events that describe the outcome, and the apply handlers update state separately.
@@ -203,7 +273,10 @@ Contrast this with throwing an exception: exceptions abort the command processin
 Throw exceptions only for truly unexpected situations -- programming errors, infrastructure failures, or invariants that indicate a bug in your code:
 
 ```typescript
-AuthorizeTransaction: (command, state) => {
+export const handleAuthorizeTransaction: InferCommandHandler<
+  BankAccountDef,
+  "AuthorizeTransaction"
+> = (command, state) => {
   // This should never happen if the system is correct
   if (!state) {
     throw new Error(
@@ -219,25 +292,28 @@ AuthorizeTransaction: (command, state) => {
   }
 
   // ... normal business logic
-},
+};
 ```
 
 The rule of thumb: if a human user could cause this condition through normal use of the application (insufficient funds, expired auction, duplicate request), model it as a rejection event. If only a programmer mistake or infrastructure failure can cause this condition, throw an exception.
 
 ## Using Infrastructure
 
-The third parameter gives you access to your domain infrastructure. Destructure the services you need directly in the function signature:
+The third parameter gives you access to your domain infrastructure. Destructure the services you need directly in the function signature. `InferCommandHandler` automatically types the infrastructure from your `AggregateTypes` bundle:
 
 ```typescript
-interface AuctionInfrastructure extends Infrastructure {
-  clock: { now(): Date };
-}
+// command-handlers/handle-place-bid.ts
+import type { InferCommandHandler } from "@noddde/core";
+import type { AuctionDef } from "../auction";
 
-// Handler destructures the clock from infrastructure
-PlaceBid: (command, state, { clock }) => {
+export const handlePlaceBid: InferCommandHandler<AuctionDef, "PlaceBid"> = (
+  command,
+  state,
+  { clock },
+) => {
   const now = clock.now();
   // ... use `now` for time-based validation
-},
+};
 ```
 
 Common infrastructure services:
@@ -254,7 +330,14 @@ In tests, you inject fakes (a fixed clock, a stub fraud service). In production,
 When a handler needs several infrastructure services, destructure them all:
 
 ```typescript
-AuthorizeTransaction: async (command, state, { fraudService, logger }) => {
+// command-handlers/handle-authorize-transaction.ts
+import type { InferCommandHandler } from "@noddde/core";
+import type { BankAccountDef } from "../bank-account";
+
+export const handleAuthorizeTransaction: InferCommandHandler<
+  BankAccountDef,
+  "AuthorizeTransaction"
+> = async (command, state, { fraudService, logger }) => {
   const { amount, merchant } = command.payload;
 
   const fraudCheck = await fraudService.check({ amount, merchant });
@@ -281,7 +364,7 @@ AuthorizeTransaction: async (command, state, { fraudService, logger }) => {
       merchant,
     },
   };
-},
+};
 ```
 
 ## Async Command Handlers
@@ -289,7 +372,14 @@ AuthorizeTransaction: async (command, state, { fraudService, logger }) => {
 Handlers can be asynchronous when they need to call external infrastructure. Mark the handler with `async` and the framework will `await` it before persisting events:
 
 ```typescript
-AuthorizeTransaction: async (command, state, { fraudService }) => {
+// command-handlers/handle-authorize-transaction.ts
+import type { InferCommandHandler } from "@noddde/core";
+import type { BankAccountDef } from "../bank-account";
+
+export const handleAuthorizeTransaction: InferCommandHandler<
+  BankAccountDef,
+  "AuthorizeTransaction"
+> = async (command, state, { fraudService }) => {
   const isSuspicious = await fraudService.evaluate(
     command.targetAggregateId,
     command.payload.amount,
@@ -316,7 +406,7 @@ AuthorizeTransaction: async (command, state, { fraudService }) => {
       merchant: command.payload.merchant,
     },
   };
-},
+};
 ```
 
 The return type `Promise<TEvents | TEvents[]>` is part of the handler contract. Use cases for async handlers include:
@@ -329,7 +419,7 @@ Keep in mind that the aggregate instance is locked during command processing. Lo
 
 ## Type Safety
 
-The `commands` map is fully typed. The framework guarantees the following without requiring any manual type annotations from you:
+The `commands` map is fully typed. When you use `InferCommandHandler<Def, "CommandName">`, the function signature is derived entirely from your `AggregateTypes` bundle. The framework guarantees the following without requiring any manual type annotations from you:
 
 1. **Narrowed command type.** Each handler receives the exact command type for its key. The `AuthorizeTransaction` handler gets `{ name: "AuthorizeTransaction"; payload: { amount: number; merchant: string }; targetAggregateId: string }`, not the full command union.
 

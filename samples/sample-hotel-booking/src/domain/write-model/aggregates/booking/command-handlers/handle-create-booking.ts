@@ -1,14 +1,11 @@
-import type { CreateBookingPayload } from "../commands/create-booking";
-import type { BookingState } from "../state";
-import type { HotelInfrastructure } from "../../../../../infrastructure/types";
-import type { BookingEvent } from "../../../../event-model";
+import type { InferCommandHandler } from "@noddde/core";
+import type { BookingDef } from "../booking";
 
 /** Handles the CreateBooking command by emitting a BookingCreated event. */
-export const handleCreateBooking = (
-  command: { targetAggregateId: string; payload: CreateBookingPayload },
-  state: BookingState,
-  { clock }: HotelInfrastructure,
-): BookingEvent => {
+export const handleCreateBooking: InferCommandHandler<
+  BookingDef,
+  "CreateBooking"
+> = (command, state, { clock }) => {
   if (state.guestId !== null) {
     throw new Error("Booking already created");
   }

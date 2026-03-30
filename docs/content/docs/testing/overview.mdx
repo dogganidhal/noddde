@@ -111,21 +111,23 @@ expect(result.events).toEqual([]);
 
 ## Direct Handler Testing
 
-You can always call handlers directly without any harness. The aggregate, projection, and saga objects are plain JavaScript objects with function properties:
+Since all handlers are extracted to standalone functions, you can import and test them directly without any harness:
 
 ```ts
-// Call a command handler directly
-const events = BankAccount.commands.AuthorizeTransaction(
-  command,
-  state,
-  infrastructure,
-);
+// Command handler — import the extracted function
+import { handleAuthorizeTransaction } from "./command-handlers/handle-authorize-transaction";
 
-// Call an apply handler directly
-const newState = BankAccount.apply.TransactionAuthorized(payload, state);
+const events = handleAuthorizeTransaction(command, state, infrastructure);
 
-// Call a projection reducer directly
-const newView = BankProjection.on.TransactionAuthorized!.reduce(event, view);
+// Apply handler — import the extracted function
+import { applyTransactionAuthorized } from "./apply-handlers/apply-transaction-authorized";
+
+const newState = applyTransactionAuthorized(payload, state);
+
+// Projection event handler — import the extracted on-entry
+import { onTransactionAuthorized } from "./on-entries/on-transaction-authorized";
+
+const newView = onTransactionAuthorized.reduce(event, view);
 ```
 
 The harnesses add value by managing state reconstruction from events, normalizing results, and capturing errors -- but they are optional.

@@ -148,10 +148,115 @@ return {
 
 ## Defining a Saga with defineSaga
 
-Use `defineSaga` -- an identity function that provides full type inference:
+Use `defineSaga` -- an identity function that provides full type inference. The recommended pattern is to extract each `on` entry into its own file, typed with `InferSagaOnEntry`, then import them into the saga definition. This keeps handlers focused, testable, and easy to navigate.
 
-```ts
+### Extracted on-entries (recommended)
+
+Each on-entry lives in its own file inside an `on-entries/` directory. The `InferSagaOnEntry` helper derives the exact `{ id, handle }` type from your `SagaTypes` bundle and an event name -- no manual type reconstruction needed.
+
+```ts title="on-entries/on-order-placed.ts"
+import type { InferSagaOnEntry } from "@noddde/core";
+import type { OrderFulfillmentSagaDef } from "../saga";
+
+export const onOrderPlaced: InferSagaOnEntry<
+  OrderFulfillmentSagaDef,
+  "OrderPlaced"
+> = {
+  id: (event) => event.payload.orderId,
+  handle: (event, state) => ({
+    state: {
+      ...state,
+      orderId: event.payload.orderId,
+      customerId: event.payload.customerId,
+      total: event.payload.total,
+      items: event.payload.items,
+      status: "awaiting_payment" as const,
+      paymentId: "payment-" + event.payload.orderId,
+    },
+    commands: {
+      name: "RequestPayment",
+      targetAggregateId: "payment-" + event.payload.orderId,
+      payload: {
+        referenceId: event.payload.orderId,
+        amount: event.payload.total,
+      },
+    },
+  }),
+};
+```
+
+```ts title="on-entries/on-payment-completed.ts"
+import type { InferSagaOnEntry } from "@noddde/core";
+import type { OrderFulfillmentSagaDef } from "../saga";
+
+export const onPaymentCompleted: InferSagaOnEntry<
+  OrderFulfillmentSagaDef,
+  "PaymentCompleted"
+> = {
+  id: (event) => event.payload.referenceId,
+  handle: (event, state) => ({
+    state: { ...state, status: "awaiting_shipment" as const },
+    commands: [
+      {
+        name: "ConfirmOrder",
+        targetAggregateId: state.orderId!,
+      },
+      {
+        name: "ArrangeShipment",
+        targetAggregateId: "ship-" + event.payload.referenceId,
+        payload: {
+          customerReference: event.payload.referenceId,
+          itemCount: state.items.reduce((sum, i) => sum + i.quantity, 0),
+        },
+      },
+    ],
+  }),
+};
+```
+
+```ts title="on-entries/on-shipment-delivered.ts"
+import type { InferSagaOnEntry } from "@noddde/core";
+import type { OrderFulfillmentSagaDef } from "../saga";
+
+export const onShipmentDelivered: InferSagaOnEntry<
+  OrderFulfillmentSagaDef,
+  "ShipmentDelivered"
+> = {
+  id: (event) => event.payload.customerReference,
+  handle: async (_event, state, { notificationService }) => {
+    await notificationService.notifyCustomer(
+      state.customerId!,
+      `Your order ${state.orderId} has been delivered!`,
+    );
+    return {
+      state: { ...state, status: "delivered" as const },
+      commands: {
+        name: "MarkOrderDelivered",
+        targetAggregateId: state.orderId!,
+      },
+    };
+  },
+};
+```
+
+Then the saga definition imports them all:
+
+```ts title="saga.ts"
 import { defineSaga } from "@noddde/core";
+import { onOrderPlaced } from "./on-entries/on-order-placed";
+import { onPaymentCompleted } from "./on-entries/on-payment-completed";
+import { onPaymentFailed } from "./on-entries/on-payment-failed";
+import { onShipmentDispatched } from "./on-entries/on-shipment-dispatched";
+import { onShipmentDelivered } from "./on-entries/on-shipment-delivered";
+import { onOrderCancelled } from "./on-entries/on-order-cancelled";
+import { onOrderConfirmed } from "./on-entries/on-order-confirmed";
+
+export type OrderFulfillmentSagaDef = {
+  state: OrderFulfillmentState;
+  events: OrderEvent | PaymentEvent | ShippingEvent;
+  commands: OrderCommand | PaymentCommand | ShippingCommand;
+  infrastructure: EcommerceInfrastructure;
+};
 
 export const OrderFulfillmentSaga = defineSaga<OrderFulfillmentSagaDef>({
   initialState: {
@@ -168,123 +273,46 @@ export const OrderFulfillmentSaga = defineSaga<OrderFulfillmentSagaDef>({
   startedBy: ["OrderPlaced"],
 
   on: {
-    // Order placed → request payment
-    OrderPlaced: {
-      id: (event) => event.payload.orderId,
-      handle: (event, state) => ({
-        state: {
-          ...state,
-          orderId: event.payload.orderId,
-          customerId: event.payload.customerId,
-          total: event.payload.total,
-          items: event.payload.items,
-          status: "awaiting_payment" as const,
-          paymentId: "payment-" + event.payload.orderId,
-        },
-        commands: {
-          name: "RequestPayment",
-          targetAggregateId: "payment-" + event.payload.orderId,
-          payload: {
-            referenceId: event.payload.orderId,
-            amount: event.payload.total,
-          },
-        },
-      }),
-    },
+    OrderPlaced: onOrderPlaced,
+    PaymentCompleted: onPaymentCompleted,
+    PaymentFailed: onPaymentFailed,
+    ShipmentDispatched: onShipmentDispatched,
+    ShipmentDelivered: onShipmentDelivered,
+    OrderCancelled: onOrderCancelled,
+    OrderConfirmed: onOrderConfirmed,
+  },
+});
+```
 
-    // Payment completed → confirm order + arrange shipment
-    PaymentCompleted: {
-      id: (event) => event.payload.referenceId,
-      handle: (event, state) => ({
-        state: { ...state, status: "awaiting_shipment" as const },
-        commands: [
-          {
-            name: "ConfirmOrder",
-            targetAggregateId: state.orderId!,
-          },
-          {
-            name: "ArrangeShipment",
-            targetAggregateId: "ship-" + event.payload.referenceId,
-            payload: {
-              customerReference: event.payload.referenceId,
-              itemCount: state.items.reduce((sum, i) => sum + i.quantity, 0),
-            },
-          },
-        ],
-      }),
-    },
+### Inline on-entries
 
-    // Payment failed → cancel the order
-    PaymentFailed: {
-      id: (event) => event.payload.referenceId,
-      handle: (event, state) => ({
-        state: { ...state, status: "payment_failed" as const },
-        commands: {
-          name: "CancelOrder",
-          targetAggregateId: state.orderId!,
-          payload: { reason: `Payment failed: ${event.payload.reason}` },
-        },
-      }),
-    },
+For simple sagas or entries that are just a few lines, inline handlers are still valid:
 
-    // Shipment dispatched → update order with tracking
-    ShipmentDispatched: {
-      id: (event) => event.payload.customerReference,
-      handle: (event, state) => ({
-        state: {
-          ...state,
-          trackingNumber: event.payload.trackingNumber,
-          status: "shipped" as const,
-        },
-        commands: {
-          name: "MarkOrderShipped",
-          targetAggregateId: state.orderId!,
-          payload: { trackingNumber: event.payload.trackingNumber },
-        },
-      }),
-    },
-
-    // Shipment delivered → notify customer, mark order complete
-    ShipmentDelivered: {
-      id: (event) => event.payload.customerReference,
-      handle: async (_event, state, { notificationService }) => {
-        await notificationService.notifyCustomer(
-          state.customerId!,
-          `Your order ${state.orderId} has been delivered!`,
-        );
-        return {
-          state: { ...state, status: "delivered" as const },
-          commands: {
-            name: "MarkOrderDelivered",
-            targetAggregateId: state.orderId!,
-          },
-        };
-      },
-    },
-
-    // Order cancelled → refund if payment was taken
-    OrderCancelled: {
-      id: (event) => event.payload.orderId,
-      handle: (event, state) => ({
-        state: { ...state, status: "cancelled" as const },
-        commands: state.paymentId
-          ? {
-              name: "RefundPayment",
-              targetAggregateId: state.paymentId,
-              payload: { reason: event.payload.reason },
-            }
-          : undefined,
-      }),
-    },
-
-    // Events observed for tracking, no commands dispatched
+```ts
+export const OrderFulfillmentSaga = defineSaga<OrderFulfillmentSagaDef>({
+  initialState: {
+    /* ... */
+  },
+  startedBy: ["OrderPlaced"],
+  on: {
+    // Inline is fine for trivial entries
     OrderConfirmed: {
       id: (event) => event.payload.orderId,
       handle: (_event, state) => ({ state }),
     },
+    // But extract complex entries to separate files
+    OrderPlaced: onOrderPlaced,
+    PaymentCompleted: onPaymentCompleted,
   },
 });
 ```
+
+<Callout type="info">
+  Inline handlers work for trivial cases, but extracted handlers with
+  `InferSagaOnEntry` are the recommended pattern. Each handler gets its own
+  file, its own tests, and a single type annotation that validates the entire
+  shape.
+</Callout>
 
 ## The `on` Map
 
@@ -294,29 +322,18 @@ The **`on` map** solves this: each entry bundles an `id` function that extracts 
 
 ### Defining on entries
 
-The `on` field is a map keyed by event name. Each entry has an `id` function that receives the narrowed event type and returns the saga instance ID, and a `handle` function that receives the event, current state, and infrastructure:
+The `on` field is a map keyed by event name. Each entry has an `id` function that receives the narrowed event type and returns the saga instance ID, and a `handle` function that receives the event, current state, and infrastructure. Whether the entry is inline or extracted, the shape is the same:
 
 ```ts
 on: {
-  // Order events — the order aggregate uses "orderId"
-  OrderPlaced: {
-    id: (event) => event.payload.orderId,
-    handle: (event, state) => ({ /* ... */ }),
-  },
-  // Payment events — the payment aggregate uses "referenceId"
-  PaymentCompleted: {
-    id: (event) => event.payload.referenceId,
-    handle: (event, state) => ({ /* ... */ }),
-  },
-  // Shipping events — the shipping aggregate uses "customerReference"
-  ShipmentDispatched: {
-    id: (event) => event.payload.customerReference,
-    handle: (event, state) => ({ /* ... */ }),
-  },
+  // Extracted entries -- each typed with InferSagaOnEntry in its own file
+  OrderPlaced: onOrderPlaced,
+  PaymentCompleted: onPaymentCompleted,
+  ShipmentDispatched: onShipmentDispatched,
 },
 ```
 
-Inside each `on` entry, `event` is narrowed to the specific event type for that key -- not the full union. This means you get full IntelliSense on the event payload, and TypeScript will catch it if you try to access a field that doesn't exist on that specific event type.
+Inside each `on` entry, `event` is narrowed to the specific event type for that key -- not the full union. This means you get full IntelliSense on the event payload, and TypeScript will catch it if you try to access a field that doesn't exist on that specific event type. When using `InferSagaOnEntry`, this narrowing is enforced by the type annotation itself.
 
 ### The `on` map is partial
 
@@ -446,7 +463,16 @@ The `processModel` section is separate because sagas are neither pure write-mode
 
 ## Type Inference Helpers
 
-Like aggregates and projections, sagas have `Infer*` helpers:
+Like aggregates and projections, sagas have `Infer*` helpers. The most commonly used is `InferSagaOnEntry`, which types an extracted on-entry in its own file:
+
+```ts
+import type { InferSagaOnEntry } from "@noddde/core";
+
+// Types the full { id, handle } object for a specific event
+type Entry = InferSagaOnEntry<OrderFulfillmentSagaDef, "OrderPlaced">;
+```
+
+Definition-level helpers extract types from the built saga:
 
 ```ts
 import {
@@ -463,6 +489,8 @@ type Commands = InferSagaCommands<typeof OrderFulfillmentSaga>;
 type Infra = InferSagaInfrastructure<typeof OrderFulfillmentSaga>;
 type Id = InferSagaId<typeof OrderFulfillmentSaga>; // string
 ```
+
+See [Type Inference Helpers](/docs/modeling/type-inference#handler-level-inference) for the full list of handler-level and definition-level helpers.
 
 ## Saga vs Standalone Command Handler
 

@@ -13,7 +13,9 @@ The API is split into two phases:
 This separation allows domain definitions to be shared, tested, and analyzed independently of runtime concerns.
 
 <Callout type="info">
-  You can scaffold a full project with `noddde new project my-app`, or add a domain layer to an existing project with `noddde new domain my-domain`. See [CLI Reference](/docs/getting-started/cli) for details.
+  You can scaffold a full project with `noddde new project my-app`, or add a
+  domain layer to an existing project with `noddde new domain my-domain`. See
+  [CLI Reference](/docs/getting-started/cli) for details.
 </Callout>
 
 ## Defining the Domain
@@ -126,7 +128,7 @@ These warnings only appear when the framework itself supplies the default -- not
 | `idempotency`      | Factory for idempotency store (command dedup by commandId).                                  |
 | `outbox`           | Transactional outbox configuration.                                                          |
 | `metadataProvider` | Function called on every command dispatch for event metadata context.                        |
-| `logger`           | Framework logger instance. Defaults to `NodddeLogger` at `'warn'` level.                 |
+| `logger`           | Framework logger instance. Defaults to `NodddeLogger` at `'warn'` level.                     |
 
 All fields are optional. Both `wireDomain(definition)` and `wireDomain(definition, {})` use in-memory defaults for everything.
 

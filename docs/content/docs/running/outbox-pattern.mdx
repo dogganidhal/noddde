@@ -5,15 +5,12 @@ description: Guaranteeing at-least-once event delivery with the transactional ou
 
 In a CQRS/Event Sourcing system, events are persisted inside a database transaction and then published to the event bus. If the node crashes after the transaction commits but before events are published, those events are lost — projections, sagas, and external subscribers never see them.
 
-The **transactional outbox pattern** solves this by writing events to an outbox table *within the same transaction* as aggregate persistence. A background relay polls for unpublished entries and dispatches them, guaranteeing **at-least-once delivery**.
+The **transactional outbox pattern** solves this by writing events to an outbox table _within the same transaction_ as aggregate persistence. A background relay polls for unpublished entries and dispatches them, guaranteeing **at-least-once delivery**.
 
 ## Quick Example
 
 ```ts
-import {
-  wireDomain,
-  InMemoryOutboxStore,
-} from "@noddde/engine";
+import { wireDomain, InMemoryOutboxStore } from "@noddde/engine";
 
 const domain = await wireDomain(orderDomain, {
   outbox: {
@@ -83,7 +80,12 @@ For production, all three [ORM adapter packages](/docs/running/orm-adapters) (`@
 ```ts
 // Drizzle (outbox schema table required)
 import { outbox } from "@noddde/drizzle/pg";
-const infra = createDrizzlePersistence(db, { events, aggregateStates, sagaStates, outbox });
+const infra = createDrizzlePersistence(db, {
+  events,
+  aggregateStates,
+  sagaStates,
+  outbox,
+});
 // infra.outboxStore is now available
 
 // Prisma / TypeORM (always included)
@@ -113,12 +115,12 @@ Both `startOutboxRelay()` and `stopOutboxRelay()` are idempotent — calling the
 
 ```ts
 interface OutboxEntry {
-  id: string;                    // UUID v7 (time-ordered)
-  event: Event;                  // Fully enriched domain event
-  aggregateName?: string;        // From event metadata
-  aggregateId?: string;          // From event metadata
-  createdAt: string;             // ISO 8601
-  publishedAt: string | null;    // null = pending
+  id: string; // UUID v7 (time-ordered)
+  event: Event; // Fully enriched domain event
+  aggregateName?: string; // From event metadata
+  aggregateId?: string; // From event metadata
+  createdAt: string; // ISO 8601
+  publishedAt: string | null; // null = pending
 }
 
 interface OutboxStore {
@@ -164,7 +166,7 @@ expect(dispatched).toBe(1);
 
 ## At-Least-Once Delivery
 
-The outbox guarantees events are delivered **at least once**, not exactly once. In the happy path, events are dispatched immediately after commit *and* marked as published. But if the node crashes:
+The outbox guarantees events are delivered **at least once**, not exactly once. In the happy path, events are dispatched immediately after commit _and_ marked as published. But if the node crashes:
 
 1. The relay dispatches unpublished entries on the next poll
 2. Events that were already dispatched (but not marked) may be dispatched again

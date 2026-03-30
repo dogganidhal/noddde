@@ -10,9 +10,17 @@ import { handleReserveRoom } from "./command-handlers/handle-reserve-room";
 import { handleCheckInGuest } from "./command-handlers/handle-check-in-guest";
 import { handleCheckOutGuest } from "./command-handlers/handle-check-out-guest";
 import { handlePutUnderMaintenance } from "./command-handlers/handle-put-under-maintenance";
+import {
+  applyRoomCreated,
+  applyRoomMadeAvailable,
+  applyRoomReserved,
+  applyGuestCheckedIn,
+  applyGuestCheckedOut,
+  applyRoomUnderMaintenance,
+} from "./apply-handlers";
 
 /** Type bundle for the Room aggregate. */
-type RoomDef = {
+export type RoomDef = {
   state: RoomState;
   events: RoomEvent;
   commands: RoomCommand;
@@ -23,8 +31,8 @@ type RoomDef = {
  * Room aggregate definition.
  *
  * Models a hotel room lifecycle: creation, availability, reservation,
- * occupancy, and maintenance. Command handlers are extracted; apply
- * handlers remain inline.
+ * occupancy, and maintenance. All handlers are extracted to
+ * separate files for maintainability.
  */
 export const Room = defineAggregate<RoomDef>({
   initialState: initialRoomState,
@@ -39,47 +47,11 @@ export const Room = defineAggregate<RoomDef>({
   },
 
   apply: {
-    RoomCreated: (event) => ({
-      roomNumber: event.roomNumber,
-      type: event.type,
-      floor: event.floor,
-      pricePerNight: event.pricePerNight,
-      status: "created" as const,
-      currentBookingId: null,
-      currentGuestId: null,
-    }),
-
-    RoomMadeAvailable: (_event, state) => ({
-      ...state,
-      status: "available" as const,
-      currentBookingId: null,
-      currentGuestId: null,
-    }),
-
-    RoomReserved: (event, state) => ({
-      ...state,
-      status: "reserved" as const,
-      currentBookingId: event.bookingId,
-      currentGuestId: event.guestId,
-    }),
-
-    GuestCheckedIn: (_event, state) => ({
-      ...state,
-      status: "occupied" as const,
-    }),
-
-    GuestCheckedOut: (_event, state) => ({
-      ...state,
-      status: "available" as const,
-      currentBookingId: null,
-      currentGuestId: null,
-    }),
-
-    RoomUnderMaintenance: (_event, state) => ({
-      ...state,
-      status: "maintenance" as const,
-      currentBookingId: null,
-      currentGuestId: null,
-    }),
+    RoomCreated: applyRoomCreated,
+    RoomMadeAvailable: applyRoomMadeAvailable,
+    RoomReserved: applyRoomReserved,
+    GuestCheckedIn: applyGuestCheckedIn,
+    GuestCheckedOut: applyGuestCheckedOut,
+    RoomUnderMaintenance: applyRoomUnderMaintenance,
   },
 });

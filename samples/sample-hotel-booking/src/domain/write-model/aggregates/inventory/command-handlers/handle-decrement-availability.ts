@@ -1,12 +1,11 @@
-import type { DecrementAvailabilityPayload } from "../commands/decrement-availability";
-import type { InventoryState } from "../state";
-import type { InventoryEvent } from "../../../../event-model";
+import type { InferCommandHandler } from "@noddde/core";
+import type { InventoryDef } from "../inventory";
 
 /** Handles the DecrementAvailability command by emitting an AvailabilityDecremented event. */
-export const handleDecrementAvailability = (
-  command: { targetAggregateId: string; payload: DecrementAvailabilityPayload },
-  state: InventoryState,
-): InventoryEvent => {
+export const handleDecrementAvailability: InferCommandHandler<
+  InventoryDef,
+  "DecrementAvailability"
+> = (command, state) => {
   if (!state.initialized) {
     throw new Error("Inventory not initialized");
   }

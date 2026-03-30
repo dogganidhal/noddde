@@ -5,10 +5,13 @@ import type {
   CQRSInfrastructure,
   DefineCommands,
   DefineEvents,
+  FrameworkInfrastructure,
   InferSagaCommands,
   InferSagaEvents,
+  InferSagaEventHandler,
   InferSagaId,
   InferSagaInfrastructure,
+  InferSagaOnEntry,
   InferSagaState,
   Infrastructure,
   Saga,
@@ -330,5 +333,135 @@ describe("defineSaga identity", () => {
     };
     const result = defineSaga<T>(config as any);
     expect(result).toBe(config);
+  });
+});
+
+describe("InferSagaEventHandler", () => {
+  type OrderEvent = DefineEvents<{
+    OrderPlaced: { orderId: string; total: number };
+    PaymentReceived: { orderId: string; amount: number };
+  }>;
+
+  type PaymentCommand = DefineCommands<{
+    RequestPayment: { orderId: string; amount: number };
+    ConfirmOrder: void;
+  }>;
+
+  type FulfillmentState = {
+    status: "pending" | "awaiting_payment" | "paid";
+    orderId: string | null;
+  };
+
+  interface FulfillmentInfra extends Infrastructure {
+    notifier: { notify(msg: string): void };
+  }
+
+  type FulfillmentTypes = {
+    state: FulfillmentState;
+    events: OrderEvent;
+    commands: PaymentCommand;
+    infrastructure: FulfillmentInfra;
+  };
+
+  it("should narrow the event to the specific variant", () => {
+    type Handler = InferSagaEventHandler<FulfillmentTypes, "OrderPlaced">;
+    expectTypeOf<Parameters<Handler>[0]>().toEqualTypeOf<
+      Extract<OrderEvent, { name: "OrderPlaced" }>
+    >();
+  });
+
+  it("should use the saga state as second parameter", () => {
+    type Handler = InferSagaEventHandler<FulfillmentTypes, "OrderPlaced">;
+    expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<FulfillmentState>();
+  });
+
+  it("should merge infrastructure with CQRSInfrastructure and FrameworkInfrastructure", () => {
+    type Handler = InferSagaEventHandler<FulfillmentTypes, "OrderPlaced">;
+    expectTypeOf<Parameters<Handler>[2]>().toEqualTypeOf<
+      FulfillmentInfra & CQRSInfrastructure & FrameworkInfrastructure
+    >();
+  });
+
+  it("should return SagaReaction or Promise of it", () => {
+    type Handler = InferSagaEventHandler<FulfillmentTypes, "OrderPlaced">;
+    expectTypeOf<ReturnType<Handler>>().toEqualTypeOf<
+      | SagaReaction<FulfillmentState, PaymentCommand>
+      | Promise<SagaReaction<FulfillmentState, PaymentCommand>>
+    >();
+  });
+});
+
+describe("InferSagaOnEntry", () => {
+  type OrderEvent = DefineEvents<{
+    OrderPlaced: { orderId: string; total: number };
+    PaymentReceived: { orderId: string; amount: number };
+  }>;
+
+  type PaymentCommand = DefineCommands<{
+    RequestPayment: { orderId: string; amount: number };
+    ConfirmOrder: void;
+  }>;
+
+  type FulfillmentState = {
+    status: "pending" | "awaiting_payment" | "paid";
+    orderId: string | null;
+  };
+
+  type FulfillmentTypes = {
+    state: FulfillmentState;
+    events: OrderEvent;
+    commands: PaymentCommand;
+    infrastructure: Infrastructure;
+  };
+
+  it("should have id and handle fields", () => {
+    type Entry = InferSagaOnEntry<FulfillmentTypes, "OrderPlaced">;
+    expectTypeOf<Entry["id"]>().toBeFunction();
+    expectTypeOf<Entry["handle"]>().toBeFunction();
+  });
+
+  it("should narrow the event in id function", () => {
+    type Entry = InferSagaOnEntry<FulfillmentTypes, "OrderPlaced">;
+    type IdParam = Parameters<Entry["id"]>[0];
+    expectTypeOf<IdParam>().toEqualTypeOf<
+      Extract<OrderEvent, { name: "OrderPlaced" }>
+    >();
+  });
+
+  it("should support custom saga ID type", () => {
+    type Entry = InferSagaOnEntry<FulfillmentTypes, "OrderPlaced", number>;
+    type IdReturn = ReturnType<Entry["id"]>;
+    expectTypeOf<IdReturn>().toBeNumber();
+  });
+
+  it("should be usable in defineSaga on map", () => {
+    const onOrderPlaced: InferSagaOnEntry<FulfillmentTypes, "OrderPlaced"> = {
+      id: (event) => event.payload.orderId,
+      handle: (event, state) => ({
+        state: {
+          ...state,
+          status: "awaiting_payment",
+          orderId: event.payload.orderId,
+        },
+        commands: {
+          name: "RequestPayment",
+          targetAggregateId: event.payload.orderId,
+          payload: {
+            orderId: event.payload.orderId,
+            amount: event.payload.total,
+          },
+        },
+      }),
+    };
+
+    const saga = defineSaga<FulfillmentTypes>({
+      initialState: { status: "pending", orderId: null },
+      startedBy: ["OrderPlaced"],
+      on: {
+        OrderPlaced: onOrderPlaced,
+      },
+    });
+
+    expectTypeOf(saga.on.OrderPlaced).not.toBeUndefined();
   });
 });

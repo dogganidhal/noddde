@@ -278,3 +278,85 @@ export type InferProjectionQueries<T extends Projection> =
  */
 export type InferProjectionInfrastructure<T extends Projection> =
   T extends Projection<infer U> ? U["infrastructure"] : never;
+
+// ---- Handler-level inference utilities ----
+
+/**
+ * Infers the fully-typed projection event handler (`{ id?, reduce }` bundle)
+ * for a specific event name within a {@link ProjectionTypes} bundle. Use this
+ * to type extracted projection event handlers in separate files.
+ *
+ * Operates on the `ProjectionTypes` bundle (not the `Projection` definition),
+ * so it can be used before `defineProjection` is called.
+ *
+ * @typeParam T - The {@link ProjectionTypes} bundle.
+ * @typeParam K - The event name literal (a member of `T["events"]["name"]`).
+ *
+ * @example
+ * ```ts
+ * // on-payment-completed.ts
+ * export const onPaymentCompleted: InferProjectionEventHandler<RevenueDef, "PaymentCompleted"> = {
+ *   id: (event) => day(event.payload.completedAt),
+ *   reduce: (event, view) => ({
+ *     ...view,
+ *     totalRevenue: view.totalRevenue + event.payload.amount,
+ *   }),
+ * };
+ * ```
+ */
+export type InferProjectionEventHandler<
+  T extends ProjectionTypes,
+  K extends T["events"]["name"],
+> = ProjectionEventHandler<Extract<T["events"], { name: K }>, T["view"]>;
+
+/**
+ * Computes the full infrastructure type for a projection's query handlers.
+ * When the {@link ProjectionTypes} bundle has a typed `viewStore` field,
+ * query handlers receive `T["infrastructure"] & { views: T["viewStore"] }`.
+ * Otherwise, they receive just `T["infrastructure"]`.
+ *
+ * This is the public export of the internal `ProjectionQueryInfra<T>` logic.
+ *
+ * @typeParam T - The {@link ProjectionTypes} bundle.
+ *
+ * @example
+ * ```ts
+ * type Infra = InferProjectionQueryInfrastructure<AccountProjectionDef>;
+ * // → AccountInfra & { views: AccountViewStore }  (when viewStore is present)
+ * // → AccountInfra                                 (when viewStore is absent)
+ * ```
+ */
+export type InferProjectionQueryInfrastructure<T extends ProjectionTypes> =
+  T extends {
+    viewStore: infer VS extends ViewStore;
+  }
+    ? T["infrastructure"] & { views: VS }
+    : T["infrastructure"];
+
+/**
+ * Infers the fully-typed query handler function for a specific query name
+ * within a {@link ProjectionTypes} bundle. Use this to type extracted query
+ * handlers in separate files. Infrastructure is automatically merged with
+ * `{ views }` when the projection defines a typed `viewStore`.
+ *
+ * Operates on the `ProjectionTypes` bundle (not the `Projection` definition),
+ * so it can be used before `defineProjection` is called.
+ *
+ * @typeParam T - The {@link ProjectionTypes} bundle.
+ * @typeParam K - The query name literal (a member of `T["queries"]["name"]`).
+ *
+ * @example
+ * ```ts
+ * // query-daily-revenue.ts
+ * export const queryDailyRevenue: InferProjectionQueryHandler<RevenueDef, "GetDailyRevenue"> = (
+ *   query, { views }
+ * ) => views.load(query.date);
+ * ```
+ */
+export type InferProjectionQueryHandler<
+  T extends ProjectionTypes,
+  K extends T["queries"]["name"],
+> = QueryHandler<
+  InferProjectionQueryInfrastructure<T>,
+  Extract<T["queries"], { name: K }>
+>;

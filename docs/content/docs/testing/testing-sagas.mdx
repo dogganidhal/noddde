@@ -150,10 +150,12 @@ expect(result.commands).toEqual([]);
 
 ## Testing ID Extraction
 
-Each `on` entry in a saga bundles an `id` function that extracts the saga instance ID from an event. These are plain functions -- test them directly:
+Each on-entry bundles an `id` function that extracts the saga instance ID from an event. Since on-entries are extracted to standalone files, import them directly:
 
 ```ts
-const sagaId = OrderFulfillmentSaga.on.OrderPlaced!.id({
+import { onOrderPlaced } from "./on-entries/on-order-placed";
+
+const sagaId = onOrderPlaced.id({
   name: "OrderPlaced",
   payload: { orderId: "o-1", amount: 99.99 },
 });
@@ -161,9 +163,12 @@ const sagaId = OrderFulfillmentSaga.on.OrderPlaced!.id({
 expect(sagaId).toBe("o-1");
 ```
 
-Each bounded context may name the correlation field differently (`orderId`, `referenceId`, `customerReference`), so verify that each `on` entry's `id` function resolves to the same saga ID:
+Each bounded context may name the correlation field differently (`orderId`, `referenceId`, `customerReference`), so verify that each on-entry's `id` function resolves to the same saga ID:
 
 ```ts
+import { onOrderPlaced } from "./on-entries/on-order-placed";
+import { onPaymentCompleted } from "./on-entries/on-payment-completed";
+
 describe("on entry id extraction", () => {
   it("should extract orderId from OrderPlaced", () => {
     const event = {
@@ -176,9 +181,7 @@ describe("on entry id extraction", () => {
         placedAt: new Date(),
       },
     };
-    expect(OrderFulfillmentSaga.on.OrderPlaced!.id(event)).toBe(
-      "order-1",
-    );
+    expect(onOrderPlaced.id(event)).toBe("order-1");
   });
 
   it("should extract referenceId from PaymentCompleted", () => {
@@ -191,24 +194,26 @@ describe("on entry id extraction", () => {
         completedAt: new Date(),
       },
     };
-    expect(OrderFulfillmentSaga.on.PaymentCompleted!.id(event)).toBe(
-      "order-1",
-    );
+    expect(onPaymentCompleted.id(event)).toBe("order-1");
   });
 });
 ```
 
 ## Testing Full Workflows
 
-Replay a sequence of events through the saga to verify the complete lifecycle. You can either use the harness for each step or call handlers directly via the `on` map:
+Replay a sequence of events through the saga to verify the complete lifecycle. Import the extracted on-entries and call their `handle` function directly:
 
 ```ts
+import { onOrderPlaced } from "./on-entries/on-order-placed";
+import { onPaymentCompleted } from "./on-entries/on-payment-completed";
+import { onShipmentDispatched } from "./on-entries/on-shipment-dispatched";
+
 it("should complete the full happy path", async () => {
   let state = OrderFulfillmentSaga.initialState;
   let commands: any;
 
   // Step 1: Order placed
-  ({ state, commands } = OrderFulfillmentSaga.on.OrderPlaced!.handle(
+  ({ state, commands } = onOrderPlaced.handle(
     {
       name: "OrderPlaced",
       payload: {
@@ -226,7 +231,7 @@ it("should complete the full happy path", async () => {
   expect(commands.name).toBe("RequestPayment");
 
   // Step 2: Payment completed
-  ({ state, commands } = OrderFulfillmentSaga.on.PaymentCompleted!.handle(
+  ({ state, commands } = onPaymentCompleted.handle(
     {
       name: "PaymentCompleted",
       payload: {
@@ -242,7 +247,7 @@ it("should complete the full happy path", async () => {
   expect(state.status).toBe("awaiting_shipment");
 
   // Step 3: Shipment dispatched
-  ({ state, commands } = OrderFulfillmentSaga.on.ShipmentDispatched!.handle(
+  ({ state, commands } = onShipmentDispatched.handle(
     {
       name: "ShipmentDispatched",
       payload: {

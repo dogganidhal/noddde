@@ -1,5 +1,8 @@
 export { RoomAvailabilityProjection } from "./room-availability";
-export type { RoomAvailabilityView } from "./room-availability";
+export type {
+  RoomAvailabilityView,
+  RoomAvailabilityProjectionDef,
+} from "./room-availability";
 export type {
   RoomAvailabilityQuery,
   RoomAvailabilityViewStore,

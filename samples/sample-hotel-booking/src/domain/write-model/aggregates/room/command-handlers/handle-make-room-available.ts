@@ -1,11 +1,11 @@
-import type { RoomState } from "../state";
-import type { RoomEvent } from "../../../../event-model";
+import type { InferCommandHandler } from "@noddde/core";
+import type { RoomDef } from "../room";
 
 /** Handles the MakeRoomAvailable command by emitting a RoomMadeAvailable event. */
-export const handleMakeRoomAvailable = (
-  command: { targetAggregateId: string },
-  state: RoomState,
-): RoomEvent => {
+export const handleMakeRoomAvailable: InferCommandHandler<
+  RoomDef,
+  "MakeRoomAvailable"
+> = (command, state) => {
   if (state.status === "occupied") {
     throw new Error("Cannot make occupied room available");
   }

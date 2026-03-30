@@ -17,50 +17,115 @@ Pessimistic locking would add unnecessary overhead here. Acquiring and releasing
 
 ## The Aggregate
 
+The aggregate uses extracted handlers — each command handler and apply handler lives in its own file, typed with `InferCommandHandler` and `InferApplyHandler`.
+
+### Command handlers (extracted)
+
 ```ts
-export const FlashSaleItem = defineAggregate<FlashSaleTypes>({
-  initialState: { stock: 0, sold: 0, buyers: [] },
-  commands: {
-    CreateFlashSale: (command) => ({
-      name: "FlashSaleCreated",
-      payload: {
-        itemId: command.targetAggregateId,
-        initialStock: command.payload.initialStock,
-      },
-    }),
-    PurchaseItem: (command, state) => {
-      if (state.stock <= 0) {
-        return {
-          name: "PurchaseRejected",
-          payload: { buyerId: command.payload.buyerId, reason: "out_of_stock" },
-        };
-      }
-      return {
-        name: "ItemPurchased",
-        payload: {
-          buyerId: command.payload.buyerId,
-          quantity: command.payload.quantity,
-        },
-      };
-    },
-  },
-  apply: {
-    FlashSaleCreated: (payload) => ({
-      stock: payload.initialStock,
-      sold: 0,
-      buyers: [],
-    }),
-    ItemPurchased: (payload, state) => ({
-      stock: state.stock - payload.quantity,
-      sold: state.sold + payload.quantity,
-      buyers: [...state.buyers, payload.buyerId],
-    }),
-    PurchaseRejected: (_payload, state) => state,
+// command-handlers/handle-create-flash-sale.ts
+import type { InferCommandHandler } from "@noddde/core";
+import type { FlashSaleItemTypes } from "../flash-sale-item";
+
+export const handleCreateFlashSale: InferCommandHandler<
+  FlashSaleItemTypes,
+  "CreateFlashSale"
+> = (command) => ({
+  name: "FlashSaleCreated",
+  payload: {
+    itemId: command.targetAggregateId,
+    initialStock: command.payload.initialStock,
   },
 });
 ```
 
+```ts
+// command-handlers/handle-purchase-item.ts
+import type { InferCommandHandler } from "@noddde/core";
+import type { FlashSaleItemTypes } from "../flash-sale-item";
+
+export const handlePurchaseItem: InferCommandHandler<
+  FlashSaleItemTypes,
+  "PurchaseItem"
+> = (command, state) => {
+  if (state.stock <= 0) {
+    return {
+      name: "PurchaseRejected",
+      payload: { buyerId: command.payload.buyerId, reason: "out_of_stock" },
+    };
+  }
+  return {
+    name: "ItemPurchased",
+    payload: {
+      buyerId: command.payload.buyerId,
+      quantity: command.payload.quantity,
+    },
+  };
+};
+```
+
 The `PurchaseItem` handler either produces `ItemPurchased` (decrements stock) or `PurchaseRejected` (stock exhausted). Both are valid domain events — rejection is not an error, it is a recorded fact.
+
+### Apply handlers (extracted)
+
+```ts
+// apply-handlers/apply-flash-sale-created.ts
+import type { InferApplyHandler } from "@noddde/core";
+import type { FlashSaleItemTypes } from "../flash-sale-item";
+
+export const applyFlashSaleCreated: InferApplyHandler<
+  FlashSaleItemTypes,
+  "FlashSaleCreated"
+> = (payload) => ({
+  stock: payload.initialStock,
+  sold: 0,
+  buyers: [],
+});
+```
+
+```ts
+// apply-handlers/apply-item-purchased.ts
+import type { InferApplyHandler } from "@noddde/core";
+import type { FlashSaleItemTypes } from "../flash-sale-item";
+
+export const applyItemPurchased: InferApplyHandler<
+  FlashSaleItemTypes,
+  "ItemPurchased"
+> = (payload, state) => ({
+  stock: state.stock - payload.quantity,
+  sold: state.sold + payload.quantity,
+  buyers: [...state.buyers, payload.buyerId],
+});
+```
+
+The `PurchaseRejected` apply handler follows the same pattern — it returns `state` unchanged (no-op).
+
+### Aggregate definition (wiring)
+
+```ts
+// flash-sale-item.ts
+import { defineAggregate } from "@noddde/core";
+import type { AggregateTypes, Infrastructure } from "@noddde/core";
+
+export type FlashSaleItemTypes = AggregateTypes & {
+  state: FlashSaleState;
+  events: FlashSaleEvent;
+  commands: FlashSaleCommand;
+  infrastructure: Infrastructure;
+};
+
+export const FlashSaleItem = defineAggregate<FlashSaleItemTypes>({
+  initialState: initialFlashSaleState,
+  commands: {
+    CreateFlashSale: handleCreateFlashSale,
+    PurchaseItem: handlePurchaseItem,
+  },
+  apply: {
+    FlashSaleCreated: applyFlashSaleCreated,
+    ItemPurchased: applyItemPurchased,
+    PurchaseRejected: applyPurchaseRejected,
+  },
+});
+```
 
 ## Domain Configuration
 

@@ -33,6 +33,42 @@ Three things are deliberately absent from this signature:
 
 These constraints exist because apply handlers run in two contexts: during command processing (applying freshly produced events) and during event replay (reconstructing state from stored events). If they had side effects, replaying events would re-trigger those side effects -- sending duplicate emails, double-writing to databases. Purity ensures that replay is safe and produces the same state every time.
 
+The recommended pattern is to extract each apply handler into its own file using `InferApplyHandler`, which derives the full function type from your `AggregateTypes` bundle:
+
+```typescript
+// apply-handlers/apply-transaction-authorized.ts
+import type { InferApplyHandler } from "@noddde/core";
+import type { BankAccountDef } from "../bank-account";
+
+export const applyTransactionAuthorized: InferApplyHandler<
+  BankAccountDef,
+  "TransactionAuthorized"
+> = (event, state) => ({
+  ...state,
+  availableBalance: state.availableBalance - event.amount,
+  transactions: [
+    ...state.transactions,
+    { ...event, status: "pending" as const },
+  ],
+});
+```
+
+The handler is then referenced by name in the aggregate definition:
+
+```typescript
+apply: {
+  TransactionAuthorized: applyTransactionAuthorized,
+  TransactionDeclined: applyTransactionDeclined,
+  // ...
+},
+```
+
+<Callout type="info">
+  For simple handlers, you can define them inline in the `apply` map. But
+  extracted handlers are preferred -- each can be tested in isolation and the
+  aggregate definition stays concise.
+</Callout>
+
 For a deeper discussion, see [Why Are Apply Handlers Pure?](/docs/design-decisions/why-pure-apply-handlers).
 
 ## Designing Initial State
@@ -80,22 +116,27 @@ Apply handlers must return a **new state object**. Never mutate the existing sta
 Override specific fields while preserving the rest:
 
 ```typescript
-apply: {
-  TransactionAuthorized: (event, state) => ({
-    ...state,
-    availableBalance: state.availableBalance - event.amount,
-    transactions: [
-      ...state.transactions,
-      {
-        id: event.id,
-        timestamp: event.timestamp,
-        amount: event.amount,
-        merchant: event.merchant,
-        status: "pending" as const,
-      },
-    ],
-  }),
-}
+// apply-handlers/apply-transaction-authorized.ts
+import type { InferApplyHandler } from "@noddde/core";
+import type { BankAccountDef } from "../bank-account";
+
+export const applyTransactionAuthorized: InferApplyHandler<
+  BankAccountDef,
+  "TransactionAuthorized"
+> = (event, state) => ({
+  ...state,
+  availableBalance: state.availableBalance - event.amount,
+  transactions: [
+    ...state.transactions,
+    {
+      id: event.id,
+      timestamp: event.timestamp,
+      amount: event.amount,
+      merchant: event.merchant,
+      status: "pending" as const,
+    },
+  ],
+});
 ```
 
 This creates a new object with all existing state fields, but with `availableBalance` updated and a new entry appended to `transactions`. The original `state` object is untouched.
@@ -105,17 +146,22 @@ This creates a new object with all existing state fields, but with `availableBal
 When updating a specific item inside a collection, use `map` to produce a new array and spread to produce a new item:
 
 ```typescript
-apply: {
-  TransactionProcessed: (event, state) => ({
-    ...state,
-    balance: state.balance - event.amount,
-    transactions: state.transactions.map((transaction) =>
-      transaction.id === event.id
-        ? { ...transaction, status: "processed" as const }
-        : transaction,
-    ),
-  }),
-}
+// apply-handlers/apply-transaction-processed.ts
+import type { InferApplyHandler } from "@noddde/core";
+import type { BankAccountDef } from "../bank-account";
+
+export const applyTransactionProcessed: InferApplyHandler<
+  BankAccountDef,
+  "TransactionProcessed"
+> = (event, state) => ({
+  ...state,
+  balance: state.balance - event.amount,
+  transactions: state.transactions.map((transaction) =>
+    transaction.id === event.id
+      ? { ...transaction, status: "processed" as const }
+      : transaction,
+  ),
+});
 ```
 
 Here `map` creates a new array, and only the matching transaction is replaced with a new object via spread. All other transactions are returned as-is.
@@ -163,9 +209,14 @@ Some events do not change the aggregate state. For example, a `TransactionDeclin
 These handlers simply return the existing state:
 
 ```typescript
-apply: {
-  BidRejected: (_event, state) => state,
-}
+// apply-handlers/apply-bid-rejected.ts
+import type { InferApplyHandler } from "@noddde/core";
+import type { AuctionDef } from "../auction";
+
+export const applyBidRejected: InferApplyHandler<AuctionDef, "BidRejected"> = (
+  _event,
+  state,
+) => state;
 ```
 
 This is still required in the `apply` map -- the framework expects a handler for every event type. The event remains part of the event stream and can be projected or audited, even though the aggregate's internal state is unaffected.
@@ -183,11 +234,15 @@ The most important thing to understand about apply handlers is how state accumul
 ### Event 1: BankAccountCreated
 
 ```typescript
-BankAccountCreated: (_event, _state) => ({
+// apply-handlers/apply-bank-account-created.ts
+export const applyBankAccountCreated: InferApplyHandler<
+  BankAccountDef,
+  "BankAccountCreated"
+> = (_event, _state) => ({
   balance: 0,
   availableBalance: 0,
   transactions: [],
-}),
+});
 ```
 
 This handler ignores both the event and prior state, returning a clean initial state. This is typical for creation events -- the aggregate starts fresh.
@@ -201,7 +256,11 @@ This handler ignores both the event and prior state, returning a clean initial s
 ### Event 2: TransactionAuthorized (amount: 50)
 
 ```typescript
-TransactionAuthorized: (event, state) => ({
+// apply-handlers/apply-transaction-authorized.ts
+export const applyTransactionAuthorized: InferApplyHandler<
+  BankAccountDef,
+  "TransactionAuthorized"
+> = (event, state) => ({
   ...state,
   availableBalance: state.availableBalance - event.amount,
   transactions: [
@@ -214,7 +273,7 @@ TransactionAuthorized: (event, state) => ({
       status: "pending" as const,
     },
   ],
-}),
+});
 ```
 
 The available balance decreases by the authorized amount, reserving funds. The transaction is recorded as `"pending"`. The actual `balance` is unchanged -- the money has not settled yet.
@@ -251,7 +310,11 @@ The same handler runs again with a new event. Both transactions are now pending.
 ### Event 4: TransactionProcessed (id: "tx-1", amount: 50)
 
 ```typescript
-TransactionProcessed: (event, state) => ({
+// apply-handlers/apply-transaction-processed.ts
+export const applyTransactionProcessed: InferApplyHandler<
+  BankAccountDef,
+  "TransactionProcessed"
+> = (event, state) => ({
   ...state,
   balance: state.balance - event.amount,
   transactions: state.transactions.map((transaction) =>
@@ -259,7 +322,7 @@ TransactionProcessed: (event, state) => ({
       ? { ...transaction, status: "processed" as const }
       : transaction,
   ),
-}),
+});
 ```
 
 The actual `balance` is now updated (the funds have settled), and the first transaction's status changes from `"pending"` to `"processed"`. The second transaction remains pending.
@@ -293,14 +356,20 @@ The rule: **"Does a command handler need this field to make a decision?"**
 Both `balance` and `availableBalance` are stored because they are needed for authorization:
 
 ```typescript
-commands: {
-  AuthorizeTransaction: (command, state) => {
-    if (state.availableBalance < command.payload.amount) {
-      return { name: "TransactionDeclined", payload: { /* ... */ } };
-    }
-    // ...
-  },
-}
+export const handleAuthorizeTransaction: InferCommandHandler<
+  BankAccountDef,
+  "AuthorizeTransaction"
+> = (command, state) => {
+  if (state.availableBalance < command.payload.amount) {
+    return {
+      name: "TransactionDeclined",
+      payload: {
+        /* ... */
+      },
+    };
+  }
+  // ...
+};
 ```
 
 Even though `availableBalance` could theoretically be computed from the transaction list, storing it explicitly makes command handlers simpler and avoids recomputation on every command.
@@ -333,12 +402,13 @@ The aggregate ID (`targetAggregateId`) is deliberately excluded from aggregate s
 The ID is always available in the command object:
 
 ```typescript
-commands: {
-  CreateBankAccount: (command, _state) => ({
-    name: "BankAccountCreated",
-    payload: { id: command.targetAggregateId },
-  }),
-}
+export const handleCreateBankAccount: InferCommandHandler<
+  BankAccountDef,
+  "CreateBankAccount"
+> = (command, _state) => ({
+  name: "BankAccountCreated",
+  payload: { id: command.targetAggregateId },
+});
 ```
 
 If your event payloads need the ID (for example, to identify the aggregate in read models), pass it from the command into the event payload. But do not store it as a field in the aggregate state object.
@@ -349,36 +419,48 @@ For the full rationale, see [Why Is the Aggregate ID Not in State?](/docs/design
 
 ## Common Patterns
 
-Quick reference for the most frequent apply handler shapes.
+Quick reference for the most frequent apply handler shapes, shown as extracted functions with `InferApplyHandler`.
 
 ### Appending to an Array
 
 ```typescript
-TransactionAuthorized: (event, state) => ({
+export const applyTransactionAuthorized: InferApplyHandler<
+  BankAccountDef,
+  "TransactionAuthorized"
+> = (event, state) => ({
   ...state,
-  transactions: [...state.transactions, { ...event, status: "pending" as const }],
-}),
+  transactions: [
+    ...state.transactions,
+    { ...event, status: "pending" as const },
+  ],
+});
 ```
 
 ### Updating an Item in an Array
 
 ```typescript
-TransactionProcessed: (event, state) => ({
+export const applyTransactionProcessed: InferApplyHandler<
+  BankAccountDef,
+  "TransactionProcessed"
+> = (event, state) => ({
   ...state,
   transactions: state.transactions.map((t) =>
     t.id === event.id ? { ...t, status: "processed" as const } : t,
   ),
-}),
+});
 ```
 
 ### Incrementing a Counter
 
 ```typescript
-BidPlaced: (event, state) => ({
+export const applyBidPlaced: InferApplyHandler<AuctionDef, "BidPlaced"> = (
+  event,
+  state,
+) => ({
   ...state,
   bidCount: state.bidCount + 1,
   highestBid: { bidderId: event.bidderId, amount: event.amount },
-}),
+});
 ```
 
 ### Full State Replacement
@@ -386,11 +468,14 @@ BidPlaced: (event, state) => ({
 For creation events that set the entire state from the event payload:
 
 ```typescript
-BankAccountCreated: (_event, _state) => ({
+export const applyBankAccountCreated: InferApplyHandler<
+  BankAccountDef,
+  "BankAccountCreated"
+> = (_event, _state) => ({
   balance: 0,
   availableBalance: 0,
   transactions: [],
-}),
+});
 ```
 
 ## Next Steps
