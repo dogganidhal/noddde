@@ -373,20 +373,20 @@ src/
     read-model/
       projections/
         room-availability/                 # Strong consistency
-          room-availability.ts, queries/, query-handlers/, view-reducers/
+          room-availability.ts, queries/, query-handlers/, on-entries/
         guest-history/                     # Eventual consistency
-          guest-history.ts, queries/, query-handlers/, view-reducers/
+          guest-history.ts, queries/, query-handlers/, on-entries/
         revenue/                           # Eventual consistency
-          revenue.ts, queries/, query-handlers/, view-reducers/
+          revenue.ts, queries/, query-handlers/, on-entries/
       queries.ts                           # Shared view types + SearchQuery
       query-handlers.ts                    # Standalone SearchAvailableRooms handler
     process-model/
       booking-fulfillment/                 # Cross-aggregate orchestration
-        saga.ts, state.ts, transition-handlers/
+        saga.ts, state.ts, on-entries/
       payment-processing/                  # Payment gateway bridge
-        saga.ts, state.ts, transition-handlers/
+        saga.ts, state.ts, on-entries/
       checkout-reminder/                   # Guest notification workflow
-        saga.ts, state.ts, transition-handlers/
+        saga.ts, state.ts, on-entries/
   infrastructure/                          # All I/O and framework wiring
     types.ts                               # HotelInfrastructure + service interfaces
     services/                              # Clock, email, SMS, payment implementations

@@ -5,9 +5,9 @@ import type { AuctionInfrastructure } from "../../../../infrastructure";
 import type { AuctionSummaryView } from "./auction-summary";
 import { initialAuctionSummaryView } from "./auction-summary";
 import type { AuctionSummaryQuery } from "./queries";
-import { onAuctionCreated } from "./view-reducers/on-auction-created";
-import { onBidPlaced } from "./view-reducers/on-bid-placed";
-import { onAuctionClosed } from "./view-reducers/on-auction-closed";
+import { onAuctionCreated } from "./on-entries/on-auction-created";
+import { onBidPlaced } from "./on-entries/on-bid-placed";
+import { onAuctionClosed } from "./on-entries/on-auction-closed";
 import { handleGetAuctionSummary } from "./query-handlers/handle-get-auction-summary";
 
 export type { AuctionSummaryView } from "./auction-summary";

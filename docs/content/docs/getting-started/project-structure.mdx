@@ -125,7 +125,9 @@ export const evolveHotelBookingCreated: InferEvolveHandler<HotelBookingDef, "Hot
 });
 
 // hotel-booking.ts
-export type HotelBookingDef = { /* ... */ };
+export type HotelBookingDef = {
+  /* ... */
+};
 
 export const HotelBooking = defineAggregate<HotelBookingDef>({
   decide: { CreateHotelBooking: decideCreateHotelBooking },
@@ -166,7 +168,10 @@ Projections follow the same extraction pattern as aggregates. **Query handlers**
 import type { InferProjectionEventHandler } from "@noddde/core";
 import type { HotelBookingProjectionDef } from "../hotel-booking.js";
 
-export const onHotelBookingCreated: InferProjectionEventHandler<HotelBookingProjectionDef, "HotelBookingCreated"> = {
+export const onHotelBookingCreated: InferProjectionEventHandler<
+  HotelBookingProjectionDef,
+  "HotelBookingCreated"
+> = {
   id: (event) => event.payload.id,
   reduce: (event, _view) => ({ id: event.payload.id }),
 };
@@ -175,16 +180,21 @@ export const onHotelBookingCreated: InferProjectionEventHandler<HotelBookingProj
 import type { InferProjectionQueryHandler } from "@noddde/core";
 import type { HotelBookingProjectionDef } from "../hotel-booking.js";
 
-export const handleGetHotelBooking: InferProjectionQueryHandler<HotelBookingProjectionDef, "GetHotelBooking"> = async (query, { views }) =>
-  (await views.load(query.payload.id)) ?? null;
+export const handleGetHotelBooking: InferProjectionQueryHandler<
+  HotelBookingProjectionDef,
+  "GetHotelBooking"
+> = async (query, { views }) => (await views.load(query.payload.id)) ?? null;
 
 // hotel-booking.ts (projection)
-export type HotelBookingProjectionDef = { /* ... */ };
+export type HotelBookingProjectionDef = {
+  /* ... */
+};
 
-export const HotelBookingProjection = defineProjection<HotelBookingProjectionDef>({
-  on: { HotelBookingCreated: onHotelBookingCreated },
-  queryHandlers: { GetHotelBooking: handleGetHotelBooking },
-});
+export const HotelBookingProjection =
+  defineProjection<HotelBookingProjectionDef>({
+    on: { HotelBookingCreated: onHotelBookingCreated },
+    queryHandlers: { GetHotelBooking: handleGetHotelBooking },
+  });
 ```
 
 ### Process Model
@@ -210,20 +220,27 @@ Sagas follow the same extraction pattern. **On-entries** are standalone `{ id, h
 import type { InferSagaOnEntry } from "@noddde/core";
 import type { BookingFulfillmentDef } from "../saga.js";
 
-export const onOrderPlaced: InferSagaOnEntry<BookingFulfillmentDef, "OrderPlaced"> = {
+export const onOrderPlaced: InferSagaOnEntry<
+  BookingFulfillmentDef,
+  "OrderPlaced"
+> = {
   id: (event) => event.payload.orderId,
   handle: (event, state) => ({
     state: { ...state, status: "started" },
     commands: {
       name: "RequestPayment" as const,
       targetAggregateId: event.payload.orderId,
-      payload: { /* ... */ },
+      payload: {
+        /* ... */
+      },
     },
   }),
 };
 
 // saga.ts
-export type BookingFulfillmentDef = { /* ... */ };
+export type BookingFulfillmentDef = {
+  /* ... */
+};
 
 export const BookingFulfillmentSaga = defineSaga<BookingFulfillmentDef>({
   startedBy: ["OrderPlaced"],

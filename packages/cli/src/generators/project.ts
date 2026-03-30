@@ -31,6 +31,10 @@ import {
   deciderTemplate,
 } from "../templates/domain/aggregate-deciders.js";
 import {
+  applyHandlersIndexTemplate,
+  applyHandlerTemplate,
+} from "../templates/domain/aggregate-apply-handlers.js";
+import {
   domainProjectionIndexTemplate,
   domainProjectionTemplate,
 } from "../templates/domain/projection.js";
@@ -124,6 +128,14 @@ export async function generateProject(
       relativePath: `${agg}/deciders/decide-create-${ctx.kebabName}.ts`,
       content: deciderTemplate(ctx),
     },
+    {
+      relativePath: `${agg}/apply-handlers/index.ts`,
+      content: applyHandlersIndexTemplate(ctx),
+    },
+    {
+      relativePath: `${agg}/apply-handlers/apply-${ctx.kebabName}-created.ts`,
+      content: applyHandlerTemplate(ctx),
+    },
 
     // ── Read model ──────────────────────────────────────────────
     {
@@ -151,11 +163,11 @@ export async function generateProject(
       content: queryHandlerTemplate(ctx),
     },
     {
-      relativePath: `${proj}/view-reducers/index.ts`,
+      relativePath: `${proj}/on-entries/index.ts`,
       content: viewReducersIndexTemplate(ctx),
     },
     {
-      relativePath: `${proj}/view-reducers/on-${ctx.kebabName}-created.ts`,
+      relativePath: `${proj}/on-entries/on-${ctx.kebabName}-created.ts`,
       content: viewReducerTemplate(ctx),
     },
 
