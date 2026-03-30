@@ -23,8 +23,8 @@ describe("generateSaga", () => {
       "index.ts",
       "state.ts",
       "saga.ts",
-      "transition-handlers/index.ts",
-      "transition-handlers/on-start-event.ts",
+      "on-entries/index.ts",
+      "on-entries/on-start-event.ts",
     ];
 
     for (const file of expectedFiles) {
@@ -65,28 +65,25 @@ describe("generateSaga", () => {
     expect(sagaContent).toContain('from "./state.js"');
   });
 
-  it("generates standalone transition handler", async () => {
+  it("generates standalone on-entry handler", async () => {
     await generateSaga("OrderFulfillment", tmpDir);
 
     const handlerContent = await readFile(
-      path.join(
-        tmpDir,
-        "order-fulfillment/transition-handlers/on-start-event.ts",
-      ),
+      path.join(tmpDir, "order-fulfillment/on-entries/on-start-event.ts"),
       "utf-8",
     );
     expect(handlerContent).toContain("export function onStartEvent");
     expect(handlerContent).toContain("OrderFulfillmentSagaState");
   });
 
-  it("saga.ts imports from transition-handlers", async () => {
+  it("saga.ts imports from on-entries", async () => {
     await generateSaga("OrderFulfillment", tmpDir);
 
     const sagaContent = await readFile(
       path.join(tmpDir, "order-fulfillment", "saga.ts"),
       "utf-8",
     );
-    expect(sagaContent).toContain('from "./transition-handlers/index.js"');
+    expect(sagaContent).toContain('from "./on-entries/index.js"');
     expect(sagaContent).toContain("onStartEvent");
   });
 

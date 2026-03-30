@@ -4,6 +4,8 @@ import type { RoomType } from "../../../../infrastructure/types";
 import type { HotelInfrastructure } from "../../../../infrastructure/types";
 import type { BookingEvent } from "../../../event-model";
 import type { GuestHistoryQuery } from "./queries";
+import { onBookingCreated } from "./on-entries";
+import { handleGetGuestHistory } from "./query-handlers";
 
 /** View for guest booking history. */
 export interface GuestHistoryView {
@@ -18,7 +20,7 @@ export interface GuestHistoryView {
 }
 
 /** Type bundle for the GuestHistory projection. */
-type GuestHistoryProjectionDef = {
+export type GuestHistoryProjectionDef = {
   events: BookingEvent;
   queries: GuestHistoryQuery;
   view: GuestHistoryView;
@@ -42,26 +44,10 @@ export const GuestHistoryProjection =
     },
 
     on: {
-      BookingCreated: {
-        id: (event) => event.payload.guestId,
-        reduce: (event, view) => ({
-          guestId: event.payload.guestId,
-          bookings: [
-            ...view.bookings,
-            {
-              bookingId: event.payload.bookingId,
-              roomType: event.payload.roomType,
-              checkIn: event.payload.checkIn,
-              checkOut: event.payload.checkOut,
-              status: "pending",
-            },
-          ],
-        }),
-      },
+      BookingCreated: onBookingCreated,
     },
 
     queryHandlers: {
-      GetGuestHistory: async (query, { views }) =>
-        (await views.load(query.guestId)) ?? null,
+      GetGuestHistory: handleGetGuestHistory,
     },
   });

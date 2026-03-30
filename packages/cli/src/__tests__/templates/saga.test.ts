@@ -30,10 +30,10 @@ describe("saga templates", () => {
     );
   });
 
-  it("generates saga.ts importing state and transition handlers", () => {
+  it("generates saga.ts importing state and on-entries", () => {
     const result = sagaTemplate(ctx);
     expect(result).toContain('from "./state.js"');
-    expect(result).toContain('from "./transition-handlers/index.js"');
+    expect(result).toContain('from "./on-entries/index.js"');
     expect(result).toContain("onStartEvent");
   });
 
@@ -48,17 +48,18 @@ describe("saga templates", () => {
     expect(result).not.toContain("handlers:");
   });
 
-  it("generates transition-handlers barrel", () => {
+  it("generates on-entries barrel", () => {
     const result = transitionHandlersIndexTemplate();
     expect(result).toContain("onStartEvent");
     expect(result).toContain("on-start-event.js");
   });
 
-  it("generates standalone transition handler", () => {
+  it("generates standalone on-entry handler with InferSagaOnEntry comment", () => {
     const result = transitionHandlerTemplate(ctx);
     expect(result).toContain("export function onStartEvent");
     expect(result).toContain("OrderFulfillmentSagaState");
     expect(result).toContain('status: "started"');
+    expect(result).toContain("InferSagaOnEntry");
   });
 
   it("uses .js extensions for all local imports", () => {

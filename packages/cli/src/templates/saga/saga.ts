@@ -5,7 +5,7 @@ export function sagaTemplate(ctx: TemplateContext): string {
   return `import { defineSaga } from "@noddde/core";
 import type { ${ctx.name}SagaState } from "./state.js";
 import { initial${ctx.name}SagaState } from "./state.js";
-import { onStartEvent } from "./transition-handlers/index.js";
+import { onStartEvent } from "./on-entries/index.js";
 
 // TODO: import event and command types from related aggregates
 // import type { SomeEvent } from "../some-aggregate/events.js";

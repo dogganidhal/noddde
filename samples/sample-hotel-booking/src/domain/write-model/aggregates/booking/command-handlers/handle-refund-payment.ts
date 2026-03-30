@@ -1,14 +1,11 @@
-import type { RefundPaymentPayload } from "../commands/refund-payment";
-import type { BookingState } from "../state";
-import type { HotelInfrastructure } from "../../../../../infrastructure/types";
-import type { BookingEvent } from "../../../../event-model";
+import type { InferCommandHandler } from "@noddde/core";
+import type { BookingDef } from "../booking";
 
 /** Handles the RefundPayment command by emitting a PaymentRefunded event. */
-export const handleRefundPayment = (
-  command: { targetAggregateId: string; payload: RefundPaymentPayload },
-  state: BookingState,
-  { clock }: HotelInfrastructure,
-): BookingEvent => {
+export const handleRefundPayment: InferCommandHandler<
+  BookingDef,
+  "RefundPayment"
+> = (command, state, { clock }) => {
   if (state.transactionId === null) {
     throw new Error("No payment to refund");
   }

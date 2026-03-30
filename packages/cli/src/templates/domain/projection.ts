@@ -10,17 +10,19 @@ export type { ${ctx.name}View, ${ctx.name}Query } from "./queries/index.js";
 /** Template for .../projections/<name>/<name>.ts — projection definition. */
 export function domainProjectionTemplate(ctx: TemplateContext): string {
   return `import { defineProjection } from "@noddde/core";
+import type { ViewStore } from "@noddde/core";
 import type { ${ctx.name}View, ${ctx.name}Query } from "./queries/index.js";
 import { handleGet${ctx.name} } from "./query-handlers/index.js";
-import { on${ctx.name}Created } from "./view-reducers/index.js";
 
-// TODO: import event types from the aggregate
+// TODO: import event types and on-entries once wired
 // import type { ${ctx.name}Event } from "../../write-model/aggregates/${ctx.kebabName}/index.js";
+// import { on${ctx.name}Created } from "./on-entries/index.js";
 
-type ${ctx.name}ProjectionDef = {
+export type ${ctx.name}ProjectionDef = {
   events: never; // TODO: replace with event union type
   queries: ${ctx.name}Query;
   view: ${ctx.name}View;
+  viewStore: ViewStore<${ctx.name}View>;
   infrastructure: Record<string, never>;
 };
 

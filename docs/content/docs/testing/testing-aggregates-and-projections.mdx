@@ -183,20 +183,20 @@ const state = evolveAggregate(
 expect(state.balance).toBe(150);
 ```
 
-## Direct Aggregate Handler Testing
+## Direct Handler Testing
 
-You can always bypass the harness and call handlers directly:
+Since handlers are extracted to standalone functions, you can import and call them directly without going through the aggregate object:
 
 ```ts
-// Command handler
-const events = BankAccount.commands.AuthorizeTransaction(
-  command,
-  state,
-  infrastructure,
-);
+// Command handler — import the extracted function
+import { handleAuthorizeTransaction } from "./command-handlers/handle-authorize-transaction";
 
-// Apply handler (pure, sync)
-const newState = BankAccount.apply.TransactionAuthorized(payload, state);
+const events = handleAuthorizeTransaction(command, state, infrastructure);
+
+// Apply handler — import the extracted function
+import { applyTransactionAuthorized } from "./apply-handlers/apply-transaction-authorized";
+
+const newState = applyTransactionAuthorized(payload, state);
 ```
 
 The harness is recommended for most tests because it manages state reconstruction from events and provides consistent error handling, but direct calls are useful for focused unit tests of individual handlers.
@@ -270,21 +270,25 @@ expect(result.view.balance).toBe(800);
 When `.initialView()` is not called, the first reducer invocation receives `undefined` as the view. This matches real projection behavior when the first event arrives. Design your reducers to handle this:
 
 ```ts
-on: {
-  AccountCreated: {
-    reduce: (event, view) => ({
-      id: event.payload.id,
-      balance: 0,              // Initialize from scratch
-      transactions: [],
-    }),
-  },
-  DepositMade: {
-    reduce: (event, view) => ({
-      ...view,                 // Spread existing view
-      balance: (view?.balance ?? 0) + event.payload.amount,
-    }),
-  },
-},
+// on-entries/on-account-created.ts
+export const onAccountCreated: InferProjectionEventHandler<
+  Def,
+  "AccountCreated"
+> = {
+  reduce: (event, view) => ({
+    id: event.payload.id,
+    balance: 0, // Initialize from scratch
+    transactions: [],
+  }),
+};
+
+// on-entries/on-deposit-made.ts
+export const onDepositMade: InferProjectionEventHandler<Def, "DepositMade"> = {
+  reduce: (event, view) => ({
+    ...view, // Spread existing view
+    balance: (view?.balance ?? 0) + event.payload.amount,
+  }),
+};
 ```
 
 ## Testing Full Event Streams
@@ -316,14 +320,16 @@ expect(result.view.transactions).toHaveLength(1);
 Projection reducers receive the **full event object** (`{ name, payload }`), not just the payload. The event type is narrowed by name:
 
 ```ts
-on: {
-  AccountCreated: {
-    reduce: (event, view) => {
-      // event is { name: "AccountCreated", payload: { id: string } }
-      return { ...view, id: event.payload.id };
-    },
+// on-entries/on-account-created.ts
+export const onAccountCreated: InferProjectionEventHandler<
+  Def,
+  "AccountCreated"
+> = {
+  reduce: (event, view) => {
+    // event is { name: "AccountCreated", payload: { id: string } }
+    return { ...view, id: event.payload.id };
   },
-},
+};
 ```
 
 This is consistent with the runtime behavior in `@noddde/engine` and different from aggregate apply handlers, which receive only the payload.
@@ -355,10 +361,12 @@ expect(result.error!.message).toContain("invalid");
 
 ## Direct Reducer Testing
 
-You can always call reducers directly for focused tests:
+Since projection event handlers are extracted to standalone functions, import and call them directly:
 
 ```ts
-const newView = BankAccountProjection.on.TransactionProcessed!.reduce(
+import { onTransactionProcessed } from "./on-entries/on-transaction-processed";
+
+const newView = onTransactionProcessed.reduce(
   {
     name: "TransactionProcessed",
     payload: { id: "t1", amount: 100, merchant: "Store", timestamp: now },

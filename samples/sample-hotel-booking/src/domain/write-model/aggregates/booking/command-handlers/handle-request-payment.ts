@@ -1,12 +1,11 @@
-import type { RequestPaymentPayload } from "../commands/request-payment";
-import type { BookingState } from "../state";
-import type { BookingEvent } from "../../../../event-model";
+import type { InferCommandHandler } from "@noddde/core";
+import type { BookingDef } from "../booking";
 
 /** Handles the RequestPayment command by emitting a PaymentRequested event. */
-export const handleRequestPayment = (
-  command: { targetAggregateId: string; payload: RequestPaymentPayload },
-  state: BookingState,
-): BookingEvent => {
+export const handleRequestPayment: InferCommandHandler<
+  BookingDef,
+  "RequestPayment"
+> = (command, state) => {
   if (state.status !== "pending") {
     throw new Error(`Cannot request payment in ${state.status} status`);
   }

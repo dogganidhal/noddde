@@ -175,7 +175,36 @@ Most query handlers read from views built by [projections](/docs/read-model/proj
 Events --> Projection --> View Store --> Query Handler --> Result
 ```
 
-These handlers are defined inside `defineProjection` as part of the `queryHandlers` map.
+These handlers are defined inside `defineProjection` as part of the `queryHandlers` map. The recommended pattern is to extract each query handler to its own file, typed with `InferProjectionQueryHandler`:
+
+```ts title="query-handlers/handle-get-bank-account-by-id.ts"
+import type { InferProjectionQueryHandler } from "@noddde/core";
+import type { BankAccountProjectionDef } from "../types";
+
+export const handleGetBankAccountById: InferProjectionQueryHandler<
+  BankAccountProjectionDef,
+  "GetBankAccountById"
+> = async (query, { views }) => (await views.load(query.id)) ?? null;
+```
+
+Then imported into the projection definition:
+
+```ts title="projection.ts"
+import { handleGetBankAccountById } from "./query-handlers/handle-get-bank-account-by-id";
+
+export const BankAccountProjection = defineProjection<BankAccountProjectionDef>(
+  {
+    on: {
+      /* ... */
+    },
+    queryHandlers: {
+      GetBankAccountById: handleGetBankAccountById,
+    },
+  },
+);
+```
+
+`InferProjectionQueryHandler` automatically injects `{ views }` into the infrastructure parameter when your `ProjectionTypes` bundle has a `viewStore` field. See [Type Inference Helpers](/docs/modeling/type-inference#inferprojectionqueryhandler-and-inferprojectionqueryhandler) for details.
 
 ### Standalone Query Handlers
 
@@ -218,7 +247,9 @@ const myDomain = defineDomain({
   },
 });
 
-const domain = await wireDomain(myDomain, { /* wiring */ });
+const domain = await wireDomain(myDomain, {
+  /* wiring */
+});
 ```
 
 ## The QueryBus Interface

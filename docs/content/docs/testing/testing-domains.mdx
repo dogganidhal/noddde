@@ -209,13 +209,13 @@ expect(summary?.status).toBe("confirmed");
 
 ## When to Use testDomain vs. defineDomain + wireDomain
 
-| Scenario                             | Use                                                       |
-| ------------------------------------ | --------------------------------------------------------- |
-| Testing handler logic in isolation   | `testAggregate`, `testProjection`, `testSaga`             |
-| Testing multiple components together | `testDomain`                                              |
-| Custom persistence strategies        | `defineDomain` + `wireDomain` from `@noddde/engine`      |
-| Custom bus implementations           | `defineDomain` + `wireDomain` from `@noddde/engine`      |
-| Production-like environment tests    | `defineDomain` + `wireDomain` from `@noddde/engine`      |
+| Scenario                             | Use                                                 |
+| ------------------------------------ | --------------------------------------------------- |
+| Testing handler logic in isolation   | `testAggregate`, `testProjection`, `testSaga`       |
+| Testing multiple components together | `testDomain`                                        |
+| Custom persistence strategies        | `defineDomain` + `wireDomain` from `@noddde/engine` |
+| Custom bus implementations           | `defineDomain` + `wireDomain` from `@noddde/engine` |
+| Production-like environment tests    | `defineDomain` + `wireDomain` from `@noddde/engine` |
 
 ## Next Steps
 

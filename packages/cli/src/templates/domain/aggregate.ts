@@ -19,6 +19,7 @@ import type { ${ctx.name}CreatedPayload } from "../../../event-model/${ctx.kebab
 import type { Create${ctx.name}Payload } from "./commands/create-${ctx.kebabName}.js";
 import type { ${ctx.name}Infrastructure } from "../../../../infrastructure/index.js";
 import { handleCreate${ctx.name} } from "./command-handlers/index.js";
+import { apply${ctx.name}Created } from "./apply-handlers/index.js";
 
 // ── Type unions ─────────────────────────────────────────────────
 
@@ -34,7 +35,7 @@ export type ${ctx.name}Command = DefineCommands<{
 
 // ── Types bundle ────────────────────────────────────────────────
 
-type ${ctx.name}Def = {
+export type ${ctx.name}Def = {
   state: ${ctx.name}State;
   events: ${ctx.name}Event;
   commands: ${ctx.name}Command;
@@ -51,10 +52,7 @@ export const ${ctx.name} = defineAggregate<${ctx.name}Def>({
   },
 
   apply: {
-    ${ctx.name}Created: () => ({
-      ...initial${ctx.name}State,
-      // TODO: apply event payload to state
-    }),
+    ${ctx.name}Created: apply${ctx.name}Created,
   },
 });
 `;

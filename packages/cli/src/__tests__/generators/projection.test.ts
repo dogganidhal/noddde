@@ -26,8 +26,8 @@ describe("generateProjection", () => {
       "queries/get-order-summary.ts",
       "query-handlers/index.ts",
       "query-handlers/handle-get-order-summary.ts",
-      "view-reducers/index.ts",
-      "view-reducers/on-order-summary-created.ts",
+      "on-entries/index.ts",
+      "on-entries/on-order-summary-created.ts",
     ];
 
     for (const file of expectedFiles) {
@@ -35,7 +35,7 @@ describe("generateProjection", () => {
     }
   });
 
-  it("generates projection with on map and imported handlers", async () => {
+  it("generates projection with on map, exported Def, and imported handler", async () => {
     await generateProjection("OrderSummary", tmpDir);
 
     const content = await readFile(
@@ -45,11 +45,11 @@ describe("generateProjection", () => {
     expect(content).toContain("defineProjection");
     expect(content).toContain("on:");
     expect(content).toContain("handleGetOrderSummary");
-    expect(content).toContain("onOrderSummaryCreated");
+    expect(content).toContain("export type OrderSummaryProjectionDef");
     expect(content).not.toContain("reducers:");
   });
 
-  it("generates standalone query handler", async () => {
+  it("generates standalone query handler using InferProjectionQueryHandler", async () => {
     await generateProjection("OrderSummary", tmpDir);
 
     const content = await readFile(
@@ -59,18 +59,16 @@ describe("generateProjection", () => {
       ),
       "utf-8",
     );
-    expect(content).toContain("export async function handleGetOrderSummary");
-    expect(content).toContain("ViewStore");
+    expect(content).toContain("InferProjectionQueryHandler");
+    expect(content).toContain("OrderSummaryProjectionDef");
+    expect(content).toContain("handleGetOrderSummary");
   });
 
-  it("generates standalone view reducer", async () => {
+  it("generates standalone on-entry", async () => {
     await generateProjection("OrderSummary", tmpDir);
 
     const content = await readFile(
-      path.join(
-        tmpDir,
-        "order-summary/view-reducers/on-order-summary-created.ts",
-      ),
+      path.join(tmpDir, "order-summary/on-entries/on-order-summary-created.ts"),
       "utf-8",
     );
     expect(content).toContain("export function onOrderSummaryCreated");

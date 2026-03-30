@@ -32,6 +32,8 @@ describe("generateDomain", () => {
       "domain/write-model/aggregates/bank-account/commands/create-bank-account.ts",
       "domain/write-model/aggregates/bank-account/command-handlers/index.ts",
       "domain/write-model/aggregates/bank-account/command-handlers/handle-create-bank-account.ts",
+      "domain/write-model/aggregates/bank-account/apply-handlers/index.ts",
+      "domain/write-model/aggregates/bank-account/apply-handlers/apply-bank-account-created.ts",
       // Read model
       "domain/read-model/projections/bank-account/index.ts",
       "domain/read-model/projections/bank-account/bank-account.ts",
@@ -39,8 +41,8 @@ describe("generateDomain", () => {
       "domain/read-model/projections/bank-account/queries/get-bank-account.ts",
       "domain/read-model/projections/bank-account/query-handlers/index.ts",
       "domain/read-model/projections/bank-account/query-handlers/handle-get-bank-account.ts",
-      "domain/read-model/projections/bank-account/view-reducers/index.ts",
-      "domain/read-model/projections/bank-account/view-reducers/on-bank-account-created.ts",
+      "domain/read-model/projections/bank-account/on-entries/index.ts",
+      "domain/read-model/projections/bank-account/on-entries/on-bank-account-created.ts",
       // Domain wiring
       "domain/domain.ts",
       "infrastructure/index.ts",
@@ -67,7 +69,7 @@ describe("generateDomain", () => {
     expect(content).toContain("DefineCommands");
   });
 
-  it("generates standalone command handler", async () => {
+  it("generates standalone command handler using InferCommandHandler", async () => {
     await generateDomain("BankAccount", tmpDir);
 
     const handlerPath = path.join(
@@ -75,11 +77,26 @@ describe("generateDomain", () => {
       "bank-account/domain/write-model/aggregates/bank-account/command-handlers/handle-create-bank-account.ts",
     );
     const content = await readFile(handlerPath, "utf-8");
-    expect(content).toContain("export function handleCreateBankAccount");
+    expect(content).toContain("InferCommandHandler");
+    expect(content).toContain("BankAccountDef");
+    expect(content).toContain("handleCreateBankAccount");
     expect(content).toContain('"BankAccountCreated" as const');
   });
 
-  it("generates projection with on map and imported handlers", async () => {
+  it("generates standalone apply handler using InferApplyHandler", async () => {
+    await generateDomain("BankAccount", tmpDir);
+
+    const handlerPath = path.join(
+      tmpDir,
+      "bank-account/domain/write-model/aggregates/bank-account/apply-handlers/apply-bank-account-created.ts",
+    );
+    const content = await readFile(handlerPath, "utf-8");
+    expect(content).toContain("InferApplyHandler");
+    expect(content).toContain("BankAccountDef");
+    expect(content).toContain("applyBankAccountCreated");
+  });
+
+  it("generates projection with on map and exported Def type", async () => {
     await generateDomain("BankAccount", tmpDir);
 
     const projPath = path.join(
@@ -90,22 +107,22 @@ describe("generateDomain", () => {
     expect(content).toContain("defineProjection");
     expect(content).toContain("on:");
     expect(content).toContain("handleGetBankAccount");
-    expect(content).toContain("onBankAccountCreated");
+    expect(content).toContain("export type BankAccountProjectionDef");
   });
 
-  it("generates standalone view reducer", async () => {
+  it("generates standalone on-entry", async () => {
     await generateDomain("BankAccount", tmpDir);
 
     const reducerPath = path.join(
       tmpDir,
-      "bank-account/domain/read-model/projections/bank-account/view-reducers/on-bank-account-created.ts",
+      "bank-account/domain/read-model/projections/bank-account/on-entries/on-bank-account-created.ts",
     );
     const content = await readFile(reducerPath, "utf-8");
     expect(content).toContain("export function onBankAccountCreated");
     expect(content).toContain("BankAccountView");
   });
 
-  it("generates standalone query handler", async () => {
+  it("generates standalone query handler using InferProjectionQueryHandler", async () => {
     await generateDomain("BankAccount", tmpDir);
 
     const handlerPath = path.join(
@@ -113,8 +130,9 @@ describe("generateDomain", () => {
       "bank-account/domain/read-model/projections/bank-account/query-handlers/handle-get-bank-account.ts",
     );
     const content = await readFile(handlerPath, "utf-8");
-    expect(content).toContain("export async function handleGetBankAccount");
-    expect(content).toContain("ViewStore");
+    expect(content).toContain("InferProjectionQueryHandler");
+    expect(content).toContain("BankAccountProjectionDef");
+    expect(content).toContain("handleGetBankAccount");
   });
 
   it("generates domain.ts with defineDomain", async () => {

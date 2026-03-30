@@ -1,11 +1,11 @@
-import type { FlashSaleState } from "../state";
-import type { FlashSaleEvent } from "../../../../event-model";
+import type { InferCommandHandler } from "@noddde/core";
+import type { FlashSaleItemTypes } from "../flash-sale-item";
 
 /** Handles the PurchaseItem command. Rejects when stock is depleted. */
-export const handlePurchaseItem = (
-  command: { payload: { buyerId: string; quantity: number } },
-  state: FlashSaleState,
-): FlashSaleEvent => {
+export const handlePurchaseItem: InferCommandHandler<
+  FlashSaleItemTypes,
+  "PurchaseItem"
+> = (command, state) => {
   if (state.stock <= 0) {
     return {
       name: "PurchaseRejected",

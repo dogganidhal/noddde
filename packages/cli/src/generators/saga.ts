@@ -24,11 +24,11 @@ export async function generateSaga(
     { relativePath: "state.ts", content: sagaStateTemplate(ctx) },
     { relativePath: "saga.ts", content: sagaTemplate(ctx) },
     {
-      relativePath: "transition-handlers/index.ts",
+      relativePath: "on-entries/index.ts",
       content: transitionHandlersIndexTemplate(),
     },
     {
-      relativePath: "transition-handlers/on-start-event.ts",
+      relativePath: "on-entries/on-start-event.ts",
       content: transitionHandlerTemplate(ctx),
     },
   ];

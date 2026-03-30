@@ -19,7 +19,7 @@ import {
   viewReducerTemplate,
 } from "../templates/domain/projection-view-reducers.js";
 
-/** Generates a projection folder with queries, query-handlers, and view-reducers subdirectories. */
+/** Generates a projection folder with queries, query-handlers, and on-entries subdirectories. */
 export async function generateProjection(
   name: string,
   basePath: string,
@@ -51,11 +51,11 @@ export async function generateProjection(
       content: queryHandlerTemplate(ctx),
     },
     {
-      relativePath: "view-reducers/index.ts",
+      relativePath: "on-entries/index.ts",
       content: viewReducersIndexTemplate(ctx),
     },
     {
-      relativePath: `view-reducers/on-${ctx.kebabName}-created.ts`,
+      relativePath: `on-entries/on-${ctx.kebabName}-created.ts`,
       content: viewReducerTemplate(ctx),
     },
   ];

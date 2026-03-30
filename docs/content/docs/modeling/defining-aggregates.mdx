@@ -14,7 +14,9 @@ An aggregate definition is a **blueprint**, not a singleton. You define the beha
 The rest of this page walks through building a complete aggregate from scratch using the banking domain as a running example.
 
 <Callout type="info">
-  You can scaffold this entire structure with the CLI: `noddde new aggregate BankAccount`. See [CLI Reference](/docs/getting-started/cli#noddde-new-aggregate-name) for details.
+  You can scaffold this entire structure with the CLI: `noddde new aggregate
+  BankAccount`. See [CLI
+  Reference](/docs/getting-started/cli#noddde-new-aggregate-name) for details.
 </Callout>
 
 ## Step 1: Define Events
@@ -119,12 +121,115 @@ The `infrastructure` field specifies what services your command handlers can acc
 
 This bundle replaces what would otherwise be five or more positional generic parameters. For the reasoning behind this approach, see [Why AggregateTypes?](/docs/design-decisions/why-aggregate-types).
 
-## Step 5: defineAggregate
+## Step 5: Extract Handlers
+
+The recommended pattern is to define command handlers and apply handlers as standalone functions in separate files, typed with `InferCommandHandler` and `InferApplyHandler`. This keeps each handler focused, independently testable, and makes the aggregate definition itself a clean table of references.
+
+### Command handlers
+
+Each command handler lives in its own file and is typed with `InferCommandHandler<TypesBundle, "CommandName">`:
+
+```typescript
+// command-handlers/handle-create-bank-account.ts
+import type { InferCommandHandler } from "@noddde/core";
+import type { BankAccountDef } from "../bank-account";
+
+export const handleCreateBankAccount: InferCommandHandler<
+  BankAccountDef,
+  "CreateBankAccount"
+> = (command) => ({
+  name: "BankAccountCreated",
+  payload: { id: command.targetAggregateId },
+});
+```
+
+```typescript
+// command-handlers/handle-authorize-transaction.ts
+import type { InferCommandHandler } from "@noddde/core";
+import type { BankAccountDef } from "../bank-account";
+
+export const handleAuthorizeTransaction: InferCommandHandler<
+  BankAccountDef,
+  "AuthorizeTransaction"
+> = (command, state) => {
+  const { amount, merchant } = command.payload;
+
+  if (state.availableBalance < amount) {
+    return {
+      name: "TransactionDeclined",
+      payload: {
+        id: command.targetAggregateId,
+        timestamp: new Date(),
+        amount,
+        merchant,
+      },
+    };
+  }
+
+  return {
+    name: "TransactionAuthorized",
+    payload: {
+      id: command.targetAggregateId,
+      timestamp: new Date(),
+      amount,
+      merchant,
+    },
+  };
+};
+```
+
+### Apply handlers
+
+Each apply handler lives in its own file and is typed with `InferApplyHandler<TypesBundle, "EventName">`:
+
+```typescript
+// apply-handlers/apply-bank-account-created.ts
+import type { InferApplyHandler } from "@noddde/core";
+import type { BankAccountDef } from "../bank-account";
+
+export const applyBankAccountCreated: InferApplyHandler<
+  BankAccountDef,
+  "BankAccountCreated"
+> = (_event, _state) => ({
+  balance: 0,
+  availableBalance: 0,
+  transactions: [],
+});
+```
+
+```typescript
+// apply-handlers/apply-transaction-authorized.ts
+import type { InferApplyHandler } from "@noddde/core";
+import type { BankAccountDef } from "../bank-account";
+
+export const applyTransactionAuthorized: InferApplyHandler<
+  BankAccountDef,
+  "TransactionAuthorized"
+> = (event, state) => ({
+  ...state,
+  availableBalance: state.availableBalance - event.amount,
+  transactions: [
+    ...state.transactions,
+    { ...event, status: "pending" as const },
+  ],
+});
+```
+
+## Step 6: defineAggregate
 
 `defineAggregate` is an identity function -- it takes your aggregate object and returns it unchanged. Its only purpose is to provide type inference so TypeScript can verify that your command handlers, apply handlers, and initial state are all consistent.
 
+With extracted handlers, the aggregate definition becomes a concise wiring file that imports and maps each handler:
+
 ```typescript
+// bank-account.ts
 import { defineAggregate } from "@noddde/core";
+import { handleCreateBankAccount } from "./command-handlers/handle-create-bank-account";
+import { handleAuthorizeTransaction } from "./command-handlers/handle-authorize-transaction";
+import { applyBankAccountCreated } from "./apply-handlers/apply-bank-account-created";
+import { applyTransactionAuthorized } from "./apply-handlers/apply-transaction-authorized";
+import { applyTransactionDeclined } from "./apply-handlers/apply-transaction-declined";
+import { applyTransactionProcessed } from "./apply-handlers/apply-transaction-processed";
 
 export const BankAccount = defineAggregate<BankAccountDef>({
   initialState: {
@@ -134,69 +239,15 @@ export const BankAccount = defineAggregate<BankAccountDef>({
   },
 
   commands: {
-    CreateBankAccount: (command) => ({
-      name: "BankAccountCreated",
-      payload: { id: command.targetAggregateId },
-    }),
-
-    AuthorizeTransaction: (command, state) => {
-      const { amount, merchant } = command.payload;
-
-      if (state.availableBalance < amount) {
-        return {
-          name: "TransactionDeclined",
-          payload: {
-            id: command.targetAggregateId,
-            timestamp: new Date(),
-            amount,
-            merchant,
-          },
-        };
-      }
-
-      return {
-        name: "TransactionAuthorized",
-        payload: {
-          id: command.targetAggregateId,
-          timestamp: new Date(),
-          amount,
-          merchant,
-        },
-      };
-    },
+    CreateBankAccount: handleCreateBankAccount,
+    AuthorizeTransaction: handleAuthorizeTransaction,
   },
 
   apply: {
-    BankAccountCreated: (_event, _state) => ({
-      balance: 0,
-      availableBalance: 0,
-      transactions: [],
-    }),
-
-    TransactionAuthorized: (event, state) => ({
-      ...state,
-      availableBalance: state.availableBalance - event.amount,
-      transactions: [
-        ...state.transactions,
-        { ...event, status: "pending" as const },
-      ],
-    }),
-
-    TransactionDeclined: (event, state) => ({
-      ...state,
-      transactions: [
-        ...state.transactions,
-        { ...event, status: "declined" as const },
-      ],
-    }),
-
-    TransactionProcessed: (event, state) => ({
-      ...state,
-      balance: state.balance - event.amount,
-      transactions: state.transactions.map((t) =>
-        t.id === event.id ? { ...t, status: "processed" as const } : t,
-      ),
-    }),
+    BankAccountCreated: applyBankAccountCreated,
+    TransactionAuthorized: applyTransactionAuthorized,
+    TransactionDeclined: applyTransactionDeclined,
+    TransactionProcessed: applyTransactionProcessed,
   },
 });
 ```
@@ -211,19 +262,23 @@ TypeScript enforces the following at compile time:
 
 Because `defineAggregate` is an identity function, it adds **zero runtime overhead**. It exists purely for the type checker.
 
+<Callout type="info">
+  For simple aggregates with only one or two handlers, you can define them
+  inline directly in the `defineAggregate` call. But as aggregates grow,
+  extracted handlers keep the codebase manageable.
+</Callout>
+
+Extracting handlers is the recommended pattern in noddde for testability, readability, type safety, and maintainability. See [Why Extract Handlers?](/docs/design-decisions/why-extracted-handlers) for the full rationale.
+
 ## Using Infrastructure
 
 When command handlers need external services -- a clock, a logger, a fraud-check client -- define a custom infrastructure type and include it in the types bundle.
 
-Here is the auction domain, which uses an injected `clock` to validate bid timing:
+Here is the auction domain, which uses an injected `clock` to validate bid timing. The types are defined first, then the `PlaceBid` handler is extracted to its own file with `InferCommandHandler`:
 
 ```typescript
-import {
-  Infrastructure,
-  DefineEvents,
-  DefineCommands,
-  defineAggregate,
-} from "@noddde/core";
+// types.ts
+import { Infrastructure, DefineEvents, DefineCommands } from "@noddde/core";
 
 interface AuctionInfrastructure extends Infrastructure {
   clock: { now(): Date };
@@ -250,12 +305,70 @@ interface AuctionState {
   highestBid: { bidderId: string; amount: number } | null;
 }
 
-type AuctionDef = {
+export type AuctionDef = {
   state: AuctionState;
   events: AuctionEvent;
   commands: AuctionCommand;
   infrastructure: AuctionInfrastructure;
 };
+```
+
+The `PlaceBid` handler destructures `{ clock }` from the infrastructure parameter. `InferCommandHandler` ensures TypeScript knows exactly which services are available:
+
+```typescript
+// command-handlers/handle-place-bid.ts
+import type { InferCommandHandler } from "@noddde/core";
+import type { AuctionDef } from "../auction";
+
+export const handlePlaceBid: InferCommandHandler<AuctionDef, "PlaceBid"> = (
+  command,
+  state,
+  { clock },
+) => {
+  const { bidderId, amount } = command.payload;
+  const now = clock.now();
+
+  if (state.status !== "open") {
+    return {
+      name: "BidRejected",
+      payload: { bidderId, amount, reason: "Auction is not open" },
+    };
+  }
+
+  if (state.endsAt && now > state.endsAt) {
+    return {
+      name: "BidRejected",
+      payload: { bidderId, amount, reason: "Auction has ended" },
+    };
+  }
+
+  const minimum = state.highestBid?.amount ?? state.startingPrice;
+  if (amount <= minimum) {
+    return {
+      name: "BidRejected",
+      payload: { bidderId, amount, reason: `Bid must exceed ${minimum}` },
+    };
+  }
+
+  return {
+    name: "BidPlaced",
+    payload: { bidderId, amount, timestamp: now },
+  };
+};
+```
+
+The aggregate definition then wires everything together:
+
+```typescript
+// auction.ts
+import { defineAggregate } from "@noddde/core";
+import { handleCreateAuction } from "./command-handlers/handle-create-auction";
+import { handlePlaceBid } from "./command-handlers/handle-place-bid";
+import { handleCloseAuction } from "./command-handlers/handle-close-auction";
+import { applyAuctionCreated } from "./apply-handlers/apply-auction-created";
+import { applyBidPlaced } from "./apply-handlers/apply-bid-placed";
+import { applyBidRejected } from "./apply-handlers/apply-bid-rejected";
+import { applyAuctionClosed } from "./apply-handlers/apply-auction-closed";
 
 export const Auction = defineAggregate<AuctionDef>({
   initialState: {
@@ -267,86 +380,19 @@ export const Auction = defineAggregate<AuctionDef>({
   },
 
   commands: {
-    CreateAuction: (command) => ({
-      name: "AuctionCreated",
-      payload: command.payload,
-    }),
-
-    PlaceBid: (command, state, { clock }) => {
-      if (state.status !== "open") {
-        return {
-          name: "BidRejected",
-          payload: {
-            ...command.payload,
-            reason: "Auction is not open",
-          },
-        };
-      }
-
-      if (state.endsAt && clock.now() > state.endsAt) {
-        return {
-          name: "BidRejected",
-          payload: {
-            ...command.payload,
-            reason: "Auction has ended",
-          },
-        };
-      }
-
-      const minimum = state.highestBid?.amount ?? state.startingPrice;
-      if (command.payload.amount <= minimum) {
-        return {
-          name: "BidRejected",
-          payload: {
-            ...command.payload,
-            reason: `Bid must exceed ${minimum}`,
-          },
-        };
-      }
-
-      return {
-        name: "BidPlaced",
-        payload: {
-          ...command.payload,
-          timestamp: clock.now(),
-        },
-      };
-    },
-
-    CloseAuction: (_command, state) => ({
-      name: "AuctionClosed",
-      payload: { winnerId: state.highestBid?.bidderId ?? null },
-    }),
+    CreateAuction: handleCreateAuction,
+    PlaceBid: handlePlaceBid,
+    CloseAuction: handleCloseAuction,
   },
 
   apply: {
-    AuctionCreated: (event) => ({
-      item: event.item,
-      startingPrice: event.startingPrice,
-      endsAt: null,
-      status: "open" as const,
-      highestBid: null,
-    }),
-
-    BidPlaced: (event, state) => ({
-      ...state,
-      highestBid: {
-        bidderId: event.bidderId,
-        amount: event.amount,
-      },
-    }),
-
-    BidRejected: (_event, state) => state,
-
-    AuctionClosed: (_event, state) => ({
-      ...state,
-      status: "closed" as const,
-    }),
+    AuctionCreated: applyAuctionCreated,
+    BidPlaced: applyBidPlaced,
+    BidRejected: applyBidRejected,
+    AuctionClosed: applyAuctionClosed,
   },
 });
 ```
-
-Notice that `{ clock }` is destructured from the third argument of the `PlaceBid` handler. The `AuctionInfrastructure` type ensures TypeScript knows exactly which services are available.
 
 Infrastructure is **never passed to apply handlers**. Apply handlers are pure reducers -- they receive only the event payload and the current state. This keeps state evolution deterministic and safe for event replay.
 

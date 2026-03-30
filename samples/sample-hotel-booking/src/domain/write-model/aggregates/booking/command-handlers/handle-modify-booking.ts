@@ -1,14 +1,11 @@
-import type { ModifyBookingPayload } from "../commands/modify-booking";
-import type { BookingState } from "../state";
-import type { HotelInfrastructure } from "../../../../../infrastructure/types";
-import type { BookingEvent } from "../../../../event-model";
+import type { InferCommandHandler } from "@noddde/core";
+import type { BookingDef } from "../booking";
 
 /** Handles the ModifyBooking command by emitting a BookingModified event. */
-export const handleModifyBooking = (
-  command: { targetAggregateId: string; payload: ModifyBookingPayload },
-  state: BookingState,
-  { clock }: HotelInfrastructure,
-): BookingEvent => {
+export const handleModifyBooking: InferCommandHandler<
+  BookingDef,
+  "ModifyBooking"
+> = (command, state, { clock }) => {
   if (state.status === "cancelled") {
     throw new Error("Cannot modify cancelled booking");
   }

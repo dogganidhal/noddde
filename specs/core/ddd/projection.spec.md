@@ -13,6 +13,9 @@ exports:
     InferProjectionEvents,
     InferProjectionQueries,
     InferProjectionInfrastructure,
+    InferProjectionEventHandler,
+    InferProjectionQueryHandler,
+    InferProjectionQueryInfrastructure,
   ]
 depends_on:
   [
@@ -73,11 +76,20 @@ docs:
 
 - **`defineProjection<T>(config): Projection<T>`** -- identity function for type inference.
 
-- **Infer utilities**:
+- **Infer utilities** (operate on `Projection` definition instances):
+
   - `InferProjectionView<T extends Projection>` = inferred `U["view"]`.
   - `InferProjectionEvents<T extends Projection>` = inferred `U["events"]`.
   - `InferProjectionQueries<T extends Projection>` = inferred `U["queries"]`.
   - `InferProjectionInfrastructure<T extends Projection>` = inferred `U["infrastructure"]`.
+
+- **Handler-level inference utilities** (operate on `ProjectionTypes` bundle, for typing extracted handlers in separate files):
+
+  - `InferProjectionEventHandler<T extends ProjectionTypes, K extends T["events"]["name"]>` = `ProjectionEventHandler<Extract<T["events"], { name: K }>, T["view"]>`. Resolves to the `{ id?, reduce }` bundle for event `K`, with the event narrowed via `Extract`.
+
+  - `InferProjectionQueryInfrastructure<T extends ProjectionTypes>` = conditionally `T["infrastructure"] & { views: T["viewStore"] }` when `T` has a `viewStore` field extending `ViewStore`, otherwise `T["infrastructure"]`. This is the public export of the internal `ProjectionQueryInfra<T>` logic.
+
+  - `InferProjectionQueryHandler<T extends ProjectionTypes, K extends T["queries"]["name"]>` = `QueryHandler<InferProjectionQueryInfrastructure<T>, Extract<T["queries"], { name: K }>>`. Resolves to the exact query handler function type for query `K`, with views injection when applicable.
 
 ## Behavioral Requirements
 
@@ -92,6 +104,10 @@ docs:
 9. `initialView` provides the default view state when the view store returns `undefined`/`null` for a new entity. Without it, reducers may receive `undefined` as the current view.
 10. `consistency` defaults to `"eventual"`. When `"strong"`, the engine enlists view persistence in the same UoW as the originating command. When `"eventual"`, views are updated asynchronously via the event bus.
 11. `ProjectionEventHandler` is exported so users can reference it in utility types and generic helpers.
+12. `InferProjectionEventHandler<T, K>` resolves to a `{ id?, reduce }` object type with the event narrowed to variant `K` and the view type from `T`.
+13. `InferProjectionQueryInfrastructure<T>` conditionally injects `{ views: T["viewStore"] }` into `T["infrastructure"]` when `T` has a `viewStore` field, matching the internal `ProjectionQueryInfra<T>` logic.
+14. `InferProjectionQueryHandler<T, K>` resolves to a query handler function receiving the narrowed query payload and the conditional infrastructure (with or without `{ views }`).
+15. All three handler-level inference utilities operate on the `ProjectionTypes` bundle (not the `Projection` definition instance), enabling use before `defineProjection` is called.
 
 ## Invariants
 
@@ -104,6 +120,9 @@ docs:
 - `id` functions (when present) return `ID` (`string | number | bigint`).
 - `consistency` is `"eventual"` or `"strong"` when specified; the engine defaults to `"eventual"` when omitted.
 - `on` map keys are constrained to `T["events"]["name"]` — invalid event names are compile errors.
+- `InferProjectionEventHandler<T, K>` always produces the same type as `ProjectionOnMap<T>[K]`.
+- `InferProjectionQueryHandler<T, K>` always produces the same type as `QueryHandlerMap<T>[K]`.
+- `InferProjectionQueryInfrastructure<T>` always produces the same type as internal `ProjectionQueryInfra<T>`.
 
 ## Edge Cases
 
@@ -771,6 +790,207 @@ describe("Optional id in on entries", () => {
     });
 
     expect(projection.on.Created!.id).toBeUndefined();
+  });
+});
+```
+
+### InferProjectionEventHandler narrows event for reducer
+
+```ts
+import { describe, it, expectTypeOf } from "vitest";
+import type {
+  DefineEvents,
+  Infrastructure,
+  Query,
+  InferProjectionEventHandler,
+} from "@noddde/core";
+import { defineProjection } from "@noddde/core";
+
+describe("InferProjectionEventHandler", () => {
+  interface ItemView {
+    id: string;
+    name: string;
+  }
+
+  type ItemEvent = DefineEvents<{
+    ItemCreated: { id: string; name: string };
+    ItemUpdated: { id: string; newName: string };
+  }>;
+
+  type Def = {
+    events: ItemEvent;
+    queries: Query<any>;
+    view: ItemView;
+    infrastructure: Infrastructure;
+  };
+
+  it("should narrow the event to the specific variant in reduce", () => {
+    type Handler = InferProjectionEventHandler<Def, "ItemCreated">;
+    type ReduceParams = Parameters<Handler["reduce"]>;
+    expectTypeOf<ReduceParams[0]>().toEqualTypeOf<
+      Extract<ItemEvent, { name: "ItemCreated" }>
+    >();
+    expectTypeOf<ReduceParams[1]>().toEqualTypeOf<ItemView>();
+  });
+
+  it("should have optional id function with narrowed event", () => {
+    type Handler = InferProjectionEventHandler<Def, "ItemCreated">;
+    // id is optional
+    expectTypeOf<Handler["id"]>().toEqualTypeOf<
+      | ((
+          event: Extract<ItemEvent, { name: "ItemCreated" }>,
+        ) => string | number | bigint)
+      | undefined
+    >();
+  });
+
+  it("should be usable in defineProjection on map", () => {
+    const onItemCreated: InferProjectionEventHandler<Def, "ItemCreated"> = {
+      id: (event) => event.payload.id,
+      reduce: (event, _view) => ({
+        id: event.payload.id,
+        name: event.payload.name,
+      }),
+    };
+
+    const projection = defineProjection<Def>({
+      on: {
+        ItemCreated: onItemCreated,
+      },
+      queryHandlers: {},
+    });
+
+    expectTypeOf(projection.on.ItemCreated).not.toBeUndefined();
+  });
+});
+```
+
+### InferProjectionQueryHandler wires views when viewStore present
+
+```ts
+import { describe, it, expectTypeOf } from "vitest";
+import type {
+  DefineEvents,
+  DefineQueries,
+  Infrastructure,
+  ViewStore,
+  InferProjectionQueryHandler,
+  FrameworkInfrastructure,
+} from "@noddde/core";
+
+describe("InferProjectionQueryHandler", () => {
+  interface ItemView {
+    id: string;
+    name: string;
+  }
+
+  interface ItemViewStore extends ViewStore<ItemView> {
+    findByName(name: string): Promise<ItemView[]>;
+  }
+
+  type ItemEvent = DefineEvents<{ ItemCreated: { id: string; name: string } }>;
+
+  type ItemQuery = DefineQueries<{
+    GetItem: { payload: { id: string }; result: ItemView | null };
+    FindByName: { payload: { name: string }; result: ItemView[] };
+  }>;
+
+  type DefWithViewStore = {
+    events: ItemEvent;
+    queries: ItemQuery;
+    view: ItemView;
+    infrastructure: Infrastructure;
+    viewStore: ItemViewStore;
+  };
+
+  type DefWithoutViewStore = {
+    events: ItemEvent;
+    queries: ItemQuery;
+    view: ItemView;
+    infrastructure: Infrastructure;
+  };
+
+  it("should include views in infrastructure when viewStore is defined", () => {
+    type Handler = InferProjectionQueryHandler<DefWithViewStore, "GetItem">;
+    type InfraParam = Parameters<Handler>[1];
+    expectTypeOf<InfraParam>().toEqualTypeOf<
+      Infrastructure & { views: ItemViewStore } & FrameworkInfrastructure
+    >();
+  });
+
+  it("should use plain infrastructure when viewStore is absent", () => {
+    type Handler = InferProjectionQueryHandler<DefWithoutViewStore, "GetItem">;
+    type InfraParam = Parameters<Handler>[1];
+    expectTypeOf<InfraParam>().toEqualTypeOf<
+      Infrastructure & FrameworkInfrastructure
+    >();
+  });
+
+  it("should narrow the query payload", () => {
+    type Handler = InferProjectionQueryHandler<DefWithViewStore, "GetItem">;
+    expectTypeOf<Parameters<Handler>[0]>().toEqualTypeOf<{ id: string }>();
+  });
+
+  it("should return the query result type", () => {
+    type Handler = InferProjectionQueryHandler<DefWithViewStore, "GetItem">;
+    expectTypeOf<ReturnType<Handler>>().toEqualTypeOf<
+      (ItemView | null) | Promise<ItemView | null>
+    >();
+  });
+});
+```
+
+### InferProjectionQueryInfrastructure conditional type
+
+```ts
+import { describe, it, expectTypeOf } from "vitest";
+import type {
+  DefineEvents,
+  DefineQueries,
+  Infrastructure,
+  ViewStore,
+  InferProjectionQueryInfrastructure,
+  Query,
+} from "@noddde/core";
+
+describe("InferProjectionQueryInfrastructure", () => {
+  interface MyView {
+    id: string;
+  }
+
+  interface MyViewStore extends ViewStore<MyView> {
+    custom(): Promise<MyView[]>;
+  }
+
+  interface MyInfra extends Infrastructure {
+    db: { query(): Promise<MyView[]> };
+  }
+
+  type WithViewStore = {
+    events: DefineEvents<{ Created: { id: string } }>;
+    queries: Query<any>;
+    view: MyView;
+    infrastructure: MyInfra;
+    viewStore: MyViewStore;
+  };
+
+  type WithoutViewStore = {
+    events: DefineEvents<{ Created: { id: string } }>;
+    queries: Query<any>;
+    view: MyView;
+    infrastructure: MyInfra;
+  };
+
+  it("should include views when viewStore is present", () => {
+    expectTypeOf<
+      InferProjectionQueryInfrastructure<WithViewStore>
+    >().toEqualTypeOf<MyInfra & { views: MyViewStore }>();
+  });
+
+  it("should be plain infrastructure when viewStore is absent", () => {
+    expectTypeOf<
+      InferProjectionQueryInfrastructure<WithoutViewStore>
+    >().toEqualTypeOf<MyInfra>();
   });
 });
 ```

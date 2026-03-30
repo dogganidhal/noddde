@@ -89,7 +89,9 @@ const bankingDomain = defineDomain<BankingInfrastructure>({
   },
 });
 
-const domain = await wireDomain(bankingDomain, { /* wiring */ });
+const domain = await wireDomain(bankingDomain, {
+  /* wiring */
+});
 ```
 
 ## Use Cases

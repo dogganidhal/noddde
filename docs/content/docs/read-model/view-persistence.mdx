@@ -48,6 +48,7 @@ const view = await store.load("acc-1"); // { id: "acc-1", balance: 100 }
 ```
 
 It also includes convenience methods not on the base interface:
+
 - `findAll()` -- returns all stored views
 - `find(predicate)` -- filters views by a predicate function
 
@@ -61,25 +62,24 @@ To enable automatic view persistence on a projection, provide three things:
 2. **`id`** function in each `on` entry (tells the engine how to derive the view instance ID)
 3. **`viewStore`** factory in the domain configuration (provides the actual store instance)
 
-```ts
+```ts title="types.ts"
 import type { ViewStore, DefineEvents, DefineQueries } from "@noddde/core";
-import { defineProjection } from "@noddde/core";
 
-interface AccountView {
+export interface AccountView {
   id: string;
   balance: number;
 }
 
-interface AccountViewStore extends ViewStore<AccountView> {
+export interface AccountViewStore extends ViewStore<AccountView> {
   findByBalanceRange(min: number, max: number): Promise<AccountView[]>;
 }
 
-type AccountEvent = DefineEvents<{
+export type AccountEvent = DefineEvents<{
   AccountCreated: { id: string; owner: string };
   DepositMade: { accountId: string; amount: number };
 }>;
 
-type AccountQuery = DefineQueries<{
+export type AccountQuery = DefineQueries<{
   GetAccountById: { payload: { id: string }; result: AccountView | null };
   GetAccountsInRange: {
     payload: { min: number; max: number };
@@ -87,46 +87,98 @@ type AccountQuery = DefineQueries<{
   };
 }>;
 
-type AccountProjectionDef = {
+export type AccountProjectionDef = {
   events: AccountEvent;
   queries: AccountQuery;
   view: AccountView;
   infrastructure: {};
-  viewStore: AccountViewStore;  // Type hint for { views } injection
+  viewStore: AccountViewStore; // Type hint for { views } injection
 };
+```
+
+```ts title="on-entries/on-account-created.ts"
+import type { InferProjectionEventHandler } from "@noddde/core";
+import type { AccountProjectionDef } from "../types";
+
+export const onAccountCreated: InferProjectionEventHandler<
+  AccountProjectionDef,
+  "AccountCreated"
+> = {
+  id: (event) => event.payload.id,
+  reduce: (event) => ({
+    id: event.payload.id,
+    balance: 0,
+  }),
+};
+```
+
+```ts title="on-entries/on-deposit-made.ts"
+import type { InferProjectionEventHandler } from "@noddde/core";
+import type { AccountProjectionDef } from "../types";
+
+export const onDepositMade: InferProjectionEventHandler<
+  AccountProjectionDef,
+  "DepositMade"
+> = {
+  id: (event) => event.payload.accountId,
+  reduce: (event, view) => ({
+    ...view,
+    balance: view.balance + event.payload.amount,
+  }),
+};
+```
+
+```ts title="query-handlers/handle-get-account-by-id.ts"
+import type { InferProjectionQueryHandler } from "@noddde/core";
+import type { AccountProjectionDef } from "../types";
+
+export const handleGetAccountById: InferProjectionQueryHandler<
+  AccountProjectionDef,
+  "GetAccountById"
+> = async (query, { views }) => (await views.load(query.id)) ?? null;
+```
+
+```ts title="query-handlers/handle-get-accounts-in-range.ts"
+import type { InferProjectionQueryHandler } from "@noddde/core";
+import type { AccountProjectionDef } from "../types";
+
+export const handleGetAccountsInRange: InferProjectionQueryHandler<
+  AccountProjectionDef,
+  "GetAccountsInRange"
+> = (query, { views }) => views.findByBalanceRange(query.min, query.max);
+```
+
+```ts title="projection.ts"
+import { defineProjection } from "@noddde/core";
+import type { AccountProjectionDef } from "./types";
+import { onAccountCreated } from "./on-entries/on-account-created";
+import { onDepositMade } from "./on-entries/on-deposit-made";
+import { handleGetAccountById } from "./query-handlers/handle-get-account-by-id";
+import { handleGetAccountsInRange } from "./query-handlers/handle-get-accounts-in-range";
 
 const AccountProjection = defineProjection<AccountProjectionDef>({
   on: {
-    AccountCreated: {
-      id: (event) => event.payload.id,
-      reduce: (event) => ({
-        id: event.payload.id,
-        balance: 0,
-      }),
-    },
-    DepositMade: {
-      id: (event) => event.payload.accountId,
-      reduce: (event, view) => ({
-        ...view,
-        balance: view.balance + event.payload.amount,
-      }),
-    },
+    AccountCreated: onAccountCreated,
+    DepositMade: onDepositMade,
   },
 
-  // Query handlers receive { views } typed as AccountViewStore
   queryHandlers: {
-    GetAccountById: async (query, { views }) =>
-      (await views.load(query.id)) ?? null,
-    GetAccountsInRange: (query, { views }) =>
-      views.findByBalanceRange(query.min, query.max),
+    GetAccountById: handleGetAccountById,
+    GetAccountsInRange: handleGetAccountsInRange,
   },
 });
+```
 
-// In domain wiring — viewStore is provided here
+```ts title="domain.ts"
+// In domain wiring -- viewStore is provided here
 import { defineDomain, wireDomain } from "@noddde/engine";
 
 const definition = defineDomain({
-  writeModel: { aggregates: { /* ... */ } },
+  writeModel: {
+    aggregates: {
+      /* ... */
+    },
+  },
   readModel: { projections: { Account: AccountProjection } },
 });
 
@@ -141,23 +193,33 @@ const domain = await wireDomain(definition, {
 
 The `id` function inside each `on` entry tells the engine how to derive the view instance ID from an event. It is optional at the type level, but required by the engine when a view store is configured.
 
-```ts
-on: {
-  AccountCreated: {
-    id: (event) => event.payload.id,
-    reduce: (event) => ({ id: event.payload.id, balance: 0 }),
-  },
-  DepositMade: {
-    id: (event) => event.payload.accountId,
-    reduce: (event, view) => ({
-      ...view,
-      balance: view.balance + event.payload.amount,
-    }),
-  },
-},
+Each extracted event handler includes its own `id` function:
+
+```ts title="on-entries/on-account-created.ts"
+export const onAccountCreated: InferProjectionEventHandler<
+  AccountProjectionDef,
+  "AccountCreated"
+> = {
+  id: (event) => event.payload.id,
+  reduce: (event) => ({ id: event.payload.id, balance: 0 }),
+};
+```
+
+```ts title="on-entries/on-deposit-made.ts"
+export const onDepositMade: InferProjectionEventHandler<
+  AccountProjectionDef,
+  "DepositMade"
+> = {
+  id: (event) => event.payload.accountId,
+  reduce: (event, view) => ({
+    ...view,
+    balance: view.balance + event.payload.amount,
+  }),
+};
 ```
 
 Unlike the old exhaustive `identity` map, only events the projection cares about need entries in `on`. When an event arrives, the engine:
+
 1. Calls `on[event.name].id(event)` to get the view ID
 2. Loads the current view from the view store (falling back to `initialView`)
 3. Runs `on[event.name].reduce(event, view)` to produce the new view
@@ -175,7 +237,7 @@ const projection = defineProjection<Def>({
       reduce: (event) => ({ id: event.payload.id, balance: 0 }),
     },
   },
-  initialView: { id: "", balance: 0 },  // Default for new entities
+  initialView: { id: "", balance: 0 }, // Default for new entities
   queryHandlers: {},
 });
 ```
@@ -230,10 +292,7 @@ Enable it with `consistency: "strong"`:
 ```ts
 const projection = defineProjection<Def>({
   on: {
-    Created: {
-      id: (event) => event.payload.id,
-      reduce: (event, _view) => ({ id: event.payload.id }),
-    },
+    Created: onCreated, // extracted handler with InferProjectionEventHandler
   },
   consistency: "strong",
   queryHandlers: {},

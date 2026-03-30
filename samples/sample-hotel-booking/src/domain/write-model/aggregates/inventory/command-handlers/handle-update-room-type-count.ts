@@ -1,12 +1,11 @@
-import type { UpdateRoomTypeCountPayload } from "../commands/update-room-type-count";
-import type { InventoryState } from "../state";
-import type { InventoryEvent } from "../../../../event-model";
+import type { InferCommandHandler } from "@noddde/core";
+import type { InventoryDef } from "../inventory";
 
 /** Handles the UpdateRoomTypeCount command by emitting a RoomTypeCountUpdated event. */
-export const handleUpdateRoomTypeCount = (
-  command: { targetAggregateId: string; payload: UpdateRoomTypeCountPayload },
-  state: InventoryState,
-): InventoryEvent => {
+export const handleUpdateRoomTypeCount: InferCommandHandler<
+  InventoryDef,
+  "UpdateRoomTypeCount"
+> = (command, state) => {
   if (!state.initialized) {
     throw new Error("Inventory not initialized");
   }

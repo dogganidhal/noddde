@@ -5,11 +5,14 @@ import type {
   CommandHandler,
   DefineCommands,
   DefineEvents,
+  FrameworkInfrastructure,
   InferAggregateCommands,
   InferAggregateEvents,
   InferAggregateID,
   InferAggregateInfrastructure,
   InferAggregateState,
+  InferApplyHandler,
+  InferCommandHandler,
   Infrastructure,
 } from "@noddde/core";
 import { defineAggregate } from "@noddde/core";
@@ -285,5 +288,155 @@ describe("defineAggregate identity", () => {
     };
     const result = defineAggregate<T>(config as any);
     expect(result).toBe(config);
+  });
+});
+
+describe("InferCommandHandler", () => {
+  type MyState = { value: number };
+
+  type MyEvent = DefineEvents<{
+    Updated: { newValue: number };
+    Reset: {};
+  }>;
+
+  type MyCommand = DefineCommands<{
+    Update: { newValue: number };
+    Reset: void;
+  }>;
+
+  interface MyInfra extends Infrastructure {
+    clock: { now(): Date };
+  }
+
+  type MyTypes = {
+    state: MyState;
+    events: MyEvent;
+    commands: MyCommand;
+    infrastructure: MyInfra;
+  };
+
+  it("should narrow the command to the specific variant", () => {
+    type Handler = InferCommandHandler<MyTypes, "Update">;
+    type Cmd = Parameters<Handler>[0];
+    expectTypeOf<Cmd>().toEqualTypeOf<Extract<MyCommand, { name: "Update" }>>();
+  });
+
+  it("should use the aggregate state as second parameter", () => {
+    type Handler = InferCommandHandler<MyTypes, "Update">;
+    expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<MyState>();
+  });
+
+  it("should merge infrastructure with FrameworkInfrastructure", () => {
+    type Handler = InferCommandHandler<MyTypes, "Update">;
+    expectTypeOf<Parameters<Handler>[2]>().toEqualTypeOf<
+      MyInfra & FrameworkInfrastructure
+    >();
+  });
+
+  it("should return the event union", () => {
+    type Handler = InferCommandHandler<MyTypes, "Update">;
+    expectTypeOf<ReturnType<Handler>>().toEqualTypeOf<
+      MyEvent | MyEvent[] | Promise<MyEvent | MyEvent[]>
+    >();
+  });
+
+  it("should be usable in defineAggregate commands map", () => {
+    const handleUpdate: InferCommandHandler<MyTypes, "Update"> = (
+      command,
+      _state,
+      _infra,
+    ) => ({
+      name: "Updated",
+      payload: { newValue: command.payload.newValue },
+    });
+
+    const handleReset: InferCommandHandler<MyTypes, "Reset"> = (
+      _command,
+      _state,
+      _infra,
+    ) => ({
+      name: "Reset",
+      payload: {},
+    });
+
+    const agg = defineAggregate<MyTypes>({
+      initialState: { value: 0 },
+      commands: {
+        Update: handleUpdate,
+        Reset: handleReset,
+      },
+      apply: {
+        Updated: (payload, _state) => ({ value: payload.newValue }),
+        Reset: (_payload, _state) => ({ value: 0 }),
+      },
+    });
+
+    expectTypeOf(agg.commands.Update).toEqualTypeOf<typeof handleUpdate>();
+  });
+});
+
+describe("InferApplyHandler", () => {
+  type MyState = { value: number };
+
+  type MyEvent = DefineEvents<{
+    Updated: { newValue: number };
+    Reset: {};
+  }>;
+
+  type MyCommand = DefineCommands<{
+    Update: { newValue: number };
+    Reset: void;
+  }>;
+
+  type MyTypes = {
+    state: MyState;
+    events: MyEvent;
+    commands: MyCommand;
+    infrastructure: Infrastructure;
+  };
+
+  it("should narrow the event payload to the specific variant", () => {
+    type Handler = InferApplyHandler<MyTypes, "Updated">;
+    expectTypeOf<Parameters<Handler>[0]>().toEqualTypeOf<{
+      newValue: number;
+    }>();
+  });
+
+  it("should use the aggregate state as second parameter and return type", () => {
+    type Handler = InferApplyHandler<MyTypes, "Updated">;
+    expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<MyState>();
+    expectTypeOf<ReturnType<Handler>>().toEqualTypeOf<MyState>();
+  });
+
+  it("should be usable in defineAggregate apply map", () => {
+    const applyUpdated: InferApplyHandler<MyTypes, "Updated"> = (
+      payload,
+      _state,
+    ) => ({ value: payload.newValue });
+
+    const applyReset: InferApplyHandler<MyTypes, "Reset"> = (
+      _payload,
+      _state,
+    ) => ({ value: 0 });
+
+    const agg = defineAggregate<MyTypes>({
+      initialState: { value: 0 },
+      commands: {
+        Update: (cmd) => ({
+          name: "Updated",
+          payload: { newValue: cmd.payload.newValue },
+        }),
+        Reset: (_cmd) => ({
+          name: "Reset",
+          payload: {},
+        }),
+      },
+      apply: {
+        Updated: applyUpdated,
+        Reset: applyReset,
+      },
+    });
+
+    expectTypeOf(agg.apply.Updated).toEqualTypeOf<typeof applyUpdated>();
   });
 });

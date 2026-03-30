@@ -6,6 +6,18 @@ import type {
   RoomAvailabilityQuery,
   RoomAvailabilityViewStore,
 } from "./queries";
+import {
+  onRoomCreated,
+  onRoomMadeAvailable,
+  onRoomReserved,
+  onGuestCheckedIn,
+  onGuestCheckedOut,
+  onRoomUnderMaintenance,
+} from "./on-entries";
+import {
+  handleGetRoomAvailability,
+  handleListAvailableRooms,
+} from "./query-handlers";
 
 /** View for room availability. */
 export interface RoomAvailabilityView {
@@ -19,7 +31,7 @@ export interface RoomAvailabilityView {
 }
 
 /** Type bundle for the RoomAvailability projection. */
-type RoomAvailabilityProjectionDef = {
+export type RoomAvailabilityProjectionDef = {
   events: RoomEvent;
   queries: RoomAvailabilityQuery;
   view: RoomAvailabilityView;
@@ -48,70 +60,16 @@ export const RoomAvailabilityProjection =
     },
 
     on: {
-      RoomCreated: {
-        id: (event) => event.payload.roomId,
-        reduce: (event) => ({
-          roomId: event.payload.roomId,
-          roomNumber: event.payload.roomNumber,
-          type: event.payload.type,
-          floor: event.payload.floor,
-          pricePerNight: event.payload.pricePerNight,
-          status: "created",
-          currentGuestId: null,
-        }),
-      },
-
-      RoomMadeAvailable: {
-        id: (event) => event.payload.roomId,
-        reduce: (_event, view) => ({
-          ...view,
-          status: "available",
-          currentGuestId: null,
-        }),
-      },
-
-      RoomReserved: {
-        id: (event) => event.payload.roomId,
-        reduce: (event, view) => ({
-          ...view,
-          status: "reserved",
-          currentGuestId: event.payload.guestId,
-        }),
-      },
-
-      GuestCheckedIn: {
-        id: (event) => event.payload.roomId,
-        reduce: (event, view) => ({
-          ...view,
-          status: "occupied",
-          currentGuestId: event.payload.guestId,
-        }),
-      },
-
-      GuestCheckedOut: {
-        id: (event) => event.payload.roomId,
-        reduce: (_event, view) => ({
-          ...view,
-          status: "available",
-          currentGuestId: null,
-        }),
-      },
-
-      RoomUnderMaintenance: {
-        id: (event) => event.payload.roomId,
-        reduce: (_event, view) => ({
-          ...view,
-          status: "maintenance",
-          currentGuestId: null,
-        }),
-      },
+      RoomCreated: onRoomCreated,
+      RoomMadeAvailable: onRoomMadeAvailable,
+      RoomReserved: onRoomReserved,
+      GuestCheckedIn: onGuestCheckedIn,
+      GuestCheckedOut: onGuestCheckedOut,
+      RoomUnderMaintenance: onRoomUnderMaintenance,
     },
 
     queryHandlers: {
-      GetRoomAvailability: async (query, { views }) =>
-        (await views.load(query.roomId)) ?? null,
-
-      ListAvailableRooms: async (query, { views }) =>
-        views.findAvailable(query.type),
+      GetRoomAvailability: handleGetRoomAvailability,
+      ListAvailableRooms: handleListAvailableRooms,
     },
   });

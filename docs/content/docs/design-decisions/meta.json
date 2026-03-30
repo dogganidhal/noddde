@@ -9,6 +9,7 @@
     "why-pure-apply-handlers",
     "why-two-persistence-strategies",
     "why-injectable-infrastructure",
-    "why-sagas-return-commands"
+    "why-sagas-return-commands",
+    "why-extracted-handlers"
   ]
 }

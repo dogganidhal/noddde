@@ -8,9 +8,15 @@ import { handleInitializeInventory } from "./command-handlers/handle-initialize-
 import { handleUpdateRoomTypeCount } from "./command-handlers/handle-update-room-type-count";
 import { handleDecrementAvailability } from "./command-handlers/handle-decrement-availability";
 import { handleIncrementAvailability } from "./command-handlers/handle-increment-availability";
+import {
+  applyInventoryInitialized,
+  applyRoomTypeCountUpdated,
+  applyAvailabilityDecremented,
+  applyAvailabilityIncremented,
+} from "./apply-handlers";
 
 /** Type bundle for the Inventory aggregate. */
-type InventoryDef = {
+export type InventoryDef = {
   state: InventoryState;
   events: InventoryEvent;
   commands: InventoryCommand;
@@ -21,7 +27,7 @@ type InventoryDef = {
  * Inventory aggregate definition.
  *
  * Tracks room counts and availability by room type. Command handlers
- * are extracted; apply handlers remain inline.
+ * and apply handlers are extracted into separate files.
  */
 export const Inventory = defineAggregate<InventoryDef>({
   initialState: initialInventoryState,
@@ -34,39 +40,9 @@ export const Inventory = defineAggregate<InventoryDef>({
   },
 
   apply: {
-    InventoryInitialized: (event) => ({
-      initialized: true,
-      roomCounts: { ...event.roomCounts },
-    }),
-
-    RoomTypeCountUpdated: (event, state) => ({
-      ...state,
-      roomCounts: {
-        ...state.roomCounts,
-        [event.roomType]: { total: event.total, available: event.available },
-      },
-    }),
-
-    AvailabilityDecremented: (event, state) => ({
-      ...state,
-      roomCounts: {
-        ...state.roomCounts,
-        [event.roomType]: {
-          ...state.roomCounts[event.roomType]!,
-          available: event.newAvailable,
-        },
-      },
-    }),
-
-    AvailabilityIncremented: (event, state) => ({
-      ...state,
-      roomCounts: {
-        ...state.roomCounts,
-        [event.roomType]: {
-          ...state.roomCounts[event.roomType]!,
-          available: event.newAvailable,
-        },
-      },
-    }),
+    InventoryInitialized: applyInventoryInitialized,
+    RoomTypeCountUpdated: applyRoomTypeCountUpdated,
+    AvailabilityDecremented: applyAvailabilityDecremented,
+    AvailabilityIncremented: applyAvailabilityIncremented,
   },
 });

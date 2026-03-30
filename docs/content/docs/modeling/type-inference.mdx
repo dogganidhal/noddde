@@ -1,6 +1,6 @@
 ---
 title: Type Inference Helpers
-description: Using InferAggregateID, InferAggregateState, InferAggregateEvents, InferAggregateCommands, and InferAggregateInfrastructure to extract types from aggregate definitions
+description: Type inference helpers for extracting types from definitions and typing extracted handlers in separate files
 ---
 
 ## Overview
@@ -244,7 +244,119 @@ function createTestInfrastructure(): AuctionInfra {
 }
 ```
 
+## Handler-Level Inference
+
+When you extract command handlers, apply handlers, saga handlers, or projection handlers to separate files, you need to type the function signature. The handler-level inference utilities derive the exact function type from your `*Types` bundle and a command/event/query name -- no manual reconstruction needed.
+
+### InferCommandHandler
+
+Types an extracted aggregate command handler:
+
+```typescript
+import type { InferCommandHandler } from "@noddde/core";
+
+type BookingDef = {
+  state: BookingState;
+  events: BookingEvent;
+  commands: BookingCommand;
+  infrastructure: HotelInfrastructure;
+};
+
+// Before: manual, verbose
+export const handleConfirmBooking = (
+  command: { targetAggregateId: string; payload: ConfirmBookingPayload },
+  state: BookingState,
+  { clock }: HotelInfrastructure,
+): BookingEvent => {
+  /* ... */
+};
+
+// After: one annotation, full inference
+export const handleConfirmBooking: InferCommandHandler<
+  BookingDef,
+  "ConfirmBooking"
+> = (command, state, { clock }) => {
+  /* ... */
+};
+```
+
+### InferApplyHandler
+
+Types an extracted aggregate apply handler (event reducer):
+
+```typescript
+import type { InferApplyHandler } from "@noddde/core";
+
+export const applyBookingConfirmed: InferApplyHandler<
+  BookingDef,
+  "BookingConfirmed"
+> = (payload, state) => ({
+  ...state,
+  status: "confirmed",
+  roomId: payload.roomId,
+});
+```
+
+### InferSagaEventHandler and InferSagaOnEntry
+
+Type extracted saga handlers. `InferSagaEventHandler` types just the handler function; `InferSagaOnEntry` types the full `{ id, handle }` bundle:
+
+```typescript
+import type { InferSagaOnEntry } from "@noddde/core";
+
+export const onOrderPlaced: InferSagaOnEntry<FulfillmentDef, "OrderPlaced"> = {
+  id: (event) => event.payload.orderId,
+  handle: (event, state) => ({
+    state: { ...state, status: "awaiting_payment" },
+    commands: { name: "RequestPayment", targetAggregateId: event.payload.orderId, payload: { ... } },
+  }),
+};
+```
+
+### InferProjectionEventHandler and InferProjectionQueryHandler
+
+Type extracted projection handlers:
+
+```typescript
+import type {
+  InferProjectionEventHandler,
+  InferProjectionQueryHandler,
+} from "@noddde/core";
+
+export const onPaymentCompleted: InferProjectionEventHandler<
+  RevenueDef,
+  "PaymentCompleted"
+> = {
+  id: (event) => day(event.payload.completedAt),
+  reduce: (event, view) => ({
+    ...view,
+    totalRevenue: view.totalRevenue + event.payload.amount,
+  }),
+};
+
+export const queryDailyRevenue: InferProjectionQueryHandler<
+  RevenueDef,
+  "GetDailyRevenue"
+> = (query, { views }) => views.load(query.date);
+```
+
+`InferProjectionQueryHandler` automatically injects `{ views }` into the infrastructure parameter when your `ProjectionTypes` bundle has a `viewStore` field.
+
+### InferProjectionQueryInfrastructure
+
+Computes the full infrastructure type for a projection's query handlers, conditionally including `{ views }`:
+
+```typescript
+import type { InferProjectionQueryInfrastructure } from "@noddde/core";
+
+type Infra = InferProjectionQueryInfrastructure<RevenueDef>;
+// → RevenueInfra & { views: RevenueViewStore }  (when viewStore is present)
+// → RevenueInfra                                 (when viewStore is absent)
+```
+
 ## Quick Reference
+
+### Definition-level (extract types from built definitions)
 
 | Helper                                     | Input                   | Extracts                     |
 | ------------------------------------------ | ----------------------- | ---------------------------- |
@@ -254,7 +366,19 @@ function createTestInfrastructure(): AuctionInfra {
 | `InferAggregateID<Def>`                    | `AggregateTypes` bundle | The `targetAggregateId` type |
 | `InferAggregateInfrastructure<typeof Agg>` | `Aggregate` instance    | The infrastructure type      |
 
-The first four helpers work with `typeof YourAggregate` (the value returned by `defineAggregate`). `InferAggregateID` works with the `AggregateTypes` type alias you pass as the generic parameter to `defineAggregate`.
+### Handler-level (type extracted handlers in separate files)
+
+| Helper                                          | Input                    | Extracts                                          |
+| ----------------------------------------------- | ------------------------ | ------------------------------------------------- |
+| `InferCommandHandler<Def, "CmdName">`           | `AggregateTypes` bundle  | Command handler function type                     |
+| `InferApplyHandler<Def, "EventName">`           | `AggregateTypes` bundle  | Apply handler function type                       |
+| `InferSagaEventHandler<Def, "EventName">`       | `SagaTypes` bundle       | Saga event handler function type                  |
+| `InferSagaOnEntry<Def, "EventName">`            | `SagaTypes` bundle       | Saga on-entry `{ id, handle }` object type        |
+| `InferProjectionEventHandler<Def, "EventName">` | `ProjectionTypes` bundle | Projection `{ id?, reduce }` object type          |
+| `InferProjectionQueryHandler<Def, "QueryName">` | `ProjectionTypes` bundle | Query handler function type (with `views`)        |
+| `InferProjectionQueryInfrastructure<Def>`       | `ProjectionTypes` bundle | Conditional infrastructure (with/without `views`) |
+
+Definition-level helpers work with `typeof YourAggregate` (the value returned by `defineAggregate`). Handler-level helpers and `InferAggregateID` work with the `*Types` bundle (the type alias you pass as the generic parameter).
 
 ## Combining Helpers
 

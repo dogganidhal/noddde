@@ -138,7 +138,7 @@ async function main() {
   // -- Wire with infrastructure (async) --
   const domain = await wireDomain(hotelDomain, {
     // Custom infrastructure services (what handlers receive)
-    infrastructure: (): HotelInfrastructure => ({
+    infrastructure: () => ({
       clock: new SystemClock(),
       emailService: new ConsoleEmailService(),
       smsService: new ConsoleSmsService(),

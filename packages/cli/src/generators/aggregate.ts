@@ -13,8 +13,12 @@ import {
   commandHandlersIndexTemplate,
   commandHandlerTemplate,
 } from "../templates/domain/aggregate-command-handlers.js";
+import {
+  applyHandlersIndexTemplate,
+  applyHandlerTemplate,
+} from "../templates/domain/aggregate-apply-handlers.js";
 
-/** Generates an aggregate folder with commands and command-handlers subdirectories. */
+/** Generates an aggregate folder with commands, command-handlers, and apply-handlers subdirectories. */
 export async function generateAggregate(
   name: string,
   basePath: string,
@@ -42,6 +46,14 @@ export async function generateAggregate(
     {
       relativePath: `command-handlers/handle-create-${ctx.kebabName}.ts`,
       content: commandHandlerTemplate(ctx),
+    },
+    {
+      relativePath: "apply-handlers/index.ts",
+      content: applyHandlersIndexTemplate(ctx),
+    },
+    {
+      relativePath: `apply-handlers/apply-${ctx.kebabName}-created.ts`,
+      content: applyHandlerTemplate(ctx),
     },
   ];
 

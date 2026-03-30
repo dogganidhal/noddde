@@ -6,9 +6,14 @@ import type { FlashSaleState } from "./state";
 import { initialFlashSaleState } from "./state";
 import { handleCreateFlashSale } from "./command-handlers/handle-create-flash-sale";
 import { handlePurchaseItem } from "./command-handlers/handle-purchase-item";
+import {
+  applyFlashSaleCreated,
+  applyItemPurchased,
+  applyPurchaseRejected,
+} from "./apply-handlers";
 
 /** Type bundle for the FlashSaleItem aggregate. */
-type FlashSaleItemTypes = AggregateTypes & {
+export type FlashSaleItemTypes = AggregateTypes & {
   state: FlashSaleState;
   events: FlashSaleEvent;
   commands: FlashSaleCommand;
@@ -29,16 +34,8 @@ export const FlashSaleItem = defineAggregate<FlashSaleItemTypes>({
     PurchaseItem: handlePurchaseItem,
   },
   apply: {
-    FlashSaleCreated: (payload) => ({
-      stock: payload.initialStock,
-      sold: 0,
-      buyers: [],
-    }),
-    ItemPurchased: (payload, state) => ({
-      stock: state.stock - payload.quantity,
-      sold: state.sold + payload.quantity,
-      buyers: [...state.buyers, payload.buyerId],
-    }),
-    PurchaseRejected: (_payload, state) => state,
+    FlashSaleCreated: applyFlashSaleCreated,
+    ItemPurchased: applyItemPurchased,
+    PurchaseRejected: applyPurchaseRejected,
   },
 });

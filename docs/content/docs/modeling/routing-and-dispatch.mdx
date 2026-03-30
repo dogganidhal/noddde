@@ -16,7 +16,9 @@ const bankingDomain = defineDomain<BankingInfrastructure>({
   // ... definition
 });
 
-const domain = await wireDomain(bankingDomain, { /* wiring */ });
+const domain = await wireDomain(bankingDomain, {
+  /* wiring */
+});
 
 const bankAccountId = randomUUID();
 

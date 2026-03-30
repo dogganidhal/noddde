@@ -1,12 +1,11 @@
-import type { FailPaymentPayload } from "../commands/fail-payment";
-import type { BookingState } from "../state";
-import type { BookingEvent } from "../../../../event-model";
+import type { InferCommandHandler } from "@noddde/core";
+import type { BookingDef } from "../booking";
 
 /** Handles the FailPayment command by emitting a PaymentFailed event. */
-export const handleFailPayment = (
-  command: { targetAggregateId: string; payload: FailPaymentPayload },
-  state: BookingState,
-): BookingEvent => {
+export const handleFailPayment: InferCommandHandler<
+  BookingDef,
+  "FailPayment"
+> = (command, state) => {
   if (state.status !== "awaiting_payment") {
     throw new Error(`Cannot fail payment in ${state.status} status`);
   }

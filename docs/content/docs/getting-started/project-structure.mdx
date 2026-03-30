@@ -35,6 +35,7 @@ A project generated with `noddde new project HotelBooking` produces:
               <File name="hotel-booking.ts" />
               <Folder name="commands" />
               <Folder name="command-handlers" />
+              <Folder name="apply-handlers" />
             </Folder>
           </Folder>
         </Folder>
@@ -45,7 +46,7 @@ A project generated with `noddde new project HotelBooking` produces:
               <File name="hotel-booking.ts" />
               <Folder name="queries" />
               <Folder name="query-handlers" />
-              <Folder name="view-reducers" />
+              <Folder name="on-entries" />
             </Folder>
           </Folder>
         </Folder>
@@ -89,6 +90,10 @@ Event payloads are defined as standalone interfaces — one file per event. This
           <File name="index.ts" />
           <File name="handle-create-hotel-booking.ts" />
         </Folder>
+        <Folder name="apply-handlers">
+          <File name="index.ts" />
+          <File name="apply-hotel-booking-created.ts" />
+        </Folder>
       </Folder>
     </Folder>
   </Folder>
@@ -98,26 +103,33 @@ State is defined in a separate `state.ts` file next to the aggregate definition.
 
 Each aggregate owns its type unions. The aggregate file imports event payloads from `event-model/` and command payloads from `commands/`, then builds `DefineEvents` and `DefineCommands` types inline — the aggregate knows which events and commands it uses.
 
-**Command handlers** are standalone exported functions. They are imported into the `defineAggregate` `commands` map. This keeps each handler testable in isolation and the aggregate definition concise:
+**Command handlers** and **apply handlers** are standalone exported functions typed with `InferCommandHandler` and `InferApplyHandler`. They are imported into the `defineAggregate` `commands` and `apply` maps. This keeps each handler individually testable and the aggregate definition concise:
 
 ```ts
 // command-handlers/handle-create-hotel-booking.ts
-export function handleCreateHotelBooking(command: {
-  targetAggregateId: string;
-}) {
-  return {
-    name: "HotelBookingCreated" as const,
-    payload: { id: command.targetAggregateId },
-  };
-}
+import type { InferCommandHandler } from "@noddde/core";
+import type { HotelBookingDef } from "../hotel-booking.js";
+
+export const handleCreateHotelBooking: InferCommandHandler<HotelBookingDef, "CreateHotelBooking"> = (command, _state) => ({
+  name: "HotelBookingCreated" as const,
+  payload: { id: command.targetAggregateId },
+});
+
+// apply-handlers/apply-hotel-booking-created.ts
+import type { InferApplyHandler } from "@noddde/core";
+import type { HotelBookingDef } from "../hotel-booking.js";
+
+export const applyHotelBookingCreated: InferApplyHandler<HotelBookingDef, "HotelBookingCreated"> = (payload, state) => ({
+  ...state,
+  id: payload.id,
+});
 
 // hotel-booking.ts
-import { handleCreateHotelBooking } from "./command-handlers/index.js";
+export type HotelBookingDef = { /* ... */ };
 
 export const HotelBooking = defineAggregate<HotelBookingDef>({
-  commands: {
-    CreateHotelBooking: handleCreateHotelBooking,
-  },
+  commands: { CreateHotelBooking: handleCreateHotelBooking },
+  apply: { HotelBookingCreated: applyHotelBookingCreated },
   // ...
 });
 ```
@@ -138,7 +150,7 @@ export const HotelBooking = defineAggregate<HotelBookingDef>({
           <File name="index.ts" />
           <File name="handle-get-hotel-booking.ts" />
         </Folder>
-        <Folder name="view-reducers">
+        <Folder name="on-entries">
           <File name="index.ts" />
           <File name="on-hotel-booking-created.ts" />
         </Folder>
@@ -147,32 +159,32 @@ export const HotelBooking = defineAggregate<HotelBookingDef>({
   </Folder>
 </Files>
 
-Projections follow the same extraction pattern as aggregates. **Query handlers** and **view reducers** are standalone functions imported into the `defineProjection` `queryHandlers` and `on` maps:
+Projections follow the same extraction pattern as aggregates. **Query handlers** are typed with `InferProjectionQueryHandler` and **on-entries** are the event reducers that build the view. Both are standalone functions imported into the `defineProjection` `queryHandlers` and `on` maps:
 
 ```ts
-// view-reducers/on-hotel-booking-created.ts
-export function onHotelBookingCreated(event: {
-  payload: { id: string };
-}): HotelBookingView {
-  return { id: event.payload.id };
-}
+// on-entries/on-hotel-booking-created.ts
+import type { InferProjectionEventHandler } from "@noddde/core";
+import type { HotelBookingProjectionDef } from "../hotel-booking.js";
+
+export const onHotelBookingCreated: InferProjectionEventHandler<HotelBookingProjectionDef, "HotelBookingCreated"> = {
+  id: (event) => event.payload.id,
+  reduce: (event, _view) => ({ id: event.payload.id }),
+};
+
+// query-handlers/handle-get-hotel-booking.ts
+import type { InferProjectionQueryHandler } from "@noddde/core";
+import type { HotelBookingProjectionDef } from "../hotel-booking.js";
+
+export const handleGetHotelBooking: InferProjectionQueryHandler<HotelBookingProjectionDef, "GetHotelBooking"> = async (query, { views }) =>
+  (await views.load(query.payload.id)) ?? null;
 
 // hotel-booking.ts (projection)
-import { onHotelBookingCreated } from "./view-reducers/index.js";
-import { handleGetHotelBooking } from "./query-handlers/index.js";
+export type HotelBookingProjectionDef = { /* ... */ };
 
-export const HotelBookingProjection =
-  defineProjection<HotelBookingProjectionDef>({
-    on: {
-      HotelBookingCreated: {
-        id: (event) => event.payload.id,
-        reduce: onHotelBookingCreated,
-      },
-    },
-    queryHandlers: {
-      GetHotelBooking: handleGetHotelBooking,
-    },
-  });
+export const HotelBookingProjection = defineProjection<HotelBookingProjectionDef>({
+  on: { HotelBookingCreated: onHotelBookingCreated },
+  queryHandlers: { GetHotelBooking: handleGetHotelBooking },
+});
 ```
 
 ### Process Model
@@ -183,40 +195,39 @@ export const HotelBookingProjection =
       <File name="index.ts" />
       <File name="state.ts" />
       <File name="saga.ts" />
-      <Folder name="transition-handlers">
+      <Folder name="on-entries">
         <File name="index.ts" />
-        <File name="on-start-event.ts" />
+        <File name="on-order-placed.ts" />
       </Folder>
     </Folder>
   </Folder>
 </Files>
 
-Sagas follow the same extraction pattern. **Transition handlers** are standalone functions imported into the `defineSaga` `on` map. Each handler receives an event and the current saga state, and returns the new state plus optional commands to dispatch:
+Sagas follow the same extraction pattern. **On-entries** are standalone `{ id, handle }` objects typed with `InferSagaOnEntry`, imported into the `defineSaga` `on` map. Each on-entry specifies how to extract the saga ID from the event and how to handle the transition:
 
 ```ts
-// transition-handlers/on-start-event.ts
-export function onStartEvent(event: { payload: { id: string } }, state: BookingFulfillmentSagaState) {
-  return {
+// on-entries/on-order-placed.ts
+import type { InferSagaOnEntry } from "@noddde/core";
+import type { BookingFulfillmentDef } from "../saga.js";
+
+export const onOrderPlaced: InferSagaOnEntry<BookingFulfillmentDef, "OrderPlaced"> = {
+  id: (event) => event.payload.orderId,
+  handle: (event, state) => ({
     state: { ...state, status: "started" },
     commands: {
       name: "RequestPayment" as const,
-      targetAggregateId: event.payload.id,
-      payload: { ... },
+      targetAggregateId: event.payload.orderId,
+      payload: { /* ... */ },
     },
-  };
-}
+  }),
+};
 
 // saga.ts
-import { onStartEvent } from "./transition-handlers/index.js";
+export type BookingFulfillmentDef = { /* ... */ };
 
-export const BookingFulfillmentSaga = defineSaga<BookingFulfillmentSagaDef>({
+export const BookingFulfillmentSaga = defineSaga<BookingFulfillmentDef>({
   startedBy: ["OrderPlaced"],
-  on: {
-    OrderPlaced: {
-      id: (event) => event.payload.orderId,
-      handle: onStartEvent,
-    },
-  },
+  on: { OrderPlaced: onOrderPlaced },
 });
 ```
 

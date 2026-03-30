@@ -292,3 +292,77 @@ export type InferSagaInfrastructure<T extends Saga> =
  */
 export type InferSagaId<T extends Saga> =
   T extends Saga<any, infer TId> ? TId : never;
+
+// ---- Handler-level inference utilities ----
+
+/**
+ * Infers the fully-typed saga event handler function for a specific event name
+ * within a {@link SagaTypes} bundle. Use this to type extracted saga handlers
+ * in separate files without manually reconstructing the function signature.
+ *
+ * The infrastructure parameter is automatically merged with
+ * {@link CQRSInfrastructure} and {@link FrameworkInfrastructure},
+ * matching the runtime behavior.
+ *
+ * Operates on the `SagaTypes` bundle (not the `Saga` definition),
+ * so it can be used before `defineSaga` is called.
+ *
+ * @typeParam T - The {@link SagaTypes} bundle.
+ * @typeParam K - The event name literal (a member of `T["events"]["name"]`).
+ *
+ * @example
+ * ```ts
+ * // handle-payment-received.ts
+ * export const handlePaymentReceived: InferSagaEventHandler<FulfillmentDef, "PaymentReceived"> = (
+ *   event, state, { commandBus }
+ * ) => ({
+ *   state: { ...state, status: "paid" },
+ *   commands: { name: "ConfirmOrder", targetAggregateId: state.orderId! },
+ * });
+ * ```
+ */
+export type InferSagaEventHandler<
+  T extends SagaTypes,
+  K extends T["events"]["name"],
+> = SagaEventHandler<
+  Extract<T["events"], { name: K }>,
+  T["state"],
+  T["commands"],
+  T["infrastructure"]
+>;
+
+/**
+ * Infers the fully-typed saga on-entry (`{ id, handle }` bundle) for a specific
+ * event name within a {@link SagaTypes} bundle. Use this to type extracted
+ * saga on-entries in separate files.
+ *
+ * Operates on the `SagaTypes` bundle (not the `Saga` definition),
+ * so it can be used before `defineSaga` is called.
+ *
+ * @typeParam T - The {@link SagaTypes} bundle.
+ * @typeParam K - The event name literal (a member of `T["events"]["name"]`).
+ * @typeParam TSagaId - The saga instance identifier type. Bounded by {@link ID}, defaults to `string`.
+ *
+ * @example
+ * ```ts
+ * // on-order-placed.ts
+ * export const onOrderPlaced: InferSagaOnEntry<FulfillmentDef, "OrderPlaced"> = {
+ *   id: (event) => event.payload.orderId,
+ *   handle: (event, state) => ({
+ *     state: { ...state, status: "awaiting_payment" },
+ *     commands: { name: "RequestPayment", ... },
+ *   }),
+ * };
+ * ```
+ */
+export type InferSagaOnEntry<
+  T extends SagaTypes,
+  K extends T["events"]["name"],
+  TSagaId extends ID = string,
+> = SagaOnEntry<
+  Extract<T["events"], { name: K }>,
+  T["state"],
+  T["commands"],
+  T["infrastructure"],
+  TSagaId
+>;
