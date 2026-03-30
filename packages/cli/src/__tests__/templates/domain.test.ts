@@ -30,6 +30,10 @@ import {
   queryHandlerTemplate,
 } from "../../templates/domain/projection-query-handlers.js";
 import {
+  applyHandlersIndexTemplate,
+  applyHandlerTemplate,
+} from "../../templates/domain/aggregate-apply-handlers.js";
+import {
   viewReducersIndexTemplate,
   viewReducerTemplate,
 } from "../../templates/domain/projection-view-reducers.js";
@@ -75,14 +79,17 @@ describe("domain templates", () => {
       expect(result).toContain("BankAccountCommand");
     });
 
-    it("generates aggregate with DefineEvents/DefineCommands inline", () => {
+    it("generates aggregate with DefineEvents/DefineCommands and extracted handlers", () => {
       const result = domainAggregateTemplate(ctx);
       expect(result).toContain("defineAggregate");
       expect(result).toContain("DefineEvents");
       expect(result).toContain("DefineCommands");
       expect(result).toContain("BankAccountCreatedPayload");
       expect(result).toContain("CreateBankAccountPayload");
+      expect(result).toContain("export type BankAccountDef");
       expect(result).toContain("handleCreateBankAccount");
+      expect(result).toContain("applyBankAccountCreated");
+      expect(result).toContain('from "./apply-handlers/index.js"');
     });
 
     it("generates command payload interface", () => {
@@ -95,11 +102,25 @@ describe("domain templates", () => {
       expect(result).toContain("handleCreateBankAccount");
     });
 
-    it("generates standalone command handler", () => {
+    it("generates standalone command handler using InferCommandHandler", () => {
       const result = commandHandlerTemplate(ctx);
-      expect(result).toContain("export function handleCreateBankAccount");
+      expect(result).toContain("InferCommandHandler");
+      expect(result).toContain("BankAccountDef");
+      expect(result).toContain("handleCreateBankAccount");
       expect(result).toContain('"BankAccountCreated" as const');
       expect(result).toContain("command.targetAggregateId");
+    });
+
+    it("generates standalone apply handler using InferApplyHandler", () => {
+      const result = applyHandlerTemplate(ctx);
+      expect(result).toContain("InferApplyHandler");
+      expect(result).toContain("BankAccountDef");
+      expect(result).toContain("applyBankAccountCreated");
+    });
+
+    it("generates apply handlers barrel", () => {
+      const result = applyHandlersIndexTemplate(ctx);
+      expect(result).toContain("applyBankAccountCreated");
     });
   });
 
@@ -111,12 +132,13 @@ describe("domain templates", () => {
       expect(result).toContain("BankAccountQuery");
     });
 
-    it("generates projection with on map and imported handlers", () => {
+    it("generates projection with on map, exported Def, and InferProjectionQueryHandler", () => {
       const result = domainProjectionTemplate(ctx);
       expect(result).toContain("defineProjection");
       expect(result).toContain("on:");
       expect(result).toContain("handleGetBankAccount");
-      expect(result).toContain("onBankAccountCreated");
+      expect(result).toContain("export type BankAccountProjectionDef");
+      expect(result).toContain("ViewStore");
       expect(result).not.toContain("reducers:");
     });
 
@@ -134,23 +156,24 @@ describe("domain templates", () => {
       expect(result).toContain("id: string");
     });
 
-    it("generates standalone query handler", () => {
+    it("generates standalone query handler using InferProjectionQueryHandler", () => {
       const result = queryHandlerTemplate(ctx);
-      expect(result).toContain("export async function handleGetBankAccount");
-      expect(result).toContain("ViewStore");
-      expect(result).toContain("BankAccountView");
+      expect(result).toContain("InferProjectionQueryHandler");
+      expect(result).toContain("BankAccountProjectionDef");
+      expect(result).toContain("handleGetBankAccount");
     });
 
-    it("generates view reducers barrel", () => {
+    it("generates on-entries barrel", () => {
       const result = viewReducersIndexTemplate(ctx);
       expect(result).toContain("onBankAccountCreated");
     });
 
-    it("generates standalone view reducer", () => {
+    it("generates standalone on-entry with InferProjectionEventHandler comment", () => {
       const result = viewReducerTemplate(ctx);
       expect(result).toContain("export function onBankAccountCreated");
       expect(result).toContain("BankAccountView");
       expect(result).toContain("event.payload.id");
+      expect(result).toContain("InferProjectionEventHandler");
     });
   });
 
@@ -189,6 +212,8 @@ describe("domain templates", () => {
         domainAggregateTemplate(ctx),
         commandsIndexTemplate(ctx),
         commandHandlersIndexTemplate(ctx),
+        applyHandlersIndexTemplate(ctx),
+        applyHandlerTemplate(ctx),
         domainProjectionIndexTemplate(ctx),
         domainProjectionTemplate(ctx),
         queriesIndexTemplate(ctx),

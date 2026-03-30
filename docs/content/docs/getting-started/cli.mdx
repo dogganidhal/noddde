@@ -65,7 +65,7 @@ Generates `event-model/`, `write-model/`, `read-model/`, `domain.ts`, `infrastru
 
 ### `noddde new aggregate <name>`
 
-Scaffolds a single aggregate with extracted command handlers. Run from the project root — the CLI automatically places files at `src/domain/write-model/aggregates/<name>/`.
+Scaffolds a single aggregate with extracted command handlers and apply handlers. Run from the project root — the CLI automatically places files at `src/domain/write-model/aggregates/<name>/`.
 
 ```bash
 noddde new aggregate BankAccount
@@ -86,14 +86,18 @@ Generates:
       <File name="index.ts" />
       <File name="handle-create-bank-account.ts" />
     </Folder>
+    <Folder name="apply-handlers">
+      <File name="index.ts" />
+      <File name="apply-bank-account-created.ts" />
+    </Folder>
   </Folder>
 </Files>
 
-Command handlers are standalone exported functions imported into the `defineAggregate` `commands` map. This keeps handlers testable in isolation and aggregates readable.
+Command handlers are typed with `InferCommandHandler<Def, "CommandName">` and apply handlers with `InferApplyHandler<Def, "EventName">`. Both are standalone exported functions imported into the aggregate definition. This keeps each handler individually testable and the aggregate definition concise.
 
 ### `noddde new projection <name>`
 
-Scaffolds a single projection with extracted query handlers and view reducers. Run from the project root — the CLI automatically places files at `src/domain/read-model/projections/<name>/`.
+Scaffolds a single projection with extracted query handlers and on-entries. Run from the project root — the CLI automatically places files at `src/domain/read-model/projections/<name>/`.
 
 ```bash
 noddde new projection OrderSummary
@@ -113,18 +117,18 @@ Generates:
       <File name="index.ts" />
       <File name="handle-get-order-summary.ts" />
     </Folder>
-    <Folder name="view-reducers">
+    <Folder name="on-entries">
       <File name="index.ts" />
       <File name="on-order-summary-created.ts" />
     </Folder>
   </Folder>
 </Files>
 
-View reducers and query handlers are standalone functions imported into the `defineProjection` `on` and `queryHandlers` maps respectively.
+Query handlers are typed with `InferProjectionQueryHandler<Def, "QueryName">`. On-entries are the event reducers that build the view — they live in `on-entries/` and are imported into the projection's `on` map.
 
 ### `noddde new saga <name>`
 
-Scaffolds a saga with extracted transition handlers. Run from the project root — the CLI automatically places files at `src/domain/process-model/<name>/`.
+Scaffolds a saga with extracted on-entries. Run from the project root — the CLI automatically places files at `src/domain/process-model/<name>/`.
 
 ```bash
 noddde new saga PaymentProcessing
@@ -137,14 +141,14 @@ Generates:
     <File name="index.ts" />
     <File name="state.ts" />
     <File name="saga.ts" />
-    <Folder name="transition-handlers">
+    <Folder name="on-entries">
       <File name="index.ts" />
       <File name="on-start-event.ts" />
     </Folder>
   </Folder>
 </Files>
 
-Transition handlers are standalone exported functions imported into the `defineSaga` `on` map. Each handler receives an event and the current saga state, and returns the new state plus optional commands to dispatch.
+On-entries are `{ id, handle }` objects typed with `InferSagaOnEntry<Def, "EventName">` once event types are wired. They are imported into the `defineSaga` `on` map. Each entry specifies how to extract the saga ID from the event and how to handle the state transition.
 
 ## Name Handling
 

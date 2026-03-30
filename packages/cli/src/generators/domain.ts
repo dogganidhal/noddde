@@ -24,6 +24,10 @@ import {
   commandHandlersIndexTemplate,
   commandHandlerTemplate,
 } from "../templates/domain/aggregate-command-handlers.js";
+import {
+  applyHandlersIndexTemplate,
+  applyHandlerTemplate,
+} from "../templates/domain/aggregate-apply-handlers.js";
 
 // Read model
 import {
@@ -106,6 +110,14 @@ export async function generateDomain(
       relativePath: `${agg}/command-handlers/handle-create-${ctx.kebabName}.ts`,
       content: commandHandlerTemplate(ctx),
     },
+    {
+      relativePath: `${agg}/apply-handlers/index.ts`,
+      content: applyHandlersIndexTemplate(ctx),
+    },
+    {
+      relativePath: `${agg}/apply-handlers/apply-${ctx.kebabName}-created.ts`,
+      content: applyHandlerTemplate(ctx),
+    },
 
     // ── Read model ────────────────────────────────────────────
     {
@@ -133,11 +145,11 @@ export async function generateDomain(
       content: queryHandlerTemplate(ctx),
     },
     {
-      relativePath: `${proj}/view-reducers/index.ts`,
+      relativePath: `${proj}/on-entries/index.ts`,
       content: viewReducersIndexTemplate(ctx),
     },
     {
-      relativePath: `${proj}/view-reducers/on-${ctx.kebabName}-created.ts`,
+      relativePath: `${proj}/on-entries/on-${ctx.kebabName}-created.ts`,
       content: viewReducerTemplate(ctx),
     },
 

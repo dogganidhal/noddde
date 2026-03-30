@@ -8,16 +8,15 @@ export function commandHandlersIndexTemplate(ctx: TemplateContext): string {
 
 /** Template for .../command-handlers/handle-create-<name>.ts — standalone command handler. */
 export function commandHandlerTemplate(ctx: TemplateContext): string {
-  return `/** Handles the Create${ctx.name} command. */
-export function handleCreate${ctx.name}(
-  command: { targetAggregateId: string },
-) {
-  return {
-    name: "${ctx.name}Created" as const,
-    payload: {
-      id: command.targetAggregateId,
-    },
-  };
-}
+  return `import type { InferCommandHandler } from "@noddde/core";
+import type { ${ctx.name}Def } from "../${ctx.kebabName}.js";
+
+/** Handles the Create${ctx.name} command. */
+export const handleCreate${ctx.name}: InferCommandHandler<${ctx.name}Def, "Create${ctx.name}"> = (command, _state) => ({
+  name: "${ctx.name}Created" as const,
+  payload: {
+    id: command.targetAggregateId,
+  },
+});
 `;
 }

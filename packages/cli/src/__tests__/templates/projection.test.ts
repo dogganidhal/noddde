@@ -27,13 +27,13 @@ describe("projection templates", () => {
     expect(result).toContain("OrderSummaryQuery");
   });
 
-  it("generates projection with on map and imported handlers", () => {
+  it("generates projection with on map, exported Def, and ViewStore", () => {
     const result = domainProjectionTemplate(ctx);
     expect(result).toContain("defineProjection");
-    expect(result).toContain("OrderSummaryProjectionDef");
+    expect(result).toContain("export type OrderSummaryProjectionDef");
+    expect(result).toContain("ViewStore");
     expect(result).toContain("on:");
     expect(result).toContain("handleGetOrderSummary");
-    expect(result).toContain("onOrderSummaryCreated");
     expect(result).not.toContain("reducers:");
     expect(result).not.toContain("identity:");
   });
@@ -52,22 +52,23 @@ describe("projection templates", () => {
     expect(result).toContain("id: string");
   });
 
-  it("generates standalone query handler", () => {
+  it("generates standalone query handler using InferProjectionQueryHandler", () => {
     const result = queryHandlerTemplate(ctx);
-    expect(result).toContain("export async function handleGetOrderSummary");
-    expect(result).toContain("ViewStore");
-    expect(result).toContain("OrderSummaryView");
+    expect(result).toContain("InferProjectionQueryHandler");
+    expect(result).toContain("OrderSummaryProjectionDef");
+    expect(result).toContain("handleGetOrderSummary");
   });
 
-  it("generates view reducers barrel", () => {
+  it("generates on-entries barrel", () => {
     const result = viewReducersIndexTemplate(ctx);
     expect(result).toContain("onOrderSummaryCreated");
   });
 
-  it("generates standalone view reducer", () => {
+  it("generates standalone on-entry with InferProjectionEventHandler comment", () => {
     const result = viewReducerTemplate(ctx);
     expect(result).toContain("export function onOrderSummaryCreated");
     expect(result).toContain("OrderSummaryView");
+    expect(result).toContain("InferProjectionEventHandler");
   });
 
   it("uses .js extensions for all local imports", () => {
