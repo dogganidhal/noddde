@@ -39,7 +39,7 @@ await domain.dispatchCommand({
 });
 ```
 
-The method is generic and accepts any `AggregateCommand` registered in your domain. TypeScript validates the command shape at compile time when your commands are defined with `DefineCommands`.
+The method is strongly typed: TypeScript narrows `dispatchCommand` to only accept commands from aggregates and standalone handlers registered in the domain definition. The command `name` field provides autocomplete, and once selected, the `payload` type is inferred via discriminated union narrowing. Commands not registered in the domain are rejected at compile time.
 
 ## The Dispatch Lifecycle
 

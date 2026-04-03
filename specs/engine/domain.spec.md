@@ -12,6 +12,8 @@ exports:
     ProjectionWiring,
     DomainWiring,
     wireDomain,
+    InferAggregateMapCommands,
+    InferProjectionMapQueries,
   ]
 depends_on:
   - engine/implementations/ee-event-bus
@@ -49,6 +51,22 @@ docs:
 
 ```ts
 /**
+ * Extracts the union of all command types from a map of aggregates.
+ * Distributes InferAggregateCommands across each value in the map.
+ */
+type InferAggregateMapCommands<
+  TMap extends Record<string | symbol, Aggregate>,
+> = TMap[keyof TMap] extends Aggregate<infer U> ? U["commands"] : never;
+
+/**
+ * Extracts the union of all query types from a map of projections.
+ * Distributes InferProjectionQueries across each value in the map.
+ */
+type InferProjectionMapQueries<
+  TMap extends Record<string | symbol, Projection>,
+> = TMap[keyof TMap] extends Projection<infer U> ? U["queries"] : never;
+
+/**
  * Pure structural definition of a domain. Contains aggregates, projections,
  * sagas, and handler registrations — no runtime or infrastructure concerns.
  */
@@ -58,6 +76,7 @@ type DomainDefinition<
   TStandaloneQuery extends Query<any> = Query<any>,
   TAggregates extends AggregateMap = AggregateMap,
   TStandaloneEvent extends Event = Event,
+  TProjections extends ProjectionMap = ProjectionMap,
 > = {
   writeModel: {
     aggregates: TAggregates;
@@ -67,7 +86,7 @@ type DomainDefinition<
     >;
   };
   readModel: {
-    projections: ProjectionMap;
+    projections: TProjections;
     standaloneQueryHandlers?: StandaloneQueryHandlerMap<
       TInfrastructure,
       TStandaloneQuery
@@ -109,20 +128,23 @@ const defineDomain: <
   TStandaloneQuery extends Query<any> = Query<any>,
   TAggregates extends AggregateMap = AggregateMap,
   TStandaloneEvent extends Event = Event,
+  TProjections extends ProjectionMap = ProjectionMap,
 >(
   definition: DomainDefinition<
     TInfrastructure,
     TStandaloneCommand,
     TStandaloneQuery,
     TAggregates,
-    TStandaloneEvent
+    TStandaloneEvent,
+    TProjections
   >,
 ) => DomainDefinition<
   TInfrastructure,
   TStandaloneCommand,
   TStandaloneQuery,
   TAggregates,
-  TStandaloneEvent
+  TStandaloneEvent,
+  TProjections
 >;
 
 /**
@@ -160,6 +182,7 @@ type ProjectionWiring<TInfrastructure extends Infrastructure = Infrastructure> =
 type DomainWiring<
   TInfrastructure extends Infrastructure = Infrastructure,
   TAggregates extends AggregateMap = AggregateMap,
+  TProjections extends ProjectionMap = ProjectionMap,
 > = {
   /** Factory for user-provided infrastructure services. */
   infrastructure?: () => TInfrastructure | Promise<TInfrastructure>;
@@ -167,8 +190,11 @@ type DomainWiring<
   aggregates?:
     | AggregateWiring
     | Record<keyof TAggregates & string, AggregateWiring>;
-  /** Projection runtime — per-projection view store wiring. */
-  projections?: Record<string, ProjectionWiring<TInfrastructure>>;
+  /** Projection runtime — per-projection view store wiring keyed by projection name. */
+  projections?: Record<
+    keyof TProjections & string,
+    ProjectionWiring<TInfrastructure>
+  >;
   /** Saga runtime. Required if processModel has sagas. */
   sagas?: {
     persistence: () => SagaPersistence | Promise<SagaPersistence>;
@@ -196,6 +222,10 @@ type DomainWiring<
  * Wires a DomainDefinition with infrastructure to create a running Domain.
  * When `wiring` is omitted or `{}`, all infrastructure defaults to in-memory
  * implementations with startup warnings logged to the console.
+ *
+ * The returned Domain is strongly typed: dispatchCommand accepts only commands
+ * from registered aggregates + standalone command handlers, and dispatchQuery
+ * accepts only queries from registered projections + standalone query handlers.
  */
 const wireDomain: <
   TInfrastructure extends Infrastructure,
@@ -203,25 +233,79 @@ const wireDomain: <
   TStandaloneQuery extends Query<any> = Query<any>,
   TAggregates extends AggregateMap = AggregateMap,
   TStandaloneEvent extends Event = Event,
+  TProjections extends ProjectionMap = ProjectionMap,
 >(
   definition: DomainDefinition<
     TInfrastructure,
     TStandaloneCommand,
     TStandaloneQuery,
     TAggregates,
-    TStandaloneEvent
+    TStandaloneEvent,
+    TProjections
   >,
-  wiring?: DomainWiring<TInfrastructure, TAggregates>,
-) => Promise<Domain<TInfrastructure, TStandaloneCommand, TStandaloneQuery>>;
+  wiring?: DomainWiring<TInfrastructure, TAggregates, TProjections>,
+) => Promise<
+  Domain<
+    TInfrastructure,
+    TStandaloneCommand,
+    TStandaloneQuery,
+    InferAggregateMapCommands<TAggregates>,
+    InferProjectionMapQueries<TProjections>
+  >
+>;
+
+/**
+ * The running domain instance. Created via wireDomain, it is the primary
+ * entry point for dispatching commands and queries.
+ *
+ * dispatchCommand accepts aggregate commands (from registered aggregates)
+ * and standalone commands (from registered standalone command handlers).
+ * dispatchQuery accepts projection queries (from registered projections)
+ * and standalone queries (from registered standalone query handlers).
+ */
+class Domain<
+  TInfrastructure extends Infrastructure,
+  TStandaloneCommand extends Command = Command,
+  TStandaloneQuery extends Query<any> = Query<any>,
+  TAggregateCommand extends AggregateCommand<any> = AggregateCommand<any>,
+  TProjectionQuery extends Query<any> = Query<any>,
+> {
+  /** The fully resolved infrastructure (custom + CQRS buses + framework logger). */
+  get infrastructure(): TInfrastructure &
+    CQRSInfrastructure &
+    FrameworkInfrastructure;
+
+  /**
+   * Dispatches a command to the appropriate aggregate or standalone handler.
+   * Aggregate commands return the targetAggregateId, standalone commands return void.
+   */
+  dispatchCommand<TCommand extends TAggregateCommand | TStandaloneCommand>(
+    command: TCommand,
+  ): Promise<
+    TCommand extends AggregateCommand<any>
+      ? TCommand["targetAggregateId"]
+      : void
+  >;
+
+  /**
+   * Dispatches a query to the registered query handler via the query bus.
+   * Returns the typed result from the handler.
+   */
+  dispatchQuery<TQuery extends TProjectionQuery | TStandaloneQuery>(
+    query: TQuery,
+  ): Promise<QueryResult<TQuery>>;
+}
 ```
 
-- `DomainDefinition` captures the pure domain structure: write model (aggregates + standalone command handlers), read model (projections + standalone query handlers), and process model (sagas). `TInfrastructure` is a type parameter only (handler signatures reference it) — no infrastructure value is present.
-- `defineDomain` is a sync identity function, consistent with `defineAggregate`, `defineProjection`, `defineSaga`. It returns the input with full type inference. `TAggregates` is inferred from `writeModel.aggregates`.
+- `InferAggregateMapCommands<TMap>` extracts the union of all command types from a map of aggregates. `InferProjectionMapQueries<TMap>` extracts the union of all query types from a map of projections. Both distribute the corresponding single-aggregate/projection inference across every value in the map.
+- `DomainDefinition` captures the pure domain structure: write model (aggregates + standalone command handlers), read model (projections + standalone query handlers), and process model (sagas). `TInfrastructure` is a type parameter only (handler signatures reference it) — no infrastructure value is present. `TProjections` captures the typed projections map (inferred from `readModel.projections`).
+- `defineDomain` is a sync identity function, consistent with `defineAggregate`, `defineProjection`, `defineSaga`. It returns the input with full type inference. `TAggregates` is inferred from `writeModel.aggregates`, `TProjections` from `readModel.projections`.
 - `AggregateWiring` groups per-aggregate runtime config: persistence, concurrency strategy, and snapshots. All fields optional.
 - `ProjectionWiring` provides per-projection view store wiring, extracted from the `Projection.viewStore` field (which is now deprecated in favor of this).
-- `DomainWiring` separates user-provided infrastructure (`infrastructure`) from framework plumbing (`aggregates`, `projections`, `sagas`, `buses`, `unitOfWork`, `idempotency`, `outbox`).
+- `DomainWiring` separates user-provided infrastructure (`infrastructure`) from framework plumbing (`aggregates`, `projections`, `sagas`, `buses`, `unitOfWork`, `idempotency`, `outbox`). `TProjections` types the `projections` keys to match registered projection names.
 - `DomainWiring.aggregates` is a discriminated union: a single `AggregateWiring` (global — all aggregates share the same config) or a `Record<keyof TAggregates & string, AggregateWiring>` (per-aggregate — each aggregate configured independently). Runtime discrimination: `typeof aggregates.persistence === 'function'` or `typeof aggregates.concurrency !== 'undefined'` or `typeof aggregates.snapshots !== 'undefined'` → global; otherwise per-aggregate record.
-- `wireDomain` accepts a `DomainDefinition` and an optional `DomainWiring`. When `wiring` is omitted or `{}`, all infrastructure defaults to in-memory implementations and startup warnings are logged. Resolves all factories, creates a `Domain` instance, calls `init()`, and returns it. Type parameters propagate from the definition — the user does not need to repeat them.
+- `wireDomain` accepts a `DomainDefinition` and an optional `DomainWiring`. When `wiring` is omitted or `{}`, all infrastructure defaults to in-memory implementations and startup warnings are logged. Resolves all factories, creates a `Domain` instance, calls `init()`, and returns it. Type parameters propagate from the definition — the user does not need to repeat them. The returned `Domain` is strongly typed: `TAggregateCommand = InferAggregateMapCommands<TAggregates>` and `TProjectionQuery = InferProjectionMapQueries<TProjections>`.
+- `Domain.dispatchCommand` accepts the union `TAggregateCommand | TStandaloneCommand`. The return type is conditional: aggregate commands return `targetAggregateId`, standalone commands return `void`. `Domain.dispatchQuery` accepts `TProjectionQuery | TStandaloneQuery`. This provides autocomplete for valid command/query names and infers payload types via discriminated union narrowing.
 
 ## Behavioral Requirements
 
@@ -1433,6 +1517,520 @@ describe("empty standalone event handlers", () => {
     });
 
     expect(domain).toBeInstanceOf(Domain);
+  });
+});
+```
+
+### dispatchCommand accepts only registered aggregate commands (type-level)
+
+```ts
+import { describe, it } from "vitest";
+import { expectTypeOf } from "vitest";
+import {
+  defineDomain,
+  wireDomain,
+  defineAggregate,
+  defineProjection,
+} from "@noddde/engine";
+import type {
+  AggregateTypes,
+  DefineCommands,
+  DefineEvents,
+  DefineQueries,
+  ProjectionTypes,
+  Infrastructure,
+} from "@noddde/core";
+
+// --- Two aggregates with distinct command sets ---
+
+type CounterState = { count: number };
+type CounterEvent = DefineEvents<{ Incremented: { by: number } }>;
+type CounterCommand = DefineCommands<{ Increment: { by: number } }>;
+type CounterTypes = AggregateTypes & {
+  state: CounterState;
+  events: CounterEvent;
+  commands: CounterCommand;
+  infrastructure: Infrastructure;
+};
+
+const Counter = defineAggregate<CounterTypes>({
+  initialState: { count: 0 },
+  decide: {
+    Increment: (cmd) => ({
+      name: "Incremented",
+      payload: { by: cmd.payload.by },
+    }),
+  },
+  evolve: {
+    Incremented: (payload, state) => ({ count: state.count + payload.by }),
+  },
+});
+
+type TodoState = { done: boolean };
+type TodoEvent = DefineEvents<{ TodoCreated: { title: string } }>;
+type TodoCommand = DefineCommands<{ CreateTodo: { title: string } }>;
+type TodoTypes = AggregateTypes & {
+  state: TodoState;
+  events: TodoEvent;
+  commands: TodoCommand;
+  infrastructure: Infrastructure;
+};
+
+const Todo = defineAggregate<TodoTypes>({
+  initialState: { done: false },
+  decide: {
+    CreateTodo: (cmd) => ({
+      name: "TodoCreated",
+      payload: { title: cmd.payload.title },
+    }),
+  },
+  evolve: {
+    TodoCreated: () => ({ done: false }),
+  },
+});
+
+// --- Projection with query ---
+
+type CounterView = { total: number };
+type CounterQuery = DefineQueries<{
+  GetTotal: { payload: void; result: CounterView };
+}>;
+type CounterProjectionTypes = ProjectionTypes & {
+  events: CounterEvent;
+  queries: CounterQuery;
+  view: CounterView;
+  infrastructure: Infrastructure;
+};
+
+const CounterProjection = defineProjection<CounterProjectionTypes>({
+  on: {
+    Incremented: {
+      id: (event) => "global",
+      reduce: (event, view) => ({
+        total: (view?.total ?? 0) + event.payload.by,
+      }),
+    },
+  },
+  queryHandlers: {
+    GetTotal: (_payload, { views }) => views.load("global"),
+  },
+  initialView: { total: 0 },
+});
+
+describe("typed dispatch - aggregate commands", () => {
+  it("should accept commands from registered aggregates", async () => {
+    const definition = defineDomain({
+      writeModel: { aggregates: { Counter, Todo } },
+      readModel: { projections: { CounterProjection } },
+    });
+
+    const domain = await wireDomain(definition);
+
+    // These should compile — valid aggregate commands
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "c-1",
+      payload: { by: 5 },
+    });
+    await domain.dispatchCommand({
+      name: "CreateTodo",
+      targetAggregateId: "t-1",
+      payload: { title: "Test" },
+    });
+  });
+
+  it("should reject commands not in any aggregate", async () => {
+    const definition = defineDomain({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+    });
+
+    const domain = await wireDomain(definition);
+
+    // @ts-expect-error — "FooBar" is not a registered command
+    await domain.dispatchCommand({
+      name: "FooBar",
+      targetAggregateId: "x",
+      payload: {},
+    });
+  });
+
+  it("should return targetAggregateId for aggregate commands", async () => {
+    const definition = defineDomain({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+    });
+
+    const domain = await wireDomain(definition);
+
+    const result = await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "c-1",
+      payload: { by: 1 },
+    });
+
+    expectTypeOf(result).toEqualTypeOf<string>();
+  });
+});
+```
+
+### dispatchCommand accepts standalone commands (type-level)
+
+```ts
+import { describe, it } from "vitest";
+import { expectTypeOf } from "vitest";
+import { defineDomain, wireDomain, defineAggregate } from "@noddde/engine";
+import type {
+  AggregateTypes,
+  Command,
+  DefineCommands,
+  DefineEvents,
+  Infrastructure,
+} from "@noddde/core";
+
+type CounterState = { count: number };
+type CounterEvent = DefineEvents<{ Incremented: { by: number } }>;
+type CounterCommand = DefineCommands<{ Increment: { by: number } }>;
+type CounterTypes = AggregateTypes & {
+  state: CounterState;
+  events: CounterEvent;
+  commands: CounterCommand;
+  infrastructure: Infrastructure;
+};
+
+const Counter = defineAggregate<CounterTypes>({
+  initialState: { count: 0 },
+  decide: {
+    Increment: (cmd) => ({
+      name: "Incremented",
+      payload: { by: cmd.payload.by },
+    }),
+  },
+  evolve: {
+    Incremented: (payload, state) => ({ count: state.count + payload.by }),
+  },
+});
+
+type NotifyCommand = { name: "SendNotification"; payload: { message: string } };
+
+describe("typed dispatch - standalone commands", () => {
+  it("should accept standalone commands from registered handlers", async () => {
+    const definition = defineDomain<Infrastructure, NotifyCommand>({
+      writeModel: {
+        aggregates: { Counter },
+        standaloneCommandHandlers: {
+          SendNotification: (cmd, infra) => {},
+        },
+      },
+      readModel: { projections: {} },
+    });
+
+    const domain = await wireDomain(definition);
+
+    // Standalone command — should compile
+    await domain.dispatchCommand({
+      name: "SendNotification",
+      payload: { message: "hello" },
+    });
+
+    // Aggregate command — should also compile
+    await domain.dispatchCommand({
+      name: "Increment",
+      targetAggregateId: "c-1",
+      payload: { by: 1 },
+    });
+  });
+
+  it("should return void for standalone commands", async () => {
+    const definition = defineDomain<Infrastructure, NotifyCommand>({
+      writeModel: {
+        aggregates: {},
+        standaloneCommandHandlers: {
+          SendNotification: (cmd, infra) => {},
+        },
+      },
+      readModel: { projections: {} },
+    });
+
+    const domain = await wireDomain(definition);
+
+    const result = await domain.dispatchCommand({
+      name: "SendNotification",
+      payload: { message: "hello" },
+    });
+
+    expectTypeOf(result).toEqualTypeOf<void>();
+  });
+});
+```
+
+### dispatchQuery accepts only registered projection and standalone queries (type-level)
+
+```ts
+import { describe, it } from "vitest";
+import { expectTypeOf } from "vitest";
+import { defineDomain, wireDomain, defineProjection } from "@noddde/engine";
+import type {
+  DefineEvents,
+  DefineQueries,
+  ProjectionTypes,
+  Infrastructure,
+  Query,
+  QueryResult,
+} from "@noddde/core";
+
+type ItemEvent = DefineEvents<{ ItemAdded: { id: string; name: string } }>;
+type ItemView = { id: string; name: string };
+type ItemQuery = DefineQueries<{
+  GetItem: { payload: { id: string }; result: ItemView | null };
+}>;
+type ItemProjectionTypes = ProjectionTypes & {
+  events: ItemEvent;
+  queries: ItemQuery;
+  view: ItemView;
+  infrastructure: Infrastructure;
+};
+
+const ItemProjection = defineProjection<ItemProjectionTypes>({
+  on: {
+    ItemAdded: {
+      id: (event) => event.payload.id,
+      reduce: (event) => ({ id: event.payload.id, name: event.payload.name }),
+    },
+  },
+  queryHandlers: {
+    GetItem: (payload, { views }) => views.load(payload.id),
+  },
+  initialView: { id: "", name: "" },
+});
+
+type HealthQuery = DefineQueries<{
+  GetHealth: { payload: void; result: { status: string } };
+}>;
+
+describe("typed dispatch - queries", () => {
+  it("should accept queries from registered projections", async () => {
+    const definition = defineDomain({
+      writeModel: { aggregates: {} },
+      readModel: { projections: { ItemProjection } },
+    });
+
+    const domain = await wireDomain(definition);
+
+    // Should compile — valid projection query
+    const item = await domain.dispatchQuery({
+      name: "GetItem",
+      payload: { id: "item-1" },
+    });
+
+    // Result type should be inferred
+    expectTypeOf(item).toEqualTypeOf<ItemView | null>();
+  });
+
+  it("should accept standalone queries from registered handlers", async () => {
+    type StandaloneQ = HealthQuery;
+
+    const definition = defineDomain<Infrastructure, never, StandaloneQ>({
+      writeModel: { aggregates: {} },
+      readModel: {
+        projections: { ItemProjection },
+        standaloneQueryHandlers: {
+          GetHealth: (_payload) => ({ status: "ok" }),
+        },
+      },
+    });
+
+    const domain = await wireDomain(definition);
+
+    // Standalone query — should compile
+    const health = await domain.dispatchQuery({
+      name: "GetHealth",
+    });
+    expectTypeOf(health).toEqualTypeOf<{ status: string }>();
+
+    // Projection query — should also compile
+    const item = await domain.dispatchQuery({
+      name: "GetItem",
+      payload: { id: "item-1" },
+    });
+    expectTypeOf(item).toEqualTypeOf<ItemView | null>();
+  });
+
+  it("should reject queries not in any projection or standalone handler", async () => {
+    const definition = defineDomain({
+      writeModel: { aggregates: {} },
+      readModel: { projections: { ItemProjection } },
+    });
+
+    const domain = await wireDomain(definition);
+
+    // @ts-expect-error — "NonExistent" is not a registered query
+    await domain.dispatchQuery({
+      name: "NonExistent",
+      payload: {},
+    });
+  });
+});
+```
+
+### InferAggregateMapCommands extracts union from multi-aggregate map
+
+```ts
+import { describe, it } from "vitest";
+import { expectTypeOf } from "vitest";
+import { defineAggregate } from "@noddde/engine";
+import type {
+  AggregateTypes,
+  DefineCommands,
+  DefineEvents,
+  Infrastructure,
+  InferAggregateMapCommands,
+} from "@noddde/core";
+
+type CounterCommand = DefineCommands<{ Increment: { by: number } }>;
+type CounterEvent = DefineEvents<{ Incremented: { by: number } }>;
+type CounterTypes = AggregateTypes & {
+  state: { count: number };
+  events: CounterEvent;
+  commands: CounterCommand;
+  infrastructure: Infrastructure;
+};
+
+const Counter = defineAggregate<CounterTypes>({
+  initialState: { count: 0 },
+  decide: {
+    Increment: (cmd) => ({
+      name: "Incremented",
+      payload: { by: cmd.payload.by },
+    }),
+  },
+  evolve: {
+    Incremented: (payload, state) => ({ count: state.count + payload.by }),
+  },
+});
+
+type TodoCommand = DefineCommands<{ CreateTodo: { title: string } }>;
+type TodoEvent = DefineEvents<{ TodoCreated: { title: string } }>;
+type TodoTypes = AggregateTypes & {
+  state: { done: boolean };
+  events: TodoEvent;
+  commands: TodoCommand;
+  infrastructure: Infrastructure;
+};
+
+const Todo = defineAggregate<TodoTypes>({
+  initialState: { done: false },
+  decide: {
+    CreateTodo: (cmd) => ({
+      name: "TodoCreated",
+      payload: { title: cmd.payload.title },
+    }),
+  },
+  evolve: {
+    TodoCreated: () => ({ done: false }),
+  },
+});
+
+describe("InferAggregateMapCommands", () => {
+  it("should extract command union from multi-aggregate map", () => {
+    const aggregates = { Counter, Todo } as const;
+    type Commands = InferAggregateMapCommands<typeof aggregates>;
+
+    // Should be the union of CounterCommand | TodoCommand
+    expectTypeOf<Commands>().toMatchTypeOf<
+      | {
+          name: "Increment";
+          targetAggregateId: string;
+          payload: { by: number };
+        }
+      | {
+          name: "CreateTodo";
+          targetAggregateId: string;
+          payload: { title: string };
+        }
+    >();
+  });
+});
+```
+
+### InferProjectionMapQueries extracts union from multi-projection map
+
+```ts
+import { describe, it } from "vitest";
+import { expectTypeOf } from "vitest";
+import { defineProjection } from "@noddde/engine";
+import type {
+  DefineEvents,
+  DefineQueries,
+  ProjectionTypes,
+  Infrastructure,
+  InferProjectionMapQueries,
+} from "@noddde/core";
+
+type ItemEvent = DefineEvents<{ ItemAdded: { id: string; name: string } }>;
+type ItemView = { id: string; name: string };
+type ItemQuery = DefineQueries<{
+  GetItem: { payload: { id: string }; result: ItemView | null };
+}>;
+type ItemProjectionTypes = ProjectionTypes & {
+  events: ItemEvent;
+  queries: ItemQuery;
+  view: ItemView;
+  infrastructure: Infrastructure;
+};
+
+const ItemProjection = defineProjection<ItemProjectionTypes>({
+  on: {
+    ItemAdded: {
+      id: (event) => event.payload.id,
+      reduce: (event) => ({ id: event.payload.id, name: event.payload.name }),
+    },
+  },
+  queryHandlers: {
+    GetItem: (payload, { views }) => views.load(payload.id),
+  },
+  initialView: { id: "", name: "" },
+});
+
+type OrderEvent = DefineEvents<{
+  OrderPlaced: { orderId: string; total: number };
+}>;
+type OrderView = { orderId: string; total: number };
+type OrderQuery = DefineQueries<{
+  GetOrder: { payload: { orderId: string }; result: OrderView | null };
+}>;
+type OrderProjectionTypes = ProjectionTypes & {
+  events: OrderEvent;
+  queries: OrderQuery;
+  view: OrderView;
+  infrastructure: Infrastructure;
+};
+
+const OrderProjection = defineProjection<OrderProjectionTypes>({
+  on: {
+    OrderPlaced: {
+      id: (event) => event.payload.orderId,
+      reduce: (event) => ({
+        orderId: event.payload.orderId,
+        total: event.payload.total,
+      }),
+    },
+  },
+  queryHandlers: {
+    GetOrder: (payload, { views }) => views.load(payload.orderId),
+  },
+  initialView: { orderId: "", total: 0 },
+});
+
+describe("InferProjectionMapQueries", () => {
+  it("should extract query union from multi-projection map", () => {
+    const projections = { ItemProjection, OrderProjection } as const;
+    type Queries = InferProjectionMapQueries<typeof projections>;
+
+    // Should be the union of ItemQuery | OrderQuery
+    expectTypeOf<Queries>().toMatchTypeOf<
+      { name: "GetItem" } | { name: "GetOrder" }
+    >();
   });
 });
 ```

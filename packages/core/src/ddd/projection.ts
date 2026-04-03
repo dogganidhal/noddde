@@ -269,6 +269,21 @@ export type InferProjectionQueries<T extends Projection> =
   T extends Projection<infer U> ? U["queries"] : never;
 
 /**
+ * Extracts the union of all query types from a map of projections.
+ * Distributes {@link InferProjectionQueries} across each value in the map.
+ *
+ * @example
+ * ```ts
+ * const projections = { ItemProjection, OrderProjection } as const;
+ * type AllQueries = InferProjectionMapQueries<typeof projections>;
+ * // ItemQuery | OrderQuery
+ * ```
+ */
+export type InferProjectionMapQueries<
+  TMap extends Record<string | symbol, Projection>,
+> = TMap[keyof TMap] extends Projection<infer U> ? U["queries"] : never;
+
+/**
  * Extracts the infrastructure type from a {@link Projection} definition.
  *
  * @example

@@ -11,6 +11,8 @@ import type {
   FrameworkInfrastructure,
   ID,
   Infrastructure,
+  InferAggregateMapCommands,
+  InferProjectionMapQueries,
   Logger,
   PersistenceConfiguration,
   Projection,
@@ -199,6 +201,7 @@ export type DomainDefinition<
   TStandaloneQuery extends Query<any> = Query<any>,
   TAggregates extends AggregateMap = AggregateMap,
   TStandaloneEvent extends Event = Event,
+  TProjections extends ProjectionMap = ProjectionMap,
 > = {
   /** The write side: aggregates and standalone command handlers. */
   writeModel: {
@@ -213,7 +216,7 @@ export type DomainDefinition<
   /** The read side: projections and standalone query handlers. */
   readModel: {
     /** A map of projection definitions keyed by projection name. */
-    projections: ProjectionMap;
+    projections: TProjections;
     /** Optional map of standalone query handlers keyed by query name. */
     standaloneQueryHandlers?: StandaloneQueryHandlerMap<
       TInfrastructure,
@@ -244,6 +247,7 @@ export type DomainDefinition<
 export type DomainWiring<
   TInfrastructure extends Infrastructure = Infrastructure,
   TAggregates extends AggregateMap = AggregateMap,
+  TProjections extends ProjectionMap = ProjectionMap,
 > = {
   /**
    * Factory for user-provided infrastructure services.
@@ -256,8 +260,11 @@ export type DomainWiring<
   aggregates?:
     | AggregateWiring
     | Record<keyof TAggregates & string, AggregateWiring>;
-  /** Projection runtime config — per-projection view store wiring. */
-  projections?: Record<string, ProjectionWiring<TInfrastructure>>;
+  /** Projection runtime config — per-projection view store wiring keyed by projection name. */
+  projections?: Record<
+    keyof TProjections & string,
+    ProjectionWiring<TInfrastructure>
+  >;
   /** Saga runtime config. Required if processModel has sagas. */
   sagas?: {
     persistence: () => SagaPersistence | Promise<SagaPersistence>;
@@ -293,20 +300,23 @@ export function defineDomain<
   TStandaloneQuery extends Query<any> = Query<any>,
   TAggregates extends AggregateMap = AggregateMap,
   TStandaloneEvent extends Event = Event,
+  TProjections extends ProjectionMap = ProjectionMap,
 >(
   definition: DomainDefinition<
     TInfrastructure,
     TStandaloneCommand,
     TStandaloneQuery,
     TAggregates,
-    TStandaloneEvent
+    TStandaloneEvent,
+    TProjections
   >,
 ): DomainDefinition<
   TInfrastructure,
   TStandaloneCommand,
   TStandaloneQuery,
   TAggregates,
-  TStandaloneEvent
+  TStandaloneEvent,
+  TProjections
 > {
   return definition;
 }
@@ -324,14 +334,23 @@ interface ResolvedWiringContext {
  * The running domain instance. Created via {@link wireDomain}, it is the
  * primary entry point for dispatching commands and accessing infrastructure.
  *
+ * `dispatchCommand` accepts aggregate commands (from registered aggregates)
+ * and standalone commands (from registered standalone command handlers).
+ * `dispatchQuery` accepts projection queries (from registered projections)
+ * and standalone queries (from registered standalone query handlers).
+ *
  * @typeParam TInfrastructure - The custom infrastructure type for this domain.
  * @typeParam TStandaloneCommand - Union of standalone command types.
  * @typeParam TStandaloneQuery - Union of standalone query types.
+ * @typeParam TAggregateCommand - Union of all aggregate command types (computed by wireDomain).
+ * @typeParam TProjectionQuery - Union of all projection query types (computed by wireDomain).
  */
 export class Domain<
   TInfrastructure extends Infrastructure,
   TStandaloneCommand extends Command = Command,
   TStandaloneQuery extends Query<any> = Query<any>,
+  TAggregateCommand extends AggregateCommand<any> = AggregateCommand<any>,
+  TProjectionQuery extends Query<any> = Query<any>,
 > {
   private _infrastructure!: TInfrastructure &
     CQRSInfrastructure &
@@ -1139,16 +1158,22 @@ export class Domain<
   }
 
   /**
-   * Dispatches a command to the appropriate aggregate. The full lifecycle:
-   * route by name, load state, execute handler, apply events, persist, publish.
+   * Dispatches a command to the appropriate aggregate or standalone handler.
+   * Aggregate commands return the `targetAggregateId`, standalone commands return `void`.
    *
    * @typeParam TCommand - The specific command type being dispatched.
-   * @param command - The command to dispatch (must include `targetAggregateId`).
-   * @returns The aggregate ID that handled the command.
+   * @param command - The command to dispatch.
+   * @returns The aggregate ID for aggregate commands, or void for standalone commands.
    */
-  public async dispatchCommand<TCommand extends AggregateCommand<any>>(
+  public async dispatchCommand<
+    TCommand extends TAggregateCommand | TStandaloneCommand,
+  >(
     command: TCommand,
-  ): Promise<TCommand["targetAggregateId"]> {
+  ): Promise<
+    TCommand extends AggregateCommand<any>
+      ? TCommand["targetAggregateId"]
+      : void
+  > {
     this._acquireOperation();
     try {
       // Route: find the aggregate that handles this command
@@ -1159,15 +1184,21 @@ export class Domain<
           await this._commandExecutor.execute(
             aggregateName,
             aggregate,
-            command,
+            command as AggregateCommand<any>,
           );
-          return command.targetAggregateId;
+          return (command as AggregateCommand<any>).targetAggregateId as any;
         }
       }
 
       // If no aggregate handles it, try the command bus (standalone handlers)
       await this._infrastructure.commandBus.dispatch(command);
-      return command.targetAggregateId;
+      // Standalone commands return void; aggregate commands reaching here
+      // still return targetAggregateId for backward compatibility
+      return (
+        "targetAggregateId" in command
+          ? (command as AggregateCommand<any>).targetAggregateId
+          : undefined
+      ) as any;
     } finally {
       this._releaseOperation();
     }
@@ -1181,9 +1212,9 @@ export class Domain<
    * @param query - The query to dispatch (must include `name` and optional `payload`).
    * @returns The typed result from the query handler.
    */
-  public async dispatchQuery<TQuery extends Query<any>>(
-    query: TQuery,
-  ): Promise<QueryResult<TQuery>> {
+  public async dispatchQuery<
+    TQuery extends TProjectionQuery | TStandaloneQuery,
+  >(query: TQuery): Promise<QueryResult<TQuery>> {
     this._acquireOperation();
     try {
       return await this._infrastructure.queryBus.dispatch(query);
@@ -1210,19 +1241,30 @@ export const wireDomain = async <
   TStandaloneQuery extends Query<any> = Query<any>,
   TAggregates extends AggregateMap = AggregateMap,
   TStandaloneEvent extends Event = Event,
+  TProjections extends ProjectionMap = ProjectionMap,
 >(
   definition: DomainDefinition<
     TInfrastructure,
     TStandaloneCommand,
     TStandaloneQuery,
     TAggregates,
-    TStandaloneEvent
+    TStandaloneEvent,
+    TProjections
   >,
-  wiring: DomainWiring<TInfrastructure, TAggregates> = {} as DomainWiring<
+  wiring: DomainWiring<
     TInfrastructure,
-    TAggregates
-  >,
-): Promise<Domain<TInfrastructure, TStandaloneCommand, TStandaloneQuery>> => {
+    TAggregates,
+    TProjections
+  > = {} as DomainWiring<TInfrastructure, TAggregates, TProjections>,
+): Promise<
+  Domain<
+    TInfrastructure,
+    TStandaloneCommand,
+    TStandaloneQuery,
+    InferAggregateMapCommands<TAggregates>,
+    InferProjectionMapQueries<TProjections>
+  >
+> => {
   // Determine if aggregates wiring is per-aggregate or global
   const isGlobalAggregateWiring = (
     agg: AggregateWiring | Record<string, AggregateWiring> | undefined,
@@ -1243,13 +1285,19 @@ export const wireDomain = async <
     );
   }
 
-  const domain = new Domain(
+  const domain = new Domain<
+    TInfrastructure,
+    TStandaloneCommand,
+    TStandaloneQuery,
+    InferAggregateMapCommands<TAggregates>,
+    InferProjectionMapQueries<TProjections>
+  >(
     definition as DomainDefinition<
       TInfrastructure,
       TStandaloneCommand,
       TStandaloneQuery
     >,
-    wiring,
+    wiring as DomainWiring<TInfrastructure>,
     { perAggregateWirings },
   );
   await domain.init();

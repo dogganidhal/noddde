@@ -185,6 +185,21 @@ export type InferAggregateCommands<T extends Aggregate> =
   T extends Aggregate<infer U> ? U["commands"] : never;
 
 /**
+ * Extracts the union of all command types from a map of aggregates.
+ * Distributes {@link InferAggregateCommands} across each value in the map.
+ *
+ * @example
+ * ```ts
+ * const aggregates = { Counter, Todo } as const;
+ * type AllCommands = InferAggregateMapCommands<typeof aggregates>;
+ * // CounterCommand | TodoCommand
+ * ```
+ */
+export type InferAggregateMapCommands<
+  TMap extends Record<string | symbol, Aggregate>,
+> = TMap[keyof TMap] extends Aggregate<infer U> ? U["commands"] : never;
+
+/**
  * Extracts the infrastructure type from an {@link Aggregate} definition.
  *
  * @example

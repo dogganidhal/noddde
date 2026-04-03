@@ -366,6 +366,30 @@ type Infra = InferProjectionQueryInfrastructure<RevenueDef>;
 | `InferAggregateID<Def>`                    | `AggregateTypes` bundle | The `targetAggregateId` type |
 | `InferAggregateInfrastructure<typeof Agg>` | `Aggregate` instance    | The infrastructure type      |
 
+### Map-level (extract types across aggregate/projection maps)
+
+| Helper                                      | Input                            | Extracts                                     |
+| ------------------------------------------- | -------------------------------- | -------------------------------------------- |
+| `InferAggregateMapCommands<typeof aggMap>`  | `Record<string, Aggregate>` map  | Union of all command types across aggregates |
+| `InferProjectionMapQueries<typeof projMap>` | `Record<string, Projection>` map | Union of all query types across projections  |
+
+These are used internally by `wireDomain` to compute the typed dispatch constraints. You can also use them directly:
+
+```ts
+import type {
+  InferAggregateMapCommands,
+  InferProjectionMapQueries,
+} from "@noddde/core";
+
+const aggregates = { Counter, Todo } as const;
+type AllCommands = InferAggregateMapCommands<typeof aggregates>;
+// CounterCommand | TodoCommand
+
+const projections = { ItemProjection, OrderProjection } as const;
+type AllQueries = InferProjectionMapQueries<typeof projections>;
+// ItemQuery | OrderQuery
+```
+
 ### Handler-level (type extracted handlers in separate files)
 
 | Helper                                          | Input                    | Extracts                                          |
