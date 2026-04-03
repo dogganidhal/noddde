@@ -63,7 +63,7 @@ async function main() {
     const typeormInfra = createTypeORMAdapter(dataSource);
 
     // Define the domain structure (pure, sync -- same as optimistic)
-    const flashSaleDomain = defineDomain<Infrastructure>({
+    const flashSaleDomain = defineDomain({
       writeModel: { aggregates: { FlashSaleItem } },
       readModel: { projections: {} },
     });

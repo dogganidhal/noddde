@@ -108,7 +108,7 @@ export async function createTestEnvironment() {
   const revenueViewStore = new InMemoryViewStore<RevenueView>();
 
   // Define the domain structure (pure, sync)
-  const hotelDomain = defineDomain<HotelInfrastructure, Command, SearchQuery>({
+  const hotelDomain = defineDomain({
     writeModel: {
       aggregates: { Room, Booking, Inventory },
     },

@@ -103,11 +103,7 @@ async function main() {
   });
 
   // -- Define the domain structure (pure, sync) --
-  const hotelDomain = defineDomain<
-    HotelInfrastructure,
-    RunNightlyAuditCommand,
-    SearchQuery
-  >({
+  const hotelDomain = defineDomain({
     writeModel: {
       aggregates: { Room, Booking, Inventory },
       standaloneCommandHandlers: {

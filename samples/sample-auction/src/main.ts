@@ -26,7 +26,7 @@ const main = async () => {
   const prismaInfra = createPrismaAdapter(prisma);
 
   // ── Define the domain structure (pure, sync) ────────────────
-  const auctionDomain = defineDomain<AuctionInfrastructure>({
+  const auctionDomain = defineDomain({
     writeModel: { aggregates },
     readModel: { projections },
   });

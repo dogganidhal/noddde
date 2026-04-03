@@ -5,7 +5,7 @@ import type { HotelInfrastructure } from "../../types";
 
 export async function bookingRoutes(
   fastify: FastifyInstance,
-  opts: { domain: Domain<HotelInfrastructure> },
+  opts: { domain: Domain<HotelInfrastructure, any, any, any, any> },
 ) {
   const { domain } = opts;
 
