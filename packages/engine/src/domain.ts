@@ -12,7 +12,10 @@ import type {
   ID,
   Infrastructure,
   InferAggregateMapCommands,
+  InferAggregateMapInfrastructure,
+  InferProjectionMapInfrastructure,
   InferProjectionMapQueries,
+  InferSagaMapInfrastructure,
   Logger,
   PersistenceConfiguration,
   Projection,
@@ -1287,11 +1290,44 @@ type ExtractProjections<T> = T extends {
   : ProjectionMap;
 
 /**
- * Extracts TInfrastructure from a DomainDefinition type.
+ * Extracts sagas map from a DomainDefinition value type.
  * @internal
  */
+type ExtractSagas<T> = T extends {
+  processModel?: { sagas?: infer S extends SagaMap };
+}
+  ? S
+  : Record<string, never>;
+
+/**
+ * Converts a union type to an intersection type.
+ * Uses contravariant inference: `A | B` → `A & B`.
+ * @internal
+ */
+type UnionToIntersection<U> =
+  (U extends any ? (x: U) => void : never) extends (x: infer I) => void
+    ? I
+    : never;
+
+/**
+ * Computes TInfrastructure as the intersection of all infrastructure types
+ * declared across aggregates, projections, and sagas. This tells the developer
+ * exactly what `wiring.infrastructure` must return.
+ *
+ * Each `Infer*MapInfrastructure` produces a union (one member per component).
+ * `UnionToIntersection` merges them so the developer must satisfy ALL fields.
+ * @internal
+ */
+type ExtractInfrastructureRaw<T> = UnionToIntersection<
+  | InferAggregateMapInfrastructure<ExtractAggregates<T>>
+  | InferProjectionMapInfrastructure<ExtractProjections<T>>
+  | InferSagaMapInfrastructure<ExtractSagas<T>>
+>;
+
 type ExtractInfrastructure<T> =
-  T extends DomainDefinition<infer I> ? I : Infrastructure;
+  ExtractInfrastructureRaw<T> extends Infrastructure
+    ? ExtractInfrastructureRaw<T>
+    : Infrastructure;
 
 /**
  * Extracts TStandaloneCommand from a DomainDefinition type.
@@ -1328,10 +1364,10 @@ export const wireDomain = async <
   TProjections extends ProjectionMap = ExtractProjections<TDef>,
 >(
   definition: TDef,
-  wiring: DomainWiring<TInfrastructure, TAggregates> = {} as DomainWiring<
-    TInfrastructure,
+  wiring: DomainWiring<
+    ExtractInfrastructure<TDef>,
     TAggregates
-  >,
+  > = {} as DomainWiring<ExtractInfrastructure<TDef>, TAggregates>,
 ): Promise<
   Domain<
     TInfrastructure,

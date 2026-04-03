@@ -296,6 +296,19 @@ export type InferProjectionMapQueries<
 export type InferProjectionInfrastructure<T extends Projection> =
   T extends Projection<infer U> ? U["infrastructure"] : never;
 
+/**
+ * Computes the intersection of all infrastructure types declared across
+ * a map of projections. Used by `wireDomain` to infer what the
+ * `wiring.infrastructure` factory must return.
+ */
+export type InferProjectionMapInfrastructure<
+  TMap extends Record<string | symbol, Projection<any>>,
+> = {
+  [K in keyof TMap]: TMap[K] extends Projection<infer U>
+    ? U["infrastructure"]
+    : never;
+}[keyof TMap];
+
 // ---- Handler-level inference utilities ----
 
 /**

@@ -283,6 +283,19 @@ export type InferSagaInfrastructure<T extends Saga> =
   T extends Saga<infer U> ? U["infrastructure"] : never;
 
 /**
+ * Computes the intersection of all infrastructure types declared across
+ * a map of sagas. Used by `wireDomain` to infer what the
+ * `wiring.infrastructure` factory must return.
+ */
+export type InferSagaMapInfrastructure<
+  TMap extends Record<string | symbol, Saga<any, any>>,
+> = {
+  [K in keyof TMap]: TMap[K] extends Saga<infer U>
+    ? U["infrastructure"]
+    : never;
+}[keyof TMap];
+
+/**
  * Extracts the saga instance ID type from a {@link Saga} definition.
  *
  * @example
