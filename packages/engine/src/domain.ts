@@ -1304,10 +1304,11 @@ type ExtractSagas<T> = T extends {
  * Uses contravariant inference: `A | B` → `A & B`.
  * @internal
  */
-type UnionToIntersection<U> =
-  (U extends any ? (x: U) => void : never) extends (x: infer I) => void
-    ? I
-    : never;
+type UnionToIntersection<U> = (U extends any ? (x: U) => void : never) extends (
+  x: infer I,
+) => void
+  ? I
+  : never;
 
 /**
  * Computes TInfrastructure as the intersection of all infrastructure types
