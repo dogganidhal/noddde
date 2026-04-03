@@ -121,9 +121,21 @@ type StandaloneEventHandlerMap<
 /**
  * Sync identity function that creates a domain definition with full type
  * inference. Consistent with defineAggregate, defineProjection, defineSaga.
+ *
+ * Overload 1 (preferred): Infers all types from the definition object,
+ * preserving narrow aggregate/projection types for typed dispatch.
+ *
+ * Overload 2 (legacy, deprecated): Explicit infrastructure generic for
+ * standalone handler typing. Typed dispatch is NOT available because
+ * TypeScript cannot infer TAggregates/TProjections when explicit
+ * generics are provided.
  */
-const defineDomain: <
-  TInfrastructure extends Infrastructure = Infrastructure,
+function defineDomain<T extends DomainDefinition<any, any, any, any, any, any>>(
+  definition: T,
+): T;
+/** @deprecated Prefer calling defineDomain({...}) without explicit generics. */
+function defineDomain<
+  TInfrastructure extends Infrastructure,
   TStandaloneCommand extends Command = Command,
   TStandaloneQuery extends Query<any> = Query<any>,
   TAggregates extends AggregateMap = AggregateMap,
@@ -138,7 +150,7 @@ const defineDomain: <
     TStandaloneEvent,
     TProjections
   >,
-) => DomainDefinition<
+): DomainDefinition<
   TInfrastructure,
   TStandaloneCommand,
   TStandaloneQuery,
@@ -182,7 +194,6 @@ type ProjectionWiring<TInfrastructure extends Infrastructure = Infrastructure> =
 type DomainWiring<
   TInfrastructure extends Infrastructure = Infrastructure,
   TAggregates extends AggregateMap = AggregateMap,
-  TProjections extends ProjectionMap = ProjectionMap,
 > = {
   /** Factory for user-provided infrastructure services. */
   infrastructure?: () => TInfrastructure | Promise<TInfrastructure>;
@@ -190,7 +201,7 @@ type DomainWiring<
   aggregates?:
     | AggregateWiring
     | Record<keyof TAggregates & string, AggregateWiring>;
-  /** Projection runtime — per-projection view store wiring keyed by projection name. */
+  /** Projection runtime — per-projection view store wiring. */
   projections?: Record<
     keyof TProjections & string,
     ProjectionWiring<TInfrastructure>
@@ -223,27 +234,23 @@ type DomainWiring<
  * When `wiring` is omitted or `{}`, all infrastructure defaults to in-memory
  * implementations with startup warnings logged to the console.
  *
- * The returned Domain is strongly typed: dispatchCommand accepts only commands
- * from registered aggregates + standalone command handlers, and dispatchQuery
- * accepts only queries from registered projections + standalone query handlers.
+ * All type parameters are inferred from TDef (the narrow definition type):
+ * - TInfrastructure: intersection of all infrastructure types from aggregates,
+ *   projections, and sagas (the wiring.infrastructure factory must satisfy it)
+ * - TAggregateCommand: union of all aggregate command types
+ * - TProjectionQuery: union of all projection query types
+ * - TStandaloneCommand/TStandaloneQuery: extracted from standalone handlers
  */
 const wireDomain: <
-  TInfrastructure extends Infrastructure,
-  TStandaloneCommand extends Command = Command,
-  TStandaloneQuery extends Query<any> = Query<any>,
-  TAggregates extends AggregateMap = AggregateMap,
-  TStandaloneEvent extends Event = Event,
-  TProjections extends ProjectionMap = ProjectionMap,
+  TDef extends DomainDefinition<any, any, any, any, any, any>,
+  TInfrastructure extends Infrastructure = ExtractInfrastructure<TDef>,
+  TStandaloneCommand extends Command = ExtractStandaloneCommand<TDef>,
+  TStandaloneQuery extends Query<any> = ExtractStandaloneQuery<TDef>,
+  TAggregates extends AggregateMap = ExtractAggregates<TDef>,
+  TProjections extends ProjectionMap = ExtractProjections<TDef>,
 >(
-  definition: DomainDefinition<
-    TInfrastructure,
-    TStandaloneCommand,
-    TStandaloneQuery,
-    TAggregates,
-    TStandaloneEvent,
-    TProjections
-  >,
-  wiring?: DomainWiring<TInfrastructure, TAggregates, TProjections>,
+  definition: TDef,
+  wiring?: DomainWiring<ExtractInfrastructure<TDef>, TAggregates>,
 ) => Promise<
   Domain<
     TInfrastructure,
@@ -302,9 +309,11 @@ class Domain<
 - `defineDomain` is a sync identity function, consistent with `defineAggregate`, `defineProjection`, `defineSaga`. It returns the input with full type inference. `TAggregates` is inferred from `writeModel.aggregates`, `TProjections` from `readModel.projections`.
 - `AggregateWiring` groups per-aggregate runtime config: persistence, concurrency strategy, and snapshots. All fields optional.
 - `ProjectionWiring` provides per-projection view store wiring, extracted from the `Projection.viewStore` field (which is now deprecated in favor of this).
-- `DomainWiring` separates user-provided infrastructure (`infrastructure`) from framework plumbing (`aggregates`, `projections`, `sagas`, `buses`, `unitOfWork`, `idempotency`, `outbox`). `TProjections` types the `projections` keys to match registered projection names.
+- `DomainWiring` separates user-provided infrastructure (`infrastructure`) from framework plumbing (`aggregates`, `projections`, `sagas`, `buses`, `unitOfWork`, `idempotency`, `outbox`).
 - `DomainWiring.aggregates` is a discriminated union: a single `AggregateWiring` (global — all aggregates share the same config) or a `Record<keyof TAggregates & string, AggregateWiring>` (per-aggregate — each aggregate configured independently). Runtime discrimination: `typeof aggregates.persistence === 'function'` or `typeof aggregates.concurrency !== 'undefined'` or `typeof aggregates.snapshots !== 'undefined'` → global; otherwise per-aggregate record.
-- `wireDomain` accepts a `DomainDefinition` and an optional `DomainWiring`. When `wiring` is omitted or `{}`, all infrastructure defaults to in-memory implementations and startup warnings are logged. Resolves all factories, creates a `Domain` instance, calls `init()`, and returns it. Type parameters propagate from the definition — the user does not need to repeat them. The returned `Domain` is strongly typed: `TAggregateCommand = InferAggregateMapCommands<TAggregates>` and `TProjectionQuery = InferProjectionMapQueries<TProjections>`.
+- `wireDomain` accepts a `DomainDefinition` and an optional `DomainWiring`. When `wiring` is omitted or `{}`, all infrastructure defaults to in-memory implementations and startup warnings are logged. Resolves all factories, creates a `Domain` instance, calls `init()`, and returns it. All type parameters are inferred from `TDef` (the narrow definition type) via conditional type extraction — the user does not need to specify any generics.
+- `wireDomain` computes `TInfrastructure` as the intersection of all infrastructure types declared across aggregates, projections, and sagas. The `wiring.infrastructure` factory must return this computed type. If a component declares `{ clock: Clock }` and another declares `{ emailService: EmailService }`, the factory must return `{ clock: Clock, emailService: EmailService }`. The compiler reports exactly which fields are missing.
+- The returned `Domain` is strongly typed: `TAggregateCommand = InferAggregateMapCommands<TAggregates>` and `TProjectionQuery = InferProjectionMapQueries<TProjections>`.
 - `Domain.dispatchCommand` accepts the union `TAggregateCommand | TStandaloneCommand`. The return type is conditional: aggregate commands return `targetAggregateId`, standalone commands return `void`. `Domain.dispatchQuery` accepts `TProjectionQuery | TStandaloneQuery`. This provides autocomplete for valid command/query names and infers payload types via discriminated union narrowing.
 
 ## Behavioral Requirements

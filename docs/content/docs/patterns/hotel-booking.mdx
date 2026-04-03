@@ -612,7 +612,7 @@ The domain configuration uses `defineDomain` to capture the pure domain structur
 import { defineDomain, wireDomain } from "@noddde/engine";
 
 // Step 1: Define the domain structure (pure, sync)
-const hotelDomain = defineDomain<HotelInfrastructure>({
+const hotelDomain = defineDomain({
   writeModel: {
     aggregates: { Room, Booking, Inventory },
     standaloneCommandHandlers: { RunNightlyAudit: RunNightlyAuditHandler },

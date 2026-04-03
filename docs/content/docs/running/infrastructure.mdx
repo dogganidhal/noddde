@@ -42,7 +42,46 @@ interface BankingInfrastructure {
 }
 ```
 
-This type becomes the `infrastructure` member of your [AggregateTypes](/docs/modeling/aggregates) bundle, flowing through the type system to ensure handlers receive the correct infrastructure at compile time.
+This type becomes the `infrastructure` member of your [AggregateTypes](/docs/modeling/aggregates) bundle. Each component declares only what it needs, and `wireDomain` computes the intersection at compile time.
+
+### Scoped Infrastructure: One Interface Per Component
+
+The recommended pattern is to declare a **narrow infrastructure interface per component** rather than a single god-interface for the entire domain:
+
+```ts
+// Auction aggregate only needs a clock
+interface AuctionInfrastructure {
+  clock: Clock;
+}
+
+// Notification projection needs an email service
+interface NotificationInfrastructure {
+  emailService: EmailService;
+}
+
+// Payment saga needs both clock and payment gateway
+interface PaymentInfrastructure {
+  clock: Clock;
+  paymentGateway: PaymentGateway;
+}
+```
+
+When you wire the domain, `wireDomain` computes the intersection of all these types. The `infrastructure` factory must return an object satisfying all of them:
+
+```ts
+const domain = await wireDomain(definition, {
+  // Compiler requires: { clock: Clock, emailService: EmailService, paymentGateway: PaymentGateway }
+  infrastructure: () => ({
+    clock: new SystemClock(),
+    emailService: new SmtpEmailService(),
+    paymentGateway: new StripePaymentGateway(),
+  }),
+});
+```
+
+If you forget a field, the compiler tells you exactly what's missing. If you add a new saga that needs `smsService: SmsService`, the compiler immediately flags `wireDomain` -- no runtime surprises.
+
+Components that share the same dependency (like `clock` above) simply declare it independently. The intersection merges identical fields cleanly.
 
 ### Defining Interfaces with Swappable Implementations
 
@@ -77,7 +116,7 @@ Infrastructure appears as a parameter in three handler types:
 
 | Handler Type                | Parameter Position | Receives                               |
 | --------------------------- | ------------------ | -------------------------------------- |
-| Aggregate decide handlers  | Third parameter    | `TInfrastructure`                      |
+| Aggregate decide handlers   | Third parameter    | `TInfrastructure`                      |
 | Projection event handlers   | Second parameter   | `TInfrastructure`                      |
 | Query handlers              | Second parameter   | `TInfrastructure`                      |
 | Standalone command handlers | Second parameter   | `TInfrastructure & CQRSInfrastructure` |
@@ -124,7 +163,7 @@ const domain = await wireDomain(bankingDomain, {
 });
 ```
 
-The `TInfrastructure` generic on `defineDomain` ensures the factory return type matches your infrastructure definition. TypeScript reports an error if you forget a member or return the wrong type.
+The infrastructure type is **inferred automatically** from your aggregates, projections, and sagas. You don't need to specify it explicitly -- `wireDomain` computes the intersection of all infrastructure types declared across your domain components and requires the factory to return exactly that type. TypeScript reports an error if you forget a member or return the wrong type.
 
 ### Buses
 
@@ -257,7 +296,7 @@ The `defineDomain` + `wireDomain` split makes it especially easy to swap infrast
 
 ```ts
 // Shared domain definition
-const bankingDomain = defineDomain<BankingInfrastructure>({
+const bankingDomain = defineDomain({
   writeModel: { aggregates: { BankAccount } },
   readModel: { projections: { BankAccount: BankAccountProjection } },
 });

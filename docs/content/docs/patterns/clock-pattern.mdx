@@ -142,7 +142,7 @@ In production, provide `SystemClock` via the `infrastructure` field in `wireDoma
 ```ts
 import { defineDomain, wireDomain } from "@noddde/engine";
 
-const auctionDomain = defineDomain<AuctionInfrastructure>({
+const auctionDomain = defineDomain({
   writeModel: { aggregates: { Auction } },
   readModel: { projections: {} },
 });

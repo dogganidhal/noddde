@@ -373,7 +373,7 @@ Projections are registered in the `readModel.projections` map of the domain conf
 ```ts
 import { defineDomain, wireDomain } from "@noddde/engine";
 
-const bankingDomain = defineDomain<BankingInfrastructure>({
+const bankingDomain = defineDomain({
   writeModel: {
     aggregates: { BankAccount },
   },

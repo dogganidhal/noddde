@@ -283,11 +283,11 @@ A noddde aggregate is a plain TypeScript object with a specific shape. It does n
 
 noddde's `defineAggregate` function maps directly to the three components of a Decider:
 
-| Decider Concept | noddde Equivalent | Purpose                                        |
-| --------------- | ----------------- | ---------------------------------------------- |
-| `initialState`  | `initialState`    | Starting state for new aggregate instances     |
-| `decide`        | `decide` map      | Decide handlers that return events             |
-| `evolve`        | `evolve` map      | Evolve handlers that evolve state from events  |
+| Decider Concept | noddde Equivalent | Purpose                                       |
+| --------------- | ----------------- | --------------------------------------------- |
+| `initialState`  | `initialState`    | Starting state for new aggregate instances    |
+| `decide`        | `decide` map      | Decide handlers that return events            |
+| `evolve`        | `evolve` map      | Evolve handlers that evolve state from events |
 
 The `defineAggregate` function takes a configuration object and returns it with full type inference. It does not add behavior or register anything — it is an identity function that exists solely to provide type checking:
 

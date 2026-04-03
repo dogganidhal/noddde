@@ -105,7 +105,7 @@ const OrderFulfillmentSaga = defineSaga<OrderFulfillmentSagaDef>({
 ```ts
 import { defineDomain, wireDomain } from "@noddde/engine";
 
-const myDomain = defineDomain<MyInfrastructure>({
+const myDomain = defineDomain({
   writeModel: { aggregates: { BankAccount } },
   readModel: { projections: { BankAccount: BankAccountProjection } },
   processModel: { sagas: { OrderFulfillment: OrderFulfillmentSaga } },
@@ -128,15 +128,15 @@ const domain = await wireDomain(myDomain, {
 
 ## How noDDDe Differs
 
-|                   | Traditional DDD                   | noDDDe                                      |
-| ----------------- | --------------------------------- | ------------------------------------------- |
-| Aggregates        | Classes extending `AggregateRoot` | Plain objects via `defineAggregate`         |
+|                   | Traditional DDD                   | noDDDe                                       |
+| ----------------- | --------------------------------- | -------------------------------------------- |
+| Aggregates        | Classes extending `AggregateRoot` | Plain objects via `defineAggregate`          |
 | State changes     | `this.apply(event)` mutates state | evolve handlers return new state (immutable) |
-| Command handling  | Decorated methods                 | Typed handler maps                          |
-| Type safety       | Manual generic parameters         | Inferred from `AggregateTypes` bundle       |
-| Event definitions | Enum + interface + union          | `DefineEvents<{ ... }>` single declaration  |
-| Testing           | Requires framework setup          | Call functions directly                     |
-| Infrastructure    | Decorator-based injection         | Function parameter injection                |
+| Command handling  | Decorated methods                 | Typed handler maps                           |
+| Type safety       | Manual generic parameters         | Inferred from `AggregateTypes` bundle        |
+| Event definitions | Enum + interface + union          | `DefineEvents<{ ... }>` single declaration   |
+| Testing           | Requires framework setup          | Call functions directly                      |
+| Infrastructure    | Decorator-based injection         | Function parameter injection                 |
 
 noDDDe draws inspiration from modern TypeScript API design (Zod, tRPC, Drizzle) — declarative, inference-heavy, zero-boilerplate.
 

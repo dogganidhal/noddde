@@ -195,10 +195,10 @@ export const evolveBidPlaced: InferEvolveHandler<AuctionDef, "BidPlaced"> = (
 import type { InferEvolveHandler } from "@noddde/core";
 import type { AuctionDef } from "../auction";
 
-export const evolveBidRejected: InferEvolveHandler<AuctionDef, "BidRejected"> = (
-  _event,
-  state,
-) => state; // No state change
+export const evolveBidRejected: InferEvolveHandler<
+  AuctionDef,
+  "BidRejected"
+> = (_event, state) => state; // No state change
 ```
 
 The `AuctionClosed` evolve handler follows the same pattern.
@@ -269,7 +269,7 @@ The aggregate records that the bid happened (as an event) but the state remains 
 ```ts
 import { defineDomain, wireDomain } from "@noddde/engine";
 
-const auctionDomain = defineDomain<AuctionInfrastructure>({
+const auctionDomain = defineDomain({
   writeModel: { aggregates: { Auction } },
   readModel: { projections: {} },
 });

@@ -12,7 +12,7 @@ The entry point for all command processing is `domain.dispatchCommand()`. You pa
 ```typescript
 import { defineDomain, wireDomain } from "@noddde/engine";
 
-const bankingDomain = defineDomain<BankingInfrastructure>({
+const bankingDomain = defineDomain({
   // ... definition
 });
 
