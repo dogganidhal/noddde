@@ -196,8 +196,10 @@ export type InferAggregateCommands<T extends Aggregate> =
  * ```
  */
 export type InferAggregateMapCommands<
-  TMap extends Record<string | symbol, Aggregate>,
-> = TMap[keyof TMap] extends Aggregate<infer U> ? U["commands"] : never;
+  TMap extends Record<string | symbol, Aggregate<any>>,
+> = {
+  [K in keyof TMap]: TMap[K] extends Aggregate<infer U> ? U["commands"] : never;
+}[keyof TMap];
 
 /**
  * Extracts the infrastructure type from an {@link Aggregate} definition.

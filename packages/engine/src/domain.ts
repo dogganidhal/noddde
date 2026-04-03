@@ -247,7 +247,6 @@ export type DomainDefinition<
 export type DomainWiring<
   TInfrastructure extends Infrastructure = Infrastructure,
   TAggregates extends AggregateMap = AggregateMap,
-  TProjections extends ProjectionMap = ProjectionMap,
 > = {
   /**
    * Factory for user-provided infrastructure services.
@@ -260,11 +259,8 @@ export type DomainWiring<
   aggregates?:
     | AggregateWiring
     | Record<keyof TAggregates & string, AggregateWiring>;
-  /** Projection runtime config — per-projection view store wiring keyed by projection name. */
-  projections?: Record<
-    keyof TProjections & string,
-    ProjectionWiring<TInfrastructure>
-  >;
+  /** Projection runtime config — per-projection view store wiring. */
+  projections?: Record<string, ProjectionWiring<TInfrastructure>>;
   /** Saga runtime config. Required if processModel has sagas. */
   sagas?: {
     persistence: () => SagaPersistence | Promise<SagaPersistence>;
@@ -292,10 +288,34 @@ export type DomainWiring<
  * Creates a pure, sync domain definition with full type inference.
  * Consistent with {@link defineAggregate}, {@link defineProjection}, {@link defineSaga}.
  *
+ * **Preferred usage** (no explicit generics — enables typed dispatch):
+ * ```ts
+ * const domain = defineDomain({
+ *   writeModel: { aggregates: { Counter, Todo } },
+ *   readModel: { projections: { CounterView } },
+ * });
+ * ```
+ *
+ * **Legacy usage** (explicit infrastructure generic — typed dispatch is NOT available):
+ * ```ts
+ * const domain = defineDomain<MyInfrastructure>({...});
+ * ```
+ *
  * @returns The same definition object, fully typed.
  */
 export function defineDomain<
-  TInfrastructure extends Infrastructure = Infrastructure,
+  T extends DomainDefinition<any, any, any, any, any, any>,
+>(definition: T): T;
+/**
+ * Legacy overload: explicit infrastructure generic. Standalone handler
+ * infrastructure is typed, but typed dispatch (narrowed command/query names)
+ * is NOT available because TypeScript cannot infer TAggregates/TProjections
+ * when explicit generics are provided.
+ *
+ * @deprecated Prefer calling `defineDomain({...})` without explicit generics.
+ */
+export function defineDomain<
+  TInfrastructure extends Infrastructure,
   TStandaloneCommand extends Command = Command,
   TStandaloneQuery extends Query<any> = Query<any>,
   TAggregates extends AggregateMap = AggregateMap,
@@ -317,7 +337,8 @@ export function defineDomain<
   TAggregates,
   TStandaloneEvent,
   TProjections
-> {
+>;
+export function defineDomain(definition: DomainDefinition): DomainDefinition {
   return definition;
 }
 
@@ -1167,11 +1188,15 @@ export class Domain<
    */
   public async dispatchCommand<
     TCommand extends TAggregateCommand | TStandaloneCommand,
+    TResolved extends TAggregateCommand | TStandaloneCommand = Extract<
+      TAggregateCommand | TStandaloneCommand,
+      { name: TCommand["name"] }
+    >,
   >(
     command: TCommand,
   ): Promise<
-    TCommand extends AggregateCommand<any>
-      ? TCommand["targetAggregateId"]
+    TResolved extends AggregateCommand<any>
+      ? TResolved["targetAggregateId"]
       : void
   > {
     this._acquireOperation();
@@ -1213,11 +1238,15 @@ export class Domain<
    * @returns The typed result from the query handler.
    */
   public async dispatchQuery<
-    TQuery extends TProjectionQuery | TStandaloneQuery,
-  >(query: TQuery): Promise<QueryResult<TQuery>> {
+    TName extends (TProjectionQuery | TStandaloneQuery)["name"],
+  >(
+    query: Extract<TProjectionQuery | TStandaloneQuery, { name: TName }>,
+  ): Promise<
+    QueryResult<Extract<TProjectionQuery | TStandaloneQuery, { name: TName }>>
+  > {
     this._acquireOperation();
     try {
-      return await this._infrastructure.queryBus.dispatch(query);
+      return (await this._infrastructure.queryBus.dispatch(query)) as any;
     } finally {
       this._releaseOperation();
     }
@@ -1235,27 +1264,72 @@ export class Domain<
  * @param wiring - The infrastructure wiring configuration.
  * @returns A fully initialized {@link Domain} instance.
  */
+/**
+ * Extracts TAggregates from a DomainDefinition value type.
+ * @internal
+ */
+type ExtractAggregates<T> = T extends {
+  writeModel: { aggregates: infer A extends AggregateMap };
+}
+  ? A
+  : AggregateMap;
+
+/**
+ * Extracts TProjections from a DomainDefinition value type.
+ * @internal
+ */
+type ExtractProjections<T> = T extends {
+  readModel: { projections: infer P extends ProjectionMap };
+}
+  ? P
+  : ProjectionMap;
+
+/**
+ * Extracts TInfrastructure from a DomainDefinition type.
+ * @internal
+ */
+type ExtractInfrastructure<T> =
+  T extends DomainDefinition<infer I> ? I : Infrastructure;
+
+/**
+ * Extracts TStandaloneCommand from a DomainDefinition type.
+ * Returns `never` when no standalone command handlers are defined.
+ * @internal
+ */
+type ExtractStandaloneCommand<T> = T extends {
+  writeModel: {
+    standaloneCommandHandlers: StandaloneCommandHandlerMap<any, infer C>;
+  };
+}
+  ? C
+  : never;
+
+/**
+ * Extracts TStandaloneQuery from a DomainDefinition type.
+ * Returns `never` when no standalone query handlers are defined.
+ * @internal
+ */
+type ExtractStandaloneQuery<T> = T extends {
+  readModel: {
+    standaloneQueryHandlers: StandaloneQueryHandlerMap<any, infer Q>;
+  };
+}
+  ? Q
+  : never;
+
 export const wireDomain = async <
-  TInfrastructure extends Infrastructure,
-  TStandaloneCommand extends Command = Command,
-  TStandaloneQuery extends Query<any> = Query<any>,
-  TAggregates extends AggregateMap = AggregateMap,
-  TStandaloneEvent extends Event = Event,
-  TProjections extends ProjectionMap = ProjectionMap,
+  TDef extends DomainDefinition<any, any, any, any, any, any>,
+  TInfrastructure extends Infrastructure = ExtractInfrastructure<TDef>,
+  TStandaloneCommand extends Command = ExtractStandaloneCommand<TDef>,
+  TStandaloneQuery extends Query<any> = ExtractStandaloneQuery<TDef>,
+  TAggregates extends AggregateMap = ExtractAggregates<TDef>,
+  TProjections extends ProjectionMap = ExtractProjections<TDef>,
 >(
-  definition: DomainDefinition<
+  definition: TDef,
+  wiring: DomainWiring<TInfrastructure, TAggregates> = {} as DomainWiring<
     TInfrastructure,
-    TStandaloneCommand,
-    TStandaloneQuery,
-    TAggregates,
-    TStandaloneEvent,
-    TProjections
+    TAggregates
   >,
-  wiring: DomainWiring<
-    TInfrastructure,
-    TAggregates,
-    TProjections
-  > = {} as DomainWiring<TInfrastructure, TAggregates, TProjections>,
 ): Promise<
   Domain<
     TInfrastructure,

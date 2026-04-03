@@ -280,8 +280,10 @@ export type InferProjectionQueries<T extends Projection> =
  * ```
  */
 export type InferProjectionMapQueries<
-  TMap extends Record<string | symbol, Projection>,
-> = TMap[keyof TMap] extends Projection<infer U> ? U["queries"] : never;
+  TMap extends Record<string | symbol, Projection<any>>,
+> = {
+  [K in keyof TMap]: TMap[K] extends Projection<infer U> ? U["queries"] : never;
+}[keyof TMap];
 
 /**
  * Extracts the infrastructure type from a {@link Projection} definition.
