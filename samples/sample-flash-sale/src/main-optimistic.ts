@@ -15,7 +15,6 @@ import {
   InMemoryCommandBus,
   InMemoryQueryBus,
 } from "@noddde/engine";
-import type { Infrastructure } from "@noddde/core";
 import { FlashSaleItem } from "./domain/write-model/aggregates/flash-sale-item";
 
 /**
@@ -64,7 +63,7 @@ async function main() {
     const typeormInfra = createTypeORMAdapter(dataSource);
 
     // Define the domain structure (pure, sync)
-    const flashSaleDomain = defineDomain<Infrastructure>({
+    const flashSaleDomain = defineDomain({
       writeModel: { aggregates: { FlashSaleItem } },
       readModel: { projections: {} },
     });

@@ -269,6 +269,23 @@ export type InferProjectionQueries<T extends Projection> =
   T extends Projection<infer U> ? U["queries"] : never;
 
 /**
+ * Extracts the union of all query types from a map of projections.
+ * Distributes {@link InferProjectionQueries} across each value in the map.
+ *
+ * @example
+ * ```ts
+ * const projections = { ItemProjection, OrderProjection } as const;
+ * type AllQueries = InferProjectionMapQueries<typeof projections>;
+ * // ItemQuery | OrderQuery
+ * ```
+ */
+export type InferProjectionMapQueries<
+  TMap extends Record<string | symbol, Projection<any>>,
+> = {
+  [K in keyof TMap]: TMap[K] extends Projection<infer U> ? U["queries"] : never;
+}[keyof TMap];
+
+/**
  * Extracts the infrastructure type from a {@link Projection} definition.
  *
  * @example
@@ -278,6 +295,19 @@ export type InferProjectionQueries<T extends Projection> =
  */
 export type InferProjectionInfrastructure<T extends Projection> =
   T extends Projection<infer U> ? U["infrastructure"] : never;
+
+/**
+ * Computes the intersection of all infrastructure types declared across
+ * a map of projections. Used by `wireDomain` to infer what the
+ * `wiring.infrastructure` factory must return.
+ */
+export type InferProjectionMapInfrastructure<
+  TMap extends Record<string | symbol, Projection<any>>,
+> = {
+  [K in keyof TMap]: TMap[K] extends Projection<infer U>
+    ? U["infrastructure"]
+    : never;
+}[keyof TMap];
 
 // ---- Handler-level inference utilities ----
 

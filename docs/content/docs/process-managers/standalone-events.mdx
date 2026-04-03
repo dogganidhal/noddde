@@ -41,7 +41,7 @@ Standalone event handlers are registered in the `processModel.standaloneEventHan
 ```typescript
 import { defineDomain } from "@noddde/engine";
 
-const definition = defineDomain<AppInfrastructure>({
+const definition = defineDomain({
   writeModel: { aggregates: { Order } },
   readModel: { projections: { OrderSummary } },
   processModel: {

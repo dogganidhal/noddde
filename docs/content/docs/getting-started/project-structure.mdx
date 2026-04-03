@@ -110,7 +110,10 @@ Each aggregate owns its type unions. The aggregate file imports event payloads f
 import type { InferDecideHandler } from "@noddde/core";
 import type { HotelBookingDef } from "../hotel-booking.js";
 
-export const decideCreateHotelBooking: InferDecideHandler<HotelBookingDef, "CreateHotelBooking"> = (command, _state) => ({
+export const decideCreateHotelBooking: InferDecideHandler<
+  HotelBookingDef,
+  "CreateHotelBooking"
+> = (command, _state) => ({
   name: "HotelBookingCreated" as const,
   payload: { id: command.targetAggregateId },
 });
@@ -119,7 +122,10 @@ export const decideCreateHotelBooking: InferDecideHandler<HotelBookingDef, "Crea
 import type { InferEvolveHandler } from "@noddde/core";
 import type { HotelBookingDef } from "../hotel-booking.js";
 
-export const evolveHotelBookingCreated: InferEvolveHandler<HotelBookingDef, "HotelBookingCreated"> = (payload, state) => ({
+export const evolveHotelBookingCreated: InferEvolveHandler<
+  HotelBookingDef,
+  "HotelBookingCreated"
+> = (payload, state) => ({
   ...state,
   id: payload.id,
 });
@@ -261,7 +267,7 @@ The `process-model/` directory is created empty when scaffolding a project or do
 The `defineDomain` call captures the pure domain structure — aggregates, projections, and sagas — without any infrastructure or runtime concerns:
 
 ```ts
-export const hotelBookingDomain = defineDomain<HotelBookingInfrastructure>({
+export const hotelBookingDomain = defineDomain({
   writeModel: { aggregates: { HotelBooking } },
   readModel: { projections: { HotelBooking: HotelBookingProjection } },
 });
@@ -324,7 +330,7 @@ import { Room } from "./write-model/aggregates/room/index.js";
 import { RoomAvailabilityProjection } from "./read-model/projections/room-availability/index.js";
 import { BookingFulfillmentSaga } from "./process-model/booking-fulfillment/index.js";
 
-export const hotelBookingDomain = defineDomain<HotelBookingInfrastructure>({
+export const hotelBookingDomain = defineDomain({
   writeModel: { aggregates: { HotelBooking, Room } },
   readModel: {
     projections: {

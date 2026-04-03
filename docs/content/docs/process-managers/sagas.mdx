@@ -29,12 +29,12 @@ A saga is the structural inverse of an aggregate: an aggregate receives commands
 
 ### Aggregate vs Saga
 
-|                  | Aggregate                      | Saga                         |
-| ---------------- | ------------------------------ | ---------------------------- |
-| **Triggered by** | Commands                       | Events                       |
-| **Produces**     | Events                         | Commands                     |
-| **State**        | Domain truth                   | Workflow progress            |
-| **Persistence**  | Event-sourced or state-stored  | State-stored                 |
+|                  | Aggregate                     | Saga                         |
+| ---------------- | ----------------------------- | ---------------------------- |
+| **Triggered by** | Commands                      | Events                       |
+| **Produces**     | Events                        | Commands                     |
+| **State**        | Domain truth                  | Workflow progress            |
+| **Persistence**  | Event-sourced or state-stored | State-stored                 |
 | **Purity**       | Decide handlers may use infra | Event handlers may use infra |
 
 ## When to Use a Saga
@@ -429,7 +429,7 @@ import {
   InMemorySagaPersistence,
 } from "@noddde/engine";
 
-const ecommerceDomain = defineDomain<EcommerceInfrastructure>({
+const ecommerceDomain = defineDomain({
   writeModel: {
     aggregates: { Order, Payment, Shipping },
   },

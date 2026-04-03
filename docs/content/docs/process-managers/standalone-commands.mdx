@@ -59,7 +59,7 @@ Standalone command handlers are registered in the `writeModel.standaloneCommandH
 ```typescript
 import { defineDomain, wireDomain } from "@noddde/engine";
 
-const bankingDomain = defineDomain<BankingInfrastructure>({
+const bankingDomain = defineDomain({
   writeModel: {
     aggregates: {
       BankAccount,

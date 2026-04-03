@@ -213,10 +213,10 @@ These handlers simply return the existing state:
 import type { InferEvolveHandler } from "@noddde/core";
 import type { AuctionDef } from "../auction";
 
-export const evolveBidRejected: InferEvolveHandler<AuctionDef, "BidRejected"> = (
-  _event,
-  state,
-) => state;
+export const evolveBidRejected: InferEvolveHandler<
+  AuctionDef,
+  "BidRejected"
+> = (_event, state) => state;
 ```
 
 This is still required in the `evolve` map -- the framework expects a handler for every event type. The event remains part of the event stream and can be projected or audited, even though the aggregate's internal state is unaffected.

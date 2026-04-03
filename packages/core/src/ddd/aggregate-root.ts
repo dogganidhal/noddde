@@ -185,6 +185,23 @@ export type InferAggregateCommands<T extends Aggregate> =
   T extends Aggregate<infer U> ? U["commands"] : never;
 
 /**
+ * Extracts the union of all command types from a map of aggregates.
+ * Distributes {@link InferAggregateCommands} across each value in the map.
+ *
+ * @example
+ * ```ts
+ * const aggregates = { Counter, Todo } as const;
+ * type AllCommands = InferAggregateMapCommands<typeof aggregates>;
+ * // CounterCommand | TodoCommand
+ * ```
+ */
+export type InferAggregateMapCommands<
+  TMap extends Record<string | symbol, Aggregate<any>>,
+> = {
+  [K in keyof TMap]: TMap[K] extends Aggregate<infer U> ? U["commands"] : never;
+}[keyof TMap];
+
+/**
  * Extracts the infrastructure type from an {@link Aggregate} definition.
  *
  * @example
@@ -194,6 +211,26 @@ export type InferAggregateCommands<T extends Aggregate> =
  */
 export type InferAggregateInfrastructure<T extends Aggregate> =
   T extends Aggregate<infer U> ? U["infrastructure"] : never;
+
+/**
+ * Computes the intersection of all infrastructure types declared across
+ * a map of aggregates. Used by `wireDomain` to infer what the
+ * `wiring.infrastructure` factory must return.
+ *
+ * @example
+ * ```ts
+ * // Auction needs { clock: Clock }, Booking needs { clock: Clock, email: EmailService }
+ * type Infra = InferAggregateMapInfrastructure<typeof aggregates>;
+ * // { clock: Clock } & { clock: Clock, email: EmailService }
+ * ```
+ */
+export type InferAggregateMapInfrastructure<
+  TMap extends Record<string | symbol, Aggregate<any>>,
+> = {
+  [K in keyof TMap]: TMap[K] extends Aggregate<infer U>
+    ? U["infrastructure"]
+    : never;
+}[keyof TMap];
 
 // ---- Handler-level inference utilities ----
 

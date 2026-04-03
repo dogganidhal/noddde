@@ -25,7 +25,7 @@ This separation allows domain definitions to be shared, tested, and analyzed ind
 ```ts
 import { defineDomain } from "@noddde/engine";
 
-const bankingDomain = defineDomain<BankingInfrastructure>({
+const bankingDomain = defineDomain({
   writeModel: {
     aggregates: { BankAccount },
     standaloneCommandHandlers: {
@@ -356,7 +356,7 @@ const aggregateId = await domain.dispatchCommand({
 });
 ```
 
-`dispatchCommand` is the primary way to interact with the domain. It routes the command to the correct aggregate, executes the handler, persists resulting events, and publishes them. The return type is inferred from the command's `targetAggregateId` type.
+`dispatchCommand` is the primary way to interact with the domain. It is strongly typed: only commands from registered aggregates and standalone command handlers are accepted. TypeScript provides autocomplete for command names and infers payload types via discriminated union narrowing. The return type is the aggregate's `targetAggregateId` type for aggregate commands, or `void` for standalone commands.
 
 ### Dispatching Queries
 
@@ -367,7 +367,7 @@ const account = await domain.dispatchQuery({
 });
 ```
 
-`dispatchQuery` routes the query to its registered handler and returns the typed result.
+`dispatchQuery` is also strongly typed: only queries from registered projections and standalone query handlers are accepted. The result type is inferred from the query's phantom type parameter.
 
 ### Accessing Infrastructure
 
@@ -471,7 +471,7 @@ interface BankingInfrastructure {
 }
 
 // Step 1: Define the domain structure (pure, sync)
-const bankingDomain = defineDomain<BankingInfrastructure>({
+const bankingDomain = defineDomain({
   writeModel: {
     aggregates: { BankAccount },
   },

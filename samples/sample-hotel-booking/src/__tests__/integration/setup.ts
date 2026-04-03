@@ -21,12 +21,11 @@ import {
   InMemoryIdempotencyStore,
   InMemoryViewStore,
 } from "@noddde/engine";
-import { everyNEvents, type Command } from "@noddde/core";
+import { everyNEvents } from "@noddde/core";
 import type { HotelInfrastructure } from "../../infrastructure/types";
 import type {
   GuestHistoryView,
   RevenueView,
-  SearchQuery,
 } from "../../domain/read-model/queries";
 import { FixedClock } from "../../infrastructure/services/clock";
 import { InMemoryEmailService } from "../../infrastructure/services/email-service";
@@ -108,7 +107,7 @@ export async function createTestEnvironment() {
   const revenueViewStore = new InMemoryViewStore<RevenueView>();
 
   // Define the domain structure (pure, sync)
-  const hotelDomain = defineDomain<HotelInfrastructure, Command, SearchQuery>({
+  const hotelDomain = defineDomain({
     writeModel: {
       aggregates: { Room, Booking, Inventory },
     },

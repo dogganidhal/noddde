@@ -132,7 +132,7 @@ export const FlashSaleItem = defineAggregate<FlashSaleItemTypes>({
 ```ts
 import { defineDomain, wireDomain } from "@noddde/engine";
 
-const flashSaleDomain = defineDomain<Infrastructure>({
+const flashSaleDomain = defineDomain({
   writeModel: { aggregates: { FlashSaleItem } },
   readModel: { projections: {} },
 });

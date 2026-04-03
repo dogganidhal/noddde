@@ -6,7 +6,7 @@ import { createTestEnvironment } from "./setup";
 
 describe("Full-stack (integration)", () => {
   let app: FastifyInstance;
-  let domain: Domain<HotelInfrastructure>;
+  let domain: Domain<HotelInfrastructure, any, any, any, any>;
 
   beforeEach(async () => {
     const env = await createTestEnvironment();

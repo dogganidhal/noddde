@@ -14,7 +14,9 @@ import { queryRoutes } from "./routes/queries";
  * @param domain - The initialized domain instance.
  * @returns A ready-to-listen Fastify instance.
  */
-export function createApp(domain: Domain<HotelInfrastructure>) {
+export function createApp(
+  domain: Domain<HotelInfrastructure, any, any, any, any>,
+) {
   const app = Fastify({ logger: false });
 
   // Plugins
