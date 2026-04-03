@@ -284,6 +284,7 @@ export type DomainWiring<
   logger?: Logger;
 };
 
+/* eslint-disable no-redeclare */
 /**
  * Creates a pure, sync domain definition with full type inference.
  * Consistent with {@link defineAggregate}, {@link defineProjection}, {@link defineSaga}.
@@ -341,6 +342,7 @@ export function defineDomain<
 export function defineDomain(definition: DomainDefinition): DomainDefinition {
   return definition;
 }
+/* eslint-enable no-redeclare */
 
 /**
  * Internal context passed by wireDomain to Domain, carrying pre-computed
