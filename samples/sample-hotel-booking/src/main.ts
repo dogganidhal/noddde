@@ -34,7 +34,6 @@ import {
 } from "@noddde/engine";
 import { everyNEvents } from "@noddde/core";
 
-import type { HotelInfrastructure } from "./infrastructure/types";
 import { SystemClock } from "./infrastructure/services/clock";
 import { ConsoleEmailService } from "./infrastructure/services/email-service";
 import { ConsoleSmsService } from "./infrastructure/services/sms-service";
@@ -53,10 +52,7 @@ import { BookingFulfillmentSaga } from "./domain/process-model/booking-fulfillme
 import { CheckoutReminderSaga } from "./domain/process-model/checkout-reminder";
 import { PaymentProcessingSaga } from "./domain/process-model/payment-processing";
 
-import {
-  RunNightlyAuditHandler,
-  type RunNightlyAuditCommand,
-} from "./infrastructure/handlers/command-handlers";
+import { RunNightlyAuditHandler } from "./infrastructure/handlers/command-handlers";
 import {
   SendBookingConfirmation,
   SendCheckInNotification,
@@ -67,7 +63,6 @@ import { createApp } from "./infrastructure/http/app";
 import { DrizzleRoomAvailabilityViewStore } from "./infrastructure/persistence/drizzle-view-store";
 
 import type {
-  SearchQuery,
   GuestHistoryView,
   RevenueView,
 } from "./domain/read-model/queries";

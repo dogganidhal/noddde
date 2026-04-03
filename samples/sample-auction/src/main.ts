@@ -16,7 +16,6 @@ import { PrismaClient } from "@prisma/client";
 import { createPrismaAdapter } from "@noddde/prisma";
 import { randomUUID } from "crypto";
 
-import type { AuctionInfrastructure } from "./infrastructure";
 import { SystemClock } from "./infrastructure";
 import { aggregates, projections } from "./domain/domain";
 
