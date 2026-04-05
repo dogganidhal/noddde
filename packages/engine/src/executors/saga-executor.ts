@@ -12,6 +12,7 @@ import type {
 } from "@noddde/core";
 import { uuidv7 } from "../uuid";
 import type { MetadataContext } from "../domain";
+import type { Instrumentation } from "../tracing";
 
 /**
  * Executes the full saga event handling lifecycle: derive instance ID,
@@ -32,6 +33,7 @@ export class SagaExecutor {
     private readonly metadataStorage: AsyncLocalStorage<MetadataContext>,
     private readonly onEventsDispatched?: (events: Event[]) => Promise<void>,
     private readonly logger?: Logger,
+    private readonly instrumentation?: Instrumentation,
   ) {}
 
   /**
@@ -84,84 +86,118 @@ export class SagaExecutor {
       }
     }
 
-    // Step 5: Execute handler
-    const reaction = await onEntry.handle(
-      event,
-      currentState,
-      this.infrastructure,
-    );
-
-    const commandCount = reaction.commands
-      ? Array.isArray(reaction.commands)
-        ? reaction.commands.length
-        : 1
-      : 0;
-    this.logger?.debug("Saga reaction computed.", {
-      sagaName,
-      sagaId: String(sagaId),
-      commandCount,
-    });
-
-    // Step 6: Propagate correlation context from triggering event
-    const sagaCtx: MetadataContext = {
-      correlationId: event.metadata?.correlationId ?? uuidv7(),
-      causationId: event.metadata?.eventId ?? event.name,
-      userId: event.metadata?.userId,
+    // Wrap saga lifecycle in restored trace context from the triggering event
+    const traceCarrier = {
+      traceparent: event.metadata?.traceparent,
+      tracestate: event.metadata?.tracestate,
     };
 
-    // Step 7: Create UoW for saga reaction (spans state + commands)
-    const uow = this.unitOfWorkFactory();
-    const sagaPersistence = this.sagaPersistence;
+    const runSagaLifecycle = async (): Promise<void> => {
+      const spanAttributes = {
+        "noddde.saga.name": sagaName,
+        "noddde.event.name": event.name,
+      };
 
-    await this.uowStorage.run(uow, async () => {
-      await this.metadataStorage.run(sagaCtx, async () => {
-        try {
-          // Enlist saga state persistence
-          uow.enlist(() =>
-            sagaPersistence.save(sagaName, sagaId, reaction.state),
-          );
+      const runInSpan = async (): Promise<void> => {
+        // Step 5: Execute handler
+        const reaction = await onEntry.handle(
+          event,
+          currentState,
+          this.infrastructure,
+        );
 
-          // Step 8: Dispatch commands (within the saga's UoW + metadata context)
-          if (reaction.commands) {
-            const commands = Array.isArray(reaction.commands)
-              ? reaction.commands
-              : [reaction.commands];
-            for (const command of commands) {
-              await this.infrastructure.commandBus.dispatch(command);
-            }
-          }
+        const commandCount = reaction.commands
+          ? Array.isArray(reaction.commands)
+            ? reaction.commands.length
+            : 1
+          : 0;
+        this.logger?.debug("Saga reaction computed.", {
+          sagaName,
+          sagaId: String(sagaId),
+          commandCount,
+        });
 
-          // Step 9: Commit saga state + all aggregate changes atomically
-          const events = await uow.commit();
+        // Step 6: Propagate correlation context from triggering event
+        const sagaCtx: MetadataContext = {
+          correlationId: event.metadata?.correlationId ?? uuidv7(),
+          causationId: event.metadata?.eventId ?? event.name,
+          userId: event.metadata?.userId,
+        };
 
-          // Step 10: Publish all deferred events
-          for (const deferredEvent of events) {
-            await this.infrastructure.eventBus.dispatch(deferredEvent);
-          }
+        // Step 7: Create UoW for saga reaction (spans state + commands)
+        const uow = this.unitOfWorkFactory();
+        const sagaPersistence = this.sagaPersistence;
 
-          // Best-effort post-dispatch callback (e.g., mark outbox entries published)
-          if (this.onEventsDispatched && events.length > 0) {
+        await this.uowStorage.run(uow, async () => {
+          await this.metadataStorage.run(sagaCtx, async () => {
             try {
-              await this.onEventsDispatched(events);
-            } catch {
-              // Best-effort: relay will catch unpublished entries
+              // Enlist saga state persistence
+              uow.enlist(() =>
+                sagaPersistence.save(sagaName, sagaId, reaction.state),
+              );
+
+              // Step 8: Dispatch commands (within the saga's UoW + metadata context)
+              if (reaction.commands) {
+                const commands = Array.isArray(reaction.commands)
+                  ? reaction.commands
+                  : [reaction.commands];
+                for (const command of commands) {
+                  await this.infrastructure.commandBus.dispatch(command);
+                }
+              }
+
+              // Step 9: Commit saga state + all aggregate changes atomically
+              const events = await uow.commit();
+
+              // Step 10: Publish all deferred events
+              for (const deferredEvent of events) {
+                await this.infrastructure.eventBus.dispatch(deferredEvent);
+              }
+
+              // Best-effort post-dispatch callback (e.g., mark outbox entries published)
+              if (this.onEventsDispatched && events.length > 0) {
+                try {
+                  await this.onEventsDispatched(events);
+                } catch {
+                  // Best-effort: relay will catch unpublished entries
+                }
+              }
+            } catch (error) {
+              this.logger?.error("Saga execution failed.", {
+                sagaName,
+                sagaId: String(sagaId),
+                eventName: event.name,
+                error: String(error),
+              });
+              try {
+                await uow.rollback();
+              } catch {
+                // UoW may already be completed if commit failed
+              }
+              throw error;
             }
-          }
-        } catch (error) {
-          this.logger?.error("Saga execution failed.", {
-            sagaName,
-            sagaId: String(sagaId),
-            eventName: event.name,
-            error: String(error),
           });
-          try {
-            await uow.rollback();
-          } catch {
-            // UoW may already be completed if commit failed
-          }
-          throw error;
-        }
-      });
-    });
+        });
+      };
+
+      if (this.instrumentation) {
+        await this.instrumentation.withSpan(
+          "noddde.saga.handle",
+          spanAttributes,
+          runInSpan,
+        );
+      } else {
+        await runInSpan();
+      }
+    };
+
+    if (this.instrumentation) {
+      await this.instrumentation.withExtractedContext(
+        traceCarrier,
+        runSagaLifecycle,
+      );
+    } else {
+      await runSagaLifecycle();
+    }
   }
 }

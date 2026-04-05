@@ -1,0 +1,134 @@
+---
+title: Observability & Tracing
+description: How noddde integrates with OpenTelemetry for distributed tracing across commands, projections, sagas, and queries — with zero required configuration.
+---
+
+noddde has native OpenTelemetry (OTel) instrumentation built into the engine. When `@opentelemetry/api` is installed in your application, the framework automatically creates spans at every pipeline stage and propagates W3C Trace Context through event metadata. When it is not installed, all instrumentation is a zero-cost no-op.
+
+## How It Works
+
+During `wireDomain()` initialization, the engine attempts a dynamic `import("@opentelemetry/api")`. If the import succeeds, tracing is activated for the domain's lifetime. If it fails (package not installed), all instrumentation methods become pass-throughs with no overhead.
+
+This means:
+
+- **No hard dependency** — `@opentelemetry/api` is an optional peer dependency
+- **No configuration** — install the package, register an SDK, and traces appear
+- **Works with any backend** — GCP Cloud Trace, Datadog, Jaeger, Zipkin, or any OTel-compatible exporter
+
+## Setup
+
+### 1. Install the OTel API and an SDK
+
+```bash
+npm install @opentelemetry/api @opentelemetry/sdk-trace-node @opentelemetry/auto-instrumentations-node
+```
+
+### 2. Register a tracer provider
+
+Configure OTel before calling `wireDomain()`. A typical setup:
+
+```ts
+import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
+
+const provider = new NodeTracerProvider({
+  spanProcessors: [
+    new BatchSpanProcessor(
+      new OTLPTraceExporter({
+        url: "http://localhost:4318/v1/traces",
+      }),
+    ),
+  ],
+});
+provider.register();
+```
+
+### 3. Wire your domain as usual
+
+```ts
+import { wireDomain } from "@noddde/engine";
+
+const domain = await wireDomain(myDomainDefinition, {
+  // ... your wiring
+});
+```
+
+The engine logs `"OpenTelemetry detected. Tracing enabled."` at info level when OTel is found. If not found, it logs `"OpenTelemetry not detected. Tracing disabled."` at debug level.
+
+## What Gets Traced
+
+The engine creates spans at four pipeline stages:
+
+### Command Dispatch
+
+Every call to `domain.dispatchCommand()` creates a span:
+
+| Attribute               | Value                                     |
+| ----------------------- | ----------------------------------------- |
+| **Span name**           | `noddde.command.dispatch`                 |
+| `noddde.command.name`   | The command name (e.g. `"CreateAccount"`) |
+| `noddde.aggregate.name` | The target aggregate type                 |
+| `noddde.aggregate.id`   | The target aggregate instance ID          |
+
+### Projection Handling
+
+When an event is delivered to a projection, the engine restores the trace context from the event's metadata and creates a child span:
+
+| Attribute                | Value                                             |
+| ------------------------ | ------------------------------------------------- |
+| **Span name**            | `noddde.projection.handle`                        |
+| `noddde.projection.name` | The projection name (e.g. `"AccountView"`)        |
+| `noddde.event.name`      | The event being handled (e.g. `"AccountCreated"`) |
+
+### Saga Handling
+
+When an event triggers a saga, the engine restores the trace context and creates a span that wraps the full saga lifecycle (load state, handle, persist, dispatch commands):
+
+| Attribute           | Value                                     |
+| ------------------- | ----------------------------------------- |
+| **Span name**       | `noddde.saga.handle`                      |
+| `noddde.saga.name`  | The saga name (e.g. `"OrderFulfillment"`) |
+| `noddde.event.name` | The triggering event                      |
+
+Commands dispatched by the saga reaction are children of the saga span, which is itself linked to the original command's trace.
+
+### Query Dispatch
+
+Every call to `domain.dispatchQuery()` creates a span:
+
+| Attribute           | Value                                    |
+| ------------------- | ---------------------------------------- |
+| **Span name**       | `noddde.query.dispatch`                  |
+| `noddde.query.name` | The query name (e.g. `"GetAccountById"`) |
+
+## Trace Context Propagation
+
+The engine propagates trace context through the event store using W3C Trace Context headers (`traceparent` and `tracestate`) stored in `EventMetadata`. This enables end-to-end traces that span:
+
+```
+Command dispatch → Aggregate → Event Store → Projection
+                                           → Saga → Downstream Command → ...
+```
+
+When a command is dispatched inside an active span, the engine:
+
+1. Serializes the current trace context into the events produced by the command
+2. When those events are delivered to projections or sagas, extracts the trace context
+3. Creates child spans inside the restored context
+
+This means a single user action (e.g. placing an order) produces a connected trace across all aggregates, projections, and sagas it triggers — even if they execute asynchronously.
+
+## Disabling Tracing
+
+Simply don't install `@opentelemetry/api`. The engine detects its absence at startup and all instrumentation becomes a zero-cost pass-through. No code changes needed.
+
+## Error Recording
+
+When a span wraps an operation that throws, the engine:
+
+1. Records the exception on the span via `span.recordException(error)`
+2. Sets the span status to `ERROR`
+3. Re-throws the original error
+
+This means failed commands, projections, and sagas appear as error spans in your tracing backend with full exception details.

@@ -4,6 +4,7 @@
     "domain-configuration",
     "infrastructure",
     "logging",
+    "observability",
     "persistence",
     "idempotent-commands",
     "outbox-pattern",

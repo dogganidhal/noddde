@@ -25,6 +25,8 @@ docs:
   - `aggregateName?: string` — which aggregate type produced this event.
   - `aggregateId?: ID` — which aggregate instance produced this event. Uses `ID` to support string, numeric, and bigint aggregate identifiers.
   - `sequenceNumber?: number` — position in the aggregate's event stream.
+  - `traceparent?: string` — W3C Trace Context traceparent header. Injected by the engine when OpenTelemetry is detected at runtime. Enables distributed trace propagation through the event store.
+  - `tracestate?: string` — W3C Trace Context tracestate header. Carries vendor-specific trace information alongside `traceparent`.
 
 ## Behavioral Requirements
 
@@ -33,17 +35,20 @@ docs:
 3. The five optional fields (`userId`, `version`, `aggregateName`, `aggregateId`, `sequenceNumber`) may be omitted.
 4. `eventId` is expected to be a UUID v7 string (time-ordered), but the type system does not enforce the format — it is `string`.
 5. `timestamp` is expected to be an ISO 8601 string, but the type system does not enforce the format — it is `string`.
+6. `traceparent` is expected to be a W3C Trace Context traceparent string (e.g. `00-<trace-id>-<span-id>-<flags>`), but the type system does not enforce the format — it is `string | undefined`.
+7. `tracestate` is expected to be a W3C Trace Context tracestate string, but the type system does not enforce the format — it is `string | undefined`.
 
 ## Invariants
 
 - All four required fields are non-optional (`string`, not `string | undefined`).
-- All five optional fields use the `?` modifier.
+- All seven optional fields use the `?` modifier.
 - The interface has no methods — it is a pure data shape.
 
 ## Edge Cases
 
 - **Minimal metadata**: An object with only the 4 required fields satisfies `EventMetadata`.
-- **Full metadata**: An object with all 9 fields satisfies `EventMetadata`.
+- **Full metadata**: An object with all 11 fields satisfies `EventMetadata`.
+- **Trace context only**: An object with the 4 required fields plus `traceparent` and `tracestate` satisfies `EventMetadata`.
 - **Extra fields**: TypeScript structural typing allows extra properties when assigned to `EventMetadata`.
 
 ## Integration Points
@@ -51,6 +56,7 @@ docs:
 - `EventMetadata` is referenced by `Event.metadata?` — the optional metadata field on all events.
 - The engine's `Domain` class populates `EventMetadata` during command dispatch (not defined in this spec).
 - Persistence layers store and retrieve metadata alongside events (not defined in this spec).
+- The engine's tracing module injects `traceparent` and `tracestate` when OpenTelemetry is detected at runtime (defined in `engine/tracing` spec).
 
 ## Test Scenarios
 
@@ -157,6 +163,36 @@ describe("EventMetadata required fields", () => {
       timestamp: string;
       correlationId: string;
     }>().not.toMatchTypeOf<EventMetadata>();
+  });
+});
+```
+
+### EventMetadata accepts W3C Trace Context fields
+
+```ts
+import { describe, it, expectTypeOf } from "vitest";
+import type { EventMetadata } from "@noddde/core";
+
+describe("EventMetadata trace context fields", () => {
+  it("should accept traceparent and tracestate as optional string fields", () => {
+    const metadata: EventMetadata = {
+      eventId: "0190a6e0-0000-7000-8000-000000000001",
+      timestamp: "2024-01-01T00:00:00.000Z",
+      correlationId: "corr-1",
+      causationId: "cmd-1",
+      traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+      tracestate: "congo=t61rcWkgMzE",
+    };
+    expectTypeOf(metadata).toMatchTypeOf<EventMetadata>();
+  });
+
+  it("should have optional string types for trace context fields", () => {
+    expectTypeOf<EventMetadata["traceparent"]>().toEqualTypeOf<
+      string | undefined
+    >();
+    expectTypeOf<EventMetadata["tracestate"]>().toEqualTypeOf<
+      string | undefined
+    >();
   });
 });
 ```
