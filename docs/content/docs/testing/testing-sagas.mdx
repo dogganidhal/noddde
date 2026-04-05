@@ -1,6 +1,6 @@
 ---
 title: Testing Sagas
-description: Using testSaga for Given-When-Then saga testing with automatic CQRS infrastructure.
+description: Using testSaga for Given-When-Then saga testing with automatic CQRS setup.
 ---
 
 Sagas orchestrate workflows across aggregates by reacting to events and dispatching commands. The `testSaga` harness from `@noddde/testing` tests saga handlers in isolation with the inverse Decider pattern: **event in, commands out**.
@@ -32,13 +32,13 @@ expect(result.commands).toEqual([
 
 ### Builder API
 
-| Method                          | Purpose                                                                      |
-| ------------------------------- | ---------------------------------------------------------------------------- |
-| `.givenState(state)`            | Saga state before the event. Defaults to `saga.initialState` if not called.  |
-| `.when(event)`                  | The event to process through the saga handler. Required before `.execute()`. |
-| `.withInfrastructure(infra)`    | Custom infrastructure. Defaults to `{}`.                                     |
-| `.withCQRSInfrastructure(cqrs)` | Override the default no-op CQRS buses.                                       |
-| `.execute()`                    | Runs the test and returns the result. Always async.                          |
+| Method                 | Purpose                                                                      |
+| ---------------------- | ---------------------------------------------------------------------------- |
+| `.givenState(state)`   | Saga state before the event. Defaults to `saga.initialState` if not called.  |
+| `.when(event)`         | The event to process through the saga handler. Required before `.execute()`. |
+| `.withPorts(infra)`    | Custom ports. Defaults to `{}`.                                              |
+| `.withCQRSPorts(cqrs)` | Override the default no-op CQRS buses.                                       |
+| `.execute()`           | Runs the test and returns the result. Always async.                          |
 
 ### Result Shape
 
@@ -91,15 +91,15 @@ expect(result.commands).toEqual([]);
 expect(result.state.status).toBe("fulfilled");
 ```
 
-## Automatic CQRS Infrastructure
+## Automatic CQRS Ports
 
-Saga handlers receive `TInfrastructure & CQRSInfrastructure` -- they have access to `commandBus`, `eventBus`, and `queryBus`. The harness automatically provides no-op implementations so you do not need to wire mock buses for most tests.
+Saga handlers receive `TPorts & CQRSPorts` -- they have access to `commandBus`, `eventBus`, and `queryBus`. The harness automatically provides no-op implementations so you do not need to wire mock buses for most tests.
 
 Most saga handlers return commands in the reaction rather than dispatching through the bus directly. The no-op buses satisfy the type contract without affecting test behavior.
 
-## Custom Infrastructure
+## Custom Ports
 
-When saga handlers use domain-specific infrastructure (notification services, APIs, etc.), provide it via `.withInfrastructure()`:
+When saga handlers use domain-specific ports (notification services, APIs, etc.), provide it via `.withPorts()`:
 
 ```ts
 const mockNotifier = { send: vi.fn().mockResolvedValue(undefined) };
@@ -109,7 +109,7 @@ const result = await testSaga(NotificationSaga)
     name: "ShipmentDelivered",
     payload: { orderId: "o-1", trackingNumber: "TRK-123" },
   })
-  .withInfrastructure({ notificationService: mockNotifier })
+  .withPorts({ notificationService: mockNotifier })
   .execute();
 
 expect(mockNotifier.send).toHaveBeenCalledWith(
@@ -117,7 +117,7 @@ expect(mockNotifier.send).toHaveBeenCalledWith(
 );
 ```
 
-## Overriding CQRS Infrastructure
+## Overriding CQRS Ports
 
 In rare cases where a saga handler calls `commandBus.dispatch` directly (instead of returning commands in the reaction), override the CQRS buses:
 
@@ -126,7 +126,7 @@ const mockDispatch = vi.fn().mockResolvedValue(undefined);
 
 const result = await testSaga(SpecialSaga)
   .when(someEvent)
-  .withCQRSInfrastructure({
+  .withCQRSPorts({
     commandBus: { dispatch: mockDispatch },
   })
   .execute();

@@ -1,15 +1,15 @@
 /* eslint-disable no-unused-vars */
-import type { ID, Saga, SagaTypes, CQRSInfrastructure } from "@noddde/core";
+import type { ID, Saga, SagaTypes, CQRSPorts } from "@noddde/core";
 import { NoopLogger } from "@noddde/engine";
 import type { SagaTestResult } from "./types";
 
 /**
- * Creates a no-op CQRSInfrastructure for saga unit tests.
- * Saga handlers receive `TInfrastructure & CQRSInfrastructure`,
- * but most handlers only use the custom infrastructure portion
+ * Creates a no-op CQRSPorts for saga unit tests.
+ * Saga handlers receive `TPorts & CQRSPorts`,
+ * but most handlers only use the custom ports portion
  * and return commands in the reaction rather than dispatching directly.
  */
-function createNoopCQRSInfrastructure(): CQRSInfrastructure {
+function createNoopCQRSPorts(): CQRSPorts {
   return {
     commandBus: { dispatch: async () => {} },
     eventBus: { dispatch: async () => {} },
@@ -40,20 +40,16 @@ export interface SagaTestBuilder<T extends SagaTypes> {
  */
 export interface SagaTestBuilderWithEvent<T extends SagaTypes> {
   /**
-   * Provides custom infrastructure to the handler.
-   * A no-op CQRSInfrastructure is automatically merged.
+   * Provides custom ports to the handler.
+   * No-op {@link CQRSPorts} are automatically merged.
    */
-  withInfrastructure(
-    infrastructure: T["infrastructure"],
-  ): SagaTestBuilderWithEvent<T>;
+  withPorts(ports: T["ports"]): SagaTestBuilderWithEvent<T>;
 
   /**
-   * Provides a custom CQRSInfrastructure (overriding the default no-op).
+   * Provides custom {@link CQRSPorts} (overriding the default no-op).
    * Useful when the saga handler calls `commandBus.dispatch` directly.
    */
-  withCQRSInfrastructure(
-    cqrs: Partial<CQRSInfrastructure>,
-  ): SagaTestBuilderWithEvent<T>;
+  withCQRSPorts(cqrs: Partial<CQRSPorts>): SagaTestBuilderWithEvent<T>;
 
   /**
    * Executes the test:
@@ -70,8 +66,8 @@ export interface SagaTestBuilderWithEvent<T extends SagaTypes> {
  * Creates a Given-When-Then test harness for a saga.
  * The inverse Decider pattern: event in, commands out.
  *
- * Infrastructure is automatically augmented with a no-op
- * {@link CQRSInfrastructure} so saga handlers receive the expected type
+ * Ports are automatically augmented with no-op
+ * {@link CQRSPorts} so saga handlers receive the expected type
  * without manual bus wiring.
  *
  * @typeParam T - The {@link SagaTypes} bundle.
@@ -97,8 +93,8 @@ export function testSaga<T extends SagaTypes, TSagaId extends ID = string>(
 ): SagaTestBuilder<T> {
   let currentState: T["state"] | undefined;
   let event: T["events"] | undefined;
-  let infrastructure: T["infrastructure"] | undefined;
-  let cqrsOverride: Partial<CQRSInfrastructure> | undefined;
+  let ports: T["ports"] | undefined;
+  let cqrsOverride: Partial<CQRSPorts> | undefined;
 
   const builder: SagaTestBuilder<T> & SagaTestBuilderWithEvent<T> = {
     givenState(state: T["state"]) {
@@ -111,12 +107,12 @@ export function testSaga<T extends SagaTypes, TSagaId extends ID = string>(
       return builder;
     },
 
-    withInfrastructure(infra: T["infrastructure"]) {
-      infrastructure = infra;
+    withPorts(p: T["ports"]) {
+      ports = p;
       return builder;
     },
 
-    withCQRSInfrastructure(cqrs: Partial<CQRSInfrastructure>) {
+    withCQRSPorts(cqrs: Partial<CQRSPorts>) {
       cqrsOverride = cqrs;
       return builder;
     },
@@ -127,15 +123,15 @@ export function testSaga<T extends SagaTypes, TSagaId extends ID = string>(
       try {
         const handler = (saga.on as Record<string, any>)[event!.name]?.handle;
 
-        const noopCqrs = createNoopCQRSInfrastructure();
-        const mergedInfra = {
+        const noopCqrs = createNoopCQRSPorts();
+        const mergedPorts = {
           logger: new NoopLogger(),
-          ...(infrastructure ?? ({} as T["infrastructure"])),
+          ...(ports ?? ({} as T["ports"])),
           ...noopCqrs,
           ...cqrsOverride,
         };
 
-        const reaction = await handler(event, state, mergedInfra);
+        const reaction = await handler(event, state, mergedPorts);
 
         const commands: T["commands"][] = reaction.commands
           ? Array.isArray(reaction.commands)

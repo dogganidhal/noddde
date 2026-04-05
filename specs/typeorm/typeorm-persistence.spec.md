@@ -10,7 +10,7 @@ exports:
   - TypeORMAggregateStateTableConfig
   - TypeORMStateTableColumnMap
   - createTypeORMPersistence (deprecated)
-  - TypeORMPersistenceInfrastructure
+  - TypeORMPersistencePorts
   - TypeORMEventSourcedAggregatePersistence
   - TypeORMStateStoredAggregatePersistence
   - TypeORMSagaPersistence
@@ -138,7 +138,7 @@ export function createTypeORMAdapter<const C extends TypeORMAdapterConfig>(
 /**
  * @deprecated Use createTypeORMAdapter instead.
  */
-export interface TypeORMPersistenceInfrastructure {
+export interface TypeORMPersistencePorts {
   eventSourcedPersistence: EventSourcedAggregatePersistence;
   stateStoredPersistence: StateStoredAggregatePersistence;
   sagaPersistence: SagaPersistence;
@@ -152,7 +152,7 @@ export interface TypeORMPersistenceInfrastructure {
  */
 export function createTypeORMPersistence(
   dataSource: DataSource,
-): TypeORMPersistenceInfrastructure;
+): TypeORMPersistencePorts;
 
 /**
  * TypeORM-backed event-sourced aggregate persistence.
@@ -475,9 +475,9 @@ export class NodddeOutboxEntryEntity {
 
 ### Backwards Compatibility
 
-64. `createTypeORMPersistence(dataSource)` continues to work with the same signature and return type (`TypeORMPersistenceInfrastructure`).
+64. `createTypeORMPersistence(dataSource)` continues to work with the same signature and return type (`TypeORMPersistencePorts`).
 65. `createTypeORMPersistence` delegates to `createTypeORMAdapter` internally with `{ snapshotStore: true, outboxStore: true }`.
-66. The `TypeORMPersistenceInfrastructure` return type is unchanged.
+66. The `TypeORMPersistencePorts` return type is unchanged.
 67. `createTypeORMPersistence` is marked `@deprecated` in JSDoc, recommending `createTypeORMAdapter` instead.
 
 ## Invariants

@@ -1,6 +1,6 @@
 /* eslint-disable no-unused-vars */
 import type { ID } from "../id";
-import { Infrastructure } from "../infrastructure";
+import { Ports } from "../ports";
 import { Event } from "../edd";
 import { Query, QueryHandler } from "../cqrs";
 import type { ViewStore } from "../persistence/view-store";
@@ -20,7 +20,7 @@ import type { ViewStore } from "../persistence/view-store";
  *   events: BankAccountEvent;
  *   queries: BankAccountQuery;
  *   view: BankAccountView;
- *   infrastructure: BankingInfrastructure;
+ *   ports: BankingPorts;
  *   viewStore: BankAccountViewStore; // optional — type hint for { views } injection
  * };
  * ```
@@ -33,10 +33,10 @@ export type ProjectionTypes = {
   /** The read-optimized view model this projection builds. */
   view: any;
   /** The external dependencies available to query handlers. */
-  infrastructure: Infrastructure;
+  ports: Ports;
   /**
    * Optional typed view store for this projection. When present, enables
-   * typed `{ views }` injection into query handlers via `ProjectionQueryInfra<T>`.
+   * typed `{ views }` injection into query handlers via `ProjectionQueryPorts<T>`.
    * This is a type-level hint only — the actual view store is provided via
    * `DomainWiring.projections` in {@link wireDomain}.
    */
@@ -86,26 +86,26 @@ type ProjectionOnMap<T extends ProjectionTypes> = {
 // ---- Internal handler maps ----
 
 /**
- * Conditionally injects the view store into query handler infrastructure.
+ * Conditionally injects the view store into query handler ports.
  * When T has a viewStore field extending ViewStore, query handlers receive
- * `T["infrastructure"] & { views: T["viewStore"] }`.
- * Otherwise, they receive just `T["infrastructure"]` (backward compatible).
+ * `T["ports"] & { views: T["viewStore"] }`.
+ * Otherwise, they receive just `T["ports"]` (backward compatible).
  */
-type ProjectionQueryInfra<T extends ProjectionTypes> = T extends {
+type ProjectionQueryPorts<T extends ProjectionTypes> = T extends {
   viewStore: infer VS extends ViewStore;
 }
-  ? T["infrastructure"] & { views: VS }
-  : T["infrastructure"];
+  ? T["ports"] & { views: VS }
+  : T["ports"];
 
 type QueryHandlerMap<T extends ProjectionTypes> = {
   [QueryName in T["queries"]["name"]]?: QueryHandler<
-    ProjectionQueryInfra<T>,
+    ProjectionQueryPorts<T>,
     Extract<T["queries"], { name: QueryName }>
   >;
 };
 
 /**
- * Factory function that resolves a view store from user infrastructure.
+ * Factory function that resolves a view store from user ports.
  * When `T` has a typed `viewStore` field in its `ProjectionTypes`, the
  * factory returns that specific view store type. Otherwise, it returns
  * a generic `ViewStore<T["view"]>`.
@@ -113,8 +113,8 @@ type QueryHandlerMap<T extends ProjectionTypes> = {
 type ViewStoreFactory<T extends ProjectionTypes> = T extends {
   viewStore: infer VS extends ViewStore;
 }
-  ? (infrastructure: T["infrastructure"]) => VS
-  : (infrastructure: T["infrastructure"]) => ViewStore<T["view"]>;
+  ? (ports: T["ports"]) => VS
+  : (ports: T["ports"]) => ViewStore<T["view"]>;
 
 // ---- Projection definition ----
 
@@ -173,7 +173,7 @@ export interface Projection<T extends ProjectionTypes = ProjectionTypes> {
    * handle events without directly serving queries.
    *
    * When `T` has a `viewStore` field, handlers receive `{ views }` merged
-   * into their infrastructure parameter.
+   * into their ports parameter.
    */
   queryHandlers: QueryHandlerMap<T>;
 
@@ -185,7 +185,7 @@ export interface Projection<T extends ProjectionTypes = ProjectionTypes> {
   initialView?: T["view"];
 
   /**
-   * Optional factory that resolves the view store from user infrastructure.
+   * Optional factory that resolves the view store from user ports.
    * Can be provided here for convenience, or via `DomainWiring.projections`
    * in {@link wireDomain} (which takes priority if both are set).
    */
@@ -204,7 +204,7 @@ export interface Projection<T extends ProjectionTypes = ProjectionTypes> {
 
 /**
  * Identity function that creates a projection definition with full type inference
- * across the event/query/view/infrastructure boundaries. This is the
+ * across the event/query/view/ports boundaries. This is the
  * recommended way to define projections.
  *
  * @typeParam T - Inferred {@link ProjectionTypes} bundle.
@@ -286,27 +286,25 @@ export type InferProjectionMapQueries<
 }[keyof TMap];
 
 /**
- * Extracts the infrastructure type from a {@link Projection} definition.
+ * Extracts the ports type from a {@link Projection} definition.
  *
  * @example
  * ```ts
- * type Infra = InferProjectionInfrastructure<typeof BankAccountProjection>; // BankingInfrastructure
+ * type P = InferProjectionPorts<typeof BankAccountProjection>; // BankingPorts
  * ```
  */
-export type InferProjectionInfrastructure<T extends Projection> =
-  T extends Projection<infer U> ? U["infrastructure"] : never;
+export type InferProjectionPorts<T extends Projection> =
+  T extends Projection<infer U> ? U["ports"] : never;
 
 /**
- * Computes the intersection of all infrastructure types declared across
+ * Computes the intersection of all port types declared across
  * a map of projections. Used by `wireDomain` to infer what the
- * `wiring.infrastructure` factory must return.
+ * `wiring.adapters` factory must return.
  */
-export type InferProjectionMapInfrastructure<
+export type InferProjectionMapPorts<
   TMap extends Record<string | symbol, Projection<any>>,
 > = {
-  [K in keyof TMap]: TMap[K] extends Projection<infer U>
-    ? U["infrastructure"]
-    : never;
+  [K in keyof TMap]: TMap[K] extends Projection<infer U> ? U["ports"] : never;
 }[keyof TMap];
 
 // ---- Handler-level inference utilities ----
@@ -340,33 +338,32 @@ export type InferProjectionEventHandler<
 > = ProjectionEventHandler<Extract<T["events"], { name: K }>, T["view"]>;
 
 /**
- * Computes the full infrastructure type for a projection's query handlers.
+ * Computes the full ports type for a projection's query handlers.
  * When the {@link ProjectionTypes} bundle has a typed `viewStore` field,
- * query handlers receive `T["infrastructure"] & { views: T["viewStore"] }`.
- * Otherwise, they receive just `T["infrastructure"]`.
+ * query handlers receive `T["ports"] & { views: T["viewStore"] }`.
+ * Otherwise, they receive just `T["ports"]`.
  *
- * This is the public export of the internal `ProjectionQueryInfra<T>` logic.
+ * This is the public export of the internal `ProjectionQueryPorts<T>` logic.
  *
  * @typeParam T - The {@link ProjectionTypes} bundle.
  *
  * @example
  * ```ts
- * type Infra = InferProjectionQueryInfrastructure<AccountProjectionDef>;
- * // → AccountInfra & { views: AccountViewStore }  (when viewStore is present)
- * // → AccountInfra                                 (when viewStore is absent)
+ * type P = InferProjectionQueryPorts<AccountProjectionDef>;
+ * // → AccountPorts & { views: AccountViewStore }  (when viewStore is present)
+ * // → AccountPorts                                 (when viewStore is absent)
  * ```
  */
-export type InferProjectionQueryInfrastructure<T extends ProjectionTypes> =
-  T extends {
-    viewStore: infer VS extends ViewStore;
-  }
-    ? T["infrastructure"] & { views: VS }
-    : T["infrastructure"];
+export type InferProjectionQueryPorts<T extends ProjectionTypes> = T extends {
+  viewStore: infer VS extends ViewStore;
+}
+  ? T["ports"] & { views: VS }
+  : T["ports"];
 
 /**
  * Infers the fully-typed query handler function for a specific query name
  * within a {@link ProjectionTypes} bundle. Use this to type extracted query
- * handlers in separate files. Infrastructure is automatically merged with
+ * handlers in separate files. Ports are automatically merged with
  * `{ views }` when the projection defines a typed `viewStore`.
  *
  * Operates on the `ProjectionTypes` bundle (not the `Projection` definition),
@@ -387,6 +384,6 @@ export type InferProjectionQueryHandler<
   T extends ProjectionTypes,
   K extends T["queries"]["name"],
 > = QueryHandler<
-  InferProjectionQueryInfrastructure<T>,
+  InferProjectionQueryPorts<T>,
   Extract<T["queries"], { name: K }>
 >;

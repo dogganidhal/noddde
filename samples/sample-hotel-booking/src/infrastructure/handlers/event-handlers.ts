@@ -1,5 +1,5 @@
 import type { EventHandler } from "@noddde/core";
-import type { HotelInfrastructure } from "../types";
+import type { HotelPorts } from "../types";
 import type { BookingEvent } from "../../domain/write-model/booking/events";
 import type { RoomEvent } from "../../domain/write-model/room/events";
 
@@ -13,7 +13,7 @@ import type { RoomEvent } from "../../domain/write-model/room/events";
  */
 export const SendBookingConfirmation: EventHandler<
   Extract<BookingEvent, { name: "BookingConfirmed" }>,
-  HotelInfrastructure
+  HotelPorts
 > = async (event, { emailService }) => {
   // Real system: const guest = await queryBus.dispatch({ name: "GetGuestByBooking", ... });
   const recipient = `guest+${event.payload.bookingId}@hotel.example`;
@@ -30,7 +30,7 @@ export const SendBookingConfirmation: EventHandler<
  */
 export const SendCheckInNotification: EventHandler<
   Extract<RoomEvent, { name: "GuestCheckedIn" }>,
-  HotelInfrastructure
+  HotelPorts
 > = async (event, { smsService }) => {
   await smsService.send(
     event.payload.guestId,

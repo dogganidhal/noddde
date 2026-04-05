@@ -100,7 +100,7 @@ const OrderFulfillmentSaga = defineSaga<OrderFulfillmentSagaDef>({
 
 ### Domain Configuration
 
-`defineDomain` captures the domain structure and `wireDomain` connects it to infrastructure to create a running domain:
+`defineDomain` captures the domain structure and `wireDomain` connects it to adapters to create a running domain:
 
 ```ts
 import { defineDomain, wireDomain } from "@noddde/engine";
@@ -112,7 +112,7 @@ const myDomain = defineDomain({
 });
 
 const domain = await wireDomain(myDomain, {
-  infrastructure: () => ({
+  adapters: () => ({
     /* custom infra */
   }),
   aggregates: {
@@ -136,7 +136,7 @@ const domain = await wireDomain(myDomain, {
 | Type safety       | Manual generic parameters         | Inferred from `AggregateTypes` bundle        |
 | Event definitions | Enum + interface + union          | `DefineEvents<{ ... }>` single declaration   |
 | Testing           | Requires framework setup          | Call functions directly                      |
-| Infrastructure    | Decorator-based injection         | Function parameter injection                 |
+| Ports             | Decorator-based injection         | Function parameter injection                 |
 
 noDDDe draws inspiration from modern TypeScript API design (Zod, tRPC, Drizzle) — declarative, inference-heavy, zero-boilerplate.
 

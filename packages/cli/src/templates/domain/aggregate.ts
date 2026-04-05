@@ -17,7 +17,7 @@ import type { ${ctx.name}State } from "./state.js";
 import { initial${ctx.name}State } from "./state.js";
 import type { ${ctx.name}CreatedPayload } from "../../../event-model/${ctx.kebabName}-created.js";
 import type { Create${ctx.name}Payload } from "./commands/create-${ctx.kebabName}.js";
-import type { ${ctx.name}Infrastructure } from "../../../../infrastructure/index.js";
+import type { ${ctx.name}Ports } from "../../../../ports/index.js";
 import { decideCreate${ctx.name} } from "./deciders/index.js";
 import { evolve${ctx.name}Created } from "./evolvers/index.js";
 
@@ -39,7 +39,7 @@ export type ${ctx.name}Def = {
   state: ${ctx.name}State;
   events: ${ctx.name}Event;
   commands: ${ctx.name}Command;
-  infrastructure: ${ctx.name}Infrastructure;
+  ports: ${ctx.name}Ports;
 };
 
 // ── Aggregate definition ────────────────────────────────────────

@@ -1,7 +1,7 @@
 import { defineProjection } from "@noddde/core";
 import type { ViewStore } from "@noddde/core";
 import type { AuctionEvent } from "../../../event-model";
-import type { AuctionInfrastructure } from "../../../../infrastructure";
+import type { AuctionPorts } from "../../../../infrastructure";
 import type { AuctionSummaryView } from "./auction-summary";
 import { initialAuctionSummaryView } from "./auction-summary";
 import type { AuctionSummaryQuery } from "./queries";
@@ -19,7 +19,7 @@ type AuctionSummaryProjectionDef = {
   events: AuctionEvent;
   queries: AuctionSummaryQuery;
   view: AuctionSummaryView;
-  infrastructure: AuctionInfrastructure;
+  ports: AuctionPorts;
   viewStore: ViewStore<AuctionSummaryView>;
 };
 

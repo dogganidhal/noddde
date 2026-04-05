@@ -37,7 +37,7 @@ describe("generateProject", () => {
     const base = path.join(tmpDir, "hotel-booking");
     const domainFiles = [
       "src/main.ts",
-      "src/infrastructure/index.ts",
+      "src/ports/index.ts",
       "src/domain/domain.ts",
       "src/domain/event-model/index.ts",
       "src/domain/write-model/index.ts",

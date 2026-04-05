@@ -9,9 +9,9 @@ exports:
 depends_on:
   - persistence/outbox
   - edd/event-bus
-  - infrastructure/closeable
+  - ports/closeable
 docs:
-  - domain-configuration/infrastructure.mdx
+  - domain-configuration/adapters.mdx
 ---
 
 # OutboxRelay

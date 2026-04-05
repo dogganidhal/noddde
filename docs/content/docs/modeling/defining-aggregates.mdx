@@ -104,20 +104,20 @@ A few design tips:
 
 ## Step 4: Bundle Types
 
-Bundle the state, events, commands, and infrastructure into a single `AggregateTypes` type. This is the single type parameter that `defineAggregate` uses for full type inference across all boundaries:
+Bundle the state, events, commands, and ports into a single `AggregateTypes` type. This is the single type parameter that `defineAggregate` uses for full type inference across all boundaries:
 
 ```typescript
-import { Infrastructure } from "@noddde/core";
+import { Ports } from "@noddde/core";
 
 type BankAccountDef = {
   state: BankAccountState;
   events: BankAccountEvent;
   commands: BankAccountCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 ```
 
-The `infrastructure` field specifies what services your decide handlers can access. The base `Infrastructure` type is an empty object -- use it when your aggregate needs no external services. If your handlers need a logger, a clock, or any other service, define a custom interface instead (see [Using Infrastructure](#using-infrastructure) below).
+The `ports` field specifies what services your decide handlers can access. The base `Ports` type is an empty object -- use it when your aggregate needs no external services. If your handlers need a logger, a clock, or any other service, define a custom interface instead (see [Using Ports](#using-ports) below).
 
 This bundle replaces what would otherwise be five or more positional generic parameters. For the reasoning behind this approach, see [Why AggregateTypes?](/docs/design-decisions/why-aggregate-types).
 
@@ -258,7 +258,7 @@ TypeScript enforces the following at compile time:
 - Every event name in the union has a matching handler in the `evolve` map.
 - Decide handlers can only return events from the aggregate's event union.
 - Evolve handlers must return the exact state shape.
-- Infrastructure access in decide handlers is correctly typed.
+- Ports access in decide handlers is correctly typed.
 
 Because `defineAggregate` is an identity function, it adds **zero runtime overhead**. It exists purely for the type checker.
 
@@ -270,17 +270,17 @@ Because `defineAggregate` is an identity function, it adds **zero runtime overhe
 
 Extracting handlers is the recommended pattern in noddde for testability, readability, type safety, and maintainability. See [Why Extract Handlers?](/docs/design-decisions/why-extracted-handlers) for the full rationale.
 
-## Using Infrastructure
+## Using Ports
 
-When decide handlers need external services -- a clock, a logger, a fraud-check client -- define a custom infrastructure type and include it in the types bundle.
+When decide handlers need external services -- a clock, a logger, a fraud-check client -- define a custom ports type and include it in the types bundle.
 
 Here is the auction domain, which uses an injected `clock` to validate bid timing. The types are defined first, then the `PlaceBid` handler is extracted to its own file with `InferDecideHandler`:
 
 ```typescript
 // types.ts
-import { Infrastructure, DefineEvents, DefineCommands } from "@noddde/core";
+import { Ports, DefineEvents, DefineCommands } from "@noddde/core";
 
-interface AuctionInfrastructure extends Infrastructure {
+interface AuctionInfrastructure extends Ports {
   clock: { now(): Date };
 }
 
@@ -309,11 +309,11 @@ export type AuctionDef = {
   state: AuctionState;
   events: AuctionEvent;
   commands: AuctionCommand;
-  infrastructure: AuctionInfrastructure;
+  ports: AuctionInfrastructure;
 };
 ```
 
-The `PlaceBid` handler destructures `{ clock }` from the infrastructure parameter. `InferDecideHandler` ensures TypeScript knows exactly which services are available:
+The `PlaceBid` handler destructures `{ clock }` from the ports parameter. `InferDecideHandler` ensures TypeScript knows exactly which services are available:
 
 ```typescript
 // deciders/decide-place-bid.ts
@@ -394,7 +394,7 @@ export const Auction = defineAggregate<AuctionDef>({
 });
 ```
 
-Infrastructure is **never passed to evolve handlers**. Evolve handlers are pure reducers -- they receive only the event payload and the current state. This keeps state evolution deterministic and safe for event replay.
+Ports is **never passed to evolve handlers**. Evolve handlers are pure reducers -- they receive only the event payload and the current state. This keeps state evolution deterministic and safe for event replay.
 
 ## Commands vs Events at a Glance
 

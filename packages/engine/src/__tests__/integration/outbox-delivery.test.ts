@@ -23,7 +23,7 @@ const Order = defineAggregate<{
   events: OrderEvents;
   commands: OrderCommands;
   id: string;
-  infrastructure: {};
+  ports: {};
 }>({
   name: "Order",
   initialState: { placed: false },

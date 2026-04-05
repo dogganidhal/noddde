@@ -1,5 +1,5 @@
 import type { QueryHandler } from "@noddde/core";
-import type { HotelInfrastructure } from "../../infrastructure/types";
+import type { HotelPorts } from "../../infrastructure/types";
 import type { SearchQuery } from "./queries";
 
 /**
@@ -7,7 +7,7 @@ import type { SearchQuery } from "./queries";
  * Reads from the RoomAvailability ViewStore (injected via infrastructure).
  */
 export const SearchAvailableRoomsHandler: QueryHandler<
-  HotelInfrastructure,
+  HotelPorts,
   Extract<SearchQuery, { name: "SearchAvailableRooms" }>
-> = async (query, infrastructure) =>
-  infrastructure.roomAvailabilityViewStore.findAvailable(query.type);
+> = async (query, ports) =>
+  ports.roomAvailabilityViewStore.findAvailable(query.type);

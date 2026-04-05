@@ -27,7 +27,7 @@ describe("PaymentProcessing saga", () => {
           amount: 500,
         },
       })
-      .withInfrastructure({
+      .withPorts({
         clock: { now: () => new Date() },
         emailService: { send: async () => {} },
         smsService: { send: async () => {} },
@@ -67,7 +67,7 @@ describe("PaymentProcessing saga", () => {
           amount: 500,
         },
       })
-      .withInfrastructure({
+      .withPorts({
         clock: { now: () => new Date() },
         emailService: { send: async () => {} },
         smsService: { send: async () => {} },
@@ -122,7 +122,7 @@ describe("PaymentProcessing saga", () => {
           amount: 500,
         },
       })
-      .withInfrastructure({
+      .withPorts({
         clock: { now: () => new Date() },
         emailService: { send: async () => {} },
         smsService: { send: async () => {} },

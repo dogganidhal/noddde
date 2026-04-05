@@ -21,7 +21,7 @@ type CounterProjectionDef = {
   events: CounterEvent;
   queries: CounterQuery;
   view: CounterView;
-  infrastructure: {};
+  ports: {};
 };
 
 const CounterProjection = defineProjection<CounterProjectionDef>({
@@ -54,7 +54,7 @@ type AsyncProjectionDef = {
   events: AsyncEvent;
   queries: never;
   view: AsyncView;
-  infrastructure: {};
+  ports: {};
 };
 
 const AsyncProjection = defineProjection<AsyncProjectionDef>({
@@ -81,7 +81,7 @@ type ErrorProjectionDef = {
   events: ErrorEvent;
   queries: never;
   view: { value: string };
-  infrastructure: {};
+  ports: {};
 };
 
 const ErrorProjection = defineProjection<ErrorProjectionDef>({
@@ -106,7 +106,7 @@ type PartialProjectionDef = {
   events: PartialEvent;
   queries: never;
   view: { x: number };
-  infrastructure: {};
+  ports: {};
 };
 
 const PartialProjection = defineProjection<PartialProjectionDef>({

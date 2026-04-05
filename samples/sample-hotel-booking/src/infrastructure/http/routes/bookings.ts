@@ -1,11 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { randomUUID } from "crypto";
 import type { Domain } from "@noddde/engine";
-import type { HotelInfrastructure } from "../../types";
+import type { HotelPorts } from "../../types";
 
 export async function bookingRoutes(
   fastify: FastifyInstance,
-  opts: { domain: Domain<HotelInfrastructure, any, any, any, any> },
+  opts: { domain: Domain<HotelPorts, any, any, any, any> },
 ) {
   const { domain } = opts;
 

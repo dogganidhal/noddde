@@ -22,24 +22,24 @@ docs:
 
 # Domain Bootstrap
 
-> Validates the `defineDomain()` + `wireDomain()` bootstrap sequence: `defineDomain` captures the pure domain structure, `wireDomain` connects it to infrastructure by invoking factories in the correct order (`infrastructure` -> `buses` -> `aggregates.persistence` -> `sagas.persistence`), wires EventBus subscriptions for projections and sagas, registers command/query handlers, and returns a fully initialized `Domain` whose `infrastructure` property exposes the merged custom + CQRS infrastructure.
+> Validates the `defineDomain()` + `wireDomain()` bootstrap sequence: `defineDomain` captures the pure domain structure, `wireDomain` connects it to infrastructure by invoking factories in the correct order (`adapters` -> `buses` -> `aggregates.persistence` -> `sagas.persistence`), wires EventBus subscriptions for projections and sagas, registers command/query handlers, and returns a fully initialized `Domain` whose `adapters` property exposes the merged custom + CQRS infrastructure.
 
 ## Involved Components
 
 - **`defineDomain(definition)` + `wireDomain(definition, wiring)`** -- definition captures structure, wiring connects to infrastructure and returns the initialized instance.
-- **`Domain`** -- holds configuration and resolved infrastructure. Exposes `infrastructure` getter and `dispatchCommand`.
+- **`Domain`** -- holds configuration and resolved adapters. Exposes `adapters` getter and `dispatchCommand`.
 - **`DomainDefinition`** -- the definition object with `writeModel`, `readModel`, `processModel?`.
-- **`DomainWiring`** -- the wiring object with `infrastructure`, `buses`, `aggregates`, `sagas`, etc.
-- All bus and persistence implementations used as infrastructure factory return values.
+- **`DomainWiring`** -- the wiring object with `adapters`, `buses`, `aggregates`, `sagas`, etc.
+- All bus and persistence implementations used as adapter factory return values.
 
 ## Behavioral Requirements
 
 1. **Factory invocation order**: `init()` must call factories in this sequence:
-   - `wiring.infrastructure()` -- resolve custom infrastructure.
-   - `wiring.buses(customInfra)` -- resolve CQRS buses, receiving custom infrastructure.
+   - `wiring.adapters()` -- resolve custom adapters.
+   - `wiring.buses(customInfra)` -- resolve CQRS buses, receiving custom adapters.
    - `wiring.aggregates.persistence()` -- resolve the persistence strategy.
    - `wiring.sagas.persistence()` -- resolve saga persistence (only if `processModel` is provided).
-2. **Infrastructure merging**: The `domain.infrastructure` property must return the custom infrastructure merged with `CQRSInfrastructure` (commandBus, eventBus, queryBus).
+2. **Ports merging**: The `domain.adapters` property must return the custom adapters merged with `CQRSPorts` (commandBus, eventBus, queryBus).
 3. **Projection wiring**: For each projection in `readModel.projections`, for each event name in its `on` map, a subscription is registered on the EventBus.
 4. **Saga wiring**: For each saga in `processModel.sagas`, for each event name in its `on` map, a subscription is registered on the EventBus.
 5. **Query handler registration**: For each projection with `queryHandlers`, and for each standalone query handler, the handler must be registered on the QueryBus.
@@ -49,21 +49,21 @@ docs:
 ## Invariants
 
 - `defineDomain` + `wireDomain` always returns a Promise that resolves to a `Domain` instance.
-- `domain.infrastructure` is not accessible (throws or is undefined) before `init()` completes.
+- `domain.adapters` is not accessible (throws or is undefined) before `init()` completes.
 - If `processModel` is omitted, no saga wiring occurs and `sagas.persistence` factory is not called.
-- If `wiring.infrastructure` is omitted, custom infrastructure defaults to `{}`.
+- If `wiring.adapters` is omitted, custom adapters defaults to `{}`.
 - If `wiring.buses` is omitted, the framework must provide sensible defaults (or throw a clear error).
 - If `wiring.aggregates` is omitted, the framework must provide a default in-memory implementation (or throw a clear error).
 - Factory functions are called exactly once during `init()`.
 
 ## Edge Cases
 
-- **All factories omitted**: `defineDomain` + `wireDomain` with only aggregates and projections, no explicit infrastructure factories. The framework should use defaults or throw clearly.
-- **Async `wiring.infrastructure`**: The factory returns a Promise; `wiring.buses` must not be called until it resolves.
+- **All factories omitted**: `defineDomain` + `wireDomain` with only aggregates and projections, no explicit adapter factories. The framework should use defaults or throw clearly.
+- **Async `wiring.adapters`**: The factory returns a Promise; `wiring.buses` must not be called until it resolves.
 - **`processModel` omitted**: `sagas.persistence` factory is never called; no saga subscriptions are created.
 - **Empty aggregates/projections**: `writeModel: { aggregates: {} }` and `readModel: { projections: {} }` should not cause errors.
 - **Multiple aggregates and projections**: All are wired correctly without name collisions.
-- **`wiring.buses` receives custom infrastructure**: The factory's parameter must be the resolved custom infrastructure, not undefined.
+- **`wiring.buses` receives custom adapters**: The factory's parameter must be the resolved custom adapters, not undefined.
 
 ## Integration Points
 
@@ -106,10 +106,10 @@ describe("Domain bootstrap - minimal config", () => {
     );
 
     expect(domain).toBeDefined();
-    expect(domain.infrastructure).toBeDefined();
-    expect(domain.infrastructure.commandBus).toBeInstanceOf(InMemoryCommandBus);
-    expect(domain.infrastructure.eventBus).toBeInstanceOf(EventEmitterEventBus);
-    expect(domain.infrastructure.queryBus).toBeInstanceOf(InMemoryQueryBus);
+    expect(domain.adapters).toBeDefined();
+    expect(domain.adapters.commandBus).toBeInstanceOf(InMemoryCommandBus);
+    expect(domain.adapters.eventBus).toBeInstanceOf(EventEmitterEventBus);
+    expect(domain.adapters.queryBus).toBeInstanceOf(InMemoryQueryBus);
   });
 });
 ```
@@ -126,24 +126,24 @@ import {
   InMemoryQueryBus,
   EventEmitterEventBus,
 } from "@noddde/core";
-import type { Infrastructure } from "@noddde/core";
+import type { Ports } from "@noddde/core";
 
-interface TestInfrastructure extends Infrastructure {
+interface TestPorts extends Ports {
   clock: { now(): Date };
   apiKey: string;
 }
 
-describe("Domain bootstrap - custom infrastructure", () => {
-  it("should merge custom infrastructure with CQRS buses", async () => {
+describe("Domain bootstrap - custom adapters", () => {
+  it("should merge custom adapters with CQRS buses", async () => {
     const fixedDate = new Date("2025-01-01");
 
     const domain = await wireDomain(
-      defineDomain<TestInfrastructure>({
+      defineDomain<TestPorts>({
         writeModel: { aggregates: {} },
         readModel: { projections: {} },
       }),
       {
-        infrastructure: () => ({
+        adapters: () => ({
           clock: { now: () => fixedDate },
           apiKey: "secret-123",
         }),
@@ -151,7 +151,7 @@ describe("Domain bootstrap - custom infrastructure", () => {
           persistence: () => new InMemoryEventSourcedAggregatePersistence(),
         },
         buses: (infra) => {
-          // Verify custom infrastructure is received
+          // Verify custom adapters is received
           expect(infra.apiKey).toBe("secret-123");
           return {
             commandBus: new InMemoryCommandBus(),
@@ -163,16 +163,16 @@ describe("Domain bootstrap - custom infrastructure", () => {
     );
 
     // Merged infrastructure should contain both custom and CQRS
-    expect(domain.infrastructure.clock.now()).toEqual(fixedDate);
-    expect(domain.infrastructure.apiKey).toBe("secret-123");
-    expect(domain.infrastructure.commandBus).toBeDefined();
-    expect(domain.infrastructure.eventBus).toBeDefined();
-    expect(domain.infrastructure.queryBus).toBeDefined();
+    expect(domain.adapters.clock.now()).toEqual(fixedDate);
+    expect(domain.adapters.apiKey).toBe("secret-123");
+    expect(domain.adapters.commandBus).toBeDefined();
+    expect(domain.adapters.eventBus).toBeDefined();
+    expect(domain.adapters.queryBus).toBeDefined();
   });
 });
 ```
 
-### Async infrastructure factories are awaited in order
+### Async adapter factories are awaited in order
 
 ```ts
 import { describe, it, expect } from "vitest";
@@ -195,7 +195,7 @@ describe("Domain bootstrap - async factories", () => {
         readModel: { projections: {} },
       }),
       {
-        infrastructure: async () => {
+        adapters: async () => {
           await new Promise((resolve) => setTimeout(resolve, 10));
           callOrder.push("infrastructure");
           return {};
@@ -299,7 +299,7 @@ const Ticket = defineAggregate<{
   state: { resolved: boolean };
   events: TicketEvent;
   commands: TicketCommand;
-  infrastructure: {};
+  ports: {};
 }>({
   initialState: { resolved: false },
   decide: {
@@ -322,7 +322,7 @@ const TicketListProjection = defineProjection<{
   events: TicketEvent;
   queries: DefineQueries<{ GetOpenTicketCount: { result: number } }>;
   view: { openCount: number };
-  infrastructure: {};
+  ports: {};
 }>({
   on: {
     TicketCreated: {
@@ -347,7 +347,7 @@ const TicketNotificationSaga = defineSaga<{
   state: { notified: boolean };
   events: TicketEvent;
   commands: NotifyCommand;
-  infrastructure: {};
+  ports: {};
 }>({
   initialState: { notified: false },
   startedBy: ["TicketCreated"],
@@ -397,14 +397,14 @@ describe("Domain bootstrap - full configuration", () => {
     );
 
     expect(domain).toBeDefined();
-    expect(domain.infrastructure.commandBus).toBeDefined();
-    expect(domain.infrastructure.eventBus).toBeDefined();
-    expect(domain.infrastructure.queryBus).toBeDefined();
+    expect(domain.adapters.commandBus).toBeDefined();
+    expect(domain.adapters.eventBus).toBeDefined();
+    expect(domain.adapters.queryBus).toBeDefined();
   });
 });
 ```
 
-### buses factory receives the resolved custom infrastructure
+### buses factory receives the resolved custom adapters
 
 ```ts
 import { describe, it, expect } from "vitest";
@@ -416,14 +416,14 @@ import {
   InMemoryQueryBus,
   EventEmitterEventBus,
 } from "@noddde/core";
-import type { Infrastructure } from "@noddde/core";
+import type { Ports } from "@noddde/core";
 
-interface AppInfra extends Infrastructure {
+interface AppInfra extends Ports {
   dbUrl: string;
 }
 
 describe("Domain bootstrap - buses parameter", () => {
-  it("should pass resolved custom infrastructure to buses factory", async () => {
+  it("should pass resolved custom adapters to buses factory", async () => {
     let receivedInfra: any = null;
 
     await wireDomain(
@@ -432,7 +432,7 @@ describe("Domain bootstrap - buses parameter", () => {
         readModel: { projections: {} },
       }),
       {
-        infrastructure: () => ({ dbUrl: "postgres://localhost/test" }),
+        adapters: () => ({ dbUrl: "postgres://localhost/test" }),
         buses: (infra) => {
           receivedInfra = infra;
           return {

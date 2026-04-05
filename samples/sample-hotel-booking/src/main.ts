@@ -128,8 +128,8 @@ async function main() {
 
   // -- Wire with infrastructure (async) --
   const domain = await wireDomain(hotelDomain, {
-    // Custom infrastructure services (what handlers receive)
-    infrastructure: () => ({
+    // Custom port adapters (what handlers receive)
+    adapters: () => ({
       clock: new SystemClock(),
       emailService: new ConsoleEmailService(),
       smsService: new ConsoleSmsService(),
@@ -161,13 +161,13 @@ async function main() {
     // Projection view stores
     projections: {
       RoomAvailability: {
-        viewStore: (infra) => infra.roomAvailabilityViewStore,
+        viewStore: (adapters) => adapters.roomAvailabilityViewStore,
       },
       GuestHistory: {
-        viewStore: (infra) => infra.guestHistoryViewStore,
+        viewStore: (adapters) => adapters.guestHistoryViewStore,
       },
       Revenue: {
-        viewStore: (infra) => infra.revenueViewStore,
+        viewStore: (adapters) => adapters.revenueViewStore,
       },
     },
 
@@ -194,8 +194,8 @@ async function main() {
   });
 
   // -- Register standalone event handlers on the event bus --
-  const eventBus = domain.infrastructure.eventBus as EventEmitterEventBus;
-  const infra = domain.infrastructure;
+  const eventBus = domain.adapters.eventBus as EventEmitterEventBus;
+  const infra = domain.adapters;
 
   eventBus.on("BookingConfirmed", async (event) => {
     await SendBookingConfirmation(event as any, infra);

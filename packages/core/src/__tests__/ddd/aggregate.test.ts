@@ -5,15 +5,15 @@ import type {
   DecideHandler,
   DefineCommands,
   DefineEvents,
-  FrameworkInfrastructure,
+  FrameworkPorts,
   InferAggregateCommands,
   InferAggregateEvents,
   InferAggregateID,
-  InferAggregateInfrastructure,
+  InferAggregatePorts,
   InferAggregateState,
   InferEvolveHandler,
   InferDecideHandler,
-  Infrastructure,
+  Ports,
 } from "@noddde/core";
 import { defineAggregate } from "@noddde/core";
 
@@ -34,17 +34,17 @@ describe("defineAggregate", () => {
     state: CounterState;
     events: CounterEvent;
     commands: CounterCommand;
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   const Counter = defineAggregate<CounterTypes>({
     initialState: { count: 0 },
     decide: {
-      Increment: (command, _state, _infra) => ({
+      Increment: (command, _state, _ports) => ({
         name: "Incremented",
         payload: { amount: command.payload.amount },
       }),
-      Decrement: (command, _state, _infra) => ({
+      Decrement: (command, _state, _ports) => ({
         name: "Decremented",
         payload: { amount: command.payload.amount },
       }),
@@ -89,7 +89,7 @@ describe("DecideHandler", () => {
     CreateAccountCommand,
     { balance: number },
     AccountEvent,
-    Infrastructure
+    Ports
   >;
 
   it("should receive the specific command as first parameter", () => {
@@ -102,8 +102,8 @@ describe("DecideHandler", () => {
     expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<{ balance: number }>();
   });
 
-  it("should receive infrastructure as third parameter", () => {
-    expectTypeOf<Parameters<Handler>[2]>().toEqualTypeOf<Infrastructure>();
+  it("should receive ports as third parameter", () => {
+    expectTypeOf<Parameters<Handler>[2]>().toEqualTypeOf<Ports>();
   });
 
   it("should return event(s) or Promise of event(s)", () => {
@@ -128,7 +128,7 @@ describe("Aggregate exhaustive handlers", () => {
     state: { items: string[] };
     events: Events;
     commands: Commands;
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should compile when all handlers are provided", () => {
@@ -162,7 +162,7 @@ describe("Infer utilities", () => {
   type MyEvent = DefineEvents<{ Updated: { newValue: number } }>;
   type MyCommand = DefineCommands<{ Update: { newValue: number } }>;
 
-  interface MyInfra extends Infrastructure {
+  interface MyPorts extends Ports {
     logger: { log(msg: string): void };
   }
 
@@ -170,7 +170,7 @@ describe("Infer utilities", () => {
     state: MyState;
     events: MyEvent;
     commands: MyCommand;
-    infrastructure: MyInfra;
+    ports: MyPorts;
   };
 
   const MyAggregate = defineAggregate<MyTypes>({
@@ -204,10 +204,10 @@ describe("Infer utilities", () => {
     >().toEqualTypeOf<MyCommand>();
   });
 
-  it("should infer infrastructure type", () => {
+  it("should infer ports type", () => {
     expectTypeOf<
-      InferAggregateInfrastructure<typeof MyAggregate>
-    >().toEqualTypeOf<MyInfra>();
+      InferAggregatePorts<typeof MyAggregate>
+    >().toEqualTypeOf<MyPorts>();
   });
 
   it("should infer aggregate ID from types bundle", () => {
@@ -223,7 +223,7 @@ describe("Decide handler return types", () => {
     state: {};
     events: Events;
     commands: Commands;
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should accept single event return", () => {
@@ -255,7 +255,7 @@ describe("InferAggregateID with number ID", () => {
     state: {};
     events: MyEvent;
     commands: MyCommand;
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should infer number as the aggregate ID type", () => {
@@ -270,7 +270,7 @@ describe("defineAggregate identity", () => {
     state: { v: number };
     events: E;
     commands: C;
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should return the exact same config object", () => {
@@ -304,7 +304,7 @@ describe("InferDecideHandler", () => {
     Reset: void;
   }>;
 
-  interface MyInfra extends Infrastructure {
+  interface MyPorts extends Ports {
     clock: { now(): Date };
   }
 
@@ -312,7 +312,7 @@ describe("InferDecideHandler", () => {
     state: MyState;
     events: MyEvent;
     commands: MyCommand;
-    infrastructure: MyInfra;
+    ports: MyPorts;
   };
 
   it("should narrow the command to the specific variant", () => {
@@ -326,10 +326,10 @@ describe("InferDecideHandler", () => {
     expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<MyState>();
   });
 
-  it("should merge infrastructure with FrameworkInfrastructure", () => {
+  it("should merge ports with FrameworkPorts", () => {
     type Handler = InferDecideHandler<MyTypes, "Update">;
     expectTypeOf<Parameters<Handler>[2]>().toEqualTypeOf<
-      MyInfra & FrameworkInfrastructure
+      MyPorts & FrameworkPorts
     >();
   });
 
@@ -344,7 +344,7 @@ describe("InferDecideHandler", () => {
     const handleUpdate: InferDecideHandler<MyTypes, "Update"> = (
       command,
       _state,
-      _infra,
+      _ports,
     ) => ({
       name: "Updated",
       payload: { newValue: command.payload.newValue },
@@ -353,7 +353,7 @@ describe("InferDecideHandler", () => {
     const handleReset: InferDecideHandler<MyTypes, "Reset"> = (
       _command,
       _state,
-      _infra,
+      _ports,
     ) => ({
       name: "Reset",
       payload: {},
@@ -392,7 +392,7 @@ describe("InferEvolveHandler", () => {
     state: MyState;
     events: MyEvent;
     commands: MyCommand;
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should narrow the event payload to the specific variant", () => {

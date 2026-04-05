@@ -8,7 +8,7 @@ exports:
   - ShutdownOptions
 depends_on:
   - engine/domain
-  - infrastructure/closeable
+  - ports/closeable
   - engine/outbox-relay
   - engine/implementations/ee-event-bus
 docs:
@@ -51,7 +51,7 @@ interface ShutdownOptions {
 The `Domain` class gains:
 
 ```ts
-class Domain<TInfrastructure, TStandaloneCommand, TStandaloneQuery> {
+class Domain<TPorts, TStandaloneCommand, TStandaloneQuery> {
   /**
    * Gracefully shuts down the domain:
    * 1. Stops accepting new commands and queries (DomainShutdownError).
@@ -80,7 +80,7 @@ class Domain<TInfrastructure, TStandaloneCommand, TStandaloneQuery> {
 4. **shutdown waits for in-flight operations** -- If commands, queries, or withUnitOfWork calls are in progress when `shutdown()` is called, shutdown waits for them to complete before proceeding. The entire cascade (command → events → projections → sagas → saga commands) is covered because event dispatch is synchronous within the operation.
 5. **shutdown drains the outbox relay** -- If an outbox relay is configured, shutdown calls `drain()` on it, which stops the polling timer and processes remaining entries until empty.
 6. **shutdown removes event bus listeners** -- After draining, calls `removeAllListeners()` on the event bus (if it supports it) to prevent stale event delivery.
-7. **shutdown auto-discovers and closes Closeable infrastructure** -- Scans all resolved infrastructure components using `isCloseable()`. Calls `close()` on each in reverse discovery order. Discovery targets (in order): custom infrastructure values, CQRS buses, aggregate persistence, saga persistence, outbox store, snapshot stores, idempotency store.
+7. **shutdown auto-discovers and closes Closeable adapters** -- Scans all resolved adapter components using `isCloseable()`. Calls `close()` on each in reverse discovery order. Discovery targets (in order): custom adapters values, CQRS buses, aggregate persistence, saga persistence, outbox store, snapshot stores, idempotency store.
 8. **shutdown is idempotent** -- Calling `shutdown()` multiple times returns the same promise. The shutdown sequence executes only once.
 9. **shutdown respects timeout** -- If in-flight operations or background process draining exceed `timeoutMs` (default 30000), shutdown proceeds to resource cleanup anyway.
 10. **shutdown closes infrastructure even on timeout** -- Even if the drain phases time out, resource cleanup (removeAllListeners + close) still executes.
@@ -99,7 +99,7 @@ class Domain<TInfrastructure, TStandaloneCommand, TStandaloneQuery> {
 
 - **shutdown with no active operations** -- Resolves immediately after cleanup phases.
 - **shutdown with no outbox configured** -- Skips relay drain phase.
-- **shutdown with no Closeable infrastructure** -- Skips close phase.
+- **shutdown with no Closeable adapters** -- Skips close phase.
 - **shutdown called during init()** -- Undefined behavior (domain is not fully initialized).
 - **shutdown called twice concurrently** -- Both calls return the same promise.
 - **Closeable.close() throws** -- Error is caught, shutdown continues.
@@ -114,7 +114,7 @@ class Domain<TInfrastructure, TStandaloneCommand, TStandaloneQuery> {
 - **Domain.withUnitOfWork()** -- Guarded by `_shuttingDown` flag at entry.
 - **OutboxRelay** -- `drain()` called during shutdown (implements `BackgroundProcess`).
 - **EventEmitterEventBus** -- `removeAllListeners()` called during shutdown.
-- **Closeable** -- Infrastructure auto-detected via `isCloseable()` and closed.
+- **Closeable** -- Ports auto-detected via `isCloseable()` and closed.
 
 ## Test Scenarios
 
@@ -293,7 +293,7 @@ describe("Domain.shutdown", () => {
 });
 ```
 
-### shutdown auto-discovers and closes Closeable infrastructure
+### shutdown auto-discovers and closes Closeable adapters
 
 ```ts
 import { describe, it, expect, vi } from "vitest";
@@ -314,7 +314,7 @@ describe("Domain.shutdown", () => {
         readModel: { projections: {} },
       }),
       {
-        infrastructure: () => ({
+        adapters: () => ({
           db: { query: () => {}, close: closeFn },
         }),
       },
@@ -348,7 +348,7 @@ describe("Domain.shutdown", () => {
         readModel: { projections: {} },
       }),
       {
-        infrastructure: () => ({
+        adapters: () => ({
           first: {
             close: async () => {
               order.push("first");
@@ -436,7 +436,7 @@ describe("Domain.shutdown", () => {
         readModel: { projections: {} },
       }),
       {
-        infrastructure: () => ({
+        adapters: () => ({
           failing: {
             close: async () => {
               order.push("failing");

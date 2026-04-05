@@ -1,5 +1,5 @@
 import { defineAggregate } from "@noddde/core";
-import type { HotelInfrastructure } from "../../../../infrastructure/types";
+import type { HotelPorts } from "../../../../infrastructure/types";
 import type { InventoryEvent } from "../../../event-model";
 import type { InventoryCommand } from "./commands";
 import type { InventoryState } from "./state";
@@ -20,7 +20,7 @@ export type InventoryDef = {
   state: InventoryState;
   events: InventoryEvent;
   commands: InventoryCommand;
-  infrastructure: HotelInfrastructure;
+  ports: HotelPorts;
 };
 
 /**

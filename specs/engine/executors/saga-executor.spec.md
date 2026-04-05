@@ -11,7 +11,7 @@ depends_on:
   - cqrs/command/command
   - cqrs/command/command-bus
   - persistence
-  - infrastructure
+  - ports
 ---
 
 # SagaExecutor
@@ -23,9 +23,9 @@ depends_on:
 ```ts
 import { AsyncLocalStorage } from "node:async_hooks";
 import type {
-  CQRSInfrastructure,
+  CQRSPorts,
   Event,
-  Infrastructure,
+  Ports,
   Saga,
   SagaPersistence,
   UnitOfWork,
@@ -35,7 +35,7 @@ import type { MetadataContext } from "../domain";
 
 class SagaExecutor {
   constructor(
-    infrastructure: Infrastructure & CQRSInfrastructure,
+    adapters: Ports & CQRSPorts,
     sagaPersistence: SagaPersistence,
     unitOfWorkFactory: UnitOfWorkFactory,
     uowStorage: AsyncLocalStorage<UnitOfWork>,
@@ -71,7 +71,7 @@ class SagaExecutor {
 
 ### Execute Saga Handler
 
-5. **Handler lookup and invocation** -- Look up the handler via `saga.on[event.name]?.handle`. If no handler exists, return immediately (no-op). Otherwise, invoke the handler with `(event, currentState, infrastructure)`. The handler returns a `SagaReaction` containing `state` (the new saga state) and optional `commands`.
+5. **Handler lookup and invocation** -- Look up the handler via `saga.on[event.name]?.handle`. If no handler exists, return immediately (no-op). Otherwise, invoke the handler with `(event, currentState, ports)`. The handler returns a `SagaReaction` containing `state` (the new saga state) and optional `commands`.
 
 ### Propagate Correlation Metadata
 
@@ -95,7 +95,7 @@ class SagaExecutor {
 
 10. **Dispatch commands within UoW** -- If `reaction.commands` is defined:
     - Normalize to array: if `reaction.commands` is a single command, wrap in an array.
-    - For each command, call `infrastructure.commandBus.dispatch(command)`.
+    - For each command, call `adapters.commandBus.dispatch(command)`.
     - Because the UoW is in the `AsyncLocalStorage`, aggregate command handlers invoked by the command bus will enlist their persistence on the same UoW, achieving atomicity.
 
 ### Commit Atomically
@@ -104,7 +104,7 @@ class SagaExecutor {
 
 ### Publish Deferred Events
 
-12. **Publish events after commit** -- After successful commit, iterate over the returned events and dispatch each via `infrastructure.eventBus.dispatch(event)`. This triggers downstream projections and sagas.
+12. **Publish events after commit** -- After successful commit, iterate over the returned events and dispatch each via `adapters.eventBus.dispatch(event)`. This triggers downstream projections and sagas.
 
 12b. **Post-dispatch callback (best-effort)** -- After dispatching all events, if `onEventsDispatched` is provided, call `onEventsDispatched(events)`. Errors from this callback are silently swallowed. This enables the Domain to mark outbox entries as published.
 
@@ -142,7 +142,7 @@ class SagaExecutor {
 ## Integration Points
 
 - **Domain** -- Constructs the `SagaExecutor` during `init()` and subscribes it to event bus events matching `Object.keys(saga.on)`.
-- **CommandBus** -- Saga dispatches commands through `infrastructure.commandBus.dispatch()`. This routes to aggregate command handlers registered by the Domain.
+- **CommandBus** -- Saga dispatches commands through `adapters.commandBus.dispatch()`. This routes to aggregate command handlers registered by the Domain.
 - **CommandLifecycleExecutor** -- When the saga dispatches commands, the command bus invokes the `CommandLifecycleExecutor`. Because the saga's UoW is in the `AsyncLocalStorage`, the executor uses the saga's UoW (explicit UoW path).
 - **SagaPersistence** -- Saga state is loaded and saved via the persistence interface.
 - **MetadataEnricher** -- Indirectly used: the metadata context set by the saga flows through `AsyncLocalStorage` to the `MetadataEnricher` in `CommandLifecycleExecutor`, ensuring correlation propagation.
@@ -159,8 +159,8 @@ import { defineSaga } from "@noddde/core";
 import type {
   SagaTypes,
   DefineEvents,
-  Infrastructure,
-  CQRSInfrastructure,
+  Ports,
+  CQRSPorts,
   UnitOfWork,
 } from "@noddde/core";
 import {
@@ -182,7 +182,7 @@ type OrderSagaTypes = SagaTypes & {
   state: OrderSagaState;
   events: OrderSagaEvent;
   commands: never;
-  infrastructure: Infrastructure & CQRSInfrastructure;
+  ports: Ports & CQRSPorts;
 };
 
 const OrderSaga = defineSaga<OrderSagaTypes>({
@@ -207,7 +207,7 @@ const OrderSaga = defineSaga<OrderSagaTypes>({
 describe("SagaExecutor", () => {
   it("should bootstrap saga with initialState on startedBy event and persist new state", async () => {
     const sagaPersistence = new InMemorySagaPersistence();
-    const infrastructure: Infrastructure & CQRSInfrastructure = {
+    const adapters: Ports & CQRSPorts = {
       commandBus: new InMemoryCommandBus(),
       eventBus: new EventEmitterEventBus(),
       queryBus: new InMemoryQueryBus(),
@@ -216,7 +216,7 @@ describe("SagaExecutor", () => {
     const metadataStorage = new AsyncLocalStorage<MetadataContext>();
 
     const executor = new SagaExecutor(
-      infrastructure,
+      ports,
       sagaPersistence,
       createInMemoryUnitOfWork,
       uowStorage,
@@ -243,8 +243,8 @@ import { defineSaga } from "@noddde/core";
 import type {
   SagaTypes,
   DefineEvents,
-  Infrastructure,
-  CQRSInfrastructure,
+  Ports,
+  CQRSPorts,
   UnitOfWork,
 } from "@noddde/core";
 import {
@@ -266,7 +266,7 @@ type MySagaTypes = SagaTypes & {
   state: MySagaState;
   events: MySagaEvent;
   commands: never;
-  infrastructure: Infrastructure & CQRSInfrastructure;
+  ports: Ports & CQRSPorts;
 };
 
 const MySaga = defineSaga<MySagaTypes>({
@@ -287,7 +287,7 @@ const MySaga = defineSaga<MySagaTypes>({
 describe("SagaExecutor", () => {
   it("should ignore event when saga not started and event not in startedBy", async () => {
     const sagaPersistence = new InMemorySagaPersistence();
-    const infrastructure: Infrastructure & CQRSInfrastructure = {
+    const adapters: Ports & CQRSPorts = {
       commandBus: new InMemoryCommandBus(),
       eventBus: new EventEmitterEventBus(),
       queryBus: new InMemoryQueryBus(),
@@ -296,7 +296,7 @@ describe("SagaExecutor", () => {
     const metadataStorage = new AsyncLocalStorage<MetadataContext>();
 
     const executor = new SagaExecutor(
-      infrastructure,
+      ports,
       sagaPersistence,
       createInMemoryUnitOfWork,
       uowStorage,
@@ -324,8 +324,8 @@ import { defineSaga } from "@noddde/core";
 import type {
   SagaTypes,
   DefineEvents,
-  Infrastructure,
-  CQRSInfrastructure,
+  Ports,
+  CQRSPorts,
   UnitOfWork,
 } from "@noddde/core";
 import {
@@ -344,7 +344,7 @@ type MinSagaTypes = SagaTypes & {
   state: MinSagaState;
   events: MinSagaEvent;
   commands: never;
-  infrastructure: Infrastructure & CQRSInfrastructure;
+  ports: Ports & CQRSPorts;
 };
 
 const MinSaga = defineSaga<MinSagaTypes>({
@@ -362,7 +362,7 @@ describe("SagaExecutor", () => {
   it("should return immediately when no association exists for the event", async () => {
     const sagaPersistence = new InMemorySagaPersistence();
     const loadSpy = vi.spyOn(sagaPersistence, "load");
-    const infrastructure: Infrastructure & CQRSInfrastructure = {
+    const adapters: Ports & CQRSPorts = {
       commandBus: new InMemoryCommandBus(),
       eventBus: new EventEmitterEventBus(),
       queryBus: new InMemoryQueryBus(),
@@ -371,7 +371,7 @@ describe("SagaExecutor", () => {
     const metadataStorage = new AsyncLocalStorage<MetadataContext>();
 
     const executor = new SagaExecutor(
-      infrastructure,
+      ports,
       sagaPersistence,
       createInMemoryUnitOfWork,
       uowStorage,
@@ -401,8 +401,8 @@ import type {
   AggregateTypes,
   DefineCommands,
   DefineEvents,
-  Infrastructure,
-  CQRSInfrastructure,
+  Ports,
+  CQRSPorts,
   UnitOfWork,
   Command,
 } from "@noddde/core";
@@ -424,7 +424,7 @@ type DispatchSagaTypes = SagaTypes & {
   state: DispatchSagaState;
   events: DispatchSagaEvent;
   commands: never;
-  infrastructure: Infrastructure & CQRSInfrastructure;
+  ports: Ports & CQRSPorts;
 };
 
 const DispatchSaga = defineSaga<DispatchSagaTypes>({
@@ -449,7 +449,7 @@ describe("SagaExecutor", () => {
   it("should dispatch reaction commands through the command bus", async () => {
     const sagaPersistence = new InMemorySagaPersistence();
     const commandBus = new InMemoryCommandBus();
-    const infrastructure: Infrastructure & CQRSInfrastructure = {
+    const adapters: Ports & CQRSPorts = {
       commandBus,
       eventBus: new EventEmitterEventBus(),
       queryBus: new InMemoryQueryBus(),
@@ -463,7 +463,7 @@ describe("SagaExecutor", () => {
     });
 
     const executor = new SagaExecutor(
-      infrastructure,
+      ports,
       sagaPersistence,
       createInMemoryUnitOfWork,
       uowStorage,
@@ -495,8 +495,8 @@ import { defineSaga } from "@noddde/core";
 import type {
   SagaTypes,
   DefineEvents,
-  Infrastructure,
-  CQRSInfrastructure,
+  Ports,
+  CQRSPorts,
   UnitOfWork,
   Command,
 } from "@noddde/core";
@@ -516,7 +516,7 @@ type CorrSagaTypes = SagaTypes & {
   state: CorrSagaState;
   events: CorrSagaEvent;
   commands: never;
-  infrastructure: Infrastructure & CQRSInfrastructure;
+  ports: Ports & CQRSPorts;
 };
 
 const CorrSaga = defineSaga<CorrSagaTypes>({
@@ -549,14 +549,14 @@ describe("SagaExecutor", () => {
       capturedCtx = metadataStorage.getStore();
     });
 
-    const infrastructure: Infrastructure & CQRSInfrastructure = {
+    const adapters: Ports & CQRSPorts = {
       commandBus,
       eventBus: new EventEmitterEventBus(),
       queryBus: new InMemoryQueryBus(),
     };
 
     const executor = new SagaExecutor(
-      infrastructure,
+      ports,
       sagaPersistence,
       createInMemoryUnitOfWork,
       uowStorage,
@@ -592,8 +592,8 @@ import { defineSaga } from "@noddde/core";
 import type {
   SagaTypes,
   DefineEvents,
-  Infrastructure,
-  CQRSInfrastructure,
+  Ports,
+  CQRSPorts,
   UnitOfWork,
 } from "@noddde/core";
 import {
@@ -612,7 +612,7 @@ type RbSagaTypes = SagaTypes & {
   state: RbSagaState;
   events: RbSagaEvent;
   commands: never;
-  infrastructure: Infrastructure & CQRSInfrastructure;
+  ports: Ports & CQRSPorts;
 };
 
 const RbSaga = defineSaga<RbSagaTypes>({
@@ -640,7 +640,7 @@ describe("SagaExecutor", () => {
     commandBus.register("FailingCmd", async () => {
       throw new Error("Command failed");
     });
-    const infrastructure: Infrastructure & CQRSInfrastructure = {
+    const adapters: Ports & CQRSPorts = {
       commandBus,
       eventBus: new EventEmitterEventBus(),
       queryBus: new InMemoryQueryBus(),
@@ -649,7 +649,7 @@ describe("SagaExecutor", () => {
     const metadataStorage = new AsyncLocalStorage<MetadataContext>();
 
     const executor = new SagaExecutor(
-      infrastructure,
+      ports,
       sagaPersistence,
       createInMemoryUnitOfWork,
       uowStorage,
@@ -679,8 +679,8 @@ import { defineSaga } from "@noddde/core";
 import type {
   SagaTypes,
   DefineEvents,
-  Infrastructure,
-  CQRSInfrastructure,
+  Ports,
+  CQRSPorts,
   UnitOfWork,
 } from "@noddde/core";
 import {
@@ -699,7 +699,7 @@ type NoCmdSagaTypes = SagaTypes & {
   state: NoCmdSagaState;
   events: NoCmdSagaEvent;
   commands: never;
-  infrastructure: Infrastructure & CQRSInfrastructure;
+  ports: Ports & CQRSPorts;
 };
 
 const NoCmdSaga = defineSaga<NoCmdSagaTypes>({
@@ -721,7 +721,7 @@ describe("SagaExecutor", () => {
     const sagaPersistence = new InMemorySagaPersistence();
     const commandBus = new InMemoryCommandBus();
     const dispatchSpy = vi.spyOn(commandBus, "dispatch");
-    const infrastructure: Infrastructure & CQRSInfrastructure = {
+    const adapters: Ports & CQRSPorts = {
       commandBus,
       eventBus: new EventEmitterEventBus(),
       queryBus: new InMemoryQueryBus(),
@@ -730,7 +730,7 @@ describe("SagaExecutor", () => {
     const metadataStorage = new AsyncLocalStorage<MetadataContext>();
 
     const executor = new SagaExecutor(
-      infrastructure,
+      ports,
       sagaPersistence,
       createInMemoryUnitOfWork,
       uowStorage,
@@ -758,8 +758,8 @@ import { defineSaga } from "@noddde/core";
 import type {
   SagaTypes,
   DefineEvents,
-  Infrastructure,
-  CQRSInfrastructure,
+  Ports,
+  CQRSPorts,
   UnitOfWork,
 } from "@noddde/core";
 import {
@@ -781,7 +781,7 @@ type FlowSagaTypes = SagaTypes & {
   state: FlowSagaState;
   events: FlowSagaEvent;
   commands: never;
-  infrastructure: Infrastructure & CQRSInfrastructure;
+  ports: Ports & CQRSPorts;
 };
 
 const FlowSaga = defineSaga<FlowSagaTypes>({
@@ -806,7 +806,7 @@ const FlowSaga = defineSaga<FlowSagaTypes>({
 describe("SagaExecutor", () => {
   it("should resume saga from persisted state on subsequent events", async () => {
     const sagaPersistence = new InMemorySagaPersistence();
-    const infrastructure: Infrastructure & CQRSInfrastructure = {
+    const adapters: Ports & CQRSPorts = {
       commandBus: new InMemoryCommandBus(),
       eventBus: new EventEmitterEventBus(),
       queryBus: new InMemoryQueryBus(),
@@ -815,7 +815,7 @@ describe("SagaExecutor", () => {
     const metadataStorage = new AsyncLocalStorage<MetadataContext>();
 
     const executor = new SagaExecutor(
-      infrastructure,
+      ports,
       sagaPersistence,
       createInMemoryUnitOfWork,
       uowStorage,

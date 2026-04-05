@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { testDomain } from "@noddde/testing";
 import { InMemoryViewStore } from "@noddde/engine";
-import type { HotelInfrastructure } from "../../infrastructure/types";
+import type { HotelPorts } from "../../infrastructure/types";
 import { FixedClock } from "../../infrastructure/services/clock";
 import { InMemoryEmailService } from "../../infrastructure/services/email-service";
 import { InMemorySmsService } from "../../infrastructure/services/sms-service";
@@ -10,7 +10,7 @@ import { InMemoryRoomAvailabilityViewStore } from "../../infrastructure/services
 import { Booking } from "../../domain/write-model/aggregates/booking";
 import { BookingFulfillmentSaga } from "../../domain/process-model/booking-fulfillment";
 
-function createTestInfrastructure(): HotelInfrastructure {
+function createTestInfrastructure(): HotelPorts {
   return {
     clock: new FixedClock(new Date("2026-04-01T10:00:00Z")),
     emailService: new InMemoryEmailService(),
@@ -25,10 +25,10 @@ function createTestInfrastructure(): HotelInfrastructure {
 describe("Cancellation flow (slice)", () => {
   it("should dispatch CancelBooking when payment fails via saga", async () => {
     const infra = createTestInfrastructure();
-    const { domain, spy } = await testDomain<HotelInfrastructure>({
+    const { domain, spy } = await testDomain<HotelPorts>({
       aggregates: { Booking },
       sagas: { BookingFulfillment: BookingFulfillmentSaga },
-      infrastructure: infra,
+      ports: infra,
     });
 
     // Create booking
@@ -70,9 +70,9 @@ describe("Cancellation flow (slice)", () => {
 
   it("should cancel a pending booking directly", async () => {
     const infra = createTestInfrastructure();
-    const { domain, spy } = await testDomain<HotelInfrastructure>({
+    const { domain, spy } = await testDomain<HotelPorts>({
       aggregates: { Booking },
-      infrastructure: infra,
+      ports: infra,
     });
 
     await domain.dispatchCommand({
@@ -103,9 +103,9 @@ describe("Cancellation flow (slice)", () => {
 
   it("should reject cancelling an already cancelled booking", async () => {
     const infra = createTestInfrastructure();
-    const { domain } = await testDomain<HotelInfrastructure>({
+    const { domain } = await testDomain<HotelPorts>({
       aggregates: { Booking },
-      infrastructure: infra,
+      ports: infra,
     });
 
     await domain.dispatchCommand({

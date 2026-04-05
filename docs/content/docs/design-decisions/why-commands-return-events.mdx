@@ -40,7 +40,7 @@ This creates problems:
 ## Alternatives Considered
 
 - **`this.apply(event)`** — The Axon/Eventuate pattern where the handler calls a framework method
-- **Event bus injection** — Handler receives `eventBus` in infrastructure and calls `dispatch`
+- **Event bus injection** — Handler receives `eventBus` in ports and calls `dispatch`
 - **Callback pattern** — Handler receives a `publish` callback
 
 ## Why This Approach

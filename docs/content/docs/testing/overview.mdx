@@ -51,7 +51,7 @@ Available unit harnesses:
 
 ### Level 2: Slice Tests (Pre-Wired Domain)
 
-Test multiple components together with zero infrastructure boilerplate. `testDomain` automatically wires in-memory buses, persistence, and installs spies.
+Test multiple components together with zero wiring boilerplate. `testDomain` automatically wires in-memory buses, persistence, and installs spies.
 
 ```ts
 import { testDomain } from "@noddde/testing";
@@ -117,7 +117,7 @@ Since all handlers are extracted to standalone functions, you can import and tes
 // Decide handler — import the extracted function
 import { decideAuthorizeTransaction } from "./deciders/decide-authorize-transaction";
 
-const events = decideAuthorizeTransaction(command, state, infrastructure);
+const events = decideAuthorizeTransaction(command, state, ports);
 
 // evolve handler — import the extracted function
 import { evolveTransactionAuthorized } from "./evolvers/evolve-transaction-authorized";
@@ -132,13 +132,13 @@ const newView = onTransactionAuthorized.reduce(event, view);
 
 The harnesses add value by managing state reconstruction from events, normalizing results, and capturing errors -- but they are optional.
 
-## Infrastructure Stubs for Testing
+## Ports Stubs for Testing
 
-Infrastructure injection is what makes noddde handlers testable. Because infrastructure is passed as function parameters (not via DI containers), you can substitute test implementations trivially.
+Ports injection is what makes noddde handlers testable. Because ports are passed as function parameters (not via DI containers), you can substitute test implementations trivially.
 
 The most common pattern is the **Clock**: inject a `Clock` interface instead of calling `new Date()` directly, then use a `FixedClock` in tests for deterministic behavior. This pattern generalizes to any non-deterministic dependency -- random ID generators, external APIs, or file storage.
 
-For infrastructure with multiple members, create a reusable mock factory:
+For ports with multiple members, create a reusable mock factory:
 
 ```ts
 function createMockBankingInfrastructure() {
@@ -153,7 +153,7 @@ function createMockBankingInfrastructure() {
 }
 ```
 
-Then pass it via `.withInfrastructure()` in unit harnesses or the `infrastructure` field in `testDomain`.
+Then pass it via `.withPorts()` in unit harnesses or the `adapters` field in `testDomain`.
 
 ## Event Metadata Testing Utilities
 

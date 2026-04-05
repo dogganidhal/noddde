@@ -59,10 +59,10 @@ Best-effort: outboxStore.markPublishedByEventIds()  <-- cleanup
 
 ## Configuration
 
-Add the `outbox` field to your domain configuration's `infrastructure`:
+Add the `outbox` field to your domain wiring:
 
 ```ts
-infrastructure: {
+ports: {
   outbox: {
     // Factory for the outbox store (called once during init)
     store: () => new InMemoryOutboxStore(),

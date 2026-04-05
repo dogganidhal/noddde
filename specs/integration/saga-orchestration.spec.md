@@ -22,7 +22,7 @@ docs:
 
 # Saga Orchestration
 
-> Validates the full saga orchestration lifecycle: when a domain event is published on the EventBus, the framework uses the saga's `on` map to extract the saga instance ID from the event (via the `id` function), loads the saga state from persistence, invokes the matching handler (via the `handle` function) with `(event, state, infrastructure & CQRSInfrastructure)`, persists the new saga state, and dispatches any returned commands via the CommandBus. This spec covers saga creation via `startedBy` events, state transitions across multiple events, and command dispatch.
+> Validates the full saga orchestration lifecycle: when a domain event is published on the EventBus, the framework uses the saga's `on` map to extract the saga instance ID from the event (via the `id` function), loads the saga state from persistence, invokes the matching handler (via the `handle` function) with `(event, state, infrastructure & CQRSPorts)`, persists the new saga state, and dispatches any returned commands via the CommandBus. This spec covers saga creation via `startedBy` events, state transitions across multiple events, and command dispatch.
 
 ## Involved Components
 
@@ -39,7 +39,7 @@ docs:
 3. **State loading**: The framework calls `sagaPersistence.load(sagaName, sagaId)` to retrieve the current saga state.
 4. **Saga creation (`startedBy`)**: If the event name is in `saga.startedBy` AND no saga state exists (load returns `undefined`/`null`), a new saga instance is created with `saga.initialState`.
 5. **Non-starter event with no instance**: If the event name is NOT in `saga.startedBy` AND no saga state exists, the event is silently ignored (no handler invocation, no error).
-6. **Handler invocation**: The matching handler is invoked with `(event, state, infrastructure)` where `infrastructure` includes both custom infrastructure and CQRS buses. It returns `{ state, commands? }`.
+6. **Handler invocation**: The matching handler is invoked with `(event, state, ports)` where `adapters` includes both custom adapters and CQRS buses. It returns `{ state, commands? }`.
 7. **State persistence**: After the handler returns, the new `state` from the reaction is saved via `sagaPersistence.save(sagaName, sagaId, newState)`.
 8. **Command dispatch**: If the reaction includes `commands`, each command is dispatched via `commandBus.dispatch(command)`. A single command or an array of commands may be returned.
 9. **No commands**: If `commands` is `undefined` or omitted, no commands are dispatched. The saga state is still persisted.
@@ -117,7 +117,7 @@ type FulfillmentSagaDef = {
   state: FulfillmentState;
   events: OrderEvent | PaymentEvent;
   commands: PaymentCommand | OrderCommand;
-  infrastructure: {};
+  ports: {};
 };
 
 const OrderFulfillmentSaga = defineSaga<FulfillmentSagaDef>({
@@ -341,7 +341,7 @@ type AckSagaDef = {
   state: { acknowledged: boolean };
   events: AckEvent;
   commands: never;
-  infrastructure: {};
+  ports: {};
 };
 
 const AckSaga = defineSaga<AckSagaDef>({
@@ -432,7 +432,7 @@ type RetrySagaDef = {
   state: { attempts: number };
   events: RetryEvent;
   commands: never;
-  infrastructure: {};
+  ports: {};
 };
 
 const RetrySaga = defineSaga<RetrySagaDef>({

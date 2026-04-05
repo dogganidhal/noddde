@@ -43,7 +43,7 @@ type FulfillmentSagaDef = {
   state: FulfillmentState;
   events: OrderEvent | PaymentEvent;
   commands: PaymentCommand | OrderCommand;
-  infrastructure: {};
+  ports: {};
 };
 
 const OrderFulfillmentSaga = defineSaga<FulfillmentSagaDef>({
@@ -238,7 +238,7 @@ describe("Handler returning no commands", () => {
     state: { acknowledged: boolean };
     events: AckEvent;
     commands: never;
-    infrastructure: {};
+    ports: {};
   };
 
   const AckSaga = defineSaga<AckSagaDef>({
@@ -312,7 +312,7 @@ describe("startedBy event with existing instance", () => {
     state: { attempts: number };
     events: RetryEvent;
     commands: never;
-    infrastructure: {};
+    ports: {};
   };
 
   const RetrySaga = defineSaga<RetrySagaDef>({

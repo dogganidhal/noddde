@@ -71,7 +71,7 @@ export interface ViewStore<TView = any> {
 ## Integration Points
 
 - Used by `Projection.viewStore` factory to declare the view store type for a projection.
-- Used by `ProjectionQueryInfra` to inject `{ views: ViewStore }` into query handler infrastructure.
+- Used by `ProjectionQueryInfra` to inject `{ views: ViewStore }` into query handler ports.
 - Implemented by `InMemoryViewStore` (engine), `TypeORMViewStore`, `PrismaViewStore`, `DrizzleViewStore` (ORM adapters).
 - The engine calls `save()` and `load()` during automatic view persistence when identity is configured.
 

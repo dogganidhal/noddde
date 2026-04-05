@@ -1,17 +1,17 @@
 ---
-title: Infrastructure
-description: How noddde uses injectable infrastructure to keep domain logic pure, and how to configure providers, buses, and custom services.
+title: Ports
+description: How noddde uses injectable ports to keep domain logic pure, and how to configure providers, buses, and custom services.
 ---
 
-Infrastructure in noddde refers to everything outside your domain logic -- databases, loggers, HTTP clients, clocks, view repositories, and any external service your handlers need. The framework enforces a strict boundary: domain logic depends on interfaces, and concrete implementations are injected at wiring time.
+Ports in noddde refers to everything outside your domain logic -- databases, loggers, HTTP clients, clocks, view repositories, and any external service your handlers need. The framework enforces a strict boundary: domain logic depends on interfaces, and concrete implementations are injected at wiring time.
 
-With the `defineDomain` + `wireDomain` API, infrastructure is cleanly separated from domain structure. User-provided services (what handlers receive) are distinct from framework plumbing (persistence, buses, concurrency). See [Domain Configuration](/docs/running/domain-configuration) for the full API.
+With the `defineDomain` + `wireDomain` API, ports and adapters are cleanly separated from domain structure. User-provided services (what handlers receive) are distinct from framework plumbing (persistence, buses, concurrency). See [Domain Configuration](/docs/running/domain-configuration) for the full API.
 
 ## The Core Principle
 
 A decide handler that decides whether a transaction is authorized should not know whether it is logging to the console or to CloudWatch. It should not know whether its state came from PostgreSQL or an in-memory store.
 
-noddde enforces this by injecting infrastructure as a function parameter, never as a direct import:
+noddde enforces this by injecting ports as a function parameter, never as a direct import:
 
 ```ts
 decide: {
@@ -22,56 +22,56 @@ decide: {
 },
 ```
 
-The handler depends on the `Logger` interface, not a concrete `SystemClock`. This separation makes the entire framework testable without mocks for infrastructure internals.
+The handler depends on the `Logger` interface, not a concrete `SystemClock`. This separation makes the entire framework testable without mocks for port internals.
 
-## The Infrastructure Type
+## The Ports Type
 
-The base `Infrastructure` type is deliberately empty:
+The base `Ports` type is deliberately empty:
 
 ```ts
-type Infrastructure = {};
+type Ports = {};
 ```
 
 You extend it with whatever your domain needs:
 
 ```ts
-interface BankingInfrastructure {
+interface BankingPorts {
   logger: Logger;
   bankAccountViewRepository: BankAccountViewRepository;
   transactionViewRepository: TransactionViewRepository;
 }
 ```
 
-This type becomes the `infrastructure` member of your [AggregateTypes](/docs/modeling/aggregates) bundle. Each component declares only what it needs, and `wireDomain` computes the intersection at compile time.
+This type becomes the `ports` member of your [AggregateTypes](/docs/modeling/aggregates) bundle. Each component declares only what it needs, and `wireDomain` computes the intersection at compile time.
 
-### Scoped Infrastructure: One Interface Per Component
+### Scoped Ports: One Interface Per Component
 
-The recommended pattern is to declare a **narrow infrastructure interface per component** rather than a single god-interface for the entire domain:
+The recommended pattern is to declare a **narrow ports interface per component** rather than a single god-interface for the entire domain:
 
 ```ts
 // Auction aggregate only needs a clock
-interface AuctionInfrastructure {
+interface AuctionPorts {
   clock: Clock;
 }
 
 // Notification projection needs an email service
-interface NotificationInfrastructure {
+interface NotificationPorts {
   emailService: EmailService;
 }
 
 // Payment saga needs both clock and payment gateway
-interface PaymentInfrastructure {
+interface PaymentPorts {
   clock: Clock;
   paymentGateway: PaymentGateway;
 }
 ```
 
-When you wire the domain, `wireDomain` computes the intersection of all these types. The `infrastructure` factory must return an object satisfying all of them:
+When you wire the domain, `wireDomain` computes the intersection of all these types. The `adapters` factory must return an object satisfying all of them:
 
 ```ts
 const domain = await wireDomain(definition, {
   // Compiler requires: { clock: Clock, emailService: EmailService, paymentGateway: PaymentGateway }
-  infrastructure: () => ({
+  adapters: () => ({
     clock: new SystemClock(),
     emailService: new SmtpEmailService(),
     paymentGateway: new StripePaymentGateway(),
@@ -85,7 +85,7 @@ Components that share the same dependency (like `clock` above) simply declare it
 
 ### Defining Interfaces with Swappable Implementations
 
-Each member of your infrastructure type should be an interface with concrete implementations:
+Each member of your ports type should be an interface with concrete implementations:
 
 ```ts
 interface Clock {
@@ -110,26 +110,26 @@ class FixedClock implements Clock {
 
 This pattern -- interface plus swappable implementations -- is what makes noddde handlers testable without mocking frameworks.
 
-## Where Infrastructure Is Injected
+## Where Ports Are Injected
 
-Infrastructure appears as a parameter in three handler types:
+Ports appear as a parameter in three handler types:
 
-| Handler Type                | Parameter Position | Receives                               |
-| --------------------------- | ------------------ | -------------------------------------- |
-| Aggregate decide handlers   | Third parameter    | `TInfrastructure`                      |
-| Projection event handlers   | Second parameter   | `TInfrastructure`                      |
-| Query handlers              | Second parameter   | `TInfrastructure`                      |
-| Standalone command handlers | Second parameter   | `TInfrastructure & CQRSInfrastructure` |
-| Saga handlers               | Third parameter    | `TInfrastructure & CQRSInfrastructure` |
+| Handler Type                | Parameter Position | Receives             |
+| --------------------------- | ------------------ | -------------------- |
+| Aggregate decide handlers   | Third parameter    | `TPorts`             |
+| Projection event handlers   | Second parameter   | `TPorts`             |
+| Query handlers              | Second parameter   | `TPorts`             |
+| Standalone command handlers | Second parameter   | `TPorts & CQRSPorts` |
+| Saga handlers               | Third parameter    | `TPorts & CQRSPorts` |
 
-[Evolve handlers](/docs/core-concepts/cqrs-and-event-sourcing) deliberately do **not** receive infrastructure. They are pure, synchronous functions for deterministic event replay -- no side effects allowed.
+[Evolve handlers](/docs/core-concepts/cqrs-and-event-sourcing) deliberately do **not** receive ports. They are pure, synchronous functions for deterministic event replay -- no side effects allowed.
 
-## CQRSInfrastructure
+## CQRSPorts
 
-In addition to your custom infrastructure, noddde provides a built-in `CQRSInfrastructure` type:
+In addition to your custom ports, noddde provides a built-in `CQRSPorts` type:
 
 ```ts
-interface CQRSInfrastructure {
+interface CQRSPorts {
   commandBus: CommandBus;
   eventBus: EventBus;
   queryBus: QueryBus;
@@ -142,19 +142,19 @@ These three buses are the communication backbone of the CQRS architecture:
 - **`EventBus`** -- Publishes events to projections, sagas, and other subscribers
 - **`QueryBus`** -- Routes queries to query handlers with type-safe return values
 
-Standalone command handlers and saga handlers receive the merged type `TInfrastructure & CQRSInfrastructure`, giving them access to both your custom services and the CQRS buses. This is what allows them to orchestrate across aggregates.
+Standalone command handlers and saga handlers receive the merged type `TPorts & CQRSPorts`, giving them access to both your custom services and the CQRS buses. This is what allows them to orchestrate across aggregates.
 
-## The Infrastructure Providers
+## The Ports Providers
 
-With `wireDomain`, infrastructure is provided via the `DomainWiring` object. The key distinction is that **user-provided services** (what handlers receive) are separated from **framework plumbing** (persistence, buses, concurrency).
+With `wireDomain`, adapters are provided via the `DomainWiring` object. The key distinction is that **user-provided services** (what handlers receive) are separated from **framework plumbing** (persistence, buses, concurrency).
 
-### User Infrastructure
+### User Ports
 
-The `infrastructure` factory provides your custom domain services -- repositories, clients, clocks:
+The `adapters` factory provides your custom domain services -- repositories, clients, clocks:
 
 ```ts
 const domain = await wireDomain(bankingDomain, {
-  infrastructure: () => ({
+  adapters: () => ({
     clock: new SystemClock(),
     bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
     transactionViewRepository: new InMemoryTransactionViewRepository(),
@@ -163,14 +163,14 @@ const domain = await wireDomain(bankingDomain, {
 });
 ```
 
-The infrastructure type is **inferred automatically** from your aggregates, projections, and sagas. You don't need to specify it explicitly -- `wireDomain` computes the intersection of all infrastructure types declared across your domain components and requires the factory to return exactly that type. TypeScript reports an error if you forget a member or return the wrong type.
+The ports type is **inferred automatically** from your aggregates, projections, and sagas. You don't need to specify it explicitly -- `wireDomain` computes the intersection of all ports types declared across your domain components and requires the factory to return exactly that type. TypeScript reports an error if you forget a member or return the wrong type.
 
 ### Buses
 
-The `buses` factory provides the three CQRS buses. It receives the resolved user infrastructure as a parameter:
+The `buses` factory provides the three CQRS buses. It receives the resolved user adapters as a parameter:
 
 ```ts
-buses: (customInfra) => ({
+buses: (adapters) => ({
   commandBus: new InMemoryCommandBus(),
   eventBus: new EventEmitterEventBus(),
   queryBus: new InMemoryQueryBus(),
@@ -209,7 +209,7 @@ View stores are provided per-projection, separating runtime concerns from projec
 
 ```ts
 projections: {
-  BankAccount: { viewStore: (infra) => infra.bankAccountViewRepository },
+  BankAccount: { viewStore: (adapters) => adapters.bankAccountViewRepository },
   TransactionHistory: { viewStore: () => new InMemoryViewStore() },
 },
 ```
@@ -228,10 +228,10 @@ All providers are factory functions (not raw values). This is intentional:
 
 - **Lazy initialization** -- Resources are created when needed, not at import time
 - **Async setup** -- Database connections, service discovery, config loading
-- **Clean isolation** -- Each test can create fresh infrastructure
+- **Clean isolation** -- Each test can create fresh adapters
 
 ```ts
-infrastructure: async () => {
+adapters: async () => {
   const dbConnection = await connectToDatabase();
   return {
     bankAccountRepo: new PostgresBankAccountRepository(dbConnection),
@@ -248,15 +248,15 @@ buses: async () => ({
 
 When `wireDomain` is called:
 
-1. `infrastructure()` is called first to create user-provided services
-2. `buses(userInfra)` is called with the resolved user infrastructure
+1. `adapters()` is called first to create user-provided services
+2. `buses(userAdapters)` is called with the resolved user adapters
 3. `aggregates` is resolved: global config applied to all aggregates, or per-aggregate configs resolved individually
 4. `projections` view stores are resolved per-projection
 5. `sagas.persistence()` is called if sagas are configured
 6. `idempotency()`, `unitOfWork()`, `outbox.store()` are resolved if configured
-7. The `Domain` instance is created with all infrastructure merged
+7. The `Domain` instance is created with all adapters merged
 
-The resulting `domain.infrastructure` property is `TInfrastructure & CQRSInfrastructure` -- your custom infrastructure merged with the CQRS buses.
+The resulting `domain.adapters` property is `TPorts & CQRSPorts` -- your custom adapters merged with the CQRS buses.
 
 ## Custom Bus Implementations
 
@@ -281,18 +281,18 @@ class LoggingCommandBus implements CommandBus {
 }
 
 // In the wiring:
-buses: (infra) => ({
+buses: (adapters) => ({
   commandBus: new LoggingCommandBus(new InMemoryCommandBus(), infra.logger),
   eventBus: new EventEmitterEventBus(),
   queryBus: new InMemoryQueryBus(),
 }),
 ```
 
-Notice how `buses` receives the custom infrastructure as a parameter. This allows the logging bus to use the same logger that decide handlers use.
+Notice how `buses` receives the user adapters as a parameter. This allows the logging bus to use the same logger that decide handlers use.
 
-## Testing with Different Infrastructure
+## Testing with Different Ports
 
-The `defineDomain` + `wireDomain` split makes it especially easy to swap infrastructure for testing -- the domain definition is shared, only the wiring differs:
+The `defineDomain` + `wireDomain` split makes it especially easy to swap adapters for testing -- the domain definition is shared, only the wiring differs:
 
 ```ts
 // Shared domain definition
@@ -303,7 +303,7 @@ const bankingDomain = defineDomain({
 
 // Production wiring
 const prodDomain = await wireDomain(bankingDomain, {
-  infrastructure: () => createProductionInfrastructure(),
+  adapters: () => createProductionInfrastructure(),
   aggregates: { persistence: () => new PostgresEventStore() },
   buses: () => createProductionBuses(),
 });
@@ -311,7 +311,7 @@ const prodDomain = await wireDomain(bankingDomain, {
 // Test wiring
 const testDomain = await wireDomain(bankingDomain, {
   logger: new NoopLogger(), // Suppress framework logging in tests
-  infrastructure: () => ({
+  adapters: () => ({
     clock: new FixedClock(new Date("2026-01-01")),
     bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
     transactionViewRepository: new InMemoryTransactionViewRepository(),
@@ -327,23 +327,23 @@ const testDomain = await wireDomain(bankingDomain, {
 });
 ```
 
-Same domain definition, different wiring. The domain logic does not change -- only the infrastructure factories differ between environments.
+Same domain definition, different wiring. The domain logic does not change -- only the adapter factories differ between environments.
 
 ## Accessing Buses at Runtime
 
-After configuration, buses are available on `domain.infrastructure`:
+After configuration, buses are available on `domain.adapters`:
 
 ```ts
 const domain = await wireDomain(bankingDomain, {
   /* ... */
 });
 
-const { commandBus, eventBus, queryBus } = domain.infrastructure;
+const { commandBus, eventBus, queryBus } = domain.adapters;
 ```
 
 ## Resource Cleanup with `Closeable`
 
-If your custom infrastructure holds resources that need cleanup on shutdown (database pools, file handles, network connections), implement the `Closeable` interface:
+If your custom adapters hold resources that need cleanup on shutdown (database pools, file handles, network connections), implement the `Closeable` interface:
 
 ```ts
 import type { Closeable } from "@noddde/core";
@@ -361,7 +361,7 @@ class PostgresBankAccountRepository
 }
 ```
 
-When `domain.shutdown()` is called, the domain automatically discovers all infrastructure components that implement `Closeable` and calls `close()` on each one. No additional registration is needed — just implement the interface.
+When `domain.shutdown()` is called, the domain automatically discovers all adapter components that implement `Closeable` and calls `close()` on each one. No additional registration is needed — just implement the interface.
 
 See [Graceful Shutdown](/docs/running/domain-configuration#graceful-shutdown) for the full shutdown lifecycle.
 

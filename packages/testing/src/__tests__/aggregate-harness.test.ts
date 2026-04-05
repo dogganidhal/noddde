@@ -22,7 +22,7 @@ type CounterTypes = {
   state: CounterState;
   events: CounterEvent;
   commands: CounterCommand;
-  infrastructure: {};
+  ports: {};
 };
 
 const Counter = defineAggregate<CounterTypes>({
@@ -62,7 +62,7 @@ type AsyncTypes = {
   state: { result: string | null };
   events: AsyncEvent;
   commands: AsyncCommand;
-  infrastructure: {};
+  ports: {};
 };
 
 const AsyncAggregate = defineAggregate<AsyncTypes>({
@@ -81,7 +81,7 @@ const AsyncAggregate = defineAggregate<AsyncTypes>({
   },
 });
 
-// ---- Aggregate with infrastructure ----
+// ---- Aggregate with ports ----
 
 type InfraEvent = DefineEvents<{
   TimestampRecorded: { timestamp: number };
@@ -91,21 +91,21 @@ type InfraCommand = DefineCommands<{
   RecordTimestamp: void;
 }>;
 
-type ClockInfra = { clock: { now: () => number } };
+type ClockPorts = { clock: { now: () => number } };
 
 type InfraTypes = {
   state: { timestamp: number | null };
   events: InfraEvent;
   commands: InfraCommand;
-  infrastructure: ClockInfra;
+  ports: ClockPorts;
 };
 
 const InfraAggregate = defineAggregate<InfraTypes>({
   initialState: { timestamp: null },
   decide: {
-    RecordTimestamp: (_command, _state, infrastructure) => ({
+    RecordTimestamp: (_command, _state, ports) => ({
       name: "TimestampRecorded",
-      payload: { timestamp: infrastructure.clock.now() },
+      payload: { timestamp: ports.clock.now() },
     }),
   },
   evolve: {
@@ -127,7 +127,7 @@ type MultiTypes = {
   state: { steps: number[] };
   events: MultiEvent;
   commands: MultiCommand;
-  infrastructure: {};
+  ports: {};
 };
 
 const MultiAggregate = defineAggregate<MultiTypes>({
@@ -292,13 +292,13 @@ describe("testAggregate", () => {
     expect(result.state).toEqual({ count: 0 });
   });
 
-  it("should inject infrastructure into command handler", async () => {
+  it("should inject ports into command handler", async () => {
     const result = await testAggregate(InfraAggregate)
       .when({
         name: "RecordTimestamp",
         targetAggregateId: "i-1",
       })
-      .withInfrastructure({ clock: { now: () => 1234567890 } })
+      .withPorts({ clock: { now: () => 1234567890 } })
       .execute();
 
     expect(result.events).toEqual([

@@ -1,7 +1,7 @@
 ---
 title: "Closeable & BackgroundProcess"
-module: infrastructure/closeable
-source_file: packages/core/src/infrastructure/closeable.ts, packages/core/src/infrastructure/background-process.ts
+module: ports/closeable
+source_file: packages/core/src/ports/closeable.ts, packages/core/src/ports/background-process.ts
 status: implemented
 exports:
   - Closeable
@@ -14,7 +14,7 @@ docs:
 
 # Closeable & BackgroundProcess
 
-> Lifecycle interfaces for infrastructure components that hold resources requiring cleanup. `Closeable` represents any component with resources to release (database connections, file handles, timers). `BackgroundProcess` represents a long-running background task that can be drained during shutdown. `isCloseable` is a type guard for runtime auto-detection of closeable infrastructure.
+> Lifecycle interfaces for infrastructure components that hold resources requiring cleanup. `Closeable` represents any component with resources to release (database connections, file handles, timers). `BackgroundProcess` represents a long-running background task that can be drained during shutdown. `isCloseable` is a type guard for runtime auto-detection of closeable adapters.
 
 ## Type Contract
 
@@ -92,7 +92,7 @@ interface BackgroundProcess {
 
 ## Integration Points
 
-- **Domain.shutdown()** -- Scans resolved infrastructure values for `Closeable` via `isCloseable()` and calls `close()` during shutdown.
+- **Domain.shutdown()** -- Scans resolved adapters values for `Closeable` via `isCloseable()` and calls `close()` during shutdown.
 - **ORM adapters** -- Drizzle, Prisma, TypeORM persistence implementations implement `Closeable` to close database pools/connections.
 - **OutboxRelay** -- Implements `BackgroundProcess` so Domain can drain it during shutdown.
 

@@ -1,9 +1,9 @@
 ---
 title: Logging
-description: How noddde logs internally, how to configure log levels, and how to use the framework logger in your own handlers and infrastructure.
+description: How noddde logs internally, how to configure log levels, and how to use the framework logger in your own handlers and adapters.
 ---
 
-noddde has a built-in structured logging system that works out of the box with zero configuration. The framework logs its own lifecycle events (domain init, command dispatch, saga execution, concurrency, outbox) and makes the same logger available to your handlers and custom infrastructure.
+noddde has a built-in structured logging system that works out of the box with zero configuration. The framework logs its own lifecycle events (domain init, command dispatch, saga execution, concurrency, outbox) and makes the same logger available to your handlers and custom adapters.
 
 ## How noddde Logs
 
@@ -91,7 +91,7 @@ const domain = await wireDomain(bankingDomain, {
 
 ## Using the Logger in Handlers
 
-The framework logger is automatically available as `infrastructure.logger` in **every handler** -- aggregate decide handlers, event handlers, saga handlers, query handlers, and standalone handlers.
+The framework logger is automatically available as `ports.logger` in **every handler** -- aggregate decide handlers, event handlers, saga handlers, query handlers, and standalone handlers.
 
 ### In Aggregate Decide Handlers
 
@@ -99,8 +99,8 @@ The framework logger is automatically available as `infrastructure.logger` in **
 const BankAccount = defineAggregate<BankAccountTypes>({
   initialState: { balance: 0 },
   decide: {
-    Deposit: (command, state, infrastructure) => {
-      infrastructure.logger.info("Processing deposit", {
+    Deposit: (command, state, ports) => {
+      ports.logger.info("Processing deposit", {
         amount: command.payload.amount,
         currentBalance: state.balance,
       });
@@ -125,8 +125,8 @@ const OrderFulfillment = defineSaga<OrderFulfillmentTypes>({
   on: {
     OrderPlaced: {
       id: (event) => event.payload.orderId,
-      handle: (event, state, infrastructure) => {
-        infrastructure.logger.info("Starting fulfillment", {
+      handle: (event, state, ports) => {
+        ports.logger.info("Starting fulfillment", {
           orderId: event.payload.orderId,
         });
         return {
@@ -147,10 +147,10 @@ const OrderFulfillment = defineSaga<OrderFulfillmentTypes>({
 ```ts
 const getAccountById: QueryHandler<BankingInfrastructure, GetAccountQuery> = (
   query,
-  infrastructure,
+  ports,
 ) => {
-  infrastructure.logger.debug("Loading account", { id: query.id });
-  return infrastructure.accountRepository.findById(query.id);
+  ports.logger.debug("Loading account", { id: query.id });
+  return ports.accountRepository.findById(query.id);
 };
 ```
 
@@ -159,8 +159,8 @@ const getAccountById: QueryHandler<BankingInfrastructure, GetAccountQuery> = (
 Use `child()` to create loggers with a more specific namespace:
 
 ```ts
-Deposit: (command, state, infrastructure) => {
-  const log = infrastructure.logger.child("deposit");
+Deposit: (command, state, ports) => {
+  const log = ports.logger.child("deposit");
   log.info("Processing"); // logs as [noddde:deposit]
   // ...
 },
@@ -168,13 +168,13 @@ Deposit: (command, state, infrastructure) => {
 
 The framework itself uses child loggers with namespaces like `domain`, `command`, `saga`, `concurrency`, and `outbox`.
 
-## Using the Logger in Custom Infrastructure
+## Using the Logger in Custom Ports
 
-The `infrastructure` factory in `DomainWiring` receives the framework logger as its first argument. Use it to inject logging into your custom services at construction time:
+The `adapters` factory in `DomainWiring` receives the framework logger as its first argument. Use it to inject logging into your custom services at construction time:
 
 ```ts
 const domain = await wireDomain(bankingDomain, {
-  infrastructure: (logger) => ({
+  ports: (logger) => ({
     paymentGateway: new StripeGateway(logger.child("stripe")),
     emailService: new SmtpEmailService(logger.child("email")),
     accountRepository: new PostgresAccountRepository(logger.child("repo")),
@@ -241,7 +241,7 @@ Here is what the framework logs at each level, so you can decide which level to 
 
 ### `info`
 
-- Custom infrastructure resolved
+- Custom adapters resolved
 - Idempotent command skipped
 - Saga instance bootstrapped
 - Optimistic concurrency retry (attempt N of M)

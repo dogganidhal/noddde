@@ -1,5 +1,5 @@
 import { defineProjection } from "@noddde/core";
-import type { HotelInfrastructure } from "../../../../infrastructure/types";
+import type { HotelPorts } from "../../../../infrastructure/types";
 import type { RoomType } from "../../../../infrastructure/types";
 import type { RoomEvent } from "../../../event-model";
 import type {
@@ -35,7 +35,7 @@ export type RoomAvailabilityProjectionDef = {
   events: RoomEvent;
   queries: RoomAvailabilityQuery;
   view: RoomAvailabilityView;
-  infrastructure: HotelInfrastructure;
+  ports: HotelPorts;
   viewStore: RoomAvailabilityViewStore;
 };
 

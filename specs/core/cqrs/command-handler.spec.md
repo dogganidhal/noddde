@@ -4,7 +4,7 @@ module: cqrs/command/command-handler
 source_file: packages/core/src/cqrs/command/command-handler.ts
 status: implemented
 exports: [StandaloneCommandHandler]
-depends_on: [cqrs/command/command, infrastructure/index]
+depends_on: [cqrs/command/command, ports/index]
 docs:
   - commands/handling-commands.mdx
   - commands/standalone-commands.mdx
@@ -12,60 +12,60 @@ docs:
 
 # StandaloneCommandHandler
 
-> `StandaloneCommandHandler` is a function type for handling standalone commands (commands not routed to an aggregate). It receives the full command object and infrastructure merged with CQRS buses, enabling it to dispatch further commands, publish events, or query read models.
+> `StandaloneCommandHandler` is a function type for handling standalone commands (commands not routed to an aggregate). It receives the full command object and ports merged with CQRS buses, enabling it to dispatch further commands, publish events, or query read models.
 
 ## Type Contract
 
-- **`StandaloneCommandHandler<TInfrastructure, TCommand>`** is a function type:
+- **`StandaloneCommandHandler<TPorts, TCommand>`** is a function type:
   - First parameter: `command: TCommand` -- the full command object (not just the payload).
-  - Second parameter: `infrastructure: TInfrastructure & CQRSInfrastructure & FrameworkInfrastructure` -- custom infrastructure merged with CQRS buses and framework infrastructure (provides `logger`).
+  - Second parameter: `ports: TPorts & CQRSPorts & FrameworkPorts` -- custom adapters merged with CQRS buses and framework ports (provides `logger`).
   - Return type: `void | Promise<void>`.
-- `TInfrastructure` is constrained to `extends Infrastructure`.
+- `TPorts` is constrained to `extends Ports`.
 - `TCommand` is constrained to `extends StandaloneCommand`.
 
 ## Behavioral Requirements
 
 - The handler receives the full command object (including `name`), unlike event handlers which receive only the payload. This is because standalone commands may need to inspect the command name for routing logic.
-- Infrastructure is merged with `CQRSInfrastructure` and `FrameworkInfrastructure` via intersection (`&`), giving the handler access to `commandBus`, `eventBus`, `queryBus`, and `logger` in addition to custom infrastructure.
+- Ports is merged with `CQRSPorts` and `FrameworkPorts` via intersection (`&`), giving the handler access to `commandBus`, `eventBus`, `queryBus`, and `logger` in addition to custom adapters.
 - The handler may be sync (`void`) or async (`Promise<void>`).
 - The handler can dispatch commands, publish events, or query read models through the CQRS buses.
 
 ## Invariants
 
 - The first parameter is the full `TCommand`, not `TCommand["payload"]`.
-- The second parameter always includes `CQRSInfrastructure` and `FrameworkInfrastructure` via intersection.
+- The second parameter always includes `CQRSPorts` and `FrameworkPorts` via intersection.
 - The return type is exactly `void | Promise<void>`.
-- The generic parameter order is `<TInfrastructure, TCommand>` (infrastructure first, command second).
+- The generic parameter order is `<TPorts, TCommand>` (ports first, command second).
 
 ## Edge Cases
 
-- **Empty infrastructure (`{}`)**: The handler still gets `CQRSInfrastructure` (the three buses) and `FrameworkInfrastructure` (logger).
+- **Empty ports (`{}`)**: The handler still gets `CQRSPorts` (the three buses) and `FrameworkPorts` (logger).
 - **Command with no payload**: `StandaloneCommand` allows `payload` to be `undefined`.
 - **Async handler**: Returning a `Promise<void>` is valid.
-- **Handler that dispatches commands**: The handler can call `infrastructure.commandBus.dispatch(...)`.
+- **Handler that dispatches commands**: The handler can call `ports.commandBus.dispatch(...)`.
 
 ## Integration Points
 
 - `StandaloneCommandHandler` is registered with the engine/runtime for non-aggregate command processing.
-- The `CQRSInfrastructure` intersection gives handlers access to the full CQRS bus system.
+- The `CQRSPorts` intersection gives handlers access to the full CQRS bus system.
 - Standalone command handlers are an alternative to aggregate command handlers for cross-cutting or orchestration logic.
 
 ## Test Scenarios
 
-### StandaloneCommandHandler receives full command and merged infrastructure
+### StandaloneCommandHandler receives full command and merged ports
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
 import type {
   StandaloneCommandHandler,
   StandaloneCommand,
-  Infrastructure,
-  CQRSInfrastructure,
-  FrameworkInfrastructure,
+  Ports,
+  CQRSPorts,
+  FrameworkPorts,
 } from "@noddde/core";
 
 describe("StandaloneCommandHandler", () => {
-  interface NotificationInfra extends Infrastructure {
+  interface NotificationInfra extends Ports {
     emailService: { send(to: string, body: string): Promise<void> };
   }
 
@@ -85,9 +85,9 @@ describe("StandaloneCommandHandler", () => {
     >().toEqualTypeOf<SendNotificationCommand>();
   });
 
-  it("should receive infrastructure merged with CQRSInfrastructure and FrameworkInfrastructure", () => {
+  it("should receive ports merged with CQRSPorts and FrameworkPorts", () => {
     expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<
-      NotificationInfra & CQRSInfrastructure & FrameworkInfrastructure
+      NotificationInfra & CQRSPorts & FrameworkPorts
     >();
   });
 
@@ -103,24 +103,24 @@ describe("StandaloneCommandHandler", () => {
 import { describe, it, expect } from "vitest";
 import type {
   StandaloneCommandHandler,
-  Infrastructure,
+  Ports,
   Command,
-  CQRSInfrastructure,
+  CQRSPorts,
 } from "@noddde/core";
 
 describe("StandaloneCommandHandler CQRS access", () => {
-  it("should allow dispatching commands via infrastructure", () => {
-    const handler: StandaloneCommandHandler<Infrastructure, Command> = async (
+  it("should allow dispatching commands via ports", () => {
+    const handler: StandaloneCommandHandler<Ports, Command> = async (
       command,
-      infrastructure,
+      ports,
     ) => {
       // The handler has access to all three buses
-      await infrastructure.commandBus.dispatch({ name: "FollowUp" });
-      await infrastructure.eventBus.dispatch({
+      await ports.commandBus.dispatch({ name: "FollowUp" });
+      await ports.eventBus.dispatch({
         name: "Processed",
         payload: {},
       });
-      await infrastructure.queryBus.dispatch({
+      await ports.queryBus.dispatch({
         name: "GetStatus",
         payload: {},
       });
@@ -130,22 +130,22 @@ describe("StandaloneCommandHandler CQRS access", () => {
 });
 ```
 
-### StandaloneCommandHandler with empty infrastructure
+### StandaloneCommandHandler with empty ports
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
 import type {
   StandaloneCommandHandler,
-  Infrastructure,
+  Ports,
   Command,
-  CQRSInfrastructure,
+  CQRSPorts,
 } from "@noddde/core";
 
 describe("StandaloneCommandHandler with empty infra", () => {
-  type Handler = StandaloneCommandHandler<Infrastructure, Command>;
+  type Handler = StandaloneCommandHandler<Ports, Command>;
 
-  it("should still provide CQRSInfrastructure", () => {
-    expectTypeOf<Parameters<Handler>[1]>().toMatchTypeOf<CQRSInfrastructure>();
+  it("should still provide CQRSPorts", () => {
+    expectTypeOf<Parameters<Handler>[1]>().toMatchTypeOf<CQRSPorts>();
   });
 });
 ```

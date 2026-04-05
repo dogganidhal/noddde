@@ -18,7 +18,7 @@ describe("${ctx.name} aggregate", () => {
         name: "Create${ctx.name}",
         targetAggregateId: "test-id",
       })
-      .withInfrastructure({})
+      .withPorts({})
       .execute();
 
     expect(result.events).toHaveLength(1);
@@ -36,7 +36,7 @@ describe("${ctx.name} domain", () => {
     const { domain, spy } = await testDomain({
       aggregates: { ${ctx.name} },
       projections: { ${ctx.name}: ${ctx.name}Projection },
-      infrastructure: {},
+      ports: {},
     });
 
     await domain.dispatchCommand({

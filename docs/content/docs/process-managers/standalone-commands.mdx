@@ -29,28 +29,25 @@ The naming distinction exists to make intent clear in your codebase. When you se
 
 ## StandaloneCommandHandler
 
-Standalone command handlers have a different signature from aggregate decide handlers. Instead of receiving aggregate state, they receive the full [CQRS](/docs/core-concepts/cqrs-and-event-sourcing) infrastructure:
+Standalone command handlers have a different signature from aggregate decide handlers. Instead of receiving aggregate state, they receive the full [CQRS](/docs/core-concepts/cqrs-and-event-sourcing) ports:
 
 ```typescript
 type StandaloneCommandHandler<
-  TInfrastructure extends Infrastructure,
+  TPorts extends Ports,
   TCommand extends StandaloneCommand,
-> = (
-  command: TCommand,
-  infrastructure: TInfrastructure & CQRSInfrastructure,
-) => void | Promise<void>;
+> = (command: TCommand, ports: TPorts & CQRSPorts) => void | Promise<void>;
 ```
 
-| Parameter        | Description                                                                                  |
-| ---------------- | -------------------------------------------------------------------------------------------- |
-| `command`        | The incoming standalone command                                                              |
-| `infrastructure` | Your domain infrastructure merged with `CQRSInfrastructure` (commandBus, eventBus, queryBus) |
+| Parameter | Description                                                                |
+| --------- | -------------------------------------------------------------------------- |
+| `command` | The incoming standalone command                                            |
+| `ports`   | Your domain ports merged with `CQRSPorts` (commandBus, eventBus, queryBus) |
 
 Key differences from aggregate decide handlers:
 
 - **No state parameter.** Standalone handlers do not have an aggregate state to inspect.
-- **No event return value.** The handler returns `void`. If it needs to produce side effects, it does so explicitly through the infrastructure (e.g., dispatching commands to other aggregates via the command bus).
-- **Access to CQRSInfrastructure.** The handler receives `commandBus`, `eventBus`, and `queryBus` directly, enabling it to orchestrate across aggregates.
+- **No event return value.** The handler returns `void`. If it needs to produce side effects, it does so explicitly through their ports (e.g., dispatching commands to other aggregates via the command bus).
+- **Access to CQRSPorts.** The handler receives `commandBus`, `eventBus`, and `queryBus` directly, enabling it to orchestrate across aggregates.
 
 ## Registering Standalone Command Handlers
 
@@ -65,18 +62,18 @@ const bankingDomain = defineDomain({
       BankAccount,
     },
     standaloneCommandHandlers: {
-      TransferFunds: async (command, infrastructure) => {
+      TransferFunds: async (command, ports) => {
         const { fromAccountId, toAccountId, amount } = command.payload;
 
         // Debit the source account
-        await infrastructure.commandBus.dispatch({
+        await ports.commandBus.dispatch({
           name: "AuthorizeTransaction",
           targetAggregateId: fromAccountId,
           payload: { amount: -amount, merchant: `Transfer to ${toAccountId}` },
         });
 
         // Credit the destination account
-        await infrastructure.commandBus.dispatch({
+        await ports.commandBus.dispatch({
           name: "AuthorizeTransaction",
           targetAggregateId: toAccountId,
           payload: { amount, merchant: `Transfer from ${fromAccountId}` },
@@ -134,14 +131,14 @@ Use standalone handlers to bridge your domain with external systems:
 
 ```typescript
 standaloneCommandHandlers: {
-  SyncWithExternalCRM: async (command, infrastructure) => {
+  SyncWithExternalCRM: async (command, ports) => {
     const { customerId, data } = command.payload;
 
-    // Call external system through infrastructure
-    await infrastructure.crmClient.syncCustomer(customerId, data);
+    // Call external system through ports
+    await ports.crmClient.syncCustomer(customerId, data);
 
     // Dispatch a domain command if the sync triggers domain logic
-    await infrastructure.commandBus.dispatch({
+    await ports.commandBus.dispatch({
       name: "MarkCustomerSynced",
       targetAggregateId: customerId,
     });
@@ -155,17 +152,17 @@ Standalone handlers can coordinate notifications that pull data from multiple so
 
 ```typescript
 standaloneCommandHandlers: {
-  SendOrderConfirmation: async (command, infrastructure) => {
+  SendOrderConfirmation: async (command, ports) => {
     const { orderId, customerId } = command.payload;
 
     // Query read model for display data
-    const orderDetails = await infrastructure.queryBus.dispatch({
+    const orderDetails = await ports.queryBus.dispatch({
       name: "GetOrderDetails",
       payload: { orderId },
     });
 
-    // Send via infrastructure
-    await infrastructure.emailService.send({
+    // Send via ports
+    await ports.emailService.send({
       to: orderDetails.customerEmail,
       template: "order-confirmation",
       data: orderDetails,
@@ -176,13 +173,13 @@ standaloneCommandHandlers: {
 
 ## Standalone vs Aggregate Commands
 
-| Aspect                           | Aggregate Command                      | Standalone Command                   |
-| -------------------------------- | -------------------------------------- | ------------------------------------ |
-| Has `targetAggregateId`          | Yes                                    | No                                   |
-| Handler receives state           | Yes                                    | No                                   |
-| Handler returns events           | Yes (one or more)                      | No (returns void)                    |
-| Has access to CQRSInfrastructure | No (only domain infrastructure)        | Yes (commandBus, eventBus, queryBus) |
-| Purpose                          | Domain logic within a single aggregate | Cross-aggregate orchestration        |
+| Aspect                  | Aggregate Command                      | Standalone Command                   |
+| ----------------------- | -------------------------------------- | ------------------------------------ |
+| Has `targetAggregateId` | Yes                                    | No                                   |
+| Handler receives state  | Yes                                    | No                                   |
+| Handler returns events  | Yes (one or more)                      | No (returns void)                    |
+| Has access to CQRSPorts | No (only domain ports)                 | Yes (commandBus, eventBus, queryBus) |
+| Purpose                 | Domain logic within a single aggregate | Cross-aggregate orchestration        |
 
 ## Guidelines
 

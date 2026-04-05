@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { testDomain } from "@noddde/testing";
 import { InMemoryViewStore } from "@noddde/engine";
-import type { HotelInfrastructure } from "../../infrastructure/types";
+import type { HotelPorts } from "../../infrastructure/types";
 import { FixedClock } from "../../infrastructure/services/clock";
 import { InMemoryEmailService } from "../../infrastructure/services/email-service";
 import { InMemorySmsService } from "../../infrastructure/services/sms-service";
@@ -11,7 +11,7 @@ import { Room } from "../../domain/write-model/aggregates/room";
 import { Booking } from "../../domain/write-model/aggregates/booking";
 import { BookingFulfillmentSaga } from "../../domain/process-model/booking-fulfillment";
 
-function createTestInfrastructure(): HotelInfrastructure {
+function createTestInfrastructure(): HotelPorts {
   return {
     clock: new FixedClock(new Date("2026-04-01T10:00:00Z")),
     emailService: new InMemoryEmailService(),
@@ -26,10 +26,10 @@ function createTestInfrastructure(): HotelInfrastructure {
 describe("Booking flow (slice)", () => {
   it("should complete full booking lifecycle via domain", async () => {
     const infra = createTestInfrastructure();
-    const { domain, spy } = await testDomain<HotelInfrastructure>({
+    const { domain, spy } = await testDomain<HotelPorts>({
       aggregates: { Room, Booking },
       sagas: { BookingFulfillment: BookingFulfillmentSaga },
-      infrastructure: infra,
+      ports: infra,
     });
 
     // Create a booking
@@ -61,9 +61,9 @@ describe("Booking flow (slice)", () => {
 
   it("should create room and track events via domain", async () => {
     const infra = createTestInfrastructure();
-    const { domain, spy } = await testDomain<HotelInfrastructure>({
+    const { domain, spy } = await testDomain<HotelPorts>({
       aggregates: { Room },
-      infrastructure: infra,
+      ports: infra,
     });
 
     await domain.dispatchCommand({
@@ -89,9 +89,9 @@ describe("Booking flow (slice)", () => {
 
   it("should handle room reservation after booking", async () => {
     const infra = createTestInfrastructure();
-    const { domain, spy } = await testDomain<HotelInfrastructure>({
+    const { domain, spy } = await testDomain<HotelPorts>({
       aggregates: { Room, Booking },
-      infrastructure: infra,
+      ports: infra,
     });
 
     // Create and make room available
@@ -133,9 +133,9 @@ describe("Booking flow (slice)", () => {
 
   it("should update room availability projection after reservation", async () => {
     const infra = createTestInfrastructure();
-    const { domain, spy } = await testDomain<HotelInfrastructure>({
+    const { domain, spy } = await testDomain<HotelPorts>({
       aggregates: { Room },
-      infrastructure: infra,
+      ports: infra,
     });
 
     // Create a room, make it available, then reserve it

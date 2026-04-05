@@ -1,12 +1,12 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { Domain } from "@noddde/engine";
-import type { HotelInfrastructure } from "../../infrastructure/types";
+import type { HotelPorts } from "../../infrastructure/types";
 import { createTestEnvironment } from "./setup";
 
 describe("Full-stack (integration)", () => {
   let app: FastifyInstance;
-  let domain: Domain<HotelInfrastructure, any, any, any, any>;
+  let domain: Domain<HotelPorts, any, any, any, any>;
 
   beforeEach(async () => {
     const env = await createTestEnvironment();

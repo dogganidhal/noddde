@@ -12,7 +12,7 @@ It provides a declarative, type-safe way to express domain aggregates using the 
 - **Pure functions over class hierarchies** — Aggregates are objects with handler maps, not classes with methods
 - **Type safety via mapped types** — `DefineCommands` and `DefineEvents` build discriminated unions from simple payload maps
 - **The Decider pattern** — `initialState` + `commands` (decide) + `apply` (evolve)
-- **Infrastructure injection** — Dependencies are function parameters, not imports; testable by default
+- **Ports injection** — Dependencies are function parameters, not imports; testable by default
 
 ## Choose Your Path
 
@@ -47,4 +47,4 @@ Learn why noddde is built the way it is:
 
 - [Why the Decider Pattern?](/docs/design-decisions/why-decider) — Pure functions vs. OOP
 - [Why DefineCommands/Events?](/docs/design-decisions/why-define-commands-events) — Mapped types vs. enums
-- [Why Injectable Infrastructure?](/docs/design-decisions/why-injectable-infrastructure) — Testability by design
+- [Why Injectable Ports?](/docs/design-decisions/why-injectable-ports) — Testability by design

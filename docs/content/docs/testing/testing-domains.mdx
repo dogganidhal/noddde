@@ -43,7 +43,7 @@ type TestDomainConfig = {
   aggregates?: Record<string, Aggregate>; // Aggregate definitions
   projections?: Record<string, Projection>; // Projection definitions
   sagas?: Record<string, Saga>; // Saga definitions (optional)
-  infrastructure?: Infrastructure; // Custom infrastructure (optional)
+  ports?: Ports; // Custom ports (optional)
 };
 ```
 
@@ -106,7 +106,7 @@ const { domain, spy } = await testDomain({
 });
 
 // Trigger the saga via the event bus
-await domain.infrastructure.eventBus.dispatch({
+await domain.adapters.eventBus.dispatch({
   name: "OrderPlaced",
   payload: { orderId: "o-1", amount: 99.99 },
 });
@@ -145,7 +145,7 @@ const view = await bankAccountViewStore.load("acc-1");
 expect(view?.balance).toBe(1000);
 ```
 
-## Custom Infrastructure
+## Custom Ports
 
 Pass domain-specific dependencies that handlers need:
 
@@ -154,7 +154,7 @@ const mockLogger = { info: vi.fn(), error: vi.fn() };
 
 const { domain } = await testDomain<BankingInfrastructure>({
   aggregates: { BankAccount },
-  infrastructure: {
+  ports: {
     logger: mockLogger,
     bankAccountViewRepository: { getById: vi.fn() } as any,
   },

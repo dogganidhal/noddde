@@ -26,7 +26,7 @@ type CounterTypes = {
   state: CounterState;
   events: CounterEvent;
   commands: CounterCommand;
-  infrastructure: {};
+  ports: {};
 };
 
 const Counter = defineAggregate<CounterTypes>({
@@ -54,7 +54,7 @@ type CounterProjectionDef = {
   events: CounterEvent;
   queries: CounterQuery;
   view: CounterViewType;
-  infrastructure: {};
+  ports: {};
   viewStore: ViewStore<CounterViewType>;
 };
 
@@ -102,7 +102,7 @@ type TestSagaDef = {
   state: SagaState;
   events: SagaEvent;
   commands: SagaCommand;
-  infrastructure: {};
+  ports: {};
 };
 
 const TestSaga = defineSaga<TestSagaDef>({
@@ -137,7 +137,7 @@ describe("testDomain", () => {
     });
 
     expect(domain).toBeDefined();
-    expect(domain.infrastructure).toBeDefined();
+    expect(domain.adapters).toBeDefined();
   });
 
   it("should capture published events in spy", async () => {
@@ -167,7 +167,7 @@ describe("testDomain", () => {
     });
 
     // Publish event via the event bus to trigger the saga
-    await domain.infrastructure.eventBus.dispatch({
+    await domain.adapters.eventBus.dispatch({
       name: "OrderPlaced",
       payload: { orderId: "o-1", amount: 42 },
     });
@@ -194,16 +194,16 @@ describe("testDomain", () => {
     expect(id).toBe("c-1");
   });
 
-  it("should support custom infrastructure", async () => {
+  it("should support custom ports", async () => {
     type CustomInfra = { logger: { log: (msg: string) => void } };
 
     const logs: string[] = [];
     const { domain } = await testDomain<CustomInfra>({
       aggregates: { Counter },
-      infrastructure: { logger: { log: (msg) => logs.push(msg) } },
+      ports: { logger: { log: (msg) => logs.push(msg) } },
     });
 
-    expect(domain.infrastructure.logger).toBeDefined();
+    expect(domain.adapters.logger).toBeDefined();
   });
 
   it("should work without sagas", async () => {

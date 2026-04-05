@@ -152,7 +152,7 @@ type BookingDef = {
   state: BookingState;
   events: BookingEvent;
   commands: BookingCommand;
-  infrastructure: HotelInfrastructure;
+  ports: HotelInfrastructure;
 };
 
 export const Booking = defineAggregate<BookingDef>({
@@ -243,9 +243,9 @@ import type { BookingFulfillmentState } from "../state";
 export const onPaymentCompleted = async (
   event: { payload: { bookingId: string /* ... */ } },
   state: BookingFulfillmentState,
-  infrastructure: any,
+  ports: any,
 ) => {
-  const availableRooms = (await infrastructure.queryBus.dispatch({
+  const availableRooms = (await ports.queryBus.dispatch({
     name: "SearchAvailableRooms",
     payload: { type: state.roomType },
   })) as any[];
@@ -330,7 +330,7 @@ type BookingFulfillmentDef = {
   state: BookingFulfillmentState;
   events: BookingEvent;
   commands: BookingCommand | RoomCommand;
-  infrastructure: HotelInfrastructure;
+  ports: HotelInfrastructure;
 };
 
 export const BookingFulfillmentSaga = defineSaga<BookingFulfillmentDef>({
@@ -463,7 +463,7 @@ In production, the `paymentGateway.charge()` call would be replaced by an async 
 
 ### CheckoutReminderSaga
 
-The third saga is simpler: it starts on `GuestCheckedIn`, sends a welcome SMS via `smsService`, and sends a farewell SMS on `GuestCheckedOut`. It demonstrates infrastructure side effects from a saga without dispatching any commands.
+The third saga is simpler: it starts on `GuestCheckedIn`, sends a welcome SMS via `smsService`, and sends a farewell SMS on `GuestCheckedOut`. It demonstrates ports side effects from a saga without dispatching any commands.
 
 ## Read Model
 
@@ -552,7 +552,7 @@ type RoomAvailabilityProjectionDef = {
   events: RoomEvent;
   queries: RoomAvailabilityQuery;
   view: RoomAvailabilityView;
-  infrastructure: HotelInfrastructure;
+  ports: HotelInfrastructure;
   viewStore: RoomAvailabilityViewStore;
 };
 
@@ -588,24 +588,24 @@ The sample shows both consistency modes side by side:
 
 ### Standalone query handler
 
-`SearchAvailableRoomsHandler` is registered as a standalone query handler rather than a projection-backed query. It reads directly from `roomAvailabilityViewStore` via infrastructure injection:
+`SearchAvailableRoomsHandler` is registered as a standalone query handler rather than a projection-backed query. It reads directly from `roomAvailabilityViewStore` via ports injection:
 
 ```ts
 // domain/read-model/query-handlers.ts
 export const SearchAvailableRoomsHandler: QueryHandler<
   HotelInfrastructure,
   Extract<SearchQuery, { name: "SearchAvailableRooms" }>
-> = async (query, infrastructure) =>
-  infrastructure.roomAvailabilityViewStore.findAvailable(query.type);
+> = async (query, ports) =>
+  ports.roomAvailabilityViewStore.findAvailable(query.type);
 ```
 
-The handler is then consumed inside `BookingFulfillmentSaga` via `infrastructure.queryBus.dispatch(...)` — the same query bus that HTTP clients use. This is how the saga finds an available room after payment completes.
+The handler is then consumed inside `BookingFulfillmentSaga` via `ports.queryBus.dispatch(...)` — the same query bus that HTTP clients use. This is how the saga finds an available room after payment completes.
 
 See [Queries](/docs/read-model/queries) for the full standalone query handler pattern.
 
 ## Domain Configuration
 
-The domain configuration uses `defineDomain` to capture the pure domain structure, then `wireDomain` to connect infrastructure.
+The domain configuration uses `defineDomain` to capture the pure domain structure, then `wireDomain` to connect adapters.
 
 ```ts
 // src/main.ts
@@ -638,9 +638,9 @@ const hotelDomain = defineDomain({
   },
 });
 
-// Step 2: Wire with infrastructure (async)
+// Step 2: Wire with adapters (async)
 const domain = await wireDomain(hotelDomain, {
-  infrastructure: (): HotelInfrastructure => ({
+  ports: (): HotelInfrastructure => ({
     clock: new SystemClock(),
     paymentGateway: new FakePaymentGateway(),
     roomAvailabilityViewStore: new DrizzleRoomAvailabilityViewStore(db),
@@ -690,7 +690,7 @@ Per-aggregate wiring allows each aggregate to have its own persistence strategy,
 The group booking endpoint demonstrates `domain.withUnitOfWork()`. All commands dispatched inside the callback share a single database transaction — either all commit or all roll back.
 
 ```ts
-// infrastructure/http/routes/bookings.ts
+// adapters/http/routes/bookings.ts
 fastify.post("/bookings/group", async (request, reply) => {
   const { guestId, rooms } = request.body;
   const bookingIds: string[] = [];

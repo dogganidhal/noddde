@@ -1,6 +1,6 @@
 import type { ViewStore } from "@noddde/core";
 import type { AuctionSummaryView } from "../auction-summary";
-import type { AuctionInfrastructure } from "../../../../../infrastructure";
+import type { AuctionPorts } from "../../../../../infrastructure";
 
 /**
  * Handles GetAuctionSummary by loading the view from the store.
@@ -8,6 +8,6 @@ import type { AuctionInfrastructure } from "../../../../../infrastructure";
  */
 export const handleGetAuctionSummary = async (
   query: { auctionId: string },
-  { views }: AuctionInfrastructure & { views: ViewStore<AuctionSummaryView> },
+  { views }: AuctionPorts & { views: ViewStore<AuctionSummaryView> },
 ): Promise<AuctionSummaryView | null> =>
   (await views.load(query.auctionId)) ?? null;

@@ -2,18 +2,18 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
   Command,
-  CQRSInfrastructure,
+  CQRSPorts,
   DefineCommands,
   DefineEvents,
-  FrameworkInfrastructure,
+  FrameworkPorts,
   InferSagaCommands,
   InferSagaEvents,
   InferSagaEventHandler,
   InferSagaId,
-  InferSagaInfrastructure,
+  InferSagaPorts,
   InferSagaOnEntry,
   InferSagaState,
-  Infrastructure,
+  Ports,
   Saga,
   SagaEventHandler,
   SagaReaction,
@@ -40,7 +40,7 @@ describe("defineSaga", () => {
     state: FulfillmentState;
     events: OrderEvent;
     commands: PaymentCommand;
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   const saga = defineSaga<FulfillmentTypes>({
@@ -139,7 +139,7 @@ describe("SagaEventHandler", () => {
   type MyState = { started: boolean };
   type MyCommand = Command & { name: "ProcessOrder" };
 
-  interface MyInfra extends Infrastructure {
+  interface MyPorts extends Ports {
     logger: { log(msg: string): void };
   }
 
@@ -147,7 +147,7 @@ describe("SagaEventHandler", () => {
     OrderPlacedEvent,
     MyState,
     MyCommand,
-    MyInfra
+    MyPorts
   >;
 
   it("should receive full event as first parameter", () => {
@@ -158,10 +158,8 @@ describe("SagaEventHandler", () => {
     expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<MyState>();
   });
 
-  it("should receive infrastructure merged with CQRSInfrastructure", () => {
-    expectTypeOf<Parameters<Handler>[2]>().toEqualTypeOf<
-      MyInfra & CQRSInfrastructure
-    >();
+  it("should receive ports merged with CQRSPorts", () => {
+    expectTypeOf<Parameters<Handler>[2]>().toEqualTypeOf<MyPorts & CQRSPorts>();
   });
 
   it("should return SagaReaction or Promise of it", () => {
@@ -184,7 +182,7 @@ describe("Saga on map", () => {
     state: { complete: boolean };
     events: Events;
     commands: Cmds;
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   const saga = defineSaga<Types>({
@@ -228,7 +226,7 @@ describe("Saga Infer utilities", () => {
   type MyEvent = DefineEvents<{ StepCompleted: { stepId: number } }>;
   type MyCommand = Command & { name: "NextStep" };
 
-  interface MyInfra extends Infrastructure {
+  interface MyPorts extends Ports {
     timer: { delay(ms: number): Promise<void> };
   }
 
@@ -236,7 +234,7 @@ describe("Saga Infer utilities", () => {
     state: MyState;
     events: MyEvent;
     commands: MyCommand;
-    infrastructure: MyInfra;
+    ports: MyPorts;
   };
 
   const saga = defineSaga<Types>({
@@ -265,10 +263,8 @@ describe("Saga Infer utilities", () => {
     expectTypeOf<InferSagaCommands<typeof saga>>().toEqualTypeOf<MyCommand>();
   });
 
-  it("should infer infrastructure type", () => {
-    expectTypeOf<
-      InferSagaInfrastructure<typeof saga>
-    >().toEqualTypeOf<MyInfra>();
+  it("should infer ports type", () => {
+    expectTypeOf<InferSagaPorts<typeof saga>>().toEqualTypeOf<MyPorts>();
   });
 
   it("should infer saga ID type (defaults to string)", () => {
@@ -283,7 +279,7 @@ describe("Saga with custom ID type", () => {
     state: {};
     events: Events;
     commands: Cmds;
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   const saga = defineSaga<Types, number>({
@@ -317,7 +313,7 @@ describe("defineSaga identity", () => {
     state: {};
     events: E;
     commands: C;
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should return the exact same config object", () => {
@@ -352,7 +348,7 @@ describe("InferSagaEventHandler", () => {
     orderId: string | null;
   };
 
-  interface FulfillmentInfra extends Infrastructure {
+  interface FulfillmentPorts extends Ports {
     notifier: { notify(msg: string): void };
   }
 
@@ -360,7 +356,7 @@ describe("InferSagaEventHandler", () => {
     state: FulfillmentState;
     events: OrderEvent;
     commands: PaymentCommand;
-    infrastructure: FulfillmentInfra;
+    ports: FulfillmentPorts;
   };
 
   it("should narrow the event to the specific variant", () => {
@@ -375,10 +371,10 @@ describe("InferSagaEventHandler", () => {
     expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<FulfillmentState>();
   });
 
-  it("should merge infrastructure with CQRSInfrastructure and FrameworkInfrastructure", () => {
+  it("should merge ports with CQRSPorts and FrameworkPorts", () => {
     type Handler = InferSagaEventHandler<FulfillmentTypes, "OrderPlaced">;
     expectTypeOf<Parameters<Handler>[2]>().toEqualTypeOf<
-      FulfillmentInfra & CQRSInfrastructure & FrameworkInfrastructure
+      FulfillmentPorts & CQRSPorts & FrameworkPorts
     >();
   });
 
@@ -411,7 +407,7 @@ describe("InferSagaOnEntry", () => {
     state: FulfillmentState;
     events: OrderEvent;
     commands: PaymentCommand;
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should have id and handle fields", () => {

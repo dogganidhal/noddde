@@ -4,22 +4,22 @@ module: cqrs/query/query-handler
 source_file: packages/core/src/cqrs/query/query-handler.ts
 status: implemented
 exports: [QueryHandler]
-depends_on: [cqrs/query/query, infrastructure/index]
+depends_on: [cqrs/query/query, ports/index]
 docs:
   - queries/query-handlers.mdx
 ---
 
 # QueryHandler
 
-> `QueryHandler` is a function type that handles a query by reading from infrastructure and returning the expected result. It receives the query payload (not the full query object) and has access to infrastructure for data retrieval. The return type is automatically derived from the query's phantom result type.
+> `QueryHandler` is a function type that handles a query by reading from ports and returning the expected result. It receives the query payload (not the full query object) and has access to ports for data retrieval. The return type is automatically derived from the query's phantom result type.
 
 ## Type Contract
 
-- **`QueryHandler<TInfrastructure, TQuery>`** is a function type:
+- **`QueryHandler<TPorts, TQuery>`** is a function type:
   - First parameter: `query: TQuery["payload"]` -- the query payload (filters, IDs, etc.).
-  - Second parameter: `infrastructure: TInfrastructure & FrameworkInfrastructure` -- external dependencies for data access, merged with framework infrastructure (provides `logger`).
+  - Second parameter: `ports: TPorts & FrameworkPorts` -- external dependencies for data access, merged with framework ports (provides `logger`).
   - Return type: `QueryResult<TQuery> | Promise<QueryResult<TQuery>>` -- sync or async, typed by the query's phantom result.
-- `TInfrastructure` is constrained to `extends Infrastructure`.
+- `TPorts` is constrained to `extends Ports`.
 - `TQuery` is constrained to `extends Query<any>`.
 
 ## Behavioral Requirements
@@ -27,22 +27,22 @@ docs:
 - The handler receives the unwrapped `payload` from the query, not the full query object. This is consistent with `EvolveHandler` which also receives payloads (note: `EventHandler` receives the full event).
 - The return type is derived from the query's phantom `TResult` type via `QueryResult<TQuery>`.
 - The handler may return synchronously or asynchronously (`T | Promise<T>`).
-- Infrastructure provides access to repositories, caches, databases, etc.
-- Unlike `StandaloneCommandHandler`, the infrastructure is NOT merged with `CQRSInfrastructure`. It is merged with `FrameworkInfrastructure` (providing `logger`).
+- Ports provides access to repositories, caches, databases, etc.
+- Unlike `StandaloneCommandHandler`, the ports are NOT merged with `CQRSPorts`. It is merged with `FrameworkPorts` (providing `logger`).
 
 ## Invariants
 
 - The first parameter type is `TQuery["payload"]`, which may be `any` (since `Query.payload` is `any`).
 - The return type always matches `QueryResult<TQuery>` or its promise-wrapped form.
-- The generic parameter order is `<TInfrastructure, TQuery>` (infrastructure first, query second).
-- No `CQRSInfrastructure` merging -- query handlers are read-only by convention. `FrameworkInfrastructure` is merged (providing `logger`).
+- The generic parameter order is `<TPorts, TQuery>` (ports first, query second).
+- No `CQRSPorts` merging -- query handlers are read-only by convention. `FrameworkPorts` is merged (providing `logger`).
 
 ## Edge Cases
 
 - **Query with no payload**: The first parameter becomes `any` (inherited from `Query.payload?: any`).
 - **Query with `any` result**: Return type is `any | Promise<any>`.
 - **Synchronous handler**: Returning the result directly (not in a Promise) is valid.
-- **Empty infrastructure**: Handler still works with `Infrastructure` (which is `{}`).
+- **Empty ports**: Handler still works with `Ports` (which is `{}`).
 
 ## Integration Points
 
@@ -52,7 +52,7 @@ docs:
 
 ## Test Scenarios
 
-### QueryHandler receives payload and infrastructure, returns typed result
+### QueryHandler receives payload and ports, returns typed result
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
@@ -60,8 +60,8 @@ import type {
   QueryHandler,
   DefineQueries,
   QueryResult,
-  Infrastructure,
-  FrameworkInfrastructure,
+  Ports,
+  FrameworkPorts,
 } from "@noddde/core";
 
 describe("QueryHandler", () => {
@@ -70,7 +70,7 @@ describe("QueryHandler", () => {
     balance: number;
   }
 
-  interface AccountInfra extends Infrastructure {
+  interface AccountInfra extends Ports {
     accountRepo: { getById(id: string): Promise<AccountView> };
   }
 
@@ -85,9 +85,9 @@ describe("QueryHandler", () => {
     expectTypeOf<Parameters<Handler>[0]>().toEqualTypeOf<{ id: string }>();
   });
 
-  it("should receive infrastructure merged with FrameworkInfrastructure as second parameter", () => {
+  it("should receive ports merged with FrameworkPorts as second parameter", () => {
     expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<
-      AccountInfra & FrameworkInfrastructure
+      AccountInfra & FrameworkPorts
     >();
   });
 
@@ -103,20 +103,18 @@ describe("QueryHandler", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
-import type { QueryHandler, Query, Infrastructure } from "@noddde/core";
+import type { QueryHandler, Query, Ports } from "@noddde/core";
 
 describe("QueryHandler sync/async", () => {
   it("should allow synchronous handler", () => {
-    const handler: QueryHandler<Infrastructure, Query<number>> = (_payload) => {
+    const handler: QueryHandler<Ports, Query<number>> = (_payload) => {
       return 42;
     };
     expect(handler({}, {})).toBe(42);
   });
 
   it("should allow asynchronous handler", () => {
-    const handler: QueryHandler<Infrastructure, Query<number>> = async (
-      _payload,
-    ) => {
+    const handler: QueryHandler<Ports, Query<number>> = async (_payload) => {
       return 42;
     };
     expect(handler({}, {})).resolves.toBe(42);
@@ -124,24 +122,17 @@ describe("QueryHandler sync/async", () => {
 });
 ```
 
-### QueryHandler does not receive CQRSInfrastructure
+### QueryHandler does not receive CQRSPorts
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
-import type {
-  QueryHandler,
-  Query,
-  Infrastructure,
-  CQRSInfrastructure,
-} from "@noddde/core";
+import type { QueryHandler, Query, Ports, CQRSPorts } from "@noddde/core";
 
-describe("QueryHandler infrastructure isolation", () => {
-  type Handler = QueryHandler<Infrastructure, Query<string>>;
+describe("QueryHandler ports isolation", () => {
+  type Handler = QueryHandler<Ports, Query<string>>;
 
-  it("should not have commandBus in infrastructure", () => {
-    expectTypeOf<
-      Parameters<Handler>[1]
-    >().not.toMatchTypeOf<CQRSInfrastructure>();
+  it("should not have commandBus in ports", () => {
+    expectTypeOf<Parameters<Handler>[1]>().not.toMatchTypeOf<CQRSPorts>();
   });
 });
 ```

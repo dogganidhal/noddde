@@ -33,19 +33,19 @@ depends_on:
   - cqrs/command/command
   - cqrs/query/query
   - edd/event
-  - infrastructure
+  - ports
   - persistence/idempotency
   - persistence/outbox
 docs:
   - domain-configuration/overview.mdx
   - domain-configuration/write-model.mdx
   - domain-configuration/read-model.mdx
-  - domain-configuration/infrastructure.mdx
+  - domain-configuration/adapters.mdx
 ---
 
 # Domain Definition & Wiring
 
-> The domain API is split into two phases: **definition** (`defineDomain`) captures the pure domain structure (aggregates, projections, sagas, handlers) as a sync identity function, while **wiring** (`wireDomain`) connects that definition to infrastructure (persistence, buses, concurrency, snapshots) and returns a running `Domain` instance. This separation allows domain definitions to be shared, tested, and analyzed independently of runtime concerns. The `Domain` class remains the central runtime orchestrator.
+> The domain API is split into two phases: **definition** (`defineDomain`) captures the pure domain structure (aggregates, projections, sagas, handlers) as a sync identity function, while **wiring** (`wireDomain`) connects that definition to adapters (persistence, buses, concurrency, snapshots) and returns a running `Domain` instance. This separation allows domain definitions to be shared, tested, and analyzed independently of runtime concerns. The `Domain` class remains the central runtime orchestrator.
 
 ## Type Contract
 
@@ -68,10 +68,10 @@ type InferProjectionMapQueries<
 
 /**
  * Pure structural definition of a domain. Contains aggregates, projections,
- * sagas, and handler registrations — no runtime or infrastructure concerns.
+ * sagas, and handler registrations — no runtime or adapter concerns.
  */
 type DomainDefinition<
-  TInfrastructure extends Infrastructure = Infrastructure,
+  TPorts extends Ports = Ports,
   TStandaloneCommand extends Command = Command,
   TStandaloneQuery extends Query<any> = Query<any>,
   TAggregates extends AggregateMap = AggregateMap,
@@ -81,14 +81,14 @@ type DomainDefinition<
   writeModel: {
     aggregates: TAggregates;
     standaloneCommandHandlers?: StandaloneCommandHandlerMap<
-      TInfrastructure,
+      TPorts,
       TStandaloneCommand
     >;
   };
   readModel: {
     projections: TProjections;
     standaloneQueryHandlers?: StandaloneQueryHandlerMap<
-      TInfrastructure,
+      TPorts,
       TStandaloneQuery
     >;
   };
@@ -97,7 +97,7 @@ type DomainDefinition<
     sagas?: SagaMap;
     /** Optional map of standalone event handlers keyed by event name. */
     standaloneEventHandlers?: StandaloneEventHandlerMap<
-      TInfrastructure,
+      TPorts,
       TStandaloneEvent
     >;
   };
@@ -109,12 +109,12 @@ type DomainDefinition<
  * StandaloneCommandHandlerMap and StandaloneQueryHandlerMap.
  */
 type StandaloneEventHandlerMap<
-  TInfrastructure extends Infrastructure,
+  TPorts extends Ports,
   TStandaloneEvent extends Event,
 > = {
   [EventName in TStandaloneEvent["name"]]?: EventHandler<
     Extract<TStandaloneEvent, { name: EventName }>,
-    TInfrastructure
+    TPorts
   >;
 };
 
@@ -135,7 +135,7 @@ function defineDomain<T extends DomainDefinition<any, any, any, any, any, any>>(
 ): T;
 /** @deprecated Prefer calling defineDomain({...}) without explicit generics. */
 function defineDomain<
-  TInfrastructure extends Infrastructure,
+  TPorts extends Ports,
   TStandaloneCommand extends Command = Command,
   TStandaloneQuery extends Query<any> = Query<any>,
   TAggregates extends AggregateMap = AggregateMap,
@@ -143,7 +143,7 @@ function defineDomain<
   TProjections extends ProjectionMap = ProjectionMap,
 >(
   definition: DomainDefinition<
-    TInfrastructure,
+    TPorts,
     TStandaloneCommand,
     TStandaloneQuery,
     TAggregates,
@@ -151,7 +151,7 @@ function defineDomain<
     TProjections
   >,
 ): DomainDefinition<
-  TInfrastructure,
+  TPorts,
   TStandaloneCommand,
   TStandaloneQuery,
   TAggregates,
@@ -182,38 +182,32 @@ type AggregateWiring = {
  * Per-projection runtime configuration. Extracts view store wiring from
  * the projection definition into the wiring layer.
  */
-type ProjectionWiring<TInfrastructure extends Infrastructure = Infrastructure> =
-  {
-    viewStore: (infrastructure: TInfrastructure) => ViewStore;
-  };
+type ProjectionWiring<TPorts extends Ports = Ports> = {
+  viewStore: (ports: TPorts) => ViewStore;
+};
 
 /**
  * Runtime infrastructure wiring. Connects a DomainDefinition to persistence,
  * buses, concurrency, snapshots, and user-provided services.
  */
 type DomainWiring<
-  TInfrastructure extends Infrastructure = Infrastructure,
+  TPorts extends Ports = Ports,
   TAggregates extends AggregateMap = AggregateMap,
 > = {
-  /** Factory for user-provided infrastructure services. */
-  infrastructure?: () => TInfrastructure | Promise<TInfrastructure>;
+  /** Factory for user-provided adapters services. */
+  adapters?: () => TPorts | Promise<TPorts>;
   /** Aggregate runtime — global AggregateWiring OR per-aggregate record. */
   aggregates?:
     | AggregateWiring
     | Record<keyof TAggregates & string, AggregateWiring>;
   /** Projection runtime — per-projection view store wiring. */
-  projections?: Record<
-    keyof TProjections & string,
-    ProjectionWiring<TInfrastructure>
-  >;
+  projections?: Record<keyof TProjections & string, ProjectionWiring<TPorts>>;
   /** Saga runtime. Required if processModel has sagas. */
   sagas?: {
     persistence: () => SagaPersistence | Promise<SagaPersistence>;
   };
-  /** Factory for CQRS buses. Receives resolved user infrastructure. */
-  buses?: (
-    infrastructure: TInfrastructure,
-  ) => CQRSInfrastructure | Promise<CQRSInfrastructure>;
+  /** Factory for CQRS buses. Receives resolved user adapters. */
+  buses?: (ports: TPorts) => CQRSPorts | Promise<CQRSPorts>;
   /** Factory for the UnitOfWorkFactory. */
   unitOfWork?: () => UnitOfWorkFactory | Promise<UnitOfWorkFactory>;
   /** Factory for idempotency store. */
@@ -231,29 +225,29 @@ type DomainWiring<
 
 /**
  * Wires a DomainDefinition with infrastructure to create a running Domain.
- * When `wiring` is omitted or `{}`, all infrastructure defaults to in-memory
+ * When `wiring` is omitted or `{}`, all adapters default to in-memory
  * implementations with startup warnings logged to the console.
  *
  * All type parameters are inferred from TDef (the narrow definition type):
- * - TInfrastructure: intersection of all infrastructure types from aggregates,
- *   projections, and sagas (the wiring.infrastructure factory must satisfy it)
+ * - TPorts: intersection of all ports types from aggregates,
+ *   projections, and sagas (the wiring.adapters factory must satisfy it)
  * - TAggregateCommand: union of all aggregate command types
  * - TProjectionQuery: union of all projection query types
  * - TStandaloneCommand/TStandaloneQuery: extracted from standalone handlers
  */
 const wireDomain: <
   TDef extends DomainDefinition<any, any, any, any, any, any>,
-  TInfrastructure extends Infrastructure = ExtractInfrastructure<TDef>,
+  TPorts extends Ports = ExtractPorts<TDef>,
   TStandaloneCommand extends Command = ExtractStandaloneCommand<TDef>,
   TStandaloneQuery extends Query<any> = ExtractStandaloneQuery<TDef>,
   TAggregates extends AggregateMap = ExtractAggregates<TDef>,
   TProjections extends ProjectionMap = ExtractProjections<TDef>,
 >(
   definition: TDef,
-  wiring?: DomainWiring<ExtractInfrastructure<TDef>, TAggregates>,
+  wiring?: DomainWiring<ExtractPorts<TDef>, TAggregates>,
 ) => Promise<
   Domain<
-    TInfrastructure,
+    TPorts,
     TStandaloneCommand,
     TStandaloneQuery,
     InferAggregateMapCommands<TAggregates>,
@@ -271,16 +265,14 @@ const wireDomain: <
  * and standalone queries (from registered standalone query handlers).
  */
 class Domain<
-  TInfrastructure extends Infrastructure,
+  TPorts extends Ports,
   TStandaloneCommand extends Command = Command,
   TStandaloneQuery extends Query<any> = Query<any>,
   TAggregateCommand extends AggregateCommand<any> = AggregateCommand<any>,
   TProjectionQuery extends Query<any> = Query<any>,
 > {
-  /** The fully resolved infrastructure (custom + CQRS buses + framework logger). */
-  get infrastructure(): TInfrastructure &
-    CQRSInfrastructure &
-    FrameworkInfrastructure;
+  /** The fully resolved adapters (custom + CQRS buses + framework logger). */
+  get adapters(): TPorts & CQRSPorts & FrameworkPorts;
 
   /**
    * Dispatches a command to the appropriate aggregate or standalone handler.
@@ -305,14 +297,14 @@ class Domain<
 ```
 
 - `InferAggregateMapCommands<TMap>` extracts the union of all command types from a map of aggregates. `InferProjectionMapQueries<TMap>` extracts the union of all query types from a map of projections. Both distribute the corresponding single-aggregate/projection inference across every value in the map.
-- `DomainDefinition` captures the pure domain structure: write model (aggregates + standalone command handlers), read model (projections + standalone query handlers), and process model (sagas). `TInfrastructure` is a type parameter only (handler signatures reference it) — no infrastructure value is present. `TProjections` captures the typed projections map (inferred from `readModel.projections`).
+- `DomainDefinition` captures the pure domain structure: write model (aggregates + standalone command handlers), read model (projections + standalone query handlers), and process model (sagas). `TPorts` is a type parameter only (handler signatures reference it) — no infrastructure value is present. `TProjections` captures the typed projections map (inferred from `readModel.projections`).
 - `defineDomain` is a sync identity function, consistent with `defineAggregate`, `defineProjection`, `defineSaga`. It returns the input with full type inference. `TAggregates` is inferred from `writeModel.aggregates`, `TProjections` from `readModel.projections`.
 - `AggregateWiring` groups per-aggregate runtime config: persistence, concurrency strategy, and snapshots. All fields optional.
 - `ProjectionWiring` provides per-projection view store wiring, extracted from the `Projection.viewStore` field (which is now deprecated in favor of this).
-- `DomainWiring` separates user-provided infrastructure (`infrastructure`) from framework plumbing (`aggregates`, `projections`, `sagas`, `buses`, `unitOfWork`, `idempotency`, `outbox`).
+- `DomainWiring` separates user-provided adapters (`adapters`) from framework plumbing (`aggregates`, `projections`, `sagas`, `buses`, `unitOfWork`, `idempotency`, `outbox`).
 - `DomainWiring.aggregates` is a discriminated union: a single `AggregateWiring` (global — all aggregates share the same config) or a `Record<keyof TAggregates & string, AggregateWiring>` (per-aggregate — each aggregate configured independently). Runtime discrimination: `typeof aggregates.persistence === 'function'` or `typeof aggregates.concurrency !== 'undefined'` or `typeof aggregates.snapshots !== 'undefined'` → global; otherwise per-aggregate record.
-- `wireDomain` accepts a `DomainDefinition` and an optional `DomainWiring`. When `wiring` is omitted or `{}`, all infrastructure defaults to in-memory implementations and startup warnings are logged. Resolves all factories, creates a `Domain` instance, calls `init()`, and returns it. All type parameters are inferred from `TDef` (the narrow definition type) via conditional type extraction — the user does not need to specify any generics.
-- `wireDomain` computes `TInfrastructure` as the intersection of all infrastructure types declared across aggregates, projections, and sagas. The `wiring.infrastructure` factory must return this computed type. If a component declares `{ clock: Clock }` and another declares `{ emailService: EmailService }`, the factory must return `{ clock: Clock, emailService: EmailService }`. The compiler reports exactly which fields are missing.
+- `wireDomain` accepts a `DomainDefinition` and an optional `DomainWiring`. When `wiring` is omitted or `{}`, all adapters default to in-memory implementations and startup warnings are logged. Resolves all factories, creates a `Domain` instance, calls `init()`, and returns it. All type parameters are inferred from `TDef` (the narrow definition type) via conditional type extraction — the user does not need to specify any generics.
+- `wireDomain` computes `TPorts` as the intersection of all ports types declared across aggregates, projections, and sagas. The `wiring.adapters` factory must return this computed type. If a component declares `{ clock: Clock }` and another declares `{ emailService: EmailService }`, the factory must return `{ clock: Clock, emailService: EmailService }`. The compiler reports exactly which fields are missing.
 - The returned `Domain` is strongly typed: `TAggregateCommand = InferAggregateMapCommands<TAggregates>` and `TProjectionQuery = InferProjectionMapQueries<TProjections>`.
 - `Domain.dispatchCommand` accepts the union `TAggregateCommand | TStandaloneCommand`. The return type is conditional: aggregate commands return `targetAggregateId`, standalone commands return `void`. `Domain.dispatchQuery` accepts `TProjectionQuery | TStandaloneQuery`. This provides autocomplete for valid command/query names and infers payload types via discriminated union narrowing.
 
@@ -322,9 +314,9 @@ class Domain<
 
 The `init()` method must execute the following steps in order:
 
-1. **Resolve custom infrastructure** -- Call `wiring.infrastructure()` if provided. Store the result. If not provided, use `{}` as the default infrastructure.
-2. **Resolve CQRS infrastructure** -- Call `wiring.buses(infrastructure)` if provided, passing the resolved custom infrastructure. Store the `CommandBus`, `EventBus`, and `QueryBus`. If not provided, create default in-memory implementations (`InMemoryCommandBus`, `EventEmitterEventBus`, `InMemoryQueryBus`) and log a warning: `[noddde] Using in-memory CQRS buses. This is not suitable for production.`
-3. **Merge infrastructure** -- Combine custom infrastructure and CQRS infrastructure into `this._infrastructure` as `TInfrastructure & CQRSInfrastructure`.
+1. **Resolve custom adapters** -- Call `wiring.adapters()` if provided. Store the result. If not provided, use `{}` as the default infrastructure.
+2. **Resolve CQRS infrastructure** -- Call `wiring.buses(ports)` if provided, passing the resolved custom adapters. Store the `CommandBus`, `EventBus`, and `QueryBus`. If not provided, create default in-memory implementations (`InMemoryCommandBus`, `EventEmitterEventBus`, `InMemoryQueryBus`) and log a warning: `[noddde] Using in-memory CQRS buses. This is not suitable for production.`
+3. **Merge infrastructure** -- Combine custom adapters and CQRS infrastructure into `this._infrastructure` as `TPorts & CQRSPorts`.
 4. **Resolve aggregate persistence** -- Build an `AggregatePersistenceResolver` (strategy pattern, engine-internal) based on the `wiring.aggregates` configuration:
    - **Omitted** (`undefined`): Create a `GlobalAggregatePersistenceResolver` wrapping a default `InMemoryEventSourcedAggregatePersistence` and log a warning: `[noddde] Using in-memory aggregate persistence. This is not suitable for production.`
    - **Global `AggregateWiring`** (has `persistence`, `concurrency`, or `snapshots` key): Call the `persistence` factory, create a `GlobalAggregatePersistenceResolver` wrapping the result.
@@ -339,7 +331,7 @@ The `init()` method must execute the following steps in order:
 10. **Register standalone query handlers** -- For each handler in `readModel.standaloneQueryHandlers`, register it on the query bus.
 11. **Register event listeners for projections** -- For each projection, subscribe to each event name in `Projection.on` on the event bus. When an event arrives, invoke the reducer to update the projection's view.
 12. **Register event listeners for sagas** -- For each saga in `processModel.sagas` (if defined), subscribe to each event name in `Object.keys(saga.on)` on the event bus. When an event arrives, execute the saga event handling lifecycle.
-13. **Register standalone event handlers** -- For each handler in `processModel.standaloneEventHandlers` (if defined), subscribe it to the event bus for the corresponding event name. When an event arrives, invoke the handler with the full event and the merged infrastructure (`TInfrastructure & CQRSInfrastructure`). Runs after saga handler registration.
+13. **Register standalone event handlers** -- For each handler in `processModel.standaloneEventHandlers` (if defined), subscribe it to the event bus for the corresponding event name. When an event arrives, invoke the handler with the full event and the merged infrastructure (`TPorts & CQRSPorts`). Runs after saga handler registration.
 
 ### Domain.dispatchCommand() -- Command Dispatch Lifecycle
 
@@ -350,7 +342,7 @@ The `dispatchCommand` method executes the following lifecycle for aggregate comm
    - **Event-sourced (with snapshot)**: If a `SnapshotStore` is configured, call `snapshotStore.load(aggregateName, command.targetAggregateId)` first. If a snapshot is found and the persistence implements `PartialEventLoad`, call `persistence.loadAfterVersion(aggregateName, id, snapshot.version)` to load only post-snapshot events. If the persistence does not implement `PartialEventLoad`, call `persistence.load(aggregateName, id)` and slice the result: `events.slice(snapshot.version)`. Derive `version = snapshot.version + loadedEvents.length`. Replay only the post-snapshot events through `Aggregate.evolve` handlers, starting from `snapshot.state`.
    - **Event-sourced (without snapshot)**: Call `persistence.load(aggregateName, command.targetAggregateId)` to get the full event stream. Derive `version = events.length`. Replay all events through `Aggregate.evolve` handlers, starting from `Aggregate.initialState`, to rebuild the current state.
    - **State-stored**: Call `persistence.load(aggregateName, command.targetAggregateId)` to get `{ state, version }` or `null`. If `null`, use `Aggregate.initialState` with `version = 0`.
-3. **Execute** -- Invoke the aggregate's decide handler: `aggregate.decide[command.name](command, currentState, infrastructure)`. The handler returns one or more events.
+3. **Execute** -- Invoke the aggregate's decide handler: `aggregate.decide[command.name](command, currentState, ports)`. The handler returns one or more events.
 4. **Evolve** -- For each returned event, evolve the state via `aggregate.evolve[event.name](event.payload, state)` to compute the new state. This ensures the aggregate's in-memory state is consistent with the events.
 5. **Persist** -- Save the results with optimistic concurrency:
    - **Event-sourced**: Call `persistence.save(aggregateName, command.targetAggregateId, newEvents, version)` to append the new events. `version` is the stream length observed at load time.
@@ -419,7 +411,7 @@ When an event arrives on the event bus for a registered saga:
 3. **Bootstrap or resume** -- If state is `null`/`undefined`:
    - If `event.name` is in `saga.startedBy`, use `saga.initialState` as the current state.
    - Otherwise, ignore the event (the saga has not been started yet).
-4. **Execute handler** -- Call `saga.on[event.name].handle(event, currentState, infrastructure)`. Returns a `SagaReaction` with new state and optional commands.
+4. **Execute handler** -- Call `saga.on[event.name].handle(event, currentState, ports)`. Returns a `SagaReaction` with new state and optional commands.
 5. **Persist saga state** -- Call `sagaPersistence.save(sagaName, sagaId, reaction.state)`.
 6. **Dispatch commands** -- For each command in `reaction.commands`, dispatch it through the command bus.
 
@@ -427,7 +419,7 @@ When an event arrives on the event bus for a registered saga:
 
 The `dispatchQuery` method delegates query dispatch to the underlying query bus:
 
-1. **Delegate** -- Call `this._infrastructure.queryBus.dispatch(query)`.
+1. **Delegate** -- Call `this._ports.queryBus.dispatch(query)`.
 2. **Return** -- Return the result from the query bus.
 
 `dispatchQuery` is a thin convenience wrapper. It performs no validation, error wrapping, or routing logic beyond delegation. Error propagation, handler lookup, and routing are the responsibility of the query bus implementation.
@@ -480,7 +472,7 @@ Warnings are logged for:
 Warnings are **not** logged for:
 
 - Optional components that are simply not configured (snapshots, idempotency, outbox, unit of work) — omitting these is a valid production choice.
-- User-provided infrastructure (`wiring.infrastructure`) — `{}` is a valid default when aggregates don't need external services.
+- User-provided infrastructure (`wiring.adapters`) — `{}` is a valid default when aggregates don't need external services.
 - Components where the user explicitly provides a factory that happens to return an in-memory implementation — the framework only warns when **it** supplies the default.
 
 ### Per-Aggregate Concurrency Strategy
@@ -508,7 +500,7 @@ In global mode, the same snapshot config applies to all event-sourced aggregates
 
 ## Invariants
 
-- `Domain.infrastructure` must not be accessed before `init()` completes. The `!` non-null assertion on the private fields indicates they are set during init.
+- `Domain.adapters` must not be accessed before `init()` completes. The `!` non-null assertion on the private fields indicates they are set during init.
 - `dispatchQuery` must not be called before `init()` completes. The `_infrastructure` field (including the query bus) is not assigned until `init()` runs.
 - `init()` must be called exactly once. Calling it multiple times may re-register handlers, causing duplicate processing.
 - `wireDomain` always returns an initialized domain. If `init()` throws, the promise rejects.
@@ -528,7 +520,7 @@ In global mode, the same snapshot config applies to all event-sourced aggregates
 - **Empty standaloneEventHandlers** -- `processModel: { standaloneEventHandlers: {} }` — no event subscriptions are created. No error.
 - **Standalone event handler is async** -- The handler returns `Promise<void>`. The event bus awaits the handler before proceeding.
 - **Standalone event handler throws** -- The error propagates through the event bus dispatch, consistent with saga and projection handler behavior.
-- **No custom infrastructure** -- `wiring.infrastructure` can be omitted. The domain uses `{}` as the custom infrastructure.
+- **No custom adapters** -- `wiring.adapters` can be omitted. The domain uses `{}` as the custom adapters.
 - **No CQRS infrastructure provided** -- `wiring.buses` can be omitted. The domain creates default in-memory buses.
 - **No persistence provided** -- `wiring.aggregates` can be omitted. The domain uses a default in-memory event-sourced persistence for all aggregates via `GlobalAggregatePersistenceResolver`.
 - **Per-aggregate persistence with missing aggregate** -- If the per-aggregate record is missing an entry for a registered aggregate, `init()` throws an error listing the missing aggregate names.
@@ -549,7 +541,7 @@ In global mode, the same snapshot config applies to all event-sourced aggregates
 - **Command without `commandId` with `idempotencyStore` configured** -- Processed normally, idempotency check is bypassed.
 - **Concurrent duplicate commands** -- The first to commit wins. The second will either be caught by `exists()` (if the first committed before the second checks) or by persistence version check (if both proceed concurrently).
 - **wireDomain with no wiring argument** -- `wireDomain(definition)` works identically to `wireDomain(definition, {})`. All infrastructure defaults to in-memory implementations with startup warnings logged.
-- **wireDomain with empty wiring** -- `wireDomain(definition, {})` uses all defaults: in-memory persistence, in-memory buses, no concurrency, no snapshots, no custom infrastructure. Startup warnings are logged for defaulted components.
+- **wireDomain with empty wiring** -- `wireDomain(definition, {})` uses all defaults: in-memory persistence, in-memory buses, no concurrency, no snapshots, no custom adapters. Startup warnings are logged for defaulted components.
 - **wireDomain with global aggregate config** -- All aggregates share the same persistence, concurrency, and snapshot settings.
 - **wireDomain with per-aggregate config, missing aggregate** -- If the per-aggregate record is missing an entry for a registered aggregate, `wireDomain` (during `init()`) throws an error listing the missing aggregate names.
 - **wireDomain with per-aggregate config, unknown aggregate** -- If the per-aggregate record contains a key that does not match any registered aggregate, `wireDomain` (during `init()`) throws an error listing the unknown names.
@@ -561,14 +553,14 @@ In global mode, the same snapshot config applies to all event-sourced aggregates
 
 ## Integration Points
 
-- **CQRS buses** -- The domain owns the command bus, query bus, and event bus. They are wired during init and exposed via `domain.infrastructure`.
+- **CQRS buses** -- The domain owns the command bus, query bus, and event bus. They are wired during init and exposed via `domain.adapters`.
 - **Persistence** -- The domain resolves aggregate persistence during init from factory functions, building an `AggregatePersistenceResolver` (either `GlobalAggregatePersistenceResolver` or `PerAggregatePersistenceResolver`). The resolver is passed to `CommandLifecycleExecutor`. Saga persistence is resolved separately.
 - **CommandLifecycleExecutor** -- Internal executor that handles the full aggregate command lifecycle (load, execute, apply, enrich, persist, publish). Created during `init()` and used by `dispatchCommand()` and command bus handlers.
 - **SagaExecutor** -- Internal executor that handles the saga event handling lifecycle (derive ID, load state, bootstrap/resume, execute handler, dispatch commands atomically). Created during `init()` when `processModel.sagas` is configured.
 - **Standalone event handlers** -- Registered during `init()` from `processModel.standaloneEventHandlers`. Each handler subscribes to its event name on the event bus and receives the full event + merged infrastructure. No executor or persistence needed — handlers are fire-and-forget side effects.
 - **MetadataEnricher** -- Internal helper that enriches raw events with metadata (eventId, timestamp, correlationId, causationId, userId, aggregate context). Used by `CommandLifecycleExecutor`.
 - **Projections** -- The domain reads `Projection.on` and `Projection.queryHandlers` to wire event listeners and query handlers.
-- **External consumers** -- Applications interact with the domain via `domain.dispatchCommand(command)` and `domain.dispatchQuery(query)`. The query bus remains accessible directly via `domain.infrastructure.queryBus` for advanced use cases.
+- **External consumers** -- Applications interact with the domain via `domain.dispatchCommand(command)` and `domain.dispatchQuery(query)`. The query bus remains accessible directly via `domain.adapters.queryBus` for advanced use cases.
 
 ## Test Scenarios
 
@@ -581,7 +573,7 @@ import type {
   AggregateTypes,
   DefineCommands,
   DefineEvents,
-  Infrastructure,
+  Ports,
 } from "@noddde/core";
 
 type CounterState = { count: number };
@@ -591,7 +583,7 @@ type CounterTypes = AggregateTypes & {
   state: CounterState;
   events: CounterEvent;
   commands: CounterCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const Counter = defineAggregate<CounterTypes>({
@@ -609,7 +601,7 @@ const Counter = defineAggregate<CounterTypes>({
 
 describe("defineDomain", () => {
   it("should return the definition unchanged with type inference", () => {
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
     });
@@ -639,7 +631,7 @@ import type {
   AggregateTypes,
   DefineCommands,
   DefineEvents,
-  Infrastructure,
+  Ports,
 } from "@noddde/core";
 
 type CounterState = { count: number };
@@ -655,7 +647,7 @@ type CounterTypes = AggregateTypes & {
   state: CounterState;
   events: CounterEvent;
   commands: CounterCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const Counter = defineAggregate<CounterTypes>({
@@ -678,7 +670,7 @@ const Counter = defineAggregate<CounterTypes>({
 
 describe("wireDomain", () => {
   it("should create an initialized Domain from definition + wiring", async () => {
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
     });
@@ -736,7 +728,7 @@ import type {
   AggregateTypes,
   DefineCommands,
   DefineEvents,
-  Infrastructure,
+  Ports,
 } from "@noddde/core";
 
 type CounterState = { count: number };
@@ -746,7 +738,7 @@ type CounterTypes = AggregateTypes & {
   state: CounterState;
   events: CounterEvent;
   commands: CounterCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const Counter = defineAggregate<CounterTypes>({
@@ -769,7 +761,7 @@ type BalanceTypes = AggregateTypes & {
   state: BalanceState;
   events: BalanceEvent;
   commands: BalanceCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const BankAccount = defineAggregate<BalanceTypes>({
@@ -791,7 +783,7 @@ describe("wireDomain per-aggregate config", () => {
   it("should support different concurrency and snapshots per aggregate", async () => {
     const snapshotStore = new InMemorySnapshotStore();
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Counter, BankAccount } },
       readModel: { projections: {} },
     });
@@ -855,7 +847,7 @@ import type {
   AggregateTypes,
   DefineCommands,
   DefineEvents,
-  Infrastructure,
+  Ports,
 } from "@noddde/core";
 
 type PingState = { pinged: boolean };
@@ -865,7 +857,7 @@ type PingTypes = AggregateTypes & {
   state: PingState;
   events: PingEvent;
   commands: PingCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const Pinger = defineAggregate<PingTypes>({
@@ -880,7 +872,7 @@ const Pinger = defineAggregate<PingTypes>({
 
 describe("wireDomain hello world", () => {
   it("should work with no wiring argument at all", async () => {
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Pinger } },
       readModel: { projections: {} },
     });
@@ -898,7 +890,7 @@ describe("wireDomain hello world", () => {
   it("should log warnings when using in-memory defaults", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Pinger } },
       readModel: { projections: {} },
     });
@@ -919,7 +911,7 @@ describe("wireDomain hello world", () => {
   it("should not log warnings when all wiring is explicitly provided", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Pinger } },
       readModel: { projections: {} },
     });
@@ -963,7 +955,7 @@ import type {
   AggregateTypes,
   DefineCommands,
   DefineEvents,
-  Infrastructure,
+  Ports,
 } from "@noddde/core";
 
 type PingState = { pinged: boolean };
@@ -973,7 +965,7 @@ type PingTypes = AggregateTypes & {
   state: PingState;
   events: PingEvent;
   commands: PingCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const Pinger = defineAggregate<PingTypes>({
@@ -988,7 +980,7 @@ const Pinger = defineAggregate<PingTypes>({
 
 describe("wireDomain minimal", () => {
   it("should work with empty wiring using all defaults", async () => {
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Pinger } },
       readModel: { projections: {} },
     });
@@ -1025,7 +1017,7 @@ import type {
   DefineEvents,
   DefineQueries,
   ProjectionTypes,
-  Infrastructure,
+  Ports,
 } from "@noddde/core";
 
 type ItemEvent = DefineEvents<{
@@ -1041,7 +1033,7 @@ type ItemQuery = DefineQueries<{
 
 type ItemView = { id: string; name: string };
 
-interface TestInfra extends Infrastructure {
+interface TestInfra extends Ports {
   itemViewStore: InMemoryViewStore<ItemView>;
 }
 
@@ -1049,7 +1041,7 @@ type ItemProjectionTypes = ProjectionTypes & {
   events: ItemEvent;
   queries: ItemQuery;
   view: ItemView;
-  infrastructure: TestInfra;
+  ports: TestInfra;
 };
 
 const ItemProjection = defineProjection<ItemProjectionTypes>({
@@ -1076,7 +1068,7 @@ type ItemAggregateTypes = AggregateTypes & {
   state: Record<string, never>;
   events: AddItemEvent;
   commands: AddItemCommand;
-  infrastructure: TestInfra;
+  ports: TestInfra;
 };
 
 const ItemAggregate = defineAggregate<ItemAggregateTypes>({
@@ -1102,7 +1094,7 @@ describe("wireDomain projection wiring", () => {
     });
 
     const domain = await wireDomain(definition, {
-      infrastructure: () => ({ itemViewStore: viewStore }),
+      adapters: () => ({ itemViewStore: viewStore }),
       projections: {
         ItemProjection: {
           viewStore: () => viewStore,
@@ -1134,7 +1126,7 @@ describe("wireDomain projection wiring", () => {
 });
 ```
 
-### wireDomain with user infrastructure separated from framework plumbing
+### wireDomain with user adapters separated from framework plumbing
 
 ```ts
 import { describe, it, expect } from "vitest";
@@ -1152,7 +1144,7 @@ import type {
   DefineEvents,
 } from "@noddde/core";
 
-interface AppInfrastructure {
+interface AppPorts {
   clock: { now(): Date };
   logger: { log(msg: string): void };
 }
@@ -1164,7 +1156,7 @@ type PingTypes = AggregateTypes & {
   state: PingState;
   events: PingEvent;
   commands: PingCommand;
-  infrastructure: AppInfrastructure;
+  ports: AppPorts;
 };
 
 const Pinger = defineAggregate<PingTypes>({
@@ -1181,18 +1173,18 @@ const Pinger = defineAggregate<PingTypes>({
 });
 
 describe("wireDomain infrastructure separation", () => {
-  it("should provide user infrastructure to handlers separately from framework plumbing", async () => {
+  it("should provide user adapters to handlers separately from framework plumbing", async () => {
     const fixedDate = new Date("2025-06-01T12:00:00Z");
     const logs: string[] = [];
 
-    const definition = defineDomain<AppInfrastructure>({
+    const definition = defineDomain<AppPorts>({
       writeModel: { aggregates: { Pinger } },
       readModel: { projections: {} },
     });
 
     const domain = await wireDomain(definition, {
-      // User services — what handlers receive as `infrastructure`
-      infrastructure: () => ({
+      // User services — what handlers receive as `adapters`
+      adapters: () => ({
         clock: { now: () => fixedDate },
         logger: { log: (msg: string) => logs.push(msg) },
       }),
@@ -1205,11 +1197,11 @@ describe("wireDomain infrastructure separation", () => {
     });
 
     // User infrastructure is accessible
-    expect(domain.infrastructure.clock.now()).toBe(fixedDate);
-    expect(domain.infrastructure.logger).toBeDefined();
+    expect(domain.adapters.clock.now()).toBe(fixedDate);
+    expect(domain.adapters.logger).toBeDefined();
 
     // CQRS buses are also on infrastructure (merged)
-    expect(domain.infrastructure.commandBus).toBeInstanceOf(InMemoryCommandBus);
+    expect(domain.adapters.commandBus).toBeInstanceOf(InMemoryCommandBus);
   });
 });
 ```
@@ -1231,7 +1223,7 @@ import type {
   DefineCommands,
   DefineEvents,
   Event,
-  Infrastructure,
+  Ports,
 } from "@noddde/core";
 
 type CounterState = { count: number };
@@ -1241,7 +1233,7 @@ type CounterTypes = AggregateTypes & {
   state: CounterState;
   events: CounterEvent;
   commands: CounterCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const Counter = defineAggregate<CounterTypes>({
@@ -1262,7 +1254,7 @@ describe("standalone event handlers", () => {
     const receivedEvents: Event[] = [];
 
     const definition = defineDomain<
-      Infrastructure,
+      Ports,
       never,
       never,
       typeof Counter extends infer A ? { Counter: typeof Counter } : never,
@@ -1316,7 +1308,7 @@ import type {
   AggregateTypes,
   DefineCommands,
   DefineEvents,
-  Infrastructure,
+  Ports,
 } from "@noddde/core";
 
 type CounterState = { count: number };
@@ -1326,7 +1318,7 @@ type CounterTypes = AggregateTypes & {
   state: CounterState;
   events: CounterEvent;
   commands: CounterCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const Counter = defineAggregate<CounterTypes>({
@@ -1347,7 +1339,7 @@ describe("standalone event handlers without sagas", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     const definition = defineDomain<
-      Infrastructure,
+      Ports,
       never,
       never,
       typeof Counter extends infer A ? { Counter: typeof Counter } : never,
@@ -1396,7 +1388,7 @@ import type {
   AggregateTypes,
   DefineCommands,
   DefineEvents,
-  Infrastructure,
+  Ports,
 } from "@noddde/core";
 
 type CounterState = { count: number };
@@ -1406,7 +1398,7 @@ type CounterTypes = AggregateTypes & {
   state: CounterState;
   events: CounterEvent;
   commands: CounterCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const Counter = defineAggregate<CounterTypes>({
@@ -1427,7 +1419,7 @@ describe("async standalone event handler", () => {
     let completed = false;
 
     const definition = defineDomain<
-      Infrastructure,
+      Ports,
       never,
       never,
       typeof Counter extends infer A ? { Counter: typeof Counter } : never,
@@ -1481,7 +1473,7 @@ import type {
   AggregateTypes,
   DefineCommands,
   DefineEvents,
-  Infrastructure,
+  Ports,
 } from "@noddde/core";
 
 type CounterState = { count: number };
@@ -1491,7 +1483,7 @@ type CounterTypes = AggregateTypes & {
   state: CounterState;
   events: CounterEvent;
   commands: CounterCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const Counter = defineAggregate<CounterTypes>({
@@ -1509,7 +1501,7 @@ const Counter = defineAggregate<CounterTypes>({
 
 describe("empty standalone event handlers", () => {
   it("should handle empty standaloneEventHandlers gracefully", async () => {
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
       processModel: {
@@ -1547,7 +1539,7 @@ import type {
   DefineEvents,
   DefineQueries,
   ProjectionTypes,
-  Infrastructure,
+  Ports,
 } from "@noddde/core";
 
 // --- Two aggregates with distinct command sets ---
@@ -1559,7 +1551,7 @@ type CounterTypes = AggregateTypes & {
   state: CounterState;
   events: CounterEvent;
   commands: CounterCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const Counter = defineAggregate<CounterTypes>({
@@ -1582,7 +1574,7 @@ type TodoTypes = AggregateTypes & {
   state: TodoState;
   events: TodoEvent;
   commands: TodoCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const Todo = defineAggregate<TodoTypes>({
@@ -1608,7 +1600,7 @@ type CounterProjectionTypes = ProjectionTypes & {
   events: CounterEvent;
   queries: CounterQuery;
   view: CounterView;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const CounterProjection = defineProjection<CounterProjectionTypes>({
@@ -1694,7 +1686,7 @@ import type {
   Command,
   DefineCommands,
   DefineEvents,
-  Infrastructure,
+  Ports,
 } from "@noddde/core";
 
 type CounterState = { count: number };
@@ -1704,7 +1696,7 @@ type CounterTypes = AggregateTypes & {
   state: CounterState;
   events: CounterEvent;
   commands: CounterCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const Counter = defineAggregate<CounterTypes>({
@@ -1724,7 +1716,7 @@ type NotifyCommand = { name: "SendNotification"; payload: { message: string } };
 
 describe("typed dispatch - standalone commands", () => {
   it("should accept standalone commands from registered handlers", async () => {
-    const definition = defineDomain<Infrastructure, NotifyCommand>({
+    const definition = defineDomain<Ports, NotifyCommand>({
       writeModel: {
         aggregates: { Counter },
         standaloneCommandHandlers: {
@@ -1751,7 +1743,7 @@ describe("typed dispatch - standalone commands", () => {
   });
 
   it("should return void for standalone commands", async () => {
-    const definition = defineDomain<Infrastructure, NotifyCommand>({
+    const definition = defineDomain<Ports, NotifyCommand>({
       writeModel: {
         aggregates: {},
         standaloneCommandHandlers: {
@@ -1783,7 +1775,7 @@ import type {
   DefineEvents,
   DefineQueries,
   ProjectionTypes,
-  Infrastructure,
+  Ports,
   Query,
   QueryResult,
 } from "@noddde/core";
@@ -1797,7 +1789,7 @@ type ItemProjectionTypes = ProjectionTypes & {
   events: ItemEvent;
   queries: ItemQuery;
   view: ItemView;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const ItemProjection = defineProjection<ItemProjectionTypes>({
@@ -1839,7 +1831,7 @@ describe("typed dispatch - queries", () => {
   it("should accept standalone queries from registered handlers", async () => {
     type StandaloneQ = HealthQuery;
 
-    const definition = defineDomain<Infrastructure, never, StandaloneQ>({
+    const definition = defineDomain<Ports, never, StandaloneQ>({
       writeModel: { aggregates: {} },
       readModel: {
         projections: { ItemProjection },
@@ -1892,7 +1884,7 @@ import type {
   AggregateTypes,
   DefineCommands,
   DefineEvents,
-  Infrastructure,
+  Ports,
   InferAggregateMapCommands,
 } from "@noddde/core";
 
@@ -1902,7 +1894,7 @@ type CounterTypes = AggregateTypes & {
   state: { count: number };
   events: CounterEvent;
   commands: CounterCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const Counter = defineAggregate<CounterTypes>({
@@ -1924,7 +1916,7 @@ type TodoTypes = AggregateTypes & {
   state: { done: boolean };
   events: TodoEvent;
   commands: TodoCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const Todo = defineAggregate<TodoTypes>({
@@ -1972,7 +1964,7 @@ import type {
   DefineEvents,
   DefineQueries,
   ProjectionTypes,
-  Infrastructure,
+  Ports,
   InferProjectionMapQueries,
 } from "@noddde/core";
 
@@ -1985,7 +1977,7 @@ type ItemProjectionTypes = ProjectionTypes & {
   events: ItemEvent;
   queries: ItemQuery;
   view: ItemView;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const ItemProjection = defineProjection<ItemProjectionTypes>({
@@ -2012,7 +2004,7 @@ type OrderProjectionTypes = ProjectionTypes & {
   events: OrderEvent;
   queries: OrderQuery;
   view: OrderView;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const OrderProjection = defineProjection<OrderProjectionTypes>({

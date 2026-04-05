@@ -4,9 +4,9 @@ module: engine/logger
 source_file: packages/engine/src/logger.ts
 status: implemented
 exports: [NodddeLogger, NoopLogger]
-depends_on: [infrastructure/logger]
+depends_on: [ports/logger]
 docs:
-  - infrastructure/logging.mdx
+  - ports/logging.mdx
 ---
 
 # NodddeLogger & NoopLogger

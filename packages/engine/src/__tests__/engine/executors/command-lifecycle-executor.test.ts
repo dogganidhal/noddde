@@ -6,7 +6,7 @@ import type {
   AggregateTypes,
   DefineCommands,
   DefineEvents,
-  Infrastructure,
+  Ports,
   UnitOfWork,
   Event,
 } from "@noddde/core";
@@ -45,7 +45,7 @@ type CounterTypes = AggregateTypes & {
   state: CounterState;
   events: CounterEvent;
   commands: CounterCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const Counter = defineAggregate<CounterTypes>({
@@ -74,7 +74,7 @@ describe("CommandLifecycleExecutor", () => {
   it("should load event-sourced aggregate, execute command, apply, enrich, persist, and publish", async () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const eventBus = new EventEmitterEventBus();
-    const infrastructure = {
+    const adapters = {
       commandBus: new InMemoryCommandBus(),
       eventBus,
       queryBus: new InMemoryQueryBus(),
@@ -86,7 +86,7 @@ describe("CommandLifecycleExecutor", () => {
 
     const executor = new CommandLifecycleExecutor(
       new GlobalAggregatePersistenceResolver(persistence),
-      infrastructure,
+      adapters,
       createInMemoryUnitOfWork,
       strategy,
       uowStorage,
@@ -127,7 +127,7 @@ describe("CommandLifecycleExecutor", () => {
       state: ToggleState;
       events: ToggleEvent;
       commands: ToggleCommand;
-      infrastructure: Infrastructure;
+      ports: Ports;
     };
 
     const Toggle = defineAggregate<ToggleTypes>({
@@ -142,7 +142,7 @@ describe("CommandLifecycleExecutor", () => {
 
     const persistence = new InMemoryStateStoredAggregatePersistence();
     const eventBus = new EventEmitterEventBus();
-    const infrastructure = {
+    const adapters = {
       commandBus: new InMemoryCommandBus(),
       eventBus,
       queryBus: new InMemoryQueryBus(),
@@ -154,7 +154,7 @@ describe("CommandLifecycleExecutor", () => {
 
     const executor = new CommandLifecycleExecutor(
       new GlobalAggregatePersistenceResolver(persistence),
-      infrastructure,
+      adapters,
       createInMemoryUnitOfWork,
       strategy,
       uowStorage,
@@ -183,7 +183,7 @@ describe("CommandLifecycleExecutor", () => {
         state: {};
         events: never;
         commands: never;
-        infrastructure: Infrastructure;
+        ports: Ports;
       }
     >({
       initialState: {},
@@ -192,7 +192,7 @@ describe("CommandLifecycleExecutor", () => {
     });
 
     const persistence = new InMemoryEventSourcedAggregatePersistence();
-    const infrastructure = {
+    const adapters = {
       commandBus: new InMemoryCommandBus(),
       eventBus: new EventEmitterEventBus(),
       queryBus: new InMemoryQueryBus(),
@@ -204,7 +204,7 @@ describe("CommandLifecycleExecutor", () => {
 
     const executor = new CommandLifecycleExecutor(
       new GlobalAggregatePersistenceResolver(persistence),
-      infrastructure,
+      adapters,
       createInMemoryUnitOfWork,
       strategy,
       uowStorage,
@@ -234,7 +234,7 @@ describe("CommandLifecycleExecutor", () => {
       state: ItemState;
       events: ItemEvent;
       commands: ItemCommand;
-      infrastructure: Infrastructure;
+      ports: Ports;
     };
 
     const ItemList = defineAggregate<ItemTypes>({
@@ -254,7 +254,7 @@ describe("CommandLifecycleExecutor", () => {
 
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const eventBus = new EventEmitterEventBus();
-    const infrastructure = {
+    const adapters = {
       commandBus: new InMemoryCommandBus(),
       eventBus,
       queryBus: new InMemoryQueryBus(),
@@ -266,7 +266,7 @@ describe("CommandLifecycleExecutor", () => {
 
     const executor = new CommandLifecycleExecutor(
       new GlobalAggregatePersistenceResolver(persistence),
-      infrastructure,
+      adapters,
       createInMemoryUnitOfWork,
       strategy,
       uowStorage,
@@ -315,7 +315,7 @@ describe("CommandLifecycleExecutor", () => {
       state: AccState;
       events: AccEvent;
       commands: AccCommand;
-      infrastructure: Infrastructure;
+      ports: Ports;
     };
 
     const Accumulator = defineAggregate<AccTypes>({
@@ -333,7 +333,7 @@ describe("CommandLifecycleExecutor", () => {
 
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const eventBus = new EventEmitterEventBus();
-    const infrastructure = {
+    const adapters = {
       commandBus: new InMemoryCommandBus(),
       eventBus,
       queryBus: new InMemoryQueryBus(),
@@ -347,7 +347,7 @@ describe("CommandLifecycleExecutor", () => {
 
     const executor = new CommandLifecycleExecutor(
       new GlobalAggregatePersistenceResolver(persistence),
-      infrastructure,
+      adapters,
       createInMemoryUnitOfWork,
       strategy,
       uowStorage,
@@ -382,7 +382,7 @@ describe("CommandLifecycleExecutor", () => {
       state: ValState;
       events: ValEvent;
       commands: ValCommand;
-      infrastructure: Infrastructure;
+      ports: Ports;
     };
 
     const ValueAgg = defineAggregate<ValTypes>({
@@ -400,7 +400,7 @@ describe("CommandLifecycleExecutor", () => {
 
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const eventBus = new EventEmitterEventBus();
-    const infrastructure = {
+    const adapters = {
       commandBus: new InMemoryCommandBus(),
       eventBus,
       queryBus: new InMemoryQueryBus(),
@@ -430,7 +430,7 @@ describe("CommandLifecycleExecutor", () => {
 
     const executor = new CommandLifecycleExecutor(
       new GlobalAggregatePersistenceResolver(persistence),
-      infrastructure,
+      adapters,
       createInMemoryUnitOfWork,
       strategy,
       uowStorage,
@@ -467,7 +467,7 @@ describe("CommandLifecycleExecutor", () => {
       state: ErrState;
       events: ErrEvent;
       commands: ErrCommand;
-      infrastructure: Infrastructure;
+      ports: Ports;
     };
 
     const FailingAggregate = defineAggregate<ErrTypes>({
@@ -484,7 +484,7 @@ describe("CommandLifecycleExecutor", () => {
 
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const eventBus = new EventEmitterEventBus();
-    const infrastructure = {
+    const adapters = {
       commandBus: new InMemoryCommandBus(),
       eventBus,
       queryBus: new InMemoryQueryBus(),
@@ -496,7 +496,7 @@ describe("CommandLifecycleExecutor", () => {
 
     const executor = new CommandLifecycleExecutor(
       new GlobalAggregatePersistenceResolver(persistence),
-      infrastructure,
+      adapters,
       createInMemoryUnitOfWork,
       strategy,
       uowStorage,
@@ -532,7 +532,7 @@ describe("CommandLifecycleExecutor", () => {
       state: SimpleState;
       events: SimpleEvent;
       commands: SimpleCommand;
-      infrastructure: Infrastructure;
+      ports: Ports;
     };
 
     const SimpleAgg = defineAggregate<SimpleTypes>({
@@ -550,7 +550,7 @@ describe("CommandLifecycleExecutor", () => {
 
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const eventBus = new EventEmitterEventBus();
-    const infrastructure = {
+    const adapters = {
       commandBus: new InMemoryCommandBus(),
       eventBus,
       queryBus: new InMemoryQueryBus(),
@@ -573,7 +573,7 @@ describe("CommandLifecycleExecutor", () => {
 
     const executor = new CommandLifecycleExecutor(
       new GlobalAggregatePersistenceResolver(persistence),
-      infrastructure,
+      adapters,
       createInMemoryUnitOfWork,
       mockStrategy,
       uowStorage,

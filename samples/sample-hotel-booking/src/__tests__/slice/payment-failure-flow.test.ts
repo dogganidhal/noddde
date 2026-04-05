@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { testDomain, stripMetadata } from "@noddde/testing";
 import { InMemoryViewStore } from "@noddde/engine";
-import type { HotelInfrastructure } from "../../infrastructure/types";
+import type { HotelPorts } from "../../infrastructure/types";
 import { FixedClock } from "../../infrastructure/services/clock";
 import { InMemoryEmailService } from "../../infrastructure/services/email-service";
 import { InMemorySmsService } from "../../infrastructure/services/sms-service";
@@ -12,7 +12,7 @@ import { BookingFulfillmentSaga } from "../../domain/process-model/booking-fulfi
 import { PaymentProcessingSaga } from "../../domain/process-model/payment-processing";
 import { SearchAvailableRoomsHandler } from "../../domain/read-model/query-handlers";
 
-function createTestInfrastructure(): HotelInfrastructure {
+function createTestInfrastructure(): HotelPorts {
   return {
     clock: new FixedClock(new Date("2026-04-01T10:00:00Z")),
     emailService: new InMemoryEmailService(),
@@ -37,13 +37,13 @@ describe("Payment failure compensation flow (slice)", () => {
       refund: async () => {},
     };
 
-    const { domain, spy } = await testDomain<HotelInfrastructure>({
+    const { domain, spy } = await testDomain<HotelPorts>({
       aggregates: { Booking },
       sagas: {
         BookingFulfillment: BookingFulfillmentSaga,
         PaymentProcessing: PaymentProcessingSaga,
       },
-      infrastructure: infra,
+      ports: infra,
     });
 
     await domain.dispatchCommand({
@@ -68,7 +68,7 @@ describe("Payment failure compensation flow (slice)", () => {
   it("should cancel booking when no room available after payment", async () => {
     const infra = createTestInfrastructure();
 
-    const { domain, spy } = await testDomain<HotelInfrastructure>({
+    const { domain, spy } = await testDomain<HotelPorts>({
       aggregates: { Room, Booking },
       sagas: {
         BookingFulfillment: BookingFulfillmentSaga,
@@ -77,7 +77,7 @@ describe("Payment failure compensation flow (slice)", () => {
       standaloneQueryHandlers: {
         SearchAvailableRooms: SearchAvailableRoomsHandler,
       },
-      infrastructure: infra,
+      ports: infra,
     });
 
     // No rooms created -> no rooms available when saga queries
@@ -106,13 +106,13 @@ describe("Payment failure compensation flow (slice)", () => {
       refund: async () => {},
     };
 
-    const { domain, spy } = await testDomain<HotelInfrastructure>({
+    const { domain, spy } = await testDomain<HotelPorts>({
       aggregates: { Booking },
       sagas: {
         BookingFulfillment: BookingFulfillmentSaga,
         PaymentProcessing: PaymentProcessingSaga,
       },
-      infrastructure: infra,
+      ports: infra,
     });
 
     await domain.dispatchCommand({

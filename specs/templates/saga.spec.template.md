@@ -77,17 +77,17 @@ type [SagaName]Command = DefineCommands<{
 }>;
 ```
 
-### Infrastructure
+### Ports
 
 <!--
   Define external dependencies available to saga event handlers.
-  The framework automatically merges CQRSInfrastructure (commandBus, eventBus, queryBus).
+  The framework automatically merges CQRSPorts (commandBus, eventBus, queryBus).
 -->
 
 ```ts
-import type { Infrastructure } from "@noddde/core";
+import type { Ports } from "@noddde/core";
 
-interface [SagaName]Infrastructure extends Infrastructure {
+interface [SagaName]Ports extends Ports {
   // TODO: Define external dependencies, or use {} for none
   // Example:
   // notificationService: { send(to: string, message: string): Promise<void> };
@@ -102,7 +102,7 @@ type [SagaName]Types = {
   state: [SagaName]State;
   events: [SagaName]Event;
   commands: [SagaName]Command;
-  infrastructure: [SagaName]Infrastructure;
+  ports: [SagaName]Ports;
 };
 ```
 
@@ -191,7 +191,7 @@ const [SagaName] = defineSaga<[SagaName]Types>({
     // TODO: Map each event to { id, handle } entries
     // [EventName]: {
     //   id: (event) => event.payload.[field],
-    //   handle: (event, state, infrastructure) => ({
+    //   handle: (event, state, ports) => ({
     //     state: { ...state, /* updated fields */ },
     //     commands: {
     //       name: "[CommandName]",

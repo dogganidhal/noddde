@@ -35,7 +35,7 @@ export interface AggregateCommand<TID extends ID = string> extends Command {
 
 /**
  * A command that is not routed to an aggregate. Standalone commands are handled
- * by standalone command handlers which receive the full infrastructure
+ * by standalone command handlers which receive the full ports
  * (including CQRS buses) but no aggregate state.
  *
  * Use cases include sagas, process managers, integration commands, and notifications.

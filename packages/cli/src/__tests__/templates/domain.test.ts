@@ -39,7 +39,7 @@ import {
 } from "../../templates/domain/projection-view-reducers.js";
 import {
   domainDefinitionTemplate,
-  domainInfrastructureTemplate,
+  domainPortsTemplate,
   domainMainTemplate,
 } from "../../templates/domain/domain-wiring.js";
 
@@ -181,16 +181,16 @@ describe("domain templates", () => {
     it("generates domain.ts with defineDomain", () => {
       const result = domainDefinitionTemplate(ctx);
       expect(result).toContain("defineDomain");
-      expect(result).toContain("BankAccountInfrastructure");
+      expect(result).toContain("BankAccountPorts");
       expect(result).toContain("bankAccountDomain");
       expect(result).toContain("BankAccount");
       expect(result).toContain("BankAccountProjection");
     });
 
     it("generates infrastructure interface", () => {
-      const result = domainInfrastructureTemplate(ctx);
-      expect(result).toContain("Infrastructure");
-      expect(result).toContain("BankAccountInfrastructure");
+      const result = domainPortsTemplate(ctx);
+      expect(result).toContain("Ports");
+      expect(result).toContain("BankAccountPorts");
     });
 
     it("generates main.ts with wireDomain", () => {

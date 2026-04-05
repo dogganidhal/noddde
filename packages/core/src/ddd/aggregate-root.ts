@@ -4,7 +4,7 @@ import { Event } from "../edd/event";
 import { EvolveHandler } from "../edd/event-sourcing-handler";
 import type { UpcasterMap } from "../edd/upcaster";
 import { AggregateCommand } from "../cqrs/command/command";
-import { Infrastructure, FrameworkInfrastructure } from "../infrastructure";
+import { Ports, FrameworkPorts } from "../ports";
 
 /**
  * A bundle of the four type parameters that define an aggregate's type universe.
@@ -17,7 +17,7 @@ import { Infrastructure, FrameworkInfrastructure } from "../infrastructure";
  *   state: BankAccountState;
  *   events: BankAccountEvent;
  *   commands: BankAccountCommand;
- *   infrastructure: BankingInfrastructure;
+ *   ports: BankingPorts;
  * };
  * ```
  */
@@ -29,12 +29,12 @@ export type AggregateTypes = {
   /** The discriminated union of all commands this aggregate can handle. */
   commands: AggregateCommand<ID>;
   /** The external dependencies available to command handlers. */
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 /**
  * A decide handler implements the "decide" phase of the Decider pattern.
- * It receives a command, the current aggregate state, and infrastructure,
+ * It receives a command, the current aggregate state, and ports,
  * then returns the event(s) representing what happened.
  *
  * The framework handles persistence and event dispatch — handlers only decide.
@@ -42,22 +42,22 @@ export type AggregateTypes = {
  * @typeParam TCommand - The specific command type this handler processes.
  * @typeParam TState - The aggregate state type.
  * @typeParam TEvents - The union of all event types this aggregate can emit.
- * @typeParam TInfrastructure - The infrastructure dependencies available.
+ * @typeParam TPorts - The port dependencies available.
  *
  * @param command - The full command object (including `targetAggregateId`).
  * @param state - The current aggregate state (rebuilt from events or loaded from store).
- * @param infrastructure - External dependencies (clock, APIs, etc.).
+ * @param ports - External dependencies (clock, APIs, etc.).
  * @returns One or more events, optionally wrapped in a `Promise`.
  */
 export type DecideHandler<
   TCommand extends AggregateCommand<ID>,
   TState,
   TEvents extends Event,
-  TInfrastructure extends Infrastructure = Infrastructure,
+  TPorts extends Ports = Ports,
 > = (
   command: TCommand,
   state: TState,
-  infrastructure: TInfrastructure & FrameworkInfrastructure,
+  ports: TPorts & FrameworkPorts,
 ) => TEvents | TEvents[] | Promise<TEvents | TEvents[]>;
 
 // ---- Handler maps (internal) ----
@@ -67,7 +67,7 @@ type DecideHandlerMap<T extends AggregateTypes> = {
     Extract<T["commands"], { name: K }>,
     T["state"],
     T["events"],
-    T["infrastructure"]
+    T["ports"]
   >;
 };
 
@@ -92,7 +92,7 @@ export interface Aggregate<T extends AggregateTypes = AggregateTypes> {
   initialState: T["state"];
   /**
    * A map of decide handlers keyed by command name. Each handler implements
-   * the "decide" phase: `(command, state, infrastructure) => event(s)`.
+   * the "decide" phase: `(command, state, ports) => event(s)`.
    */
   decide: DecideHandlerMap<T>;
   /**
@@ -113,7 +113,7 @@ export interface Aggregate<T extends AggregateTypes = AggregateTypes> {
 
 /**
  * Identity function that creates an aggregate definition with full type inference
- * across the command/event/state/infrastructure boundaries. This is the
+ * across the command/event/state/ports boundaries. This is the
  * recommended way to define aggregates.
  *
  * @typeParam T - Inferred {@link AggregateTypes} bundle.
@@ -202,34 +202,32 @@ export type InferAggregateMapCommands<
 }[keyof TMap];
 
 /**
- * Extracts the infrastructure type from an {@link Aggregate} definition.
+ * Extracts the ports type from an {@link Aggregate} definition.
  *
  * @example
  * ```ts
- * type Infra = InferAggregateInfrastructure<typeof BankAccount>; // BankingInfrastructure
+ * type P = InferAggregatePorts<typeof BankAccount>; // BankingPorts
  * ```
  */
-export type InferAggregateInfrastructure<T extends Aggregate> =
-  T extends Aggregate<infer U> ? U["infrastructure"] : never;
+export type InferAggregatePorts<T extends Aggregate> =
+  T extends Aggregate<infer U> ? U["ports"] : never;
 
 /**
- * Computes the intersection of all infrastructure types declared across
+ * Computes the intersection of all port types declared across
  * a map of aggregates. Used by `wireDomain` to infer what the
- * `wiring.infrastructure` factory must return.
+ * `wiring.adapters` factory must return.
  *
  * @example
  * ```ts
  * // Auction needs { clock: Clock }, Booking needs { clock: Clock, email: EmailService }
- * type Infra = InferAggregateMapInfrastructure<typeof aggregates>;
+ * type P = InferAggregateMapPorts<typeof aggregates>;
  * // { clock: Clock } & { clock: Clock, email: EmailService }
  * ```
  */
-export type InferAggregateMapInfrastructure<
+export type InferAggregateMapPorts<
   TMap extends Record<string | symbol, Aggregate<any>>,
 > = {
-  [K in keyof TMap]: TMap[K] extends Aggregate<infer U>
-    ? U["infrastructure"]
-    : never;
+  [K in keyof TMap]: TMap[K] extends Aggregate<infer U> ? U["ports"] : never;
 }[keyof TMap];
 
 // ---- Handler-level inference utilities ----
@@ -260,7 +258,7 @@ export type InferDecideHandler<
   Extract<T["commands"], { name: K }>,
   T["state"],
   T["events"],
-  T["infrastructure"]
+  T["ports"]
 >;
 
 /**

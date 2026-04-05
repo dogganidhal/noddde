@@ -10,7 +10,7 @@ exports:
   - PrismaAggregateStateTableConfig
   - PrismaStateTableColumnMap
   - createPrismaPersistence
-  - PrismaPersistenceInfrastructure
+  - PrismaPersistencePorts
   - PrismaEventSourcedAggregatePersistence
   - PrismaStateStoredAggregatePersistence
   - PrismaSagaPersistence
@@ -142,7 +142,7 @@ export function createPrismaAdapter<const C extends PrismaAdapterConfig>(
 /**
  * Result of createPrismaPersistence (deprecated).
  */
-export interface PrismaPersistenceInfrastructure {
+export interface PrismaPersistencePorts {
   eventSourcedPersistence: EventSourcedAggregatePersistence;
   stateStoredPersistence: StateStoredAggregatePersistence;
   sagaPersistence: SagaPersistence;
@@ -159,7 +159,7 @@ export interface PrismaPersistenceInfrastructure {
  */
 export function createPrismaPersistence(
   prisma: PrismaClient,
-): PrismaPersistenceInfrastructure;
+): PrismaPersistencePorts;
 
 /**
  * Prisma-backed event-sourced aggregate persistence.
@@ -367,9 +367,9 @@ export class PrismaOutboxStore implements OutboxStore {
 
 ### Backwards Compatibility
 
-62. `createPrismaPersistence(prisma)` continues to work with the same signature and return type (`PrismaPersistenceInfrastructure`).
+62. `createPrismaPersistence(prisma)` continues to work with the same signature and return type (`PrismaPersistencePorts`).
 63. `createPrismaPersistence` delegates to `createPrismaAdapter` internally with `{ snapshotStore: true, outboxStore: true }`.
-64. The `PrismaPersistenceInfrastructure` return type is unchanged.
+64. The `PrismaPersistencePorts` return type is unchanged.
 65. `createPrismaPersistence` is marked `@deprecated` in JSDoc, recommending `createPrismaAdapter` instead.
 
 ## Invariants

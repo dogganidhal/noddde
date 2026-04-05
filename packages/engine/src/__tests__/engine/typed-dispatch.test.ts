@@ -12,7 +12,7 @@ import {
   type DefineEvents,
   type DefineQueries,
   type ProjectionTypes,
-  type Infrastructure,
+  type Ports,
   type InferAggregateMapCommands,
   type InferProjectionMapQueries,
   type QueryResult,
@@ -28,7 +28,7 @@ type CounterTypes = AggregateTypes & {
   state: CounterState;
   events: CounterEvent;
   commands: CounterCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const Counter = defineAggregate<CounterTypes>({
@@ -51,7 +51,7 @@ type TodoTypes = AggregateTypes & {
   state: TodoState;
   events: TodoEvent;
   commands: TodoCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const Todo = defineAggregate<TodoTypes>({
@@ -76,7 +76,7 @@ type ItemProjectionTypes = ProjectionTypes & {
   events: ItemEvent;
   queries: ItemQuery;
   view: ItemView;
-  infrastructure: Infrastructure;
+  ports: Ports;
   viewStore: ViewStore<ItemView>;
 };
 
@@ -104,7 +104,7 @@ type OrderProjectionTypes = ProjectionTypes & {
   events: OrderEvent;
   queries: OrderQuery;
   view: OrderView;
-  infrastructure: Infrastructure;
+  ports: Ports;
   viewStore: ViewStore<OrderView>;
 };
 
@@ -195,13 +195,13 @@ describe("typed dispatch - standalone commands (runtime)", () => {
     // handler types from DomainDefinition<any, any, ...>. Standalone commands
     // still work at runtime; this test verifies that.
     const definition = defineDomain<
-      Infrastructure,
+      Ports,
       { name: "SendNotification"; payload: { message: string } }
     >({
       writeModel: {
         aggregates: { Counter },
         standaloneCommandHandlers: {
-          SendNotification: (cmd, infra) => {},
+          SendNotification: (cmd, ports) => {},
         },
       },
       readModel: { projections: {} },

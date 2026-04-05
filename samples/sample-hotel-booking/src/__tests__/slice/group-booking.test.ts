@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { testDomain } from "@noddde/testing";
 import { InMemoryViewStore } from "@noddde/engine";
-import type { HotelInfrastructure } from "../../infrastructure/types";
+import type { HotelPorts } from "../../infrastructure/types";
 import { FixedClock } from "../../infrastructure/services/clock";
 import { InMemoryEmailService } from "../../infrastructure/services/email-service";
 import { InMemorySmsService } from "../../infrastructure/services/sms-service";
@@ -10,7 +10,7 @@ import { InMemoryRoomAvailabilityViewStore } from "../../infrastructure/services
 import { Room } from "../../domain/write-model/aggregates/room";
 import { Booking } from "../../domain/write-model/aggregates/booking";
 
-function createTestInfrastructure(): HotelInfrastructure {
+function createTestInfrastructure(): HotelPorts {
   return {
     clock: new FixedClock(new Date("2026-04-01T10:00:00Z")),
     emailService: new InMemoryEmailService(),
@@ -25,9 +25,9 @@ function createTestInfrastructure(): HotelInfrastructure {
 describe("Group booking (slice)", () => {
   it("should create multiple bookings and rooms atomically via UoW", async () => {
     const infra = createTestInfrastructure();
-    const { domain, spy } = await testDomain<HotelInfrastructure>({
+    const { domain, spy } = await testDomain<HotelPorts>({
       aggregates: { Room, Booking },
-      infrastructure: infra,
+      ports: infra,
     });
 
     // Set up two rooms
@@ -124,9 +124,9 @@ describe("Group booking (slice)", () => {
 
   it("should allow booking multiple rooms for the same guest", async () => {
     const infra = createTestInfrastructure();
-    const { domain, spy } = await testDomain<HotelInfrastructure>({
+    const { domain, spy } = await testDomain<HotelPorts>({
       aggregates: { Booking },
-      infrastructure: infra,
+      ports: infra,
     });
 
     await domain.dispatchCommand({

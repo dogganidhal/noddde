@@ -1,6 +1,6 @@
 import Fastify from "fastify";
 import type { Domain } from "@noddde/engine";
-import type { HotelInfrastructure } from "../types";
+import type { HotelPorts } from "../types";
 import metadataPlugin from "./plugins/metadata";
 import errorHandlerPlugin from "./plugins/error-handler";
 import { roomRoutes } from "./routes/rooms";
@@ -14,9 +14,7 @@ import { queryRoutes } from "./routes/queries";
  * @param domain - The initialized domain instance.
  * @returns A ready-to-listen Fastify instance.
  */
-export function createApp(
-  domain: Domain<HotelInfrastructure, any, any, any, any>,
-) {
+export function createApp(domain: Domain<HotelPorts, any, any, any, any>) {
   const app = Fastify({ logger: false });
 
   // Plugins

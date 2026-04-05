@@ -96,7 +96,7 @@ type TodoTypes = {
   state: { completed: boolean };
   events: TodoEvent;
   commands: TodoCommand;
-  infrastructure: {};
+  ports: {};
 };
 
 const Todo = defineAggregate<TodoTypes>({
@@ -131,7 +131,7 @@ type TodoProjectionTypes = {
   events: TodoEvent;
   queries: TodoQuery;
   view: TodoView;
-  infrastructure: {};
+  ports: {};
 };
 
 const TodoProjection = defineProjection<TodoProjectionTypes>({
@@ -235,7 +235,7 @@ const Item = defineAggregate<{
   state: { name: string | null };
   events: ItemEvent;
   commands: ItemCommand;
-  infrastructure: {};
+  ports: {};
 }>({
   initialState: { name: null },
   decide: {
@@ -258,7 +258,7 @@ const CatalogProjection = defineProjection<{
   events: ItemEvent;
   queries: never;
   view: { items: Array<{ id: string; name: string }> };
-  infrastructure: {};
+  ports: {};
 }>({
   on: {
     ItemCreated: {
@@ -278,7 +278,7 @@ const PriceIndexProjection = defineProjection<{
   events: ItemEvent;
   queries: never;
   view: { totalValue: number; count: number };
-  infrastructure: {};
+  ports: {};
 }>({
   on: {
     ItemCreated: {
@@ -355,7 +355,7 @@ const Logger = defineAggregate<{
   state: {};
   events: LogEvent;
   commands: LogCommand;
-  infrastructure: {};
+  ports: {};
 }>({
   initialState: {},
   decide: {
@@ -373,7 +373,7 @@ const AsyncLogProjection = defineProjection<{
   events: LogEvent;
   queries: never;
   view: { entries: string[] };
-  infrastructure: {};
+  ports: {};
 }>({
   on: {
     EntryLogged: {
@@ -450,7 +450,7 @@ const Account = defineAggregate<{
   state: { balance: number };
   events: BalanceEvent;
   commands: BalanceCommand;
-  infrastructure: {};
+  ports: {};
 }>({
   initialState: { balance: 0 },
   decide: {
@@ -477,7 +477,7 @@ const BalanceProjection = defineProjection<{
   events: BalanceEvent;
   queries: never;
   view: { totalDeposits: number; totalWithdrawals: number };
-  infrastructure: {};
+  ports: {};
 }>({
   on: {
     Deposited: {

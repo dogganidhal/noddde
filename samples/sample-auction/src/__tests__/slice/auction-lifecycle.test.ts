@@ -3,7 +3,7 @@ import { testDomain, stripMetadata } from "@noddde/testing";
 import { InMemoryViewStore } from "@noddde/engine";
 import { Auction } from "../../domain/write-model/aggregates/auction";
 import { AuctionSummaryProjection } from "../../domain/read-model/projections/auction-summary";
-import type { AuctionInfrastructure } from "../../infrastructure";
+import type { AuctionPorts } from "../../infrastructure";
 import type { AuctionSummaryView } from "../../domain/read-model/projections/auction-summary";
 
 // ── Shared fixtures ──────────────────────────────────────────────
@@ -15,7 +15,7 @@ function createTestSetup() {
   const viewStore = new InMemoryViewStore<AuctionSummaryView>();
   return {
     viewStore,
-    infrastructure: { clock: { now: () => now } } as AuctionInfrastructure,
+    ports: { clock: { now: () => now } } as AuctionPorts,
     projectionViewStores: {
       AuctionSummary: {
         viewStore: () => viewStore,
@@ -31,11 +31,11 @@ function createTestSetup() {
 describe("Auction domain — slice tests", () => {
   it("should run a complete auction lifecycle via dispatch", async () => {
     const setup = createTestSetup();
-    const { domain, spy } = await testDomain<AuctionInfrastructure>({
+    const { domain, spy } = await testDomain<AuctionPorts>({
       aggregates: { Auction },
       projections: { AuctionSummary: AuctionSummaryProjection },
       projectionViewStores: setup.projectionViewStores,
-      infrastructure: setup.infrastructure,
+      ports: setup.ports,
     });
 
     await domain.dispatchCommand({
@@ -92,11 +92,11 @@ describe("Auction domain — slice tests", () => {
 
   it("should update the projection view after bids", async () => {
     const setup = createTestSetup();
-    const { domain } = await testDomain<AuctionInfrastructure>({
+    const { domain } = await testDomain<AuctionPorts>({
       aggregates: { Auction },
       projections: { AuctionSummary: AuctionSummaryProjection },
       projectionViewStores: setup.projectionViewStores,
-      infrastructure: setup.infrastructure,
+      ports: setup.ports,
     });
 
     await domain.dispatchCommand({
@@ -130,11 +130,11 @@ describe("Auction domain — slice tests", () => {
 
   it("should not corrupt the projection on a rejected bid", async () => {
     const setup = createTestSetup();
-    const { domain } = await testDomain<AuctionInfrastructure>({
+    const { domain } = await testDomain<AuctionPorts>({
       aggregates: { Auction },
       projections: { AuctionSummary: AuctionSummaryProjection },
       projectionViewStores: setup.projectionViewStores,
-      infrastructure: setup.infrastructure,
+      ports: setup.ports,
     });
 
     await domain.dispatchCommand({
@@ -169,11 +169,11 @@ describe("Auction domain — slice tests", () => {
 
   it("should handle multiple concurrent auctions", async () => {
     const setup = createTestSetup();
-    const { domain, spy } = await testDomain<AuctionInfrastructure>({
+    const { domain, spy } = await testDomain<AuctionPorts>({
       aggregates: { Auction },
       projections: { AuctionSummary: AuctionSummaryProjection },
       projectionViewStores: setup.projectionViewStores,
-      infrastructure: setup.infrastructure,
+      ports: setup.ports,
     });
 
     // Auction 1
@@ -224,9 +224,9 @@ describe("Auction domain — slice tests", () => {
 
   it("should produce clean events via stripMetadata", async () => {
     const setup = createTestSetup();
-    const { domain, spy } = await testDomain<AuctionInfrastructure>({
+    const { domain, spy } = await testDomain<AuctionPorts>({
       aggregates: { Auction },
-      infrastructure: setup.infrastructure,
+      ports: setup.ports,
     });
 
     await domain.dispatchCommand({

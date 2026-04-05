@@ -2,7 +2,7 @@
   "title": "Running Your Domain",
   "pages": [
     "domain-configuration",
-    "infrastructure",
+    "ports",
     "logging",
     "persistence",
     "idempotent-commands",

@@ -41,7 +41,7 @@ docs:
 
 ## Integration Points
 
-- `QueryBus` is a member of `CQRSInfrastructure`, making it available to standalone command handlers and saga event handlers.
+- `QueryBus` is a member of `CQRSPorts`, making it available to standalone command handlers and saga event handlers.
 - Projection query handlers are registered with the `QueryBus` implementation.
 - The `QueryBus` is the read-side complement to `CommandBus` (write-side) and `EventBus` (event distribution).
 

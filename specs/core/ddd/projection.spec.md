@@ -12,17 +12,17 @@ exports:
     InferProjectionView,
     InferProjectionEvents,
     InferProjectionQueries,
-    InferProjectionInfrastructure,
+    InferProjectionPorts,
     InferProjectionEventHandler,
     InferProjectionQueryHandler,
-    InferProjectionQueryInfrastructure,
+    InferProjectionQueryPorts,
   ]
 depends_on:
   [
     edd/event,
     cqrs/query/query,
     cqrs/query/query-handler,
-    infrastructure/index,
+    ports/index,
     persistence/view-store,
   ]
 docs:
@@ -43,7 +43,7 @@ docs:
   - `events: Event` -- discriminated union of events this projection handles.
   - `queries: Query<any>` -- discriminated union of queries this projection answers.
   - `view: any` -- the read-optimized view model.
-  - `infrastructure: Infrastructure` -- external dependencies for query handlers.
+  - `ports: Ports` -- external dependencies for query handlers.
   - `viewStore?: ViewStore` -- (optional) type-level hint for the view store. When present, enables typed `{ views }` injection into query handlers via `ProjectionQueryInfra<T>`. Not used at runtime in the projection definition — the actual view store is provided in the domain configuration.
 
 - **`ProjectionEventHandler<TEvent, TView>`** (exported) bundles the identity extractor and reducer for one event type:
@@ -57,12 +57,12 @@ docs:
   - Keys are constrained to valid event names (typos caught at compile time).
   - Unhandled events are silently ignored at runtime.
 
-- **`ProjectionQueryInfra<T>`** (internal) conditionally injects the view store into query handler infrastructure:
+- **`ProjectionQueryInfra<T>`** (internal) conditionally injects the view store into query handler ports:
 
-  - When `T` has a `viewStore` field extending `ViewStore`: `T["infrastructure"] & { views: T["viewStore"] }`
-  - When `T` does not have a `viewStore` field: `T["infrastructure"]`
+  - When `T` has a `viewStore` field extending `ViewStore`: `T["ports"] & { views: T["viewStore"] }`
+  - When `T` does not have a `viewStore` field: `T["ports"]`
 
-- **`QueryHandlerMap<T>`** (internal) maps each query name to an OPTIONAL `QueryHandler`, using `ProjectionQueryInfra<T>` as the infrastructure type:
+- **`QueryHandlerMap<T>`** (internal) maps each query name to an OPTIONAL `QueryHandler`, using `ProjectionQueryInfra<T>` as the ports type:
 
   - `[QueryName]?: QueryHandler<ProjectionQueryInfra<T>, Extract<T["queries"], { name: QueryName }>>`
 
@@ -71,7 +71,7 @@ docs:
   - `on: ProjectionOnMap<T>` -- partial map of event handlers. Each entry bundles an `id` function (extracts view instance ID) and a `reduce` function (transforms the view). Only events the projection cares about need entries.
   - `queryHandlers: QueryHandlerMap<T>` -- optional handler per query name.
   - `initialView?: T["view"]` -- optional default view state for new view instances.
-  - `viewStore?: ViewStoreFactory<T>` -- optional factory function that resolves a view store from infrastructure. When `T` has a typed `viewStore` field, returns that specific type; otherwise returns `ViewStore<T["view"]>`. Prefer using `ProjectionWiring` in `DomainWiring` for runtime view store configuration.
+  - `viewStore?: ViewStoreFactory<T>` -- optional factory function that resolves a view store from ports. When `T` has a typed `viewStore` field, returns that specific type; otherwise returns `ViewStore<T["view"]>`. Prefer using `ProjectionWiring` in `DomainWiring` for runtime view store configuration.
   - `consistency?: "eventual" | "strong"` -- optional consistency mode (defaults to `"eventual"`).
 
 - **`defineProjection<T>(config): Projection<T>`** -- identity function for type inference.
@@ -81,15 +81,15 @@ docs:
   - `InferProjectionView<T extends Projection>` = inferred `U["view"]`.
   - `InferProjectionEvents<T extends Projection>` = inferred `U["events"]`.
   - `InferProjectionQueries<T extends Projection>` = inferred `U["queries"]`.
-  - `InferProjectionInfrastructure<T extends Projection>` = inferred `U["infrastructure"]`.
+  - `InferProjectionPorts<T extends Projection>` = inferred `U["ports"]`.
 
 - **Handler-level inference utilities** (operate on `ProjectionTypes` bundle, for typing extracted handlers in separate files):
 
   - `InferProjectionEventHandler<T extends ProjectionTypes, K extends T["events"]["name"]>` = `ProjectionEventHandler<Extract<T["events"], { name: K }>, T["view"]>`. Resolves to the `{ id?, reduce }` bundle for event `K`, with the event narrowed via `Extract`.
 
-  - `InferProjectionQueryInfrastructure<T extends ProjectionTypes>` = conditionally `T["infrastructure"] & { views: T["viewStore"] }` when `T` has a `viewStore` field extending `ViewStore`, otherwise `T["infrastructure"]`. This is the public export of the internal `ProjectionQueryInfra<T>` logic.
+  - `InferProjectionQueryPorts<T extends ProjectionTypes>` = conditionally `T["ports"] & { views: T["viewStore"] }` when `T` has a `viewStore` field extending `ViewStore`, otherwise `T["ports"]`. This is the public export of the internal `ProjectionQueryInfra<T>` logic.
 
-  - `InferProjectionQueryHandler<T extends ProjectionTypes, K extends T["queries"]["name"]>` = `QueryHandler<InferProjectionQueryInfrastructure<T>, Extract<T["queries"], { name: K }>>`. Resolves to the exact query handler function type for query `K`, with views injection when applicable.
+  - `InferProjectionQueryHandler<T extends ProjectionTypes, K extends T["queries"]["name"]>` = `QueryHandler<InferProjectionQueryPorts<T>, Extract<T["queries"], { name: K }>>`. Resolves to the exact query handler function type for query `K`, with views injection when applicable.
 
 ## Behavioral Requirements
 
@@ -98,15 +98,15 @@ docs:
 3. The `on` map is **partial** over the event union — only events the projection cares about need entries. Unhandled events are silently ignored. This replaces the old exhaustive `reducers` map.
 4. Query handlers are OPTIONAL per query name (the `?` modifier). A projection may handle events without directly serving queries.
 5. `defineProjection` is an identity function returning the same config object.
-6. When `T` has a `viewStore` field, `QueryHandlerMap` uses `ProjectionQueryInfra<T>` which merges `{ views: T["viewStore"] }` into the infrastructure type. Query handlers can access `views.load()`, `views.save()`, and any custom methods on the view store.
-7. When `T` does not have a `viewStore` field, `QueryHandlerMap` uses `T["infrastructure"]` as-is.
+6. When `T` has a `viewStore` field, `QueryHandlerMap` uses `ProjectionQueryInfra<T>` which merges `{ views: T["viewStore"] }` into the ports type. Query handlers can access `views.load()`, `views.save()`, and any custom methods on the view store.
+7. When `T` does not have a `viewStore` field, `QueryHandlerMap` uses `T["ports"]` as-is.
 8. The `id` function within each `on` entry is optional at the type level. When a view store is configured in the domain runtime, the engine validates that every `on` entry has an `id` function.
 9. `initialView` provides the default view state when the view store returns `undefined`/`null` for a new entity. Without it, reducers may receive `undefined` as the current view.
 10. `consistency` defaults to `"eventual"`. When `"strong"`, the engine enlists view persistence in the same UoW as the originating command. When `"eventual"`, views are updated asynchronously via the event bus.
 11. `ProjectionEventHandler` is exported so users can reference it in utility types and generic helpers.
 12. `InferProjectionEventHandler<T, K>` resolves to a `{ id?, reduce }` object type with the event narrowed to variant `K` and the view type from `T`.
-13. `InferProjectionQueryInfrastructure<T>` conditionally injects `{ views: T["viewStore"] }` into `T["infrastructure"]` when `T` has a `viewStore` field, matching the internal `ProjectionQueryInfra<T>` logic.
-14. `InferProjectionQueryHandler<T, K>` resolves to a query handler function receiving the narrowed query payload and the conditional infrastructure (with or without `{ views }`).
+13. `InferProjectionQueryPorts<T>` conditionally injects `{ views: T["viewStore"] }` into `T["ports"]` when `T` has a `viewStore` field, matching the internal `ProjectionQueryInfra<T>` logic.
+14. `InferProjectionQueryHandler<T, K>` resolves to a query handler function receiving the narrowed query payload and the conditional ports (with or without `{ views }`).
 15. All three handler-level inference utilities operate on the `ProjectionTypes` bundle (not the `Projection` definition instance), enabling use before `defineProjection` is called.
 
 ## Invariants
@@ -115,14 +115,14 @@ docs:
 - The `queryHandlers` map has at most one key per query name in `T["queries"]`; keys are optional.
 - Reducer first parameter is the full event (with `name` and `payload`), not just `payload`.
 - Reducer second parameter and return type are both `T["view"]`.
-- Query handler infrastructure type is `ProjectionQueryInfra<T>` -- conditionally includes `{ views }`.
+- Query handler ports type is `ProjectionQueryInfra<T>` -- conditionally includes `{ views }`.
 - `defineProjection` returns the exact same object reference.
 - `id` functions (when present) return `ID` (`string | number | bigint`).
 - `consistency` is `"eventual"` or `"strong"` when specified; the engine defaults to `"eventual"` when omitted.
 - `on` map keys are constrained to `T["events"]["name"]` — invalid event names are compile errors.
 - `InferProjectionEventHandler<T, K>` always produces the same type as `ProjectionOnMap<T>[K]`.
 - `InferProjectionQueryHandler<T, K>` always produces the same type as `QueryHandlerMap<T>[K]`.
-- `InferProjectionQueryInfrastructure<T>` always produces the same type as internal `ProjectionQueryInfra<T>`.
+- `InferProjectionQueryPorts<T>` always produces the same type as internal `ProjectionQueryInfra<T>`.
 
 ## Edge Cases
 
@@ -144,7 +144,7 @@ docs:
 - Projections complement aggregates: aggregates handle the write side, projections handle the read side.
 - View store configuration lives in the domain runtime (`DomainWiring.projections` via `wireDomain`), not in the projection definition.
 - When a view store is configured for a projection and `on` entries have `id`, the engine auto-persists views: `event → id → load → reduce → save`.
-- When `T` has a `viewStore` type hint, query handlers receive `{ views: viewStoreInstance }` merged into their infrastructure.
+- When `T` has a `viewStore` type hint, query handlers receive `{ views: viewStoreInstance }` merged into their ports.
 - Strong consistency projections: view persistence is enlisted in the command's `UnitOfWork` via `onEventsProduced` callback.
 - Eventual consistency projections: view persistence happens asynchronously via event bus subscription.
 
@@ -154,7 +154,7 @@ docs:
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
-import type { DefineEvents, DefineQueries, Infrastructure } from "@noddde/core";
+import type { DefineEvents, DefineQueries, Ports } from "@noddde/core";
 import { defineProjection } from "@noddde/core";
 
 describe("defineProjection", () => {
@@ -173,7 +173,7 @@ describe("defineProjection", () => {
     ListAccounts: { result: AccountView[] };
   }>;
 
-  interface AccountInfra extends Infrastructure {
+  interface AccountInfra extends Ports {
     accountRepo: { getById(id: string): Promise<AccountView> };
     accountListRepo: { getAll(): Promise<AccountView[]> };
   }
@@ -182,7 +182,7 @@ describe("defineProjection", () => {
     events: AccountEvent;
     queries: AccountQuery;
     view: AccountView;
-    infrastructure: AccountInfra;
+    ports: AccountInfra;
   };
 
   const projection = defineProjection<AccountProjectionDef>({
@@ -221,7 +221,7 @@ describe("defineProjection", () => {
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
-import type { DefineEvents, Infrastructure, Query } from "@noddde/core";
+import type { DefineEvents, Ports, Query } from "@noddde/core";
 import { defineProjection } from "@noddde/core";
 
 describe("Reducer event parameter", () => {
@@ -231,7 +231,7 @@ describe("Reducer event parameter", () => {
     events: MyEvent;
     queries: Query<any>;
     view: string[];
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should pass the full event to reducer, not just payload", () => {
@@ -260,7 +260,7 @@ describe("Reducer event parameter", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
-import type { DefineEvents, DefineQueries, Infrastructure } from "@noddde/core";
+import type { DefineEvents, DefineQueries, Ports } from "@noddde/core";
 import { defineProjection } from "@noddde/core";
 
 describe("Optional query handlers", () => {
@@ -274,7 +274,7 @@ describe("Optional query handlers", () => {
     events: Events;
     queries: Queries;
     view: { id: string };
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should compile with empty query handlers", () => {
@@ -312,11 +312,11 @@ import { describe, it, expectTypeOf } from "vitest";
 import type {
   DefineEvents,
   DefineQueries,
-  Infrastructure,
+  Ports,
   InferProjectionView,
   InferProjectionEvents,
   InferProjectionQueries,
-  InferProjectionInfrastructure,
+  InferProjectionPorts,
 } from "@noddde/core";
 import { defineProjection } from "@noddde/core";
 
@@ -326,7 +326,7 @@ describe("Projection Infer utilities", () => {
   }
   type MyEvent = DefineEvents<{ Added: { item: string } }>;
   type MyQuery = DefineQueries<{ GetItems: { result: string[] } }>;
-  interface MyInfra extends Infrastructure {
+  interface MyInfra extends Ports {
     db: { query(): Promise<string[]> };
   }
 
@@ -334,7 +334,7 @@ describe("Projection Infer utilities", () => {
     events: MyEvent;
     queries: MyQuery;
     view: MyView;
-    infrastructure: MyInfra;
+    ports: MyInfra;
   };
 
   const proj = defineProjection<Def>({
@@ -362,10 +362,8 @@ describe("Projection Infer utilities", () => {
     >().toEqualTypeOf<MyQuery>();
   });
 
-  it("should infer infrastructure type", () => {
-    expectTypeOf<
-      InferProjectionInfrastructure<typeof proj>
-    >().toEqualTypeOf<MyInfra>();
+  it("should infer ports type", () => {
+    expectTypeOf<InferProjectionPorts<typeof proj>>().toEqualTypeOf<MyInfra>();
   });
 });
 ```
@@ -374,7 +372,7 @@ describe("Projection Infer utilities", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
-import type { DefineEvents, Infrastructure, Query } from "@noddde/core";
+import type { DefineEvents, Ports, Query } from "@noddde/core";
 import { defineProjection } from "@noddde/core";
 
 describe("Async reducers", () => {
@@ -383,7 +381,7 @@ describe("Async reducers", () => {
     events: Events;
     queries: Query<any>;
     view: string[];
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should accept async reducer functions", () => {
@@ -407,7 +405,7 @@ describe("Async reducers", () => {
 ```ts
 import { describe, it, expect } from "vitest";
 import { defineProjection } from "@noddde/core";
-import type { DefineEvents, Infrastructure, Query } from "@noddde/core";
+import type { DefineEvents, Ports, Query } from "@noddde/core";
 
 describe("defineProjection identity", () => {
   type E = DefineEvents<{ X: { v: number } }>;
@@ -415,7 +413,7 @@ describe("defineProjection identity", () => {
     events: E;
     queries: Query<any>;
     view: number;
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should return the exact same config object", () => {
@@ -436,7 +434,7 @@ import { describe, it, expectTypeOf, expect } from "vitest";
 import type {
   DefineEvents,
   DefineQueries,
-  Infrastructure,
+  Ports,
   ViewStore,
 } from "@noddde/core";
 import { defineProjection } from "@noddde/core";
@@ -464,7 +462,7 @@ describe("Projection with id in on entries", () => {
     events: AccountEvent;
     queries: AccountQuery;
     view: AccountView;
-    infrastructure: Infrastructure;
+    ports: Ports;
     viewStore: AccountViewStore;
   };
 
@@ -504,7 +502,7 @@ import { describe, it, expectTypeOf } from "vitest";
 import type {
   DefineEvents,
   DefineQueries,
-  Infrastructure,
+  Ports,
   ViewStore,
 } from "@noddde/core";
 import { defineProjection } from "@noddde/core";
@@ -529,11 +527,11 @@ describe("Query handlers with views injection", () => {
     events: ItemEvent;
     queries: ItemQuery;
     view: ItemView;
-    infrastructure: Infrastructure;
+    ports: Ports;
     viewStore: ItemViewStore;
   };
 
-  it("should inject typed views into query handler infrastructure", () => {
+  it("should inject typed views into query handler ports", () => {
     const projection = defineProjection<Def>({
       on: {
         ItemCreated: {
@@ -564,11 +562,11 @@ describe("Query handlers with views injection", () => {
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
-import type { DefineEvents, DefineQueries, Infrastructure } from "@noddde/core";
+import type { DefineEvents, DefineQueries, Ports } from "@noddde/core";
 import { defineProjection } from "@noddde/core";
 
 describe("Query handlers without viewStore (no views)", () => {
-  interface MyInfra extends Infrastructure {
+  interface MyInfra extends Ports {
     repo: { getById(id: string): Promise<{ id: string }> };
   }
 
@@ -581,10 +579,10 @@ describe("Query handlers without viewStore (no views)", () => {
     events: Events;
     queries: Queries;
     view: { id: string };
-    infrastructure: MyInfra;
+    ports: MyInfra;
   };
 
-  it("should use plain infrastructure without views", () => {
+  it("should use plain ports without views", () => {
     const projection = defineProjection<Def>({
       on: {
         Created: {
@@ -608,7 +606,7 @@ describe("Query handlers without viewStore (no views)", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
-import type { DefineEvents, Infrastructure, Query } from "@noddde/core";
+import type { DefineEvents, Ports, Query } from "@noddde/core";
 import { defineProjection } from "@noddde/core";
 
 describe("Projection with initialView", () => {
@@ -617,7 +615,7 @@ describe("Projection with initialView", () => {
     events: Events;
     queries: Query<any>;
     view: string[];
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should accept initialView field", () => {
@@ -640,12 +638,7 @@ describe("Projection with initialView", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
-import type {
-  DefineEvents,
-  Infrastructure,
-  Query,
-  ViewStore,
-} from "@noddde/core";
+import type { DefineEvents, Ports, Query, ViewStore } from "@noddde/core";
 import { defineProjection } from "@noddde/core";
 
 describe("Projection consistency mode", () => {
@@ -654,7 +647,7 @@ describe("Projection consistency mode", () => {
     events: Events;
     queries: Query<any>;
     view: { id: string };
-    infrastructure: Infrastructure;
+    ports: Ports;
     viewStore: ViewStore<{ id: string }>;
   };
 
@@ -692,7 +685,7 @@ describe("Projection consistency mode", () => {
 
 ```ts
 import { describe, it, expect, expectTypeOf } from "vitest";
-import type { DefineEvents, Infrastructure, Query } from "@noddde/core";
+import type { DefineEvents, Ports, Query } from "@noddde/core";
 import { defineProjection } from "@noddde/core";
 
 describe("Partial on map", () => {
@@ -707,7 +700,7 @@ describe("Partial on map", () => {
     events: Events;
     queries: Query<any>;
     view: { id: string; name: string };
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should compile with only a subset of events in on map", () => {
@@ -744,7 +737,7 @@ describe("Partial on map", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
-import type { DefineEvents, Infrastructure, Query } from "@noddde/core";
+import type { DefineEvents, Ports, Query } from "@noddde/core";
 import { defineProjection } from "@noddde/core";
 
 describe("Optional id in on entries", () => {
@@ -757,7 +750,7 @@ describe("Optional id in on entries", () => {
     events: Events;
     queries: Query<any>;
     view: { id: string; name: string };
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should compile with id on some entries but not others", () => {
@@ -800,7 +793,7 @@ describe("Optional id in on entries", () => {
 import { describe, it, expectTypeOf } from "vitest";
 import type {
   DefineEvents,
-  Infrastructure,
+  Ports,
   Query,
   InferProjectionEventHandler,
 } from "@noddde/core";
@@ -821,7 +814,7 @@ describe("InferProjectionEventHandler", () => {
     events: ItemEvent;
     queries: Query<any>;
     view: ItemView;
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should narrow the event to the specific variant in reduce", () => {
@@ -872,10 +865,10 @@ import { describe, it, expectTypeOf } from "vitest";
 import type {
   DefineEvents,
   DefineQueries,
-  Infrastructure,
+  Ports,
   ViewStore,
   InferProjectionQueryHandler,
-  FrameworkInfrastructure,
+  FrameworkPorts,
 } from "@noddde/core";
 
 describe("InferProjectionQueryHandler", () => {
@@ -899,7 +892,7 @@ describe("InferProjectionQueryHandler", () => {
     events: ItemEvent;
     queries: ItemQuery;
     view: ItemView;
-    infrastructure: Infrastructure;
+    ports: Ports;
     viewStore: ItemViewStore;
   };
 
@@ -907,23 +900,21 @@ describe("InferProjectionQueryHandler", () => {
     events: ItemEvent;
     queries: ItemQuery;
     view: ItemView;
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
-  it("should include views in infrastructure when viewStore is defined", () => {
+  it("should include views in ports when viewStore is defined", () => {
     type Handler = InferProjectionQueryHandler<DefWithViewStore, "GetItem">;
     type InfraParam = Parameters<Handler>[1];
     expectTypeOf<InfraParam>().toEqualTypeOf<
-      Infrastructure & { views: ItemViewStore } & FrameworkInfrastructure
+      Ports & { views: ItemViewStore } & FrameworkPorts
     >();
   });
 
-  it("should use plain infrastructure when viewStore is absent", () => {
+  it("should use plain ports when viewStore is absent", () => {
     type Handler = InferProjectionQueryHandler<DefWithoutViewStore, "GetItem">;
     type InfraParam = Parameters<Handler>[1];
-    expectTypeOf<InfraParam>().toEqualTypeOf<
-      Infrastructure & FrameworkInfrastructure
-    >();
+    expectTypeOf<InfraParam>().toEqualTypeOf<Ports & FrameworkPorts>();
   });
 
   it("should narrow the query payload", () => {
@@ -940,20 +931,20 @@ describe("InferProjectionQueryHandler", () => {
 });
 ```
 
-### InferProjectionQueryInfrastructure conditional type
+### InferProjectionQueryPorts conditional type
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
 import type {
   DefineEvents,
   DefineQueries,
-  Infrastructure,
+  Ports,
   ViewStore,
-  InferProjectionQueryInfrastructure,
+  InferProjectionQueryPorts,
   Query,
 } from "@noddde/core";
 
-describe("InferProjectionQueryInfrastructure", () => {
+describe("InferProjectionQueryPorts", () => {
   interface MyView {
     id: string;
   }
@@ -962,7 +953,7 @@ describe("InferProjectionQueryInfrastructure", () => {
     custom(): Promise<MyView[]>;
   }
 
-  interface MyInfra extends Infrastructure {
+  interface MyInfra extends Ports {
     db: { query(): Promise<MyView[]> };
   }
 
@@ -970,7 +961,7 @@ describe("InferProjectionQueryInfrastructure", () => {
     events: DefineEvents<{ Created: { id: string } }>;
     queries: Query<any>;
     view: MyView;
-    infrastructure: MyInfra;
+    ports: MyInfra;
     viewStore: MyViewStore;
   };
 
@@ -978,18 +969,18 @@ describe("InferProjectionQueryInfrastructure", () => {
     events: DefineEvents<{ Created: { id: string } }>;
     queries: Query<any>;
     view: MyView;
-    infrastructure: MyInfra;
+    ports: MyInfra;
   };
 
   it("should include views when viewStore is present", () => {
-    expectTypeOf<
-      InferProjectionQueryInfrastructure<WithViewStore>
-    >().toEqualTypeOf<MyInfra & { views: MyViewStore }>();
+    expectTypeOf<InferProjectionQueryPorts<WithViewStore>>().toEqualTypeOf<
+      MyInfra & { views: MyViewStore }
+    >();
   });
 
-  it("should be plain infrastructure when viewStore is absent", () => {
+  it("should be plain ports when viewStore is absent", () => {
     expectTypeOf<
-      InferProjectionQueryInfrastructure<WithoutViewStore>
+      InferProjectionQueryPorts<WithoutViewStore>
     >().toEqualTypeOf<MyInfra>();
   });
 });

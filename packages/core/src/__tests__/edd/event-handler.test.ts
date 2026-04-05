@@ -1,11 +1,6 @@
 /* eslint-disable no-unused-vars */
 import { describe, expect, expectTypeOf, it } from "vitest";
-import type {
-  DefineEvents,
-  Event,
-  EventHandler,
-  Infrastructure,
-} from "@noddde/core";
+import type { DefineEvents, Event, EventHandler, Ports } from "@noddde/core";
 
 describe("EventHandler", () => {
   type OrderEvent = DefineEvents<{
@@ -13,18 +8,18 @@ describe("EventHandler", () => {
   }>;
   type OrderPlacedEvent = Extract<OrderEvent, { name: "OrderPlaced" }>;
 
-  interface MyInfrastructure extends Infrastructure {
+  interface MyPorts extends Ports {
     emailService: { send(to: string, body: string): Promise<void> };
   }
 
-  type Handler = EventHandler<OrderPlacedEvent, MyInfrastructure>;
+  type Handler = EventHandler<OrderPlacedEvent, MyPorts>;
 
   it("should accept the full event as first parameter", () => {
     expectTypeOf<Parameters<Handler>[0]>().toEqualTypeOf<OrderPlacedEvent>();
   });
 
-  it("should accept infrastructure as second parameter", () => {
-    expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<MyInfrastructure>();
+  it("should accept ports as second parameter", () => {
+    expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<MyPorts>();
   });
 
   it("should return void or Promise<void>", () => {
@@ -34,17 +29,14 @@ describe("EventHandler", () => {
 
 describe("EventHandler sync/async", () => {
   it("should allow synchronous handler", () => {
-    const handler: EventHandler<Event, Infrastructure> = (_event, _infra) => {
+    const handler: EventHandler<Event, Ports> = (_event, _ports) => {
       // no-op, sync
     };
     expect(handler).toBeDefined();
   });
 
   it("should allow asynchronous handler", () => {
-    const handler: EventHandler<Event, Infrastructure> = async (
-      _event,
-      _infra,
-    ) => {
+    const handler: EventHandler<Event, Ports> = async (_event, _ports) => {
       // no-op, async
     };
     expect(handler).toBeDefined();

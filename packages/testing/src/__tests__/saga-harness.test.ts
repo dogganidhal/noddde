@@ -32,7 +32,7 @@ type FulfillmentSagaDef = {
   state: FulfillmentState;
   events: OrderEvent | PaymentEvent;
   commands: PaymentCommand | OrderCommand;
-  infrastructure: {};
+  ports: {};
 };
 
 const OrderFulfillmentSaga = defineSaga<FulfillmentSagaDef>({
@@ -72,7 +72,7 @@ const OrderFulfillmentSaga = defineSaga<FulfillmentSagaDef>({
   },
 });
 
-// ---- Saga with infrastructure ----
+// ---- Saga with ports ----
 
 type NotifyEvent = DefineEvents<{
   TaskCompleted: { taskId: string; message: string };
@@ -82,7 +82,7 @@ type NotifySagaDef = {
   state: { notified: boolean };
   events: NotifyEvent;
   commands: never;
-  infrastructure: { notifier: { send: (msg: string) => Promise<void> } };
+  ports: { notifier: { send: (msg: string) => Promise<void> } };
 };
 
 const NotifySaga = defineSaga<NotifySagaDef>({
@@ -91,8 +91,8 @@ const NotifySaga = defineSaga<NotifySagaDef>({
   on: {
     TaskCompleted: {
       id: (event) => event.payload.taskId,
-      handle: async (event, state, infrastructure) => {
-        await infrastructure.notifier.send(event.payload.message);
+      handle: async (event, state, ports) => {
+        await ports.notifier.send(event.payload.message);
         return { state: { notified: true } };
       },
     },
@@ -109,7 +109,7 @@ type ErrorSagaDef = {
   state: { ok: boolean };
   events: ErrorEvent;
   commands: never;
-  infrastructure: {};
+  ports: {};
 };
 
 const ErrorSaga = defineSaga<ErrorSagaDef>({
@@ -135,7 +135,7 @@ type AsyncSagaDef = {
   state: { processed: boolean };
   events: AsyncEvent;
   commands: never;
-  infrastructure: {};
+  ports: {};
 };
 
 const AsyncSaga = defineSaga<AsyncSagaDef>({
@@ -228,7 +228,7 @@ describe("testSaga", () => {
     expect(result.commands).toEqual([]);
   });
 
-  it("should provide no-op CQRSInfrastructure automatically", async () => {
+  it("should provide no-op CQRSPorts automatically", async () => {
     // This test just verifies the handler can execute without
     // manually providing commandBus/eventBus/queryBus
     const result = await testSaga(OrderFulfillmentSaga)
@@ -242,7 +242,7 @@ describe("testSaga", () => {
     expect(result.state.status).toBe("awaiting_payment");
   });
 
-  it("should merge custom infrastructure with CQRS infrastructure", async () => {
+  it("should merge custom ports with CQRS infrastructure", async () => {
     const mockNotifier = { send: vi.fn().mockResolvedValue(undefined) };
 
     const result = await testSaga(NotifySaga)
@@ -250,14 +250,14 @@ describe("testSaga", () => {
         name: "TaskCompleted",
         payload: { taskId: "t-1", message: "Done!" },
       })
-      .withInfrastructure({ notifier: mockNotifier })
+      .withPorts({ notifier: mockNotifier })
       .execute();
 
     expect(result.state).toEqual({ notified: true });
     expect(mockNotifier.send).toHaveBeenCalledWith("Done!");
   });
 
-  it("should allow overriding CQRS infrastructure", async () => {
+  it("should allow overriding CQRS ports", async () => {
     const mockDispatch = vi.fn().mockResolvedValue(undefined);
 
     const result = await testSaga(OrderFulfillmentSaga)
@@ -265,7 +265,7 @@ describe("testSaga", () => {
         name: "OrderPlaced",
         payload: { orderId: "o-5", amount: 25 },
       })
-      .withCQRSInfrastructure({
+      .withCQRSPorts({
         commandBus: { dispatch: mockDispatch },
       })
       .execute();

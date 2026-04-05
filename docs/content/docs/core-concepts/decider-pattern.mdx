@@ -140,7 +140,7 @@ type BankAccountTypes = {
   state: BankAccountState;
   commands: BankingCommand;
   events: BankingEvent;
-  infrastructure: {};
+  ports: {};
 };
 
 const BankAccount = defineAggregate<BankAccountTypes>({
@@ -310,15 +310,15 @@ type BankAccountTypes = {
   state: BankAccountState; // The aggregate's state shape
   commands: BankingCommand; // The discriminated union of commands
   events: BankingEvent; // The discriminated union of events
-  infrastructure: {}; // External dependencies (if any)
+  ports: {}; // External dependencies (if any)
 };
 ```
 
 This bundle is passed as a single generic parameter to `defineAggregate<BankAccountTypes>(...)`. The framework then uses it to generate correctly typed handler maps — each decide handler receives the narrowed command type and state, and each evolve handler receives the narrowed event payload and state.
 
-### Infrastructure Injection
+### Ports Injection
 
-The Decider pattern in its pure form has no concept of side effects. But real-world domain logic sometimes needs external information — the current time, a random ID generator, or a third-party service check. noddde handles this through the `infrastructure` field in the types bundle:
+The Decider pattern in its pure form has no concept of side effects. But real-world domain logic sometimes needs external information — the current time, a random ID generator, or a third-party service check. noddde handles this through the `adapters` field in the types bundle:
 
 ```typescript
 type Clock = { now(): Date };
@@ -327,7 +327,7 @@ type AuctionTypes = {
   state: AuctionState;
   commands: AuctionCommand;
   events: AuctionEvent;
-  infrastructure: { clock: Clock };
+  ports: { clock: Clock };
 };
 
 const Auction = defineAggregate<AuctionTypes>({
@@ -349,12 +349,12 @@ const Auction = defineAggregate<AuctionTypes>({
   },
 
   evolve: {
-    // ... evolve handlers (no infrastructure — always pure)
+    // ... evolve handlers (no ports — always pure)
   },
 });
 ```
 
-Infrastructure is passed to decide handlers but never to evolve handlers. This is by design: evolve handlers must be pure because they are used to replay events during state reconstruction. If evolve handlers depended on infrastructure, replaying the same events could produce different states depending on external conditions, which would break the event sourcing guarantee.
+Ports is passed to decide handlers but never to evolve handlers. This is by design: evolve handlers must be pure because they are used to replay events during state reconstruction. If evolve handlers depended on ports, replaying the same events could produce different states depending on external conditions, which would break the event sourcing guarantee.
 
 ## Summary
 
@@ -364,10 +364,10 @@ The Decider pattern gives you a simple, functional model for domain behavior:
 - **`evolve`** (evolve handlers) contains your state transitions
 - **`initialState`** defines where new instances start
 
-noddde implements this pattern with `defineAggregate`, adding type-safe handler maps and infrastructure injection while preserving the pattern's core properties: no base classes, no decorators, no mutation, and full testability. The `decide` and `evolve` maps correspond directly to the Decider pattern's `decide` and `evolve` functions.
+noddde implements this pattern with `defineAggregate`, adding type-safe handler maps and ports injection while preserving the pattern's core properties: no base classes, no decorators, no mutation, and full testability. The `decide` and `evolve` maps correspond directly to the Decider pattern's `decide` and `evolve` functions.
 
 ## Next Steps
 
 - Define your own aggregates in the [Modeling Your Domain guide](/docs/modeling/defining-aggregates)
 - Understand why noddde chose this pattern in [Why the Decider Pattern](/docs/design-decisions/why-decider)
-- Learn how infrastructure injection works in the [Running Your Domain guide](/docs/running/infrastructure)
+- Learn how ports injection works in the [Running Your Domain guide](/docs/running/ports)
