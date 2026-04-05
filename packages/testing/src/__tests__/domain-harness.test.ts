@@ -167,7 +167,7 @@ describe("testDomain", () => {
     });
 
     // Publish event via the event bus to trigger the saga
-    await domain.ports.eventBus.dispatch({
+    await domain.adapters.eventBus.dispatch({
       name: "OrderPlaced",
       payload: { orderId: "o-1", amount: 42 },
     });
@@ -203,7 +203,7 @@ describe("testDomain", () => {
       ports: { logger: { log: (msg) => logs.push(msg) } },
     });
 
-    expect(domain.ports.logger).toBeDefined();
+    expect(domain.adapters.logger).toBeDefined();
   });
 
   it("should work without sagas", async () => {
