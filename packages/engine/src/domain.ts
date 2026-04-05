@@ -4,18 +4,18 @@ import type {
   Aggregate,
   AggregateCommand,
   Command,
-  CQRSInfrastructure,
+  CQRSPorts,
   Event,
   EventBus,
   EventHandler,
-  FrameworkInfrastructure,
+  FrameworkPorts,
   ID,
-  Infrastructure,
+  Ports,
   InferAggregateMapCommands,
-  InferAggregateMapInfrastructure,
-  InferProjectionMapInfrastructure,
+  InferAggregateMapPorts,
+  InferProjectionMapPorts,
   InferProjectionMapQueries,
-  InferSagaMapInfrastructure,
+  InferSagaMapPorts,
   Logger,
   PersistenceConfiguration,
   Projection,
@@ -109,21 +109,21 @@ type ProjectionMap = Record<string | symbol, Projection<any>>;
 type SagaMap = Record<string | symbol, Saga<any, any>>;
 
 type StandaloneCommandHandlerMap<
-  TInfrastructure extends Infrastructure,
+  TPorts extends Ports,
   TStandaloneCommand extends Command,
 > = {
   [CommandName in TStandaloneCommand["name"]]?: StandaloneCommandHandler<
-    TInfrastructure,
+    TPorts,
     Extract<TStandaloneCommand, { name: CommandName }>
   >;
 };
 
 type StandaloneQueryHandlerMap<
-  TInfrastructure extends Infrastructure,
+  TPorts extends Ports,
   TStandaloneQuery extends Query<any>,
 > = {
   [QueryName in TStandaloneQuery["name"]]?: QueryHandler<
-    TInfrastructure,
+    TPorts,
     Extract<
       TStandaloneQuery,
       {
@@ -135,16 +135,16 @@ type StandaloneQueryHandlerMap<
 
 /**
  * Maps event names to standalone event handlers. Each handler receives the
- * full event and infrastructure. Follows the same pattern as
+ * full event and ports. Follows the same pattern as
  * StandaloneCommandHandlerMap and StandaloneQueryHandlerMap.
  */
 type StandaloneEventHandlerMap<
-  TInfrastructure extends Infrastructure,
+  TPorts extends Ports,
   TStandaloneEvent extends Event,
 > = {
   [EventName in TStandaloneEvent["name"]]?: EventHandler<
     Extract<TStandaloneEvent, { name: EventName }>,
-    TInfrastructure
+    TPorts
   >;
 };
 
@@ -184,22 +184,20 @@ export type AggregateWiring = {
  * Per-projection runtime configuration. Provides the view store factory
  * for a projection, extracted from the projection definition.
  */
-export type ProjectionWiring<
-  TInfrastructure extends Infrastructure = Infrastructure,
-> = {
+export type ProjectionWiring<TAdapters extends Ports = Ports> = {
   /** Factory that resolves the view store. */
-  viewStore: (infrastructure: TInfrastructure) => ViewStore;
+  viewStore: (adapters: TAdapters) => ViewStore;
 };
 
 /**
  * Pure structural definition of a domain. Contains aggregates, projections,
- * sagas, and handler registrations — no runtime or infrastructure concerns.
+ * sagas, and handler registrations — no runtime or adapter concerns.
  *
  * Created via {@link defineDomain}. Pass to {@link wireDomain} along with
- * infrastructure wiring to create a running {@link Domain}.
+ * adapter wiring to create a running {@link Domain}.
  */
 export type DomainDefinition<
-  TInfrastructure extends Infrastructure = Infrastructure,
+  TPorts extends Ports = Ports,
   TStandaloneCommand extends Command = Command,
   TStandaloneQuery extends Query<any> = Query<any>,
   TAggregates extends AggregateMap = AggregateMap,
@@ -212,7 +210,7 @@ export type DomainDefinition<
     aggregates: TAggregates;
     /** Optional map of standalone command handlers keyed by command name. */
     standaloneCommandHandlers?: StandaloneCommandHandlerMap<
-      TInfrastructure,
+      TPorts,
       TStandaloneCommand
     >;
   };
@@ -222,7 +220,7 @@ export type DomainDefinition<
     projections: TProjections;
     /** Optional map of standalone query handlers keyed by query name. */
     standaloneQueryHandlers?: StandaloneQueryHandlerMap<
-      TInfrastructure,
+      TPorts,
       TStandaloneQuery
     >;
   };
@@ -235,43 +233,39 @@ export type DomainDefinition<
     sagas?: SagaMap;
     /** Optional map of standalone event handlers keyed by event name. */
     standaloneEventHandlers?: StandaloneEventHandlerMap<
-      TInfrastructure,
+      TPorts,
       TStandaloneEvent
     >;
   };
 };
 
 /**
- * Runtime infrastructure wiring for a domain. Connects a {@link DomainDefinition}
+ * Runtime adapter wiring for a domain. Connects a {@link DomainDefinition}
  * to persistence, buses, concurrency, snapshots, and user-provided services.
  *
  * Pass to {@link wireDomain} along with a definition to create a running {@link Domain}.
  */
 export type DomainWiring<
-  TInfrastructure extends Infrastructure = Infrastructure,
+  TAdapters extends Ports = Ports,
   TAggregates extends AggregateMap = AggregateMap,
 > = {
   /**
-   * Factory for user-provided infrastructure services.
+   * Factory for user-provided adapter services.
    * Receives the framework logger so custom services can use it.
    */
-  infrastructure?: (
-    logger: Logger,
-  ) => TInfrastructure | Promise<TInfrastructure>;
+  adapters?: (logger: Logger) => TAdapters | Promise<TAdapters>;
   /** Aggregate runtime config — global {@link AggregateWiring} OR per-aggregate record. */
   aggregates?:
     | AggregateWiring
     | Record<keyof TAggregates & string, AggregateWiring>;
   /** Projection runtime config — per-projection view store wiring. */
-  projections?: Record<string, ProjectionWiring<TInfrastructure>>;
+  projections?: Record<string, ProjectionWiring<TAdapters>>;
   /** Saga runtime config. Required if processModel has sagas. */
   sagas?: {
     persistence: () => SagaPersistence | Promise<SagaPersistence>;
   };
-  /** Factory for CQRS buses. Receives resolved user infrastructure. */
-  buses?: (
-    infrastructure: TInfrastructure,
-  ) => CQRSInfrastructure | Promise<CQRSInfrastructure>;
+  /** Factory for CQRS buses. Receives resolved user adapters. */
+  buses?: (adapters: TAdapters) => CQRSPorts | Promise<CQRSPorts>;
   /** Factory for the UnitOfWorkFactory. */
   unitOfWork?: () => UnitOfWorkFactory | Promise<UnitOfWorkFactory>;
   /** Factory for idempotency store. */
@@ -300,9 +294,9 @@ export type DomainWiring<
  * });
  * ```
  *
- * **Legacy usage** (explicit infrastructure generic — typed dispatch is NOT available):
+ * **Legacy usage** (explicit ports generic — typed dispatch is NOT available):
  * ```ts
- * const domain = defineDomain<MyInfrastructure>({...});
+ * const domain = defineDomain<MyPorts>({...});
  * ```
  *
  * @returns The same definition object, fully typed.
@@ -311,15 +305,15 @@ export function defineDomain<
   T extends DomainDefinition<any, any, any, any, any, any>,
 >(definition: T): T;
 /**
- * Legacy overload: explicit infrastructure generic. Standalone handler
- * infrastructure is typed, but typed dispatch (narrowed command/query names)
+ * Legacy overload: explicit ports generic. Standalone handler
+ * ports are typed, but typed dispatch (narrowed command/query names)
  * is NOT available because TypeScript cannot infer TAggregates/TProjections
  * when explicit generics are provided.
  *
  * @deprecated Prefer calling `defineDomain({...})` without explicit generics.
  */
 export function defineDomain<
-  TInfrastructure extends Infrastructure,
+  TPorts extends Ports,
   TStandaloneCommand extends Command = Command,
   TStandaloneQuery extends Query<any> = Query<any>,
   TAggregates extends AggregateMap = AggregateMap,
@@ -327,7 +321,7 @@ export function defineDomain<
   TProjections extends ProjectionMap = ProjectionMap,
 >(
   definition: DomainDefinition<
-    TInfrastructure,
+    TPorts,
     TStandaloneCommand,
     TStandaloneQuery,
     TAggregates,
@@ -335,7 +329,7 @@ export function defineDomain<
     TProjections
   >,
 ): DomainDefinition<
-  TInfrastructure,
+  TPorts,
   TStandaloneCommand,
   TStandaloneQuery,
   TAggregates,
@@ -358,29 +352,27 @@ interface ResolvedWiringContext {
 
 /**
  * The running domain instance. Created via {@link wireDomain}, it is the
- * primary entry point for dispatching commands and accessing infrastructure.
+ * primary entry point for dispatching commands and accessing adapters.
  *
  * `dispatchCommand` accepts aggregate commands (from registered aggregates)
  * and standalone commands (from registered standalone command handlers).
  * `dispatchQuery` accepts projection queries (from registered projections)
  * and standalone queries (from registered standalone query handlers).
  *
- * @typeParam TInfrastructure - The custom infrastructure type for this domain.
+ * @typeParam TAdapters - The custom adapters type for this domain.
  * @typeParam TStandaloneCommand - Union of standalone command types.
  * @typeParam TStandaloneQuery - Union of standalone query types.
  * @typeParam TAggregateCommand - Union of all aggregate command types (computed by wireDomain).
  * @typeParam TProjectionQuery - Union of all projection query types (computed by wireDomain).
  */
 export class Domain<
-  TInfrastructure extends Infrastructure,
+  TAdapters extends Ports,
   TStandaloneCommand extends Command = Command,
   TStandaloneQuery extends Query<any> = Query<any>,
   TAggregateCommand extends AggregateCommand<any> = AggregateCommand<any>,
   TProjectionQuery extends Query<any> = Query<any>,
 > {
-  private _infrastructure!: TInfrastructure &
-    CQRSInfrastructure &
-    FrameworkInfrastructure;
+  private _adapters!: TAdapters & CQRSPorts & FrameworkPorts;
   private _unitOfWorkFactory!: UnitOfWorkFactory;
   private readonly _uowStorage = new AsyncLocalStorage<UnitOfWork>();
   private readonly _metadataStorage = new AsyncLocalStorage<MetadataContext>();
@@ -392,28 +384,26 @@ export class Domain<
   private _shutdownPromise: Promise<void> | null = null;
   private _activeOperations = 0;
   private _drainResolve: (() => void) | null = null;
-  /** All resolved infrastructure components for auto-close discovery. */
+  /** All resolved adapter components for auto-close discovery. */
   private _allComponents: unknown[] = [];
-  /** The fully resolved infrastructure (custom + CQRS buses + framework logger). */
-  public get infrastructure(): TInfrastructure &
-    CQRSInfrastructure &
-    FrameworkInfrastructure {
-    return this._infrastructure;
+  /** The fully resolved adapters (custom + CQRS buses + framework logger). */
+  public get adapters(): TAdapters & CQRSPorts & FrameworkPorts {
+    return this._adapters;
   }
 
   constructor(
     private readonly definition: DomainDefinition<
-      TInfrastructure,
+      TAdapters,
       TStandaloneCommand,
       TStandaloneQuery
     >,
-    private readonly wiring: DomainWiring<TInfrastructure>,
+    private readonly wiring: DomainWiring<TAdapters>,
     private readonly _resolvedContext?: ResolvedWiringContext,
   ) {}
 
   /**
-   * Initializes the domain by calling all infrastructure factories
-   * in order: custom infrastructure, CQRS buses, persistence.
+   * Initializes the domain by calling all adapter factories
+   * in order: custom adapters, CQRS buses, persistence.
    * Then registers command handlers, query handlers, projection
    * event listeners, and saga event listeners.
    */
@@ -424,33 +414,33 @@ export class Domain<
     const logger = wiring.logger ?? new NodddeLogger();
     const domainLog = logger.child("domain");
 
-    // Step 1: Resolve custom infrastructure
-    const customInfra = wiring.infrastructure
-      ? await wiring.infrastructure(logger)
-      : ({} as TInfrastructure);
-    domainLog.info("Custom infrastructure resolved.");
+    // Step 1: Resolve custom adapters
+    const customAdapters = wiring.adapters
+      ? await wiring.adapters(logger)
+      : ({} as TAdapters);
+    domainLog.info("Custom adapters resolved.");
 
-    // Step 2: Resolve CQRS infrastructure
-    let cqrsInfra: CQRSInfrastructure;
+    // Step 2: Resolve CQRS ports
+    let cqrsPorts: CQRSPorts;
     if (wiring.buses) {
-      cqrsInfra = await wiring.buses(customInfra);
+      cqrsPorts = await wiring.buses(customAdapters);
     } else {
       domainLog.warn(
         "Using in-memory CQRS buses. This is not suitable for production.",
       );
-      cqrsInfra = {
+      cqrsPorts = {
         commandBus: new InMemoryCommandBus(),
         eventBus: new EventEmitterEventBus(),
         queryBus: new InMemoryQueryBus(),
       };
     }
 
-    // Step 3: Merge infrastructure (custom + CQRS buses + framework logger)
-    this._infrastructure = {
-      ...customInfra,
-      ...cqrsInfra,
+    // Step 3: Merge adapters (custom + CQRS buses + framework logger)
+    this._adapters = {
+      ...customAdapters,
+      ...cqrsPorts,
       logger,
-    } as TInfrastructure & CQRSInfrastructure & FrameworkInfrastructure;
+    } as TAdapters & CQRSPorts & FrameworkPorts;
 
     // Step 4: Resolve aggregate persistence → AggregatePersistenceResolver
     const perAggregateWirings = this._resolvedContext?.perAggregateWirings;
@@ -670,7 +660,7 @@ export class Domain<
         ? wiringViewStore.viewStore
         : projection.viewStore;
       if (viewStoreFactory) {
-        const storeInstance = viewStoreFactory(this._infrastructure);
+        const storeInstance = viewStoreFactory(this._adapters);
         resolvedViewStores.set(name, storeInstance);
         // Default missing id extractors to event.metadata.aggregateId
         for (const [eventName, handler] of Object.entries(projection.on)) {
@@ -766,7 +756,7 @@ export class Domain<
     // Step 5.11: Create command executor
     this._commandExecutor = new CommandLifecycleExecutor(
       persistenceResolver,
-      this._infrastructure,
+      this._adapters,
       this._unitOfWorkFactory,
       concurrencyStrategy,
       this._uowStorage,
@@ -780,7 +770,7 @@ export class Domain<
 
     if (sagaPersistence) {
       this._sagaExecutor = new SagaExecutor(
-        this._infrastructure,
+        this._adapters,
         sagaPersistence,
         this._unitOfWorkFactory,
         this._uowStorage,
@@ -794,7 +784,7 @@ export class Domain<
     if (this._outboxStore) {
       this._outboxRelay = new OutboxRelay(
         this._outboxStore,
-        this._infrastructure.eventBus,
+        this._adapters.eventBus,
         wiring.outbox?.relayOptions,
         logger.child("outbox"),
       );
@@ -819,7 +809,7 @@ export class Domain<
       }
     }
 
-    const { commandBus, eventBus, queryBus } = this._infrastructure;
+    const { commandBus, eventBus, queryBus } = this._adapters;
 
     // Step 6: Register aggregate command handlers on the command bus
     for (const [aggregateName, aggregate] of Object.entries(
@@ -848,7 +838,7 @@ export class Domain<
           (commandBus as InMemoryCommandBus).register(
             commandName,
             async (command: Command) => {
-              await (handler as any)(command, this._infrastructure);
+              await (handler as any)(command, this._adapters);
             },
           );
         }
@@ -869,8 +859,8 @@ export class Domain<
               queryName,
               async (payload: any) => {
                 const handlerInfra = viewStoreInstance
-                  ? { ...this._infrastructure, views: viewStoreInstance }
-                  : this._infrastructure;
+                  ? { ...this._adapters, views: viewStoreInstance }
+                  : this._adapters;
                 return await (handler as any)(payload, handlerInfra);
               },
             );
@@ -888,7 +878,7 @@ export class Domain<
           (queryBus as InMemoryQueryBus).register(
             queryName,
             async (payload: any) => {
-              return await (handler as any)(payload, this._infrastructure);
+              return await (handler as any)(payload, this._adapters);
             },
           );
         }
@@ -938,7 +928,7 @@ export class Domain<
       )) {
         if (!handler) continue;
         this.subscribeToEvent(eventBus, eventName, async (event: Event) => {
-          await (handler as any)(event, this._infrastructure);
+          await (handler as any)(event, this._adapters);
         });
       }
     }
@@ -951,9 +941,11 @@ export class Domain<
         : [],
     });
 
-    // Step 13: Collect all infrastructure components for auto-close discovery
-    // Custom infrastructure values come first (discovery order)
-    for (const value of Object.values(customInfra as Record<string, unknown>)) {
+    // Step 13: Collect all adapter components for auto-close discovery
+    // Custom adapter values come first (discovery order)
+    for (const value of Object.values(
+      customAdapters as Record<string, unknown>,
+    )) {
       this._allComponents.push(value);
     }
     // CQRS buses
@@ -998,7 +990,7 @@ export class Domain<
    * 2. Waits for in-flight command executions and saga reactions to complete.
    * 3. Drains the outbox relay (if configured).
    * 4. Removes all event bus listeners.
-   * 5. Auto-closes infrastructure implementing {@link Closeable}.
+   * 5. Auto-closes adapters implementing {@link Closeable}.
    *
    * Idempotent: calling `shutdown()` multiple times returns the same promise.
    *
@@ -1043,12 +1035,12 @@ export class Domain<
     }
 
     // Phase 3: Remove event bus listeners
-    const eventBus = this._infrastructure.eventBus;
+    const eventBus = this._adapters.eventBus;
     if ("removeAllListeners" in eventBus) {
       (eventBus as EventEmitterEventBus).removeAllListeners();
     }
 
-    // Phase 4: Auto-close Closeable infrastructure (reverse order)
+    // Phase 4: Auto-close Closeable adapters (reverse order)
     const closeables = this._allComponents.filter(isCloseable).reverse();
 
     for (const closeable of closeables) {
@@ -1096,7 +1088,7 @@ export class Domain<
           const result = await fn();
           const events = await uow.commit();
           for (const event of events) {
-            await this._infrastructure.eventBus.dispatch(event);
+            await this._adapters.eventBus.dispatch(event);
           }
 
           // Best-effort post-dispatch outbox marking
@@ -1221,7 +1213,7 @@ export class Domain<
       }
 
       // If no aggregate handles it, try the command bus (standalone handlers)
-      await this._infrastructure.commandBus.dispatch(command);
+      await this._adapters.commandBus.dispatch(command);
       // Standalone commands return void; aggregate commands reaching here
       // still return targetAggregateId for backward compatibility
       return (
@@ -1251,7 +1243,7 @@ export class Domain<
   > {
     this._acquireOperation();
     try {
-      return (await this._infrastructure.queryBus.dispatch(query)) as any;
+      return (await this._adapters.queryBus.dispatch(query)) as any;
     } finally {
       this._releaseOperation();
     }
@@ -1259,14 +1251,14 @@ export class Domain<
 }
 
 /**
- * Wires a {@link DomainDefinition} with infrastructure to create a running
+ * Wires a {@link DomainDefinition} with adapters to create a running
  * {@link Domain} instance. Resolves all factories, initializes persistence,
  * registers handlers, and returns the fully initialized domain.
  *
  * Type parameters propagate from the definition — no need to repeat them.
  *
  * @param definition - The domain structure from {@link defineDomain}.
- * @param wiring - The infrastructure wiring configuration.
+ * @param wiring - The adapter wiring configuration.
  * @returns A fully initialized {@link Domain} instance.
  */
 /**
@@ -1311,24 +1303,22 @@ type UnionToIntersection<U> = (U extends any ? (x: U) => void : never) extends (
   : never;
 
 /**
- * Computes TInfrastructure as the intersection of all infrastructure types
+ * Computes TPorts as the intersection of all port types
  * declared across aggregates, projections, and sagas. This tells the developer
- * exactly what `wiring.infrastructure` must return.
+ * exactly what `wiring.adapters` must return.
  *
- * Each `Infer*MapInfrastructure` produces a union (one member per component).
+ * Each `Infer*MapPorts` produces a union (one member per component).
  * `UnionToIntersection` merges them so the developer must satisfy ALL fields.
  * @internal
  */
-type ExtractInfrastructureRaw<T> = UnionToIntersection<
-  | InferAggregateMapInfrastructure<ExtractAggregates<T>>
-  | InferProjectionMapInfrastructure<ExtractProjections<T>>
-  | InferSagaMapInfrastructure<ExtractSagas<T>>
+type ExtractPortsRaw<T> = UnionToIntersection<
+  | InferAggregateMapPorts<ExtractAggregates<T>>
+  | InferProjectionMapPorts<ExtractProjections<T>>
+  | InferSagaMapPorts<ExtractSagas<T>>
 >;
 
-type ExtractInfrastructure<T> =
-  ExtractInfrastructureRaw<T> extends Infrastructure
-    ? ExtractInfrastructureRaw<T>
-    : Infrastructure;
+type ExtractPorts<T> =
+  ExtractPortsRaw<T> extends Ports ? ExtractPortsRaw<T> : Ports;
 
 /**
  * Extracts TStandaloneCommand from a DomainDefinition type.
@@ -1358,20 +1348,20 @@ type ExtractStandaloneQuery<T> = T extends {
 
 export const wireDomain = async <
   TDef extends DomainDefinition<any, any, any, any, any, any>,
-  TInfrastructure extends Infrastructure = ExtractInfrastructure<TDef>,
+  TAdapters extends Ports = ExtractPorts<TDef>,
   TStandaloneCommand extends Command = ExtractStandaloneCommand<TDef>,
   TStandaloneQuery extends Query<any> = ExtractStandaloneQuery<TDef>,
   TAggregates extends AggregateMap = ExtractAggregates<TDef>,
   TProjections extends ProjectionMap = ExtractProjections<TDef>,
 >(
   definition: TDef,
-  wiring: DomainWiring<
-    ExtractInfrastructure<TDef>,
+  wiring: DomainWiring<ExtractPorts<TDef>, TAggregates> = {} as DomainWiring<
+    ExtractPorts<TDef>,
     TAggregates
-  > = {} as DomainWiring<ExtractInfrastructure<TDef>, TAggregates>,
+  >,
 ): Promise<
   Domain<
-    TInfrastructure,
+    TAdapters,
     TStandaloneCommand,
     TStandaloneQuery,
     InferAggregateMapCommands<TAggregates>,
@@ -1399,18 +1389,18 @@ export const wireDomain = async <
   }
 
   const domain = new Domain<
-    TInfrastructure,
+    TAdapters,
     TStandaloneCommand,
     TStandaloneQuery,
     InferAggregateMapCommands<TAggregates>,
     InferProjectionMapQueries<TProjections>
   >(
     definition as DomainDefinition<
-      TInfrastructure,
+      TAdapters,
       TStandaloneCommand,
       TStandaloneQuery
     >,
-    wiring as DomainWiring<TInfrastructure>,
+    wiring as DomainWiring<TAdapters>,
     { perAggregateWirings },
   );
   await domain.init();

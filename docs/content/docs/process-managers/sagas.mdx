@@ -63,16 +63,16 @@ type OrderFulfillmentSagaDef = {
   state: OrderFulfillmentState;
   events: OrderEvent | PaymentEvent | ShippingEvent;
   commands: OrderCommand | PaymentCommand | ShippingCommand;
-  infrastructure: EcommerceInfrastructure;
+  ports: EcommerceInfrastructure;
 };
 ```
 
-| Member           | Description                                                      |
-| ---------------- | ---------------------------------------------------------------- |
-| `state`          | The saga's internal state tracking workflow progress             |
-| `events`         | Union of all event types the saga reacts to (from any aggregate) |
-| `commands`       | Union of all command types the saga may dispatch                 |
-| `infrastructure` | External dependencies available to handlers                      |
+| Member     | Description                                                      |
+| ---------- | ---------------------------------------------------------------- |
+| `state`    | The saga's internal state tracking workflow progress             |
+| `events`   | Union of all event types the saga reacts to (from any aggregate) |
+| `commands` | Union of all command types the saga may dispatch                 |
+| `ports`    | External dependencies available to handlers                      |
 
 Note that `events` and `commands` can span multiple aggregates -- this is the whole point of a saga.
 
@@ -255,7 +255,7 @@ export type OrderFulfillmentSagaDef = {
   state: OrderFulfillmentState;
   events: OrderEvent | PaymentEvent | ShippingEvent;
   commands: OrderCommand | PaymentCommand | ShippingCommand;
-  infrastructure: EcommerceInfrastructure;
+  ports: EcommerceInfrastructure;
 };
 
 export const OrderFulfillmentSaga = defineSaga<OrderFulfillmentSagaDef>({
@@ -322,7 +322,7 @@ The **`on` map** solves this: each entry bundles an `id` function that extracts 
 
 ### Defining on entries
 
-The `on` field is a map keyed by event name. Each entry has an `id` function that receives the narrowed event type and returns the saga instance ID, and a `handle` function that receives the event, current state, and infrastructure. Whether the entry is inline or extracted, the shape is the same:
+The `on` field is a map keyed by event name. Each entry has an `id` function that receives the narrowed event type and returns the saga instance ID, and a `handle` function that receives the event, current state, and ports. Whether the entry is inline or extracted, the shape is the same:
 
 ```ts
 on: {
@@ -402,7 +402,7 @@ The full saga runtime lifecycle proceeds as follows:
 3. The **`id` function** from the matching `on` entry extracts the saga instance ID from the event
 4. If the event is in `startedBy` and no instance exists, a new instance is created with `initialState`
 5. Otherwise, the existing saga state is loaded from persistence
-6. The **`handle` function** is called with `(event, state, infrastructure)`
+6. The **`handle` function** is called with `(event, state, ports)`
 7. The handler returns a `SagaReaction`: new state + commands to dispatch
 8. The framework persists the new state and dispatches the returned commands
 9. Those commands trigger aggregates, which emit events, which may trigger the saga again
@@ -444,7 +444,7 @@ const ecommerceDomain = defineDomain({
 });
 
 const domain = await wireDomain(ecommerceDomain, {
-  infrastructure: () => ({
+  adapters: () => ({
     /* ... */
   }),
   aggregates: {
@@ -479,14 +479,14 @@ import {
   InferSagaState,
   InferSagaEvents,
   InferSagaCommands,
-  InferSagaInfrastructure,
+  InferSagaPorts,
   InferSagaId,
 } from "@noddde/core";
 
 type State = InferSagaState<typeof OrderFulfillmentSaga>;
 type Events = InferSagaEvents<typeof OrderFulfillmentSaga>;
 type Commands = InferSagaCommands<typeof OrderFulfillmentSaga>;
-type Infra = InferSagaInfrastructure<typeof OrderFulfillmentSaga>;
+type Infra = InferSagaPorts<typeof OrderFulfillmentSaga>;
 type Id = InferSagaId<typeof OrderFulfillmentSaga>; // string
 ```
 
@@ -500,7 +500,7 @@ noddde also supports [standalone command handlers](/docs/process-managers/standa
 | ------------------ | ------------------------------------------- | -------------------------------------------- |
 | **Triggered by**   | A command (imperative)                      | Domain events (reactive)                     |
 | **Stateful**       | No                                          | Yes (persisted state)                        |
-| **Output**         | Side effects via infrastructure             | Declarative command returns                  |
+| **Output**         | Side effects via ports                      | Declarative command returns                  |
 | **Lifecycle**      | Single request-response                     | Multi-step over time                         |
 | **Testability**    | Requires mocking buses                      | Assert on returned data                      |
 | **Compensation**   | Manual try/catch                            | Built-in via event reactions                 |

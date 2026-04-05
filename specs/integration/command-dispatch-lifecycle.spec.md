@@ -35,7 +35,7 @@ docs:
 1. **Routing**: The framework must match the command `name` to the correct aggregate's command handler map. If no aggregate declares a handler for a given command name, the dispatch must fail.
 2. **State loading (event-sourced)**: Before executing the handler, the framework must call `persistence.load(aggregateName, aggregateId)` to retrieve the event stream, then replay those events through the aggregate's `apply` handlers starting from `initialState` to reconstruct current state.
 3. **State loading (state-stored)**: Before executing the handler, the framework must call `persistence.load(aggregateName, aggregateId)`. If `undefined`/`null` is returned, `initialState` is used.
-4. **Command execution**: The resolved command handler is invoked with `(command, currentState, infrastructure)`. It may return a single event, an array of events, or a Promise resolving to either.
+4. **Command execution**: The resolved command handler is invoked with `(command, currentState, ports)`. It may return a single event, an array of events, or a Promise resolving to either.
 5. **Apply phase**: Each returned event is applied sequentially through the corresponding `apply` handler. The apply handler receives `(event.payload, state)` and returns the new state. This is pure and synchronous.
 6. **Persistence (event-sourced)**: After applying, the new events (not all historical events) are appended via `persistence.save(aggregateName, aggregateId, newEvents)`.
 7. **Persistence (state-stored)**: After applying, the final state is saved via `persistence.save(aggregateName, aggregateId, newState)`.
@@ -67,7 +67,7 @@ docs:
 
 - Projections subscribe to the EventBus and will receive the events published during dispatch (tested in `event-projection-flow`).
 - Sagas subscribe to the EventBus and will receive the events published during dispatch (tested in `saga-orchestration`).
-- The infrastructure passed to command handlers includes both custom infrastructure and CQRS buses.
+- The infrastructure passed to command handlers includes both custom adapters and CQRS buses.
 
 ## Test Scenarios
 
@@ -106,7 +106,7 @@ type CounterTypes = {
   state: CounterState;
   events: CounterEvent;
   commands: CounterCommand;
-  infrastructure: {};
+  ports: {};
 };
 
 const Counter = defineAggregate<CounterTypes>({
@@ -346,7 +346,7 @@ type BatchCounterTypes = {
   state: { count: number };
   events: BatchCounterEvent;
   commands: BatchCounterCommand;
-  infrastructure: {};
+  ports: {};
 };
 
 const BatchCounter = defineAggregate<BatchCounterTypes>({
@@ -426,7 +426,7 @@ type AsyncTypes = {
   state: { result: string | null };
   events: AsyncEvent;
   commands: AsyncCommand;
-  infrastructure: {};
+  ports: {};
 };
 
 const AsyncAggregate = defineAggregate<AsyncTypes>({
@@ -511,7 +511,7 @@ type CounterTypes = {
   state: CounterState;
   events: CounterEvent;
   commands: CounterCommand;
-  infrastructure: {};
+  ports: {};
 };
 
 const Counter = defineAggregate<CounterTypes>({

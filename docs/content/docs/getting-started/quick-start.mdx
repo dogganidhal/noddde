@@ -112,7 +112,7 @@ type BankAccountDef = {
   state: BankAccountState;
   events: BankAccountEvent;
   commands: BankAccountCommand;
-  infrastructure: {}; // No custom infrastructure for this example
+  ports: {}; // No custom ports for this example
 };
 ```
 
@@ -197,7 +197,7 @@ export const BankAccount = defineAggregate<BankAccountDef>({
 
 ## Step 6: Define and Wire the Domain
 
-Define the domain structure, then wire it with in-memory infrastructure:
+Define the domain structure, then wire it with in-memory adapters:
 
 ```ts
 import { defineDomain, wireDomain } from "@noddde/engine";
@@ -212,11 +212,11 @@ const bankingDomain = defineDomain({
   },
 });
 
-// Wire with infrastructure and get a running Domain instance
+// Wire with adapters and get a running Domain instance
 const domain = await wireDomain(bankingDomain);
 ```
 
-That is it -- `wireDomain` with no second argument uses in-memory defaults for everything: persistence, buses, and infrastructure. This is the fastest path to a working domain.
+That is it -- `wireDomain` with no second argument uses in-memory defaults for everything: persistence, buses, and adapters. This is the fastest path to a working domain.
 
 ## Step 7: Dispatch Commands
 
@@ -245,7 +245,7 @@ The full flow for each `dispatchCommand` call:
 
 1. **Command dispatched** — `{ name: "AuthorizeTransaction", targetAggregateId: "...", payload: { amount: 100, merchant: "Amazon" } }`
 2. **State loaded** — Framework loads the aggregate's event history and replays through evolve handlers
-3. **Decide handler called** — `decide.AuthorizeTransaction(command, currentState, infrastructure)`
+3. **Decide handler called** — `decide.AuthorizeTransaction(command, currentState, ports)`
 4. **Event returned** — Handler decides: `TransactionAuthorized` or `TransactionDeclined`
 5. **Event persisted** — Saved to the event store
 6. **State updated** — Evolve handler called: `evolve.TransactionAuthorized(event, state)` returns new state

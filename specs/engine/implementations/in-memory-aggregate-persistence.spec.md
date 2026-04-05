@@ -10,7 +10,7 @@ exports:
   ]
 depends_on: [engine/domain, edd/event]
 docs:
-  - infrastructure/in-memory-implementations.mdx
+  - ports/in-memory-implementations.mdx
 ---
 
 # InMemoryAggregatePersistence

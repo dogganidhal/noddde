@@ -27,9 +27,9 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type {
   Aggregate,
   AggregateCommand,
-  CQRSInfrastructure,
+  CQRSPorts,
   IdempotencyStore,
-  Infrastructure,
+  Ports,
   SnapshotStore,
   SnapshotStrategy,
   UnitOfWork,
@@ -42,7 +42,7 @@ import type { MetadataEnricher } from "./metadata-enricher";
 class CommandLifecycleExecutor {
   constructor(
     persistenceResolver: AggregatePersistenceResolver,
-    infrastructure: Infrastructure & CQRSInfrastructure,
+    adapters: Ports & CQRSPorts,
     unitOfWorkFactory: UnitOfWorkFactory,
     concurrencyStrategy: ConcurrencyStrategy,
     uowStorage: AsyncLocalStorage<UnitOfWork>,
@@ -62,7 +62,7 @@ class CommandLifecycleExecutor {
 }
 ```
 
-- `CommandLifecycleExecutor` is constructed with all dependencies needed for the lifecycle: an `AggregatePersistenceResolver` (which resolves the correct persistence for each aggregate by name), infrastructure (including CQRS buses), UoW factory, concurrency strategy, UoW storage (for detecting explicit UoW), metadata enricher, and optional snapshot store/strategy.
+- `CommandLifecycleExecutor` is constructed with all dependencies needed for the lifecycle: an `AggregatePersistenceResolver` (which resolves the correct persistence for each aggregate by name), ports (including CQRS buses), UoW factory, concurrency strategy, UoW storage (for detecting explicit UoW), metadata enricher, and optional snapshot store/strategy.
 - `execute` is the single public method. It runs the full lifecycle for a given aggregate command, handling UoW creation/ownership and concurrency delegation internally.
 
 ## Behavioral Requirements
@@ -88,7 +88,7 @@ class CommandLifecycleExecutor {
 
 ### Execute Phase
 
-4. **Invoke decide handler** -- Look up the handler via `aggregate.decide[command.name]`. If no handler is found, throw an error: `"No decide handler found for command: ${command.name} on aggregate: ${aggregateName}"`. Otherwise, invoke the handler with `(command, currentState, infrastructure)`. The handler may return a single event or an array of events.
+4. **Invoke decide handler** -- Look up the handler via `aggregate.decide[command.name]`. If no handler is found, throw an error: `"No decide handler found for command: ${command.name} on aggregate: ${aggregateName}"`. Otherwise, invoke the handler with `(command, currentState, ports)`. The handler may return a single event or an array of events.
 
 ### Normalize Phase
 
@@ -208,7 +208,7 @@ import type {
   AggregateTypes,
   DefineCommands,
   DefineEvents,
-  Infrastructure,
+  Ports,
   UnitOfWork,
 } from "@noddde/core";
 import {
@@ -236,7 +236,7 @@ type CounterTypes = AggregateTypes & {
   state: CounterState;
   events: CounterEvent;
   commands: CounterCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const Counter = defineAggregate<CounterTypes>({
@@ -261,7 +261,7 @@ describe("CommandLifecycleExecutor", () => {
   it("should load event-sourced aggregate, execute command, evolve, enrich, persist, and publish", async () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const eventBus = new EventEmitterEventBus();
-    const infrastructure = {
+    const adapters = {
       commandBus: new InMemoryCommandBus(),
       eventBus,
       queryBus: new InMemoryQueryBus(),
@@ -273,7 +273,7 @@ describe("CommandLifecycleExecutor", () => {
 
     const executor = new CommandLifecycleExecutor(
       persistence,
-      infrastructure,
+      ports,
       createInMemoryUnitOfWork,
       strategy,
       uowStorage,
@@ -314,7 +314,7 @@ import type {
   AggregateTypes,
   DefineCommands,
   DefineEvents,
-  Infrastructure,
+  Ports,
   UnitOfWork,
 } from "@noddde/core";
 import {
@@ -336,7 +336,7 @@ type ToggleTypes = AggregateTypes & {
   state: ToggleState;
   events: ToggleEvent;
   commands: ToggleCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const Toggle = defineAggregate<ToggleTypes>({
@@ -353,7 +353,7 @@ describe("CommandLifecycleExecutor", () => {
   it("should load state-stored aggregate and persist new state", async () => {
     const persistence = new InMemoryStateStoredAggregatePersistence();
     const eventBus = new EventEmitterEventBus();
-    const infrastructure = {
+    const adapters = {
       commandBus: new InMemoryCommandBus(),
       eventBus,
       queryBus: new InMemoryQueryBus(),
@@ -365,7 +365,7 @@ describe("CommandLifecycleExecutor", () => {
 
     const executor = new CommandLifecycleExecutor(
       persistence,
-      infrastructure,
+      ports,
       createInMemoryUnitOfWork,
       strategy,
       uowStorage,
@@ -396,7 +396,7 @@ import type {
   AggregateTypes,
   DefineCommands,
   DefineEvents,
-  Infrastructure,
+  Ports,
   UnitOfWork,
 } from "@noddde/core";
 import {
@@ -416,7 +416,7 @@ const EmptyAggregate = defineAggregate<
     state: {};
     events: never;
     commands: never;
-    infrastructure: Infrastructure;
+    ports: Ports;
   }
 >({
   initialState: {},
@@ -427,7 +427,7 @@ const EmptyAggregate = defineAggregate<
 describe("CommandLifecycleExecutor", () => {
   it("should throw an error when the decide handler is not found", async () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
-    const infrastructure = {
+    const adapters = {
       commandBus: new InMemoryCommandBus(),
       eventBus: new EventEmitterEventBus(),
       queryBus: new InMemoryQueryBus(),
@@ -439,7 +439,7 @@ describe("CommandLifecycleExecutor", () => {
 
     const executor = new CommandLifecycleExecutor(
       persistence,
-      infrastructure,
+      ports,
       createInMemoryUnitOfWork,
       strategy,
       uowStorage,
@@ -469,7 +469,7 @@ import type {
   AggregateTypes,
   DefineCommands,
   DefineEvents,
-  Infrastructure,
+  Ports,
   UnitOfWork,
 } from "@noddde/core";
 import {
@@ -491,7 +491,7 @@ type ItemTypes = AggregateTypes & {
   state: ItemState;
   events: ItemEvent;
   commands: ItemCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const ItemList = defineAggregate<ItemTypes>({
@@ -513,7 +513,7 @@ describe("CommandLifecycleExecutor", () => {
   it("should enlist on existing UoW without committing or publishing events", async () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const eventBus = new EventEmitterEventBus();
-    const infrastructure = {
+    const adapters = {
       commandBus: new InMemoryCommandBus(),
       eventBus,
       queryBus: new InMemoryQueryBus(),
@@ -525,7 +525,7 @@ describe("CommandLifecycleExecutor", () => {
 
     const executor = new CommandLifecycleExecutor(
       persistence,
-      infrastructure,
+      ports,
       createInMemoryUnitOfWork,
       strategy,
       uowStorage,
@@ -574,7 +574,7 @@ import type {
   AggregateTypes,
   DefineCommands,
   DefineEvents,
-  Infrastructure,
+  Ports,
   UnitOfWork,
 } from "@noddde/core";
 import {
@@ -597,7 +597,7 @@ type AccTypes = AggregateTypes & {
   state: AccState;
   events: AccEvent;
   commands: AccCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const Accumulator = defineAggregate<AccTypes>({
@@ -614,7 +614,7 @@ describe("CommandLifecycleExecutor", () => {
   it("should save a snapshot when the strategy triggers", async () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const eventBus = new EventEmitterEventBus();
-    const infrastructure = {
+    const adapters = {
       commandBus: new InMemoryCommandBus(),
       eventBus,
       queryBus: new InMemoryQueryBus(),
@@ -628,7 +628,7 @@ describe("CommandLifecycleExecutor", () => {
 
     const executor = new CommandLifecycleExecutor(
       persistence,
-      infrastructure,
+      ports,
       createInMemoryUnitOfWork,
       strategy,
       uowStorage,
@@ -664,7 +664,7 @@ import type {
   AggregateTypes,
   DefineCommands,
   DefineEvents,
-  Infrastructure,
+  Ports,
   UnitOfWork,
 } from "@noddde/core";
 import {
@@ -687,7 +687,7 @@ type ValTypes = AggregateTypes & {
   state: ValState;
   events: ValEvent;
   commands: ValCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const ValueAgg = defineAggregate<ValTypes>({
@@ -707,7 +707,7 @@ describe("CommandLifecycleExecutor", () => {
   it("should load from snapshot and replay only post-snapshot events", async () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const eventBus = new EventEmitterEventBus();
-    const infrastructure = {
+    const adapters = {
       commandBus: new InMemoryCommandBus(),
       eventBus,
       queryBus: new InMemoryQueryBus(),
@@ -737,7 +737,7 @@ describe("CommandLifecycleExecutor", () => {
 
     const executor = new CommandLifecycleExecutor(
       persistence,
-      infrastructure,
+      ports,
       createInMemoryUnitOfWork,
       strategy,
       uowStorage,
@@ -774,7 +774,7 @@ import type {
   AggregateTypes,
   DefineCommands,
   DefineEvents,
-  Infrastructure,
+  Ports,
   UnitOfWork,
 } from "@noddde/core";
 import {
@@ -796,7 +796,7 @@ type ErrTypes = AggregateTypes & {
   state: ErrState;
   events: ErrEvent;
   commands: ErrCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const FailingAggregate = defineAggregate<ErrTypes>({
@@ -815,7 +815,7 @@ describe("CommandLifecycleExecutor", () => {
   it("should rollback UoW and propagate handler error", async () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const eventBus = new EventEmitterEventBus();
-    const infrastructure = {
+    const adapters = {
       commandBus: new InMemoryCommandBus(),
       eventBus,
       queryBus: new InMemoryQueryBus(),
@@ -827,7 +827,7 @@ describe("CommandLifecycleExecutor", () => {
 
     const executor = new CommandLifecycleExecutor(
       persistence,
-      infrastructure,
+      ports,
       createInMemoryUnitOfWork,
       strategy,
       uowStorage,
@@ -863,7 +863,7 @@ import type {
   AggregateTypes,
   DefineCommands,
   DefineEvents,
-  Infrastructure,
+  Ports,
   UnitOfWork,
   Event,
 } from "@noddde/core";
@@ -886,7 +886,7 @@ type SimpleTypes = AggregateTypes & {
   state: SimpleState;
   events: SimpleEvent;
   commands: SimpleCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const SimpleAgg = defineAggregate<SimpleTypes>({
@@ -906,7 +906,7 @@ describe("CommandLifecycleExecutor", () => {
   it("should invoke concurrency strategy which wraps the attempt", async () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const eventBus = new EventEmitterEventBus();
-    const infrastructure = {
+    const adapters = {
       commandBus: new InMemoryCommandBus(),
       eventBus,
       queryBus: new InMemoryQueryBus(),
@@ -929,7 +929,7 @@ describe("CommandLifecycleExecutor", () => {
 
     const executor = new CommandLifecycleExecutor(
       persistence,
-      infrastructure,
+      ports,
       createInMemoryUnitOfWork,
       mockStrategy,
       uowStorage,

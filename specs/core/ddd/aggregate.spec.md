@@ -13,18 +13,12 @@ exports:
     InferAggregateState,
     InferAggregateEvents,
     InferAggregateCommands,
-    InferAggregateInfrastructure,
+    InferAggregatePorts,
     InferDecideHandler,
     InferEvolveHandler,
   ]
 depends_on:
-  [
-    id,
-    edd/event,
-    edd/event-sourcing-handler,
-    cqrs/command/command,
-    infrastructure/index,
-  ]
+  [id, edd/event, edd/event-sourcing-handler, cqrs/command/command, ports/index]
 docs:
   - aggregates/overview.mdx
   - aggregates/defining-aggregates.mdx
@@ -44,14 +38,14 @@ docs:
   - `state: any` -- the aggregate state shape.
   - `events: Event` -- discriminated union of events the aggregate can emit.
   - `commands: AggregateCommand<ID>` -- discriminated union of commands the aggregate handles. Uses `AggregateCommand<ID>` as the base constraint to support any ID type.
-  - `infrastructure: Infrastructure` -- external dependencies for command handlers.
+  - `ports: Ports` -- external dependencies for command handlers.
 
-- **`DecideHandler<TCommand, TState, TEvents, TInfrastructure>`** is a function type:
+- **`DecideHandler<TCommand, TState, TEvents, TPorts>`** is a function type:
 
-  - Parameters: `(command: TCommand, state: TState, infrastructure: TInfrastructure & FrameworkInfrastructure)`.
+  - Parameters: `(command: TCommand, state: TState, ports: TPorts & FrameworkPorts)`.
   - Return: `TEvents | TEvents[] | Promise<TEvents | TEvents[]>`.
-  - `TCommand extends AggregateCommand<ID>`, `TEvents extends Event`, `TInfrastructure extends Infrastructure` (defaults to `Infrastructure`).
-  - Infrastructure is merged with `FrameworkInfrastructure` via intersection, giving decide handlers access to `logger`.
+  - `TCommand extends AggregateCommand<ID>`, `TEvents extends Event`, `TPorts extends Ports` (defaults to `Ports`).
+  - Ports is merged with `FrameworkPorts` via intersection, giving decide handlers access to `logger`.
 
 - **`Aggregate<T extends AggregateTypes>`** is an interface with three fields:
 
@@ -68,11 +62,11 @@ docs:
   - `InferAggregateState<T extends Aggregate>` = inferred `U["state"]`.
   - `InferAggregateEvents<T extends Aggregate>` = inferred `U["events"]`.
   - `InferAggregateCommands<T extends Aggregate>` = inferred `U["commands"]`.
-  - `InferAggregateInfrastructure<T extends Aggregate>` = inferred `U["infrastructure"]`.
+  - `InferAggregatePorts<T extends Aggregate>` = inferred `U["ports"]`.
 
 - **Handler-level inference utilities** (operate on `AggregateTypes` bundle, for typing extracted handlers in separate files):
 
-  - `InferDecideHandler<T extends AggregateTypes, K extends T["commands"]["name"]>` = `DecideHandler<Extract<T["commands"], { name: K }>, T["state"], T["events"], T["infrastructure"]>`. Resolves to the exact decide handler function type for command `K`, with the command narrowed via `Extract`, and infrastructure merged with `FrameworkInfrastructure` (via `DecideHandler`).
+  - `InferDecideHandler<T extends AggregateTypes, K extends T["commands"]["name"]>` = `DecideHandler<Extract<T["commands"], { name: K }>, T["state"], T["events"], T["ports"]>`. Resolves to the exact decide handler function type for command `K`, with the command narrowed via `Extract`, and ports merged with `FrameworkPorts` (via `DecideHandler`).
 
   - `InferEvolveHandler<T extends AggregateTypes, K extends T["events"]["name"]>` = `EvolveHandler<Extract<T["events"], { name: K }>, T["state"]>`. Resolves to the exact evolve handler function type for event `K`, with the event payload narrowed via `Extract`.
 
@@ -85,7 +79,7 @@ docs:
 - `defineAggregate` is a pass-through that enables TypeScript to infer `T` from the config object, so users write `defineAggregate<MyTypes>({...})` with full autocomplete.
 - Decide handlers can return a single event, an array of events, or a Promise of either.
 - Evolve handlers must be synchronous and return the new state.
-- `InferDecideHandler<T, K>` resolves to a function receiving the narrowed command (via `Extract<T["commands"], { name: K }>`), the aggregate state, and infrastructure merged with `FrameworkInfrastructure`, returning the event union.
+- `InferDecideHandler<T, K>` resolves to a function receiving the narrowed command (via `Extract<T["commands"], { name: K }>`), the aggregate state, and ports merged with `FrameworkPorts`, returning the event union.
 - `InferEvolveHandler<T, K>` resolves to a function receiving the narrowed event payload (via `Extract<T["events"], { name: K }>`) and the aggregate state, returning the new state.
 - Both `InferDecideHandler` and `InferEvolveHandler` operate on the `AggregateTypes` bundle (not the `Aggregate` definition instance), enabling use before `defineAggregate` is called.
 - A handler typed with `InferDecideHandler<T, K>` is structurally compatible with the corresponding slot in `DecideHandlerMap<T>` and can be used directly in `defineAggregate`.
@@ -103,13 +97,14 @@ docs:
 - `InferDecideHandler` and `InferEvolveHandler` operate on `AggregateTypes` (the bundle), like `InferAggregateID`.
 - `InferDecideHandler<T, K>` always produces the same type as indexing `DecideHandlerMap<T>` at key `K`.
 - `InferEvolveHandler<T, K>` always produces the same type as indexing `EvolveHandlerMap<T>` at key `K`.
+- `InferAggregatePorts<T>` always produces the same type as `T["ports"]`.
 
 ## Edge Cases
 
 - **Single command/event**: Maps have exactly one key each.
 - **Decide handler returning a single event vs array**: Both are valid return types.
 - **Async decide handler**: Returning `Promise<TEvents>` is valid.
-- **Infrastructure defaults to `{}`**: If not overridden in the types bundle.
+- **Ports defaults to `{}`**: If not overridden in the types bundle.
 - **Custom aggregate ID type**: `InferAggregateID` extracts the ID type from the commands' `targetAggregateId`.
 
 ## Integration Points
@@ -125,11 +120,7 @@ docs:
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
-import type {
-  DefineEvents,
-  DefineCommands,
-  Infrastructure,
-} from "@noddde/core";
+import type { DefineEvents, DefineCommands, Ports } from "@noddde/core";
 import { defineAggregate } from "@noddde/core";
 
 describe("defineAggregate", () => {
@@ -149,7 +140,7 @@ describe("defineAggregate", () => {
     state: CounterState;
     events: CounterEvent;
     commands: CounterCommand;
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   const Counter = defineAggregate<CounterTypes>({
@@ -198,7 +189,7 @@ import type {
   DecideHandler,
   AggregateCommand,
   Event,
-  Infrastructure,
+  Ports,
 } from "@noddde/core";
 
 describe("DecideHandler", () => {
@@ -216,7 +207,7 @@ describe("DecideHandler", () => {
     CreateAccountCommand,
     { balance: number },
     AccountEvent,
-    Infrastructure
+    Ports
   >;
 
   it("should receive the specific command as first parameter", () => {
@@ -229,8 +220,8 @@ describe("DecideHandler", () => {
     expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<{ balance: number }>();
   });
 
-  it("should receive infrastructure as third parameter", () => {
-    expectTypeOf<Parameters<Handler>[2]>().toEqualTypeOf<Infrastructure>();
+  it("should receive ports as third parameter", () => {
+    expectTypeOf<Parameters<Handler>[2]>().toEqualTypeOf<Ports>();
   });
 
   it("should return event(s) or Promise of event(s)", () => {
@@ -245,11 +236,7 @@ describe("DecideHandler", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
-import type {
-  DefineEvents,
-  DefineCommands,
-  Infrastructure,
-} from "@noddde/core";
+import type { DefineEvents, DefineCommands, Ports } from "@noddde/core";
 import { defineAggregate } from "@noddde/core";
 
 describe("Aggregate exhaustive handlers", () => {
@@ -267,7 +254,7 @@ describe("Aggregate exhaustive handlers", () => {
     state: { items: string[] };
     events: Events;
     commands: Commands;
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should compile when all handlers are provided", () => {
@@ -304,11 +291,11 @@ import { describe, it, expectTypeOf } from "vitest";
 import type {
   DefineEvents,
   DefineCommands,
-  Infrastructure,
+  Ports,
   InferAggregateState,
   InferAggregateEvents,
   InferAggregateCommands,
-  InferAggregateInfrastructure,
+  InferAggregatePorts,
   InferAggregateID,
 } from "@noddde/core";
 import { defineAggregate } from "@noddde/core";
@@ -318,7 +305,7 @@ describe("Infer utilities", () => {
   type MyEvent = DefineEvents<{ Updated: { newValue: number } }>;
   type MyCommand = DefineCommands<{ Update: { newValue: number } }>;
 
-  interface MyInfra extends Infrastructure {
+  interface MyInfra extends Ports {
     logger: { log(msg: string): void };
   }
 
@@ -326,7 +313,7 @@ describe("Infer utilities", () => {
     state: MyState;
     events: MyEvent;
     commands: MyCommand;
-    infrastructure: MyInfra;
+    ports: MyInfra;
   };
 
   const MyAggregate = defineAggregate<MyTypes>({
@@ -360,9 +347,9 @@ describe("Infer utilities", () => {
     >().toEqualTypeOf<MyCommand>();
   });
 
-  it("should infer infrastructure type", () => {
+  it("should infer ports type", () => {
     expectTypeOf<
-      InferAggregateInfrastructure<typeof MyAggregate>
+      InferAggregatePorts<typeof MyAggregate>
     >().toEqualTypeOf<MyInfra>();
   });
 
@@ -379,7 +366,7 @@ import { describe, it, expectTypeOf } from "vitest";
 import type {
   DefineEvents,
   DefineCommands,
-  Infrastructure,
+  Ports,
   InferAggregateID,
 } from "@noddde/core";
 
@@ -391,7 +378,7 @@ describe("InferAggregateID with number ID", () => {
     state: {};
     events: MyEvent;
     commands: MyCommand;
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should infer number as the aggregate ID type", () => {
@@ -404,11 +391,7 @@ describe("InferAggregateID with number ID", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
-import type {
-  DefineEvents,
-  DefineCommands,
-  Infrastructure,
-} from "@noddde/core";
+import type { DefineEvents, DefineCommands, Ports } from "@noddde/core";
 import { defineAggregate } from "@noddde/core";
 
 describe("Decide handler return types", () => {
@@ -419,7 +402,7 @@ describe("Decide handler return types", () => {
     state: {};
     events: Events;
     commands: Commands;
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should accept single event return", () => {
@@ -449,11 +432,7 @@ describe("Decide handler return types", () => {
 ```ts
 import { describe, it, expect } from "vitest";
 import { defineAggregate } from "@noddde/core";
-import type {
-  DefineEvents,
-  DefineCommands,
-  Infrastructure,
-} from "@noddde/core";
+import type { DefineEvents, DefineCommands, Ports } from "@noddde/core";
 
 describe("defineAggregate identity", () => {
   type E = DefineEvents<{ X: { v: number } }>;
@@ -462,7 +441,7 @@ describe("defineAggregate identity", () => {
     state: { v: number };
     events: E;
     commands: C;
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should return the exact same config object", () => {
@@ -484,17 +463,17 @@ describe("defineAggregate identity", () => {
 });
 ```
 
-### InferDecideHandler narrows command and wires infrastructure
+### InferDecideHandler narrows command and wires ports
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
 import type {
   DefineEvents,
   DefineCommands,
-  Infrastructure,
+  Ports,
   InferDecideHandler,
   DecideHandler,
-  FrameworkInfrastructure,
+  FrameworkPorts,
 } from "@noddde/core";
 import { defineAggregate } from "@noddde/core";
 
@@ -511,7 +490,7 @@ describe("InferDecideHandler", () => {
     Reset: void;
   }>;
 
-  interface MyInfra extends Infrastructure {
+  interface MyInfra extends Ports {
     clock: { now(): Date };
   }
 
@@ -519,7 +498,7 @@ describe("InferDecideHandler", () => {
     state: MyState;
     events: MyEvent;
     commands: MyCommand;
-    infrastructure: MyInfra;
+    ports: MyInfra;
   };
 
   it("should narrow the command to the specific variant", () => {
@@ -533,10 +512,10 @@ describe("InferDecideHandler", () => {
     expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<MyState>();
   });
 
-  it("should merge infrastructure with FrameworkInfrastructure", () => {
+  it("should merge ports with FrameworkPorts", () => {
     type Handler = InferDecideHandler<MyTypes, "Update">;
     expectTypeOf<Parameters<Handler>[2]>().toEqualTypeOf<
-      MyInfra & FrameworkInfrastructure
+      MyInfra & FrameworkPorts
     >();
   });
 
@@ -590,7 +569,7 @@ import { describe, it, expectTypeOf } from "vitest";
 import type {
   DefineEvents,
   DefineCommands,
-  Infrastructure,
+  Ports,
   InferEvolveHandler,
 } from "@noddde/core";
 import { defineAggregate } from "@noddde/core";
@@ -612,7 +591,7 @@ describe("InferEvolveHandler", () => {
     state: MyState;
     events: MyEvent;
     commands: MyCommand;
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should narrow the event payload to the specific variant", () => {

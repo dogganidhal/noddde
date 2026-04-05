@@ -3,7 +3,7 @@ import type {
   Aggregate,
   Projection,
   Saga,
-  Infrastructure,
+  Ports,
   Command,
   Event,
 } from "@noddde/core";
@@ -21,42 +21,35 @@ import type { DomainSpy } from "./types";
 
 /**
  * Simplified domain configuration for slice tests. Only requires the
- * domain components under test. All infrastructure (buses, persistence)
- * is pre-wired with in-memory implementations automatically.
+ * domain components under test. All adapters (buses, persistence)
+ * are pre-wired with in-memory implementations automatically.
  *
- * @typeParam TInfrastructure - Custom infrastructure type for this domain.
+ * @typeParam TPorts - Custom ports type for this domain.
  */
-export type TestDomainConfig<
-  TInfrastructure extends Infrastructure = Infrastructure,
-> = {
+export type TestDomainConfig<TPorts extends Ports = Ports> = {
   /** Aggregate definitions keyed by name. */
   aggregates?: Record<string, Aggregate<any>>;
   /** Projection definitions keyed by name. */
   projections?: Record<string, Projection<any>>;
   /** Optional per-projection view store factories. */
-  projectionViewStores?: Record<
-    string,
-    { viewStore: (infrastructure: any) => any }
-  >;
+  projectionViewStores?: Record<string, { viewStore: (ports: any) => any }>;
   /** Saga definitions keyed by name. */
   sagas?: Record<string, Saga<any, any>>;
   /** Optional standalone query handlers keyed by query name. */
   standaloneQueryHandlers?: Record<string, any>;
-  /** Optional custom infrastructure to provide to handlers. */
-  infrastructure?: TInfrastructure;
+  /** Optional custom ports to provide to handlers. */
+  ports?: TPorts;
 };
 
 /**
  * The result of {@link testDomain}, providing the configured domain
  * and spy accessors for assertions.
  *
- * @typeParam TInfrastructure - Custom infrastructure type.
+ * @typeParam TPorts - Custom ports type.
  */
-export type TestDomainResult<
-  TInfrastructure extends Infrastructure = Infrastructure,
-> = {
+export type TestDomainResult<TPorts extends Ports = Ports> = {
   /** The fully initialized domain instance. */
-  domain: Domain<TInfrastructure>;
+  domain: Domain<TPorts>;
   /** Spy data: all published events and dispatched commands. */
   spy: DomainSpy;
 };
@@ -67,7 +60,7 @@ export type TestDomainResult<
  * spies on the event bus and command bus to capture everything that
  * flows through.
  *
- * @typeParam TInfrastructure - Custom infrastructure type.
+ * @typeParam TPorts - Custom ports type.
  * @param config - Simplified domain configuration.
  * @returns A promise resolving to the domain and spy accessors.
  *
@@ -90,11 +83,9 @@ export type TestDomainResult<
  * });
  * ```
  */
-export async function testDomain<
-  TInfrastructure extends Infrastructure = Infrastructure,
->(
-  config: TestDomainConfig<TInfrastructure>,
-): Promise<TestDomainResult<TInfrastructure>> {
+export async function testDomain<TPorts extends Ports = Ports>(
+  config: TestDomainConfig<TPorts>,
+): Promise<TestDomainResult<TPorts>> {
   const publishedEvents: Event[] = [];
   const dispatchedCommands: Command[] = [];
 
@@ -120,7 +111,7 @@ export async function testDomain<
     }
   };
 
-  const definition = defineDomain<TInfrastructure>({
+  const definition = defineDomain<TPorts>({
     writeModel: {
       aggregates: config.aggregates ?? {},
     },
@@ -134,7 +125,7 @@ export async function testDomain<
   });
 
   const domain = await wireDomain(definition, {
-    infrastructure: () => (config.infrastructure ?? {}) as TInfrastructure,
+    adapters: () => (config.ports ?? {}) as TPorts,
     buses: () => ({
       commandBus,
       eventBus,

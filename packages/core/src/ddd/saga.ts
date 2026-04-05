@@ -2,11 +2,7 @@
 import type { ID } from "../id";
 import { Event } from "../edd/event";
 import { Command } from "../cqrs/command/command";
-import {
-  Infrastructure,
-  CQRSInfrastructure,
-  FrameworkInfrastructure,
-} from "../infrastructure";
+import { Ports, CQRSPorts, FrameworkPorts } from "../ports";
 
 // ---- Types bundle ----
 
@@ -28,7 +24,7 @@ import {
  *   state: OrderFulfillmentState;
  *   events: OrderEvent | PaymentEvent | ShippingEvent;
  *   commands: PaymentCommand | ShippingCommand | OrderCommand;
- *   infrastructure: FulfillmentInfrastructure;
+ *   ports: FulfillmentPorts;
  * };
  * ```
  */
@@ -40,7 +36,7 @@ export type SagaTypes = {
   /** The discriminated union of all commands this saga may dispatch. */
   commands: Command;
   /** The external dependencies available to event handlers. */
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 // ---- Reaction return type ----
@@ -68,7 +64,7 @@ export type SagaReaction<TState, TCommands extends Command> = {
 /**
  * A saga event handler implements the "react" phase of the process manager
  * pattern. It receives a domain event, the current saga state, and
- * infrastructure, then returns the new state plus commands to dispatch.
+ * ports, then returns the new state plus commands to dispatch.
  *
  * This is the inverse of an aggregate's {@link DecideHandler}: where a
  * decide handler receives a command and returns events, a saga event
@@ -77,25 +73,23 @@ export type SagaReaction<TState, TCommands extends Command> = {
  * @typeParam TEvent - The specific event type this handler processes.
  * @typeParam TState - The saga state type.
  * @typeParam TCommands - The union of command types this saga may dispatch.
- * @typeParam TInfrastructure - The infrastructure dependencies available.
+ * @typeParam TPorts - The port dependencies available.
  *
  * @param event - The full event object (with type narrowed by event name).
  * @param state - The current saga state (loaded from persistence, or
  *   `initialState` if this event starts the saga).
- * @param infrastructure - External dependencies merged with CQRS buses.
+ * @param ports - External dependencies merged with CQRS buses.
  * @returns The reaction: new state + commands to dispatch.
  */
 export type SagaEventHandler<
   TEvent extends Event,
   TState,
   TCommands extends Command,
-  TInfrastructure extends Infrastructure = Infrastructure,
+  TPorts extends Ports = Ports,
 > = (
   event: TEvent,
   state: TState,
-  infrastructure: TInfrastructure &
-    CQRSInfrastructure &
-    FrameworkInfrastructure,
+  ports: TPorts & CQRSPorts & FrameworkPorts,
 ) => SagaReaction<TState, TCommands> | Promise<SagaReaction<TState, TCommands>>;
 
 // ---- On-map entry ----
@@ -111,20 +105,20 @@ export type SagaEventHandler<
  * @typeParam TEvent - The narrowed event type for this entry.
  * @typeParam TState - The saga state type.
  * @typeParam TCommands - The union of command types this saga may dispatch.
- * @typeParam TInfrastructure - The infrastructure dependencies available.
+ * @typeParam TPorts - The port dependencies available.
  * @typeParam TSagaId - The saga instance identifier type.
  */
 export type SagaOnEntry<
   TEvent extends Event,
   TState,
   TCommands extends Command,
-  TInfrastructure extends Infrastructure = Infrastructure,
+  TPorts extends Ports = Ports,
   TSagaId extends ID = string,
 > = {
   /** Extracts the saga instance ID from the event. Required for routing. */
   id: (event: TEvent) => TSagaId;
-  /** The saga event handler: receives event, state, and infrastructure. */
-  handle: SagaEventHandler<TEvent, TState, TCommands, TInfrastructure>;
+  /** The saga event handler: receives event, state, and ports. */
+  handle: SagaEventHandler<TEvent, TState, TCommands, TPorts>;
 };
 
 // ---- On map ----
@@ -143,7 +137,7 @@ type SagaOnMap<T extends SagaTypes, TSagaId extends ID = string> = {
     Extract<T["events"], { name: K }>,
     T["state"],
     T["commands"],
-    T["infrastructure"],
+    T["ports"],
     TSagaId
   >;
 };
@@ -195,7 +189,7 @@ export interface Saga<
 
 /**
  * Identity function that creates a saga definition with full type inference
- * across the event/command/state/infrastructure boundaries. This is the
+ * across the event/command/state/ports boundaries. This is the
  * recommended way to define sagas.
  *
  * @typeParam T - Inferred {@link SagaTypes} bundle.
@@ -272,27 +266,25 @@ export type InferSagaCommands<T extends Saga> =
   T extends Saga<infer U> ? U["commands"] : never;
 
 /**
- * Extracts the infrastructure type from a {@link Saga} definition.
+ * Extracts the ports type from a {@link Saga} definition.
  *
  * @example
  * ```ts
- * type Infra = InferSagaInfrastructure<typeof OrderFulfillmentSaga>;
+ * type P = InferSagaPorts<typeof OrderFulfillmentSaga>;
  * ```
  */
-export type InferSagaInfrastructure<T extends Saga> =
-  T extends Saga<infer U> ? U["infrastructure"] : never;
+export type InferSagaPorts<T extends Saga> =
+  T extends Saga<infer U> ? U["ports"] : never;
 
 /**
- * Computes the intersection of all infrastructure types declared across
+ * Computes the intersection of all port types declared across
  * a map of sagas. Used by `wireDomain` to infer what the
- * `wiring.infrastructure` factory must return.
+ * `wiring.adapters` factory must return.
  */
-export type InferSagaMapInfrastructure<
+export type InferSagaMapPorts<
   TMap extends Record<string | symbol, Saga<any, any>>,
 > = {
-  [K in keyof TMap]: TMap[K] extends Saga<infer U>
-    ? U["infrastructure"]
-    : never;
+  [K in keyof TMap]: TMap[K] extends Saga<infer U> ? U["ports"] : never;
 }[keyof TMap];
 
 /**
@@ -313,8 +305,8 @@ export type InferSagaId<T extends Saga> =
  * within a {@link SagaTypes} bundle. Use this to type extracted saga handlers
  * in separate files without manually reconstructing the function signature.
  *
- * The infrastructure parameter is automatically merged with
- * {@link CQRSInfrastructure} and {@link FrameworkInfrastructure},
+ * The ports parameter is automatically merged with
+ * {@link CQRSPorts} and {@link FrameworkPorts},
  * matching the runtime behavior.
  *
  * Operates on the `SagaTypes` bundle (not the `Saga` definition),
@@ -341,7 +333,7 @@ export type InferSagaEventHandler<
   Extract<T["events"], { name: K }>,
   T["state"],
   T["commands"],
-  T["infrastructure"]
+  T["ports"]
 >;
 
 /**
@@ -376,6 +368,6 @@ export type InferSagaOnEntry<
   Extract<T["events"], { name: K }>,
   T["state"],
   T["commands"],
-  T["infrastructure"],
+  T["ports"],
   TSagaId
 >;

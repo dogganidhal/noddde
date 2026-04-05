@@ -9,7 +9,7 @@ exports:
 depends_on:
   - edd/event
 docs:
-  - domain-configuration/infrastructure.mdx
+  - domain-configuration/adapters.mdx
 ---
 
 # OutboxStore & OutboxEntry

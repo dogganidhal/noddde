@@ -183,9 +183,9 @@ export async function generateProject(
       content: domainDefinitionTemplate(ctx),
     },
 
-    // ── Infrastructure ──────────────────────────────────────────
+    // ── Ports ───────────────────────────────────────────────────
     {
-      relativePath: "src/infrastructure/index.ts",
+      relativePath: "src/ports/index.ts",
       content: domainInfrastructureTemplate(ctx),
     },
 

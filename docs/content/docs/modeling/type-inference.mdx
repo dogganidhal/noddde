@@ -15,7 +15,7 @@ import {
   InferAggregateState,
   InferAggregateEvents,
   InferAggregateCommands,
-  InferAggregateInfrastructure,
+  InferAggregatePorts,
 } from "@noddde/core";
 ```
 
@@ -184,7 +184,7 @@ type AuctionDef = {
     },
     BrandedId
   >;
-  infrastructure: {};
+  ports: {};
 };
 
 type AuctionId = InferAggregateID<AuctionDef>;
@@ -208,32 +208,32 @@ interface BankAccountRepository {
 
 Note that `InferAggregateID` takes an `AggregateTypes` bundle (the type you pass to `defineAggregate<T>`), not the result of `defineAggregate`. This is because the ID type lives on the command definitions, which are part of the types bundle.
 
-## InferAggregateInfrastructure
+## InferAggregatePorts
 
-Extracts the infrastructure type from an `Aggregate` instance.
+Extracts the ports type from an `Aggregate` instance.
 
 ```typescript
-type InferAggregateInfrastructure<T extends Aggregate> =
-  T extends Aggregate<infer U> ? U["infrastructure"] : never;
+type InferAggregatePorts<T extends Aggregate> =
+  T extends Aggregate<infer U> ? U["ports"] : never;
 ```
 
 ### Usage
 
 ```typescript
-import { InferAggregateInfrastructure } from "@noddde/core";
+import { InferAggregatePorts } from "@noddde/core";
 import { Auction } from "./auction";
 
-type AuctionInfra = InferAggregateInfrastructure<typeof Auction>;
+type AuctionInfra = InferAggregatePorts<typeof Auction>;
 // { clock: { now(): Date } }
 ```
 
 ### When to Use
 
-- **Test setup**: Know exactly which infrastructure services to mock
-- **Infrastructure factories**: Type helper functions that build the infrastructure object for a specific aggregate
+- **Test setup**: Know exactly which port services to mock
+- **Ports factories**: Type helper functions that build the ports object for a specific aggregate
 
 ```typescript
-type AuctionInfra = InferAggregateInfrastructure<typeof Auction>;
+type AuctionInfra = InferAggregatePorts<typeof Auction>;
 
 function createTestInfrastructure(): AuctionInfra {
   return {
@@ -259,7 +259,7 @@ type BookingDef = {
   state: BookingState;
   events: BookingEvent;
   commands: BookingCommand;
-  infrastructure: HotelInfrastructure;
+  ports: HotelInfrastructure;
 };
 
 // Before: manual, verbose
@@ -340,16 +340,16 @@ export const queryDailyRevenue: InferProjectionQueryHandler<
 > = (query, { views }) => views.load(query.date);
 ```
 
-`InferProjectionQueryHandler` automatically injects `{ views }` into the infrastructure parameter when your `ProjectionTypes` bundle has a `viewStore` field.
+`InferProjectionQueryHandler` automatically injects `{ views }` into the ports parameter when your `ProjectionTypes` bundle has a `viewStore` field.
 
-### InferProjectionQueryInfrastructure
+### InferProjectionQueryPorts
 
-Computes the full infrastructure type for a projection's query handlers, conditionally including `{ views }`:
+Computes the full ports type for a projection's query handlers, conditionally including `{ views }`:
 
 ```typescript
-import type { InferProjectionQueryInfrastructure } from "@noddde/core";
+import type { InferProjectionQueryPorts } from "@noddde/core";
 
-type Infra = InferProjectionQueryInfrastructure<RevenueDef>;
+type Infra = InferProjectionQueryPorts<RevenueDef>;
 // → RevenueInfra & { views: RevenueViewStore }  (when viewStore is present)
 // → RevenueInfra                                 (when viewStore is absent)
 ```
@@ -358,13 +358,13 @@ type Infra = InferProjectionQueryInfrastructure<RevenueDef>;
 
 ### Definition-level (extract types from built definitions)
 
-| Helper                                     | Input                   | Extracts                     |
-| ------------------------------------------ | ----------------------- | ---------------------------- |
-| `InferAggregateState<typeof Agg>`          | `Aggregate` instance    | The state type               |
-| `InferAggregateEvents<typeof Agg>`         | `Aggregate` instance    | The event union type         |
-| `InferAggregateCommands<typeof Agg>`       | `Aggregate` instance    | The command union type       |
-| `InferAggregateID<Def>`                    | `AggregateTypes` bundle | The `targetAggregateId` type |
-| `InferAggregateInfrastructure<typeof Agg>` | `Aggregate` instance    | The infrastructure type      |
+| Helper                               | Input                   | Extracts                     |
+| ------------------------------------ | ----------------------- | ---------------------------- |
+| `InferAggregateState<typeof Agg>`    | `Aggregate` instance    | The state type               |
+| `InferAggregateEvents<typeof Agg>`   | `Aggregate` instance    | The event union type         |
+| `InferAggregateCommands<typeof Agg>` | `Aggregate` instance    | The command union type       |
+| `InferAggregateID<Def>`              | `AggregateTypes` bundle | The `targetAggregateId` type |
+| `InferAggregatePorts<typeof Agg>`    | `Aggregate` instance    | The ports type               |
 
 ### Map-level (extract types across aggregate/projection maps)
 
@@ -392,15 +392,15 @@ type AllQueries = InferProjectionMapQueries<typeof projections>;
 
 ### Handler-level (type extracted handlers in separate files)
 
-| Helper                                          | Input                    | Extracts                                          |
-| ----------------------------------------------- | ------------------------ | ------------------------------------------------- |
-| `InferDecideHandler<Def, "CmdName">`            | `AggregateTypes` bundle  | Decide handler function type                      |
-| `InferEvolveHandler<Def, "EventName">`          | `AggregateTypes` bundle  | Evolve handler function type                      |
-| `InferSagaEventHandler<Def, "EventName">`       | `SagaTypes` bundle       | Saga event handler function type                  |
-| `InferSagaOnEntry<Def, "EventName">`            | `SagaTypes` bundle       | Saga on-entry `{ id, handle }` object type        |
-| `InferProjectionEventHandler<Def, "EventName">` | `ProjectionTypes` bundle | Projection `{ id?, reduce }` object type          |
-| `InferProjectionQueryHandler<Def, "QueryName">` | `ProjectionTypes` bundle | Query handler function type (with `views`)        |
-| `InferProjectionQueryInfrastructure<Def>`       | `ProjectionTypes` bundle | Conditional infrastructure (with/without `views`) |
+| Helper                                          | Input                    | Extracts                                   |
+| ----------------------------------------------- | ------------------------ | ------------------------------------------ |
+| `InferDecideHandler<Def, "CmdName">`            | `AggregateTypes` bundle  | Decide handler function type               |
+| `InferEvolveHandler<Def, "EventName">`          | `AggregateTypes` bundle  | Evolve handler function type               |
+| `InferSagaEventHandler<Def, "EventName">`       | `SagaTypes` bundle       | Saga event handler function type           |
+| `InferSagaOnEntry<Def, "EventName">`            | `SagaTypes` bundle       | Saga on-entry `{ id, handle }` object type |
+| `InferProjectionEventHandler<Def, "EventName">` | `ProjectionTypes` bundle | Projection `{ id?, reduce }` object type   |
+| `InferProjectionQueryHandler<Def, "QueryName">` | `ProjectionTypes` bundle | Query handler function type (with `views`) |
+| `InferProjectionQueryPorts<Def>`                | `ProjectionTypes` bundle | Conditional ports (with/without `views`)   |
 
 Definition-level helpers work with `typeof YourAggregate` (the value returned by `defineAggregate`). Handler-level helpers and `InferAggregateID` work with the `*Types` bundle (the type alias you pass as the generic parameter).
 

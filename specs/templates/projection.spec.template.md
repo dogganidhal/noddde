@@ -79,7 +79,7 @@ type [ProjectionName]Query = DefineQueries<{
 }>;
 ```
 
-### Infrastructure
+### Ports
 
 <!--
   Define external dependencies for query handlers (e.g., database connections).
@@ -87,9 +87,9 @@ type [ProjectionName]Query = DefineQueries<{
 -->
 
 ```ts
-import type { Infrastructure } from "@noddde/core";
+import type { Ports } from "@noddde/core";
 
-interface [ProjectionName]Infrastructure extends Infrastructure {
+interface [ProjectionName]Ports extends Ports {
   // TODO: Define external dependencies for query handlers, or use {} for none
   // Example:
   // viewStore: { get(id: string): Promise<ItemView | null>; list(): Promise<ItemView[]> };
@@ -103,7 +103,7 @@ type [ProjectionName]Types = {
   events: [ProjectionName]Event;
   queries: [ProjectionName]Query;
   view: [ProjectionName]View;
-  infrastructure: [ProjectionName]Infrastructure;
+  ports: [ProjectionName]Ports;
 };
 ```
 
@@ -179,7 +179,7 @@ const [ProjectionName] = defineProjection<[ProjectionName]Types>({
   },
   queryHandlers: {
     // TODO: Implement query handlers
-    // [QueryName]: (payload, infrastructure) => {
+    // [QueryName]: (payload, ports) => {
     //   return /* query result */;
     // },
   },

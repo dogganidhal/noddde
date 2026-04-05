@@ -73,7 +73,7 @@ type [AggregateName]Command = DefineCommands<{
 }>;
 ```
 
-### Infrastructure
+### Ports
 
 <!--
   Define the external dependencies this aggregate's command handlers need.
@@ -81,9 +81,9 @@ type [AggregateName]Command = DefineCommands<{
 -->
 
 ```ts
-import type { Infrastructure } from "@noddde/core";
+import type { Ports } from "@noddde/core";
 
-interface [AggregateName]Infrastructure extends Infrastructure {
+interface [AggregateName]Ports extends Ports {
   // TODO: Define external dependencies, or use {} for none
   // Example:
   // clock: { now(): Date };
@@ -98,7 +98,7 @@ type [AggregateName]Types = {
   state: [AggregateName]State;
   events: [AggregateName]Event;
   commands: [AggregateName]Command;
-  infrastructure: [AggregateName]Infrastructure;
+  ports: [AggregateName]Ports;
 };
 ```
 
@@ -169,7 +169,7 @@ const [AggregateName] = defineAggregate<[AggregateName]Types>({
   },
   decide: {
     // TODO: Implement decide handlers
-    // [CommandName]: (command, state, infrastructure) => {
+    // [CommandName]: (command, state, ports) => {
     //   // validate, then return event(s)
     //   return { name: "[EventName]", payload: { ... } };
     // },

@@ -4,23 +4,23 @@ module: edd/event-handler
 source_file: packages/core/src/edd/event-handler.ts
 status: implemented
 exports: [EventHandler]
-depends_on: [edd/event, infrastructure/index]
+depends_on: [edd/event, ports/index]
 docs:
   - events/event-handlers.mdx
 ---
 
 # EventHandler
 
-> `EventHandler` is an impure, async-capable function type that reacts to domain events. Unlike the pure `EvolveHandler`, event handlers have access to infrastructure and may perform I/O such as updating read models, sending notifications, or triggering downstream processes.
+> `EventHandler` is an impure, async-capable function type that reacts to domain events. Unlike the pure `EvolveHandler`, event handlers have access to ports and may perform I/O such as updating read models, sending notifications, or triggering downstream processes.
 
 ## Type Contract
 
-- **`EventHandler<TEvent, TInfrastructure>`** is a function type:
+- **`EventHandler<TEvent, TPorts>`** is a function type:
   - First parameter: `event: TEvent` -- receives the full event object (including `name`, `payload`, and optional `metadata`).
-  - Second parameter: `infrastructure: TInfrastructure & FrameworkInfrastructure` -- external dependencies merged with framework infrastructure (provides `logger`).
+  - Second parameter: `ports: TPorts & FrameworkPorts` -- external dependencies merged with framework ports (provides `logger`).
   - Return type: `void | Promise<void>` -- may be sync or async; no return value expected.
 - `TEvent` is constrained to `extends Event`.
-- `TInfrastructure` is constrained to `extends Infrastructure`.
+- `TPorts` is constrained to `extends Ports`.
 
 ## Behavioral Requirements
 
@@ -28,18 +28,18 @@ docs:
 - The handler may access `event.payload` for the event data and `event.metadata` for audit/tracing information.
 - The handler may perform side effects: I/O, external calls, state mutations.
 - Returning `void` (synchronous) or `Promise<void>` (asynchronous) are both valid.
-- Infrastructure provides access to repositories, services, and other external dependencies.
+- Ports provides access to repositories, services, and other external dependencies.
 
 ## Invariants
 
 - The first parameter type is always `TEvent` (the full event type, not `TEvent["payload"]`).
-- The second parameter type is always `TInfrastructure & FrameworkInfrastructure` (merged with framework infrastructure for logger access, but NOT with `CQRSInfrastructure`).
+- The second parameter type is always `TPorts & FrameworkPorts` (merged with framework ports for logger access, but NOT with `CQRSPorts`).
 - The return type is exactly `void | Promise<void>` -- no other return types are allowed.
 
 ## Edge Cases
 
 - **Event with `any` payload**: The handler's first parameter becomes `Event` with `any` payload.
-- **Empty infrastructure (`{}`)**: Valid since `Infrastructure` is `{}`.
+- **Empty ports (`{}`)**: Valid since `Ports` is `{}`.
 - **Synchronous handler**: Returning `void` (no `async`) is valid.
 - **Handler that ignores parameters**: A no-op `() => {}` is structurally compatible.
 - **Accessing metadata**: `event.metadata?.correlationId` is valid since metadata is optional on Event.
@@ -65,19 +65,19 @@ const handler: EventHandler<MyEvent, MyInfra> = (event, infra) => {
 
 - `EventHandler` is used in patterns where events trigger side effects outside of aggregate state transitions.
 - It now has the same event parameter shape as `SagaEventHandler` and projection `ReducerMap` handlers (full event, not just payload).
-- It differs from `EvolveHandler` which still receives `TEvent["payload"]` (pure, no infrastructure, no metadata access).
+- It differs from `EvolveHandler` which still receives `TEvent["payload"]` (pure, no ports, no metadata access).
 
 ## Test Scenarios
 
-### EventHandler receives full event and infrastructure
+### EventHandler receives full event and ports
 
 ```ts
 import { describe, it, expectTypeOf } from "vitest";
 import type {
   EventHandler,
   DefineEvents,
-  Infrastructure,
-  FrameworkInfrastructure,
+  Ports,
+  FrameworkPorts,
 } from "@noddde/core";
 
 describe("EventHandler", () => {
@@ -86,19 +86,19 @@ describe("EventHandler", () => {
   }>;
   type OrderPlacedEvent = Extract<OrderEvent, { name: "OrderPlaced" }>;
 
-  interface MyInfrastructure extends Infrastructure {
+  interface MyPorts extends Ports {
     emailService: { send(to: string, body: string): Promise<void> };
   }
 
-  type Handler = EventHandler<OrderPlacedEvent, MyInfrastructure>;
+  type Handler = EventHandler<OrderPlacedEvent, MyPorts>;
 
   it("should accept the full event as first parameter", () => {
     expectTypeOf<Parameters<Handler>[0]>().toEqualTypeOf<OrderPlacedEvent>();
   });
 
-  it("should accept infrastructure merged with FrameworkInfrastructure as second parameter", () => {
+  it("should accept ports merged with FrameworkPorts as second parameter", () => {
     expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<
-      MyInfrastructure & FrameworkInfrastructure
+      MyPorts & FrameworkPorts
     >();
   });
 
@@ -112,21 +112,18 @@ describe("EventHandler", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
-import type { EventHandler, Event, Infrastructure } from "@noddde/core";
+import type { EventHandler, Event, Ports } from "@noddde/core";
 
 describe("EventHandler sync/async", () => {
   it("should allow synchronous handler", () => {
-    const handler: EventHandler<Event, Infrastructure> = (_event, _infra) => {
+    const handler: EventHandler<Event, Ports> = (_event, _infra) => {
       // no-op, sync
     };
     expect(handler).toBeDefined();
   });
 
   it("should allow asynchronous handler", () => {
-    const handler: EventHandler<Event, Infrastructure> = async (
-      _event,
-      _infra,
-    ) => {
+    const handler: EventHandler<Event, Ports> = async (_event, _infra) => {
       // no-op, async
     };
     expect(handler).toBeDefined();

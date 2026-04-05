@@ -42,9 +42,9 @@ docs:
 
 ## Integration Points
 
-- `CommandBus` is a member of `CQRSInfrastructure`, making it available to standalone command handlers and saga event handlers.
+- `CommandBus` is a member of `CQRSPorts`, making it available to standalone command handlers and saga event handlers.
 - The engine/runtime implements `CommandBus` to route commands to aggregates and standalone handlers.
-- Sagas dispatch commands via `CQRSInfrastructure.commandBus`.
+- Sagas dispatch commands via `CQRSPorts.commandBus`.
 
 ## Test Scenarios
 

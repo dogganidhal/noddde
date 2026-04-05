@@ -3,7 +3,7 @@ title: "Example: Auction Domain"
 description: Complete walkthrough of an auction aggregate with time-based validation, the Clock pattern, event upcasting, and projections.
 ---
 
-This example walks through the auction domain sample. It demonstrates infrastructure injection via the Clock pattern, multi-validation decide handlers, rejection events, no-op evolve handlers, event upcasting, and projections with ViewStore.
+This example walks through the auction domain sample. It demonstrates ports injection via the Clock pattern, multi-validation decide handlers, rejection events, no-op evolve handlers, event upcasting, and projections with ViewStore.
 
 > **Full source**: [samples/sample-auction](https://github.com/dogganidhal/noddde/tree/main/samples/sample-auction) — clone and run locally with `npm start`.
 >
@@ -61,7 +61,7 @@ export interface AuctionState {
 
 `highestBid` is nullable — no bids have been placed initially. `bidCount` is a derived counter maintained for convenience.
 
-## Infrastructure: The Clock Pattern
+## Ports: The Clock Pattern
 
 The auction needs to check the current time. Instead of calling `new Date()` directly (which would be non-deterministic), we inject a `Clock`:
 
@@ -155,7 +155,7 @@ The `CloseAuction` handler follows the same pattern. Each file imports only `Inf
 
 ### Evolve handlers (extracted)
 
-Evolve handlers are also extracted. They are pure functions — no infrastructure access, no async.
+Evolve handlers are also extracted. They are pure functions — no ports access, no async.
 
 ```ts
 // evolvers/evolve-auction-created.ts
@@ -215,7 +215,7 @@ type AuctionDef = {
   state: AuctionState;
   events: AuctionEvent;
   commands: AuctionCommand;
-  infrastructure: AuctionInfrastructure;
+  ports: AuctionInfrastructure;
 };
 
 export const Auction = defineAggregate<AuctionDef>({
@@ -275,7 +275,7 @@ const auctionDomain = defineDomain({
 });
 
 const domain = await wireDomain(auctionDomain, {
-  infrastructure: () => ({ clock: new SystemClock() }),
+  adapters: () => ({ clock: new SystemClock() }),
   aggregates: {
     persistence: () => new InMemoryEventSourcedAggregatePersistence(),
   },

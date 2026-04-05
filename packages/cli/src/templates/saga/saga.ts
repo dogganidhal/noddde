@@ -17,7 +17,7 @@ type ${ctx.name}SagaDef = {
   state: ${ctx.name}SagaState;
   events: never; // TODO: replace with union of event types from related aggregates
   commands: never; // TODO: replace with union of command types
-  infrastructure: Record<string, never>; // TODO: add infrastructure dependencies
+  ports: Record<string, never>; // TODO: add port dependencies
 };
 
 // ── Saga definition ─────────────────────────────────────────────

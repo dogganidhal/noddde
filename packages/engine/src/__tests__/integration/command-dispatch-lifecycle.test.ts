@@ -32,7 +32,7 @@ type CounterTypes = {
   state: CounterState;
   events: CounterEvent;
   commands: CounterCommand;
-  infrastructure: {};
+  ports: {};
 };
 
 const Counter = defineAggregate<CounterTypes>({
@@ -241,7 +241,7 @@ describe("Multiple events from one command", () => {
     state: { count: number };
     events: BatchCounterEvent;
     commands: BatchCounterCommand;
-    infrastructure: {};
+    ports: {};
   };
 
   const BatchCounter = defineAggregate<BatchCounterTypes>({
@@ -306,7 +306,7 @@ describe("Async command handler", () => {
     state: { result: string | null };
     events: AsyncEvent;
     commands: AsyncCommand;
-    infrastructure: {};
+    ports: {};
   };
 
   const AsyncAggregate = defineAggregate<AsyncTypes>({

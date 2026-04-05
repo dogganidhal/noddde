@@ -47,8 +47,8 @@ const bankingDomain = defineDomain({
       BankAccount,
     },
     standaloneCommandHandlers: {
-      SendNotification: async (command, infrastructure) => {
-        await infrastructure.notificationService.send(command.payload);
+      SendNotification: async (command, ports) => {
+        await ports.notificationService.send(command.payload);
       },
     },
   },
@@ -78,8 +78,8 @@ const bankingDomain = defineDomain({
       TransactionHistory: TransactionHistoryProjection,
     },
     standaloneQueryHandlers: {
-      GetSystemStats: async (_query, infrastructure) => {
-        return infrastructure.statsService.getStats();
+      GetSystemStats: async (_query, ports) => {
+        return ports.statsService.getStats();
       },
     },
   },
@@ -103,10 +103,10 @@ For a detailed guide on defining sagas, `on` map entries, and handlers, see [Sag
 
 ## The Buses
 
-Communication between the write model, read model, and the outside world flows through three buses. Together they form the `CQRSInfrastructure`:
+Communication between the write model, read model, and the outside world flows through three buses. Together they form the `CQRSPorts`:
 
 ```typescript
-interface CQRSInfrastructure {
+interface CQRSPorts {
   commandBus: CommandBus;
   eventBus: EventBus;
   queryBus: QueryBus;
@@ -205,7 +205,7 @@ When a command arrives for an aggregate instance, the framework follows this seq
 
 1. **Load events** -- Retrieve the full event history for the aggregate instance.
 2. **Replay** -- Start with `initialState` and fold each event through the matching evolve handler to reconstruct the current state.
-3. **Handle command** -- Pass the reconstructed state, the command, and infrastructure to the decide handler.
+3. **Handle command** -- Pass the reconstructed state, the command, and ports to the decide handler.
 4. **Save new events** -- Append the events produced by the decide handler.
 5. **Apply new events** -- Fold the new events into the state for any subsequent commands in the same session.
 
@@ -313,9 +313,9 @@ TransactionProcessed: (event, state) => ({
 });
 ```
 
-If you need a timestamp or a generated ID, compute it in the **decide handler** (which has access to infrastructure) and include it in the event payload. The evolve handler then reads it from the event, ensuring deterministic replay.
+If you need a timestamp or a generated ID, compute it in the **decide handler** (which has access to ports) and include it in the event payload. The evolve handler then reads it from the event, ensuring deterministic replay.
 
-This is why noddde passes infrastructure to decide handlers but **never** to evolve handlers. The type system enforces this boundary:
+This is why noddde passes ports to decide handlers but **never** to evolve handlers. The type system enforces this boundary:
 
 ```typescript
 type EvolveHandler<TEvent extends Event, TState> = (
@@ -324,7 +324,7 @@ type EvolveHandler<TEvent extends Event, TState> = (
 ) => TState;
 ```
 
-There is no infrastructure parameter. If you try to access infrastructure in an evolve handler, the compiler will prevent it.
+There is no ports parameter. If you try to access ports in an evolve handler, the compiler will prevent it.
 
 ## Event Sourcing + CQRS Together
 
@@ -360,7 +360,7 @@ Here is the complete flow of a command through a noddde application:
    { balance: 1000, status: "active" }
 
 4. Decide handler runs
-   AuthorizeTransaction(command, state, infrastructure) -> event
+   AuthorizeTransaction(command, state, ports) -> event
 
 5. Event returned
    { name: "TransactionAuthorized",

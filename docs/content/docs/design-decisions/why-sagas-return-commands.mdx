@@ -67,9 +67,9 @@ If saga event streams are replayed (for rebuilding state or debugging), declarat
 
 ## The Trade-off
 
-Handlers still receive `CQRSInfrastructure` (including `QueryBus`), so they _can_ read data before deciding which commands to return. The constraint is on outputs, not inputs: you can read from the query bus, but you return commands rather than dispatching them.
+Handlers still receive `CQRSPorts` (including `QueryBus`), so they _can_ read data before deciding which commands to return. The constraint is on outputs, not inputs: you can read from the query bus, but you return commands rather than dispatching them.
 
-For truly imperative side effects (notifications, logging), handlers can call infrastructure methods directly — only command dispatch is declarative.
+For truly imperative side effects (notifications, logging), handlers can call ports methods directly — only command dispatch is declarative.
 
 ## See Also
 

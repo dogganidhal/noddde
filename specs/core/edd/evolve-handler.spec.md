@@ -26,14 +26,14 @@ docs:
 
 - The handler receives the unwrapped event payload, not the full event object.
 - The handler must return a new state value of the same type `TState`.
-- The handler must be pure: no side effects, no I/O, no infrastructure access.
+- The handler must be pure: no side effects, no I/O, no ports access.
 - The handler must be synchronous: no `Promise` in the return type.
 - State should be treated as immutable -- the handler returns a new state object rather than mutating the input.
 
 ## Invariants
 
 - The return type is exactly `TState`, not `TState | Promise<TState>`.
-- No infrastructure parameter is present -- evolve handlers are deliberately isolated from I/O.
+- No ports parameter is present -- evolve handlers are deliberately isolated from I/O.
 - The first parameter type is `TEvent["payload"]`, consistent with `EventHandler`.
 - The function signature enforces the event sourcing constraint: state evolution depends only on the event payload and current state.
 

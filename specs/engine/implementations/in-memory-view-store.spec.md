@@ -6,7 +6,7 @@ status: implemented
 exports: [InMemoryViewStore]
 depends_on: [core/persistence/view-store]
 docs:
-  - infrastructure/in-memory-implementations.mdx
+  - ports/in-memory-implementations.mdx
 ---
 
 # InMemoryViewStore
@@ -68,7 +68,7 @@ export class InMemoryViewStore<TView> implements ViewStore<TView> {
 
 - **Domain.init()** -- View stores are resolved during domain initialization from projection `viewStore` factories.
 - **Projection event handling** -- When an event arrives for a projection with `identity`: (1) derive viewId via `identity[eventName](event)`, (2) `load(viewId)`, (3) if `undefined`, use `initialView`, (4) run reducer, (5) `save(viewId, newView)`.
-- **Query handler infrastructure** -- The resolved view store is injected as `{ views }` into query handler infrastructure.
+- **Query handler ports** -- The resolved view store is injected as `{ views }` into query handler ports.
 
 ## Test Scenarios
 

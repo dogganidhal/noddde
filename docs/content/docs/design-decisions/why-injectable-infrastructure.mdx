@@ -1,5 +1,5 @@
 ---
-title: "Why Injectable Infrastructure?"
+title: "Why Injectable Ports?"
 description: Why noddde uses function parameter injection instead of dependency injection containers.
 ---
 
@@ -51,7 +51,7 @@ To test this handler, you need to:
 Function parameter injection is the simplest possible dependency injection:
 
 ```ts
-// Infrastructure is declared as a type
+// Ports is declared as a type
 interface AuctionInfrastructure {
   clock: Clock;
 }
@@ -71,7 +71,7 @@ Benefits:
 - **Visible dependencies** — The parameter signature shows exactly what the handler needs
 - **Trivial testing** — Pass a mock object; no module mocking required
 - **Type-safe** — TypeScript checks that the infrastructure matches the declared type
-- **No framework lock-in** — Infrastructure types are plain TypeScript interfaces
+- **No framework lock-in** — Ports types are plain TypeScript interfaces
 
 ## Testing Comparison
 
@@ -93,21 +93,21 @@ const result = BankAccount.commands.AuthorizeTransaction(command, state, {
 
 ## The Provider Pattern
 
-Infrastructure is created once in the domain configuration and injected everywhere:
+Ports is created once in the domain configuration and injected everywhere:
 
 ```ts
-infrastructure: () => ({
+adapters: () => ({
   clock: new SystemClock(),        // Production: real clock
   // OR
   clock: new FixedClock(testTime), // Testing: deterministic clock
 }),
 ```
 
-This is the [Factory pattern](/docs/running/infrastructure) — create once, inject everywhere.
+This is the [Factory pattern](/docs/running/ports) — create once, inject everywhere.
 
 ## Trade-offs
 
-- **Must thread through configuration** — Infrastructure is explicitly provided, not automatically resolved
+- **Must thread through configuration** — Ports is explicitly provided, not automatically resolved
 - **No automatic resolution** — You must build the infrastructure object yourself (no container auto-wiring)
 - **Verbose for large infrastructure** — If you have many dependencies, the infrastructure object is large
 
@@ -132,7 +132,7 @@ decide: {
 },
 
 // Provide it in wiring
-infrastructure: () => ({
+adapters: () => ({
   clock: new SystemClock(),
   bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
   transactionViewRepository: new InMemoryTransactionViewRepository(),

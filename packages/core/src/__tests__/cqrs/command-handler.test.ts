@@ -2,14 +2,14 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
   Command,
-  CQRSInfrastructure,
-  Infrastructure,
+  CQRSPorts,
+  Ports,
   StandaloneCommand,
   StandaloneCommandHandler,
 } from "@noddde/core";
 
 describe("StandaloneCommandHandler", () => {
-  interface NotificationInfra extends Infrastructure {
+  interface NotificationPorts extends Ports {
     emailService: { send(to: string, body: string): Promise<void> };
   }
 
@@ -19,7 +19,7 @@ describe("StandaloneCommandHandler", () => {
   }
 
   type Handler = StandaloneCommandHandler<
-    NotificationInfra,
+    NotificationPorts,
     SendNotificationCommand
   >;
 
@@ -29,9 +29,9 @@ describe("StandaloneCommandHandler", () => {
     >().toEqualTypeOf<SendNotificationCommand>();
   });
 
-  it("should receive infrastructure merged with CQRSInfrastructure", () => {
+  it("should receive ports merged with CQRSPorts", () => {
     expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<
-      NotificationInfra & CQRSInfrastructure
+      NotificationPorts & CQRSPorts
     >();
   });
 
@@ -41,18 +41,18 @@ describe("StandaloneCommandHandler", () => {
 });
 
 describe("StandaloneCommandHandler CQRS access", () => {
-  it("should allow dispatching commands via infrastructure", () => {
-    const handler: StandaloneCommandHandler<Infrastructure, Command> = async (
+  it("should allow dispatching commands via ports", () => {
+    const handler: StandaloneCommandHandler<Ports, Command> = async (
       command,
-      infrastructure,
+      ports,
     ) => {
       // The handler has access to all three buses
-      await infrastructure.commandBus.dispatch({ name: "FollowUp" });
-      await infrastructure.eventBus.dispatch({
+      await ports.commandBus.dispatch({ name: "FollowUp" });
+      await ports.eventBus.dispatch({
         name: "Processed",
         payload: {},
       });
-      await infrastructure.queryBus.dispatch({
+      await ports.queryBus.dispatch({
         name: "GetStatus",
         payload: {},
       });
@@ -61,10 +61,10 @@ describe("StandaloneCommandHandler CQRS access", () => {
   });
 });
 
-describe("StandaloneCommandHandler with empty infra", () => {
-  type Handler = StandaloneCommandHandler<Infrastructure, Command>;
+describe("StandaloneCommandHandler with empty ports", () => {
+  type Handler = StandaloneCommandHandler<Ports, Command>;
 
-  it("should still provide CQRSInfrastructure", () => {
-    expectTypeOf<Parameters<Handler>[1]>().toMatchTypeOf<CQRSInfrastructure>();
+  it("should still provide CQRSPorts", () => {
+    expectTypeOf<Parameters<Handler>[1]>().toMatchTypeOf<CQRSPorts>();
   });
 });

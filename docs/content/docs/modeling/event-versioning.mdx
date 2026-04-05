@@ -132,7 +132,7 @@ The upcaster API provides compile-time safety at multiple levels:
 
 Upcaster steps follow the same constraints as evolve handlers:
 
-- **Pure**: No side effects, no I/O, no infrastructure access.
+- **Pure**: No side effects, no I/O, no ports access.
 - **Synchronous**: No `async`/`await`.
 - **Deterministic**: Same input always produces the same output.
 

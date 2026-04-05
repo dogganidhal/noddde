@@ -1,11 +1,11 @@
 ---
 title: "Why Are Evolve Handlers Pure?"
-description: Why noddde requires evolve handlers to be pure functions with no infrastructure access.
+description: Why noddde requires evolve handlers to be pure functions with no ports access.
 ---
 
 ## The Decision
 
-Evolve handlers in noddde are pure functions that receive only the event payload and current state, returning the new state. They have no access to infrastructure, no async capability, and must produce no side effects.
+Evolve handlers in noddde are pure functions that receive only the event payload and current state, returning the new state. They have no access to ports, no async capability, and must produce no side effects.
 
 ```ts
 type EvolveHandler<TEvent extends Event, TState> = (
@@ -16,7 +16,7 @@ type EvolveHandler<TEvent extends Event, TState> = (
 
 ## The Problem
 
-If evolve handlers could access infrastructure (databases, APIs, time), event replay becomes non-deterministic:
+If evolve handlers could access ports (databases, APIs, time), event replay becomes non-deterministic:
 
 ```ts
 // Dangerous: evolve handler with side effects (NOT how noddde works)
@@ -32,7 +32,7 @@ Replaying this event tomorrow would produce a different state because the exchan
 
 ## Alternatives Considered
 
-- **Allow infrastructure in evolve handlers** — Some frameworks do this, trading correctness for convenience
+- **Allow ports in evolve handlers** — Some frameworks do this, trading correctness for convenience
 - **Snapshot-only replay** — Only replay from the latest snapshot, reducing the window of non-determinism
 - **Version-tagged handlers** — Different evolve handler per event version
 
@@ -79,7 +79,7 @@ evolve: {
 },
 ```
 
-The decide handler is allowed to be impure (it has infrastructure access). The evolve handler stays pure by working only with data that was captured in the event.
+The decide handler is allowed to be impure (it has ports access). The evolve handler stays pure by working only with data that was captured in the event.
 
 ## Trade-offs
 

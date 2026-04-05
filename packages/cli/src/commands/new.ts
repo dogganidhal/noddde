@@ -47,7 +47,7 @@ export function registerNewCommand(program: Command): void {
     .command("domain <name>")
     .alias("d")
     .description(
-      "Generate a complete domain with aggregate, projection, infrastructure, and wiring",
+      "Generate a complete domain with aggregate, projection, ports, and wiring",
     )
     .action(async (name: string) => {
       await generateDomain(name, ".");

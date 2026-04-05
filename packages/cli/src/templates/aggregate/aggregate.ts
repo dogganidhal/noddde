@@ -2,7 +2,7 @@ import type { TemplateContext } from "../../utils/context.js";
 
 /** Template for standalone aggregate definition (state in separate file). */
 export function aggregateTemplate(ctx: TemplateContext): string {
-  return `import { defineAggregate, DefineEvents, DefineCommands, Infrastructure } from "@noddde/core";
+  return `import { defineAggregate, DefineEvents, DefineCommands, Ports } from "@noddde/core";
 import type { ${ctx.name}State } from "./state.js";
 import { initial${ctx.name}State } from "./state.js";
 import type { Create${ctx.name}Payload } from "./commands/create-${ctx.kebabName}.js";
@@ -27,7 +27,7 @@ export type ${ctx.name}Def = {
   state: ${ctx.name}State;
   events: ${ctx.name}Event;
   commands: ${ctx.name}Command;
-  infrastructure: Infrastructure; // TODO: replace with domain-specific infrastructure type
+  ports: Ports; // TODO: replace with domain-specific ports type
 };
 
 // ── Aggregate definition ────────────────────────────────────────

@@ -6,7 +6,7 @@ status: implemented
 exports: [EventEmitterEventBus]
 depends_on: [edd/event-bus, edd/event]
 docs:
-  - infrastructure/in-memory-implementations.mdx
+  - ports/in-memory-implementations.mdx
 ---
 
 # EventEmitterEventBus
@@ -65,7 +65,7 @@ class EventEmitterEventBus implements EventBus {
 
 - **Domain.init()** -- The domain engine registers projection `on` map handlers and saga event handlers via `bus.on(eventName, handler)`.
 - **Domain.dispatchCommand()** -- After persisting aggregate events, the domain dispatches each event through this bus and awaits completion, ensuring projections and sagas are up-to-date before returning.
-- **CQRSInfrastructure** -- This bus is provided as `eventBus` in the merged infrastructure object.
+- **CQRSPorts** -- This bus is provided as `eventBus` in the merged ports object.
 
 ## Migration
 

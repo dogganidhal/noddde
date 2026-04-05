@@ -5,8 +5,8 @@ import { defineSaga } from "@noddde/core";
 import type {
   SagaTypes,
   DefineEvents,
-  Infrastructure,
-  CQRSInfrastructure,
+  Ports,
+  CQRSPorts,
   UnitOfWork,
   Command,
 } from "@noddde/core";
@@ -21,7 +21,7 @@ import { SagaExecutor } from "../../../executors/saga-executor";
 import type { MetadataContext } from "../../../domain";
 
 // ============================================================
-// Helper to create infrastructure + executor for each test
+// Helper to create ports + executor for each test
 // ============================================================
 
 function createTestSetup(overrides?: {
@@ -31,7 +31,7 @@ function createTestSetup(overrides?: {
   const sagaPersistence = new InMemorySagaPersistence();
   const commandBus = overrides?.commandBus ?? new InMemoryCommandBus();
   const eventBus = overrides?.eventBus ?? new EventEmitterEventBus();
-  const infrastructure: Infrastructure & CQRSInfrastructure = {
+  const ports: Ports & CQRSPorts = {
     commandBus,
     eventBus,
     queryBus: new InMemoryQueryBus(),
@@ -40,7 +40,7 @@ function createTestSetup(overrides?: {
   const metadataStorage = new AsyncLocalStorage<MetadataContext>();
 
   const executor = new SagaExecutor(
-    infrastructure,
+    ports,
     sagaPersistence,
     createInMemoryUnitOfWork,
     uowStorage,
@@ -52,7 +52,7 @@ function createTestSetup(overrides?: {
     sagaPersistence,
     commandBus,
     eventBus,
-    infrastructure,
+    ports,
     uowStorage,
     metadataStorage,
   };
@@ -71,7 +71,7 @@ type OrderSagaTypes = SagaTypes & {
   state: OrderSagaState;
   events: OrderSagaEvent;
   commands: never;
-  infrastructure: Infrastructure & CQRSInfrastructure;
+  ports: Ports & CQRSPorts;
 };
 
 const OrderSaga = defineSaga<OrderSagaTypes>({
@@ -124,7 +124,7 @@ describe("SagaExecutor", () => {
       state: MySagaState;
       events: MySagaEvent;
       commands: never;
-      infrastructure: Infrastructure & CQRSInfrastructure;
+      ports: Ports & CQRSPorts;
     };
 
     const MySaga = defineSaga<MySagaTypes>({
@@ -165,7 +165,7 @@ describe("SagaExecutor", () => {
       state: MinSagaState;
       events: MinSagaEvent;
       commands: never;
-      infrastructure: Infrastructure & CQRSInfrastructure;
+      ports: Ports & CQRSPorts;
     };
 
     const MinSaga = defineSaga<MinSagaTypes>({
@@ -205,7 +205,7 @@ describe("SagaExecutor", () => {
       state: DispatchSagaState;
       events: DispatchSagaEvent;
       commands: never;
-      infrastructure: Infrastructure & CQRSInfrastructure;
+      ports: Ports & CQRSPorts;
     };
 
     const DispatchSaga = defineSaga<DispatchSagaTypes>({
@@ -259,7 +259,7 @@ describe("SagaExecutor", () => {
       state: CorrSagaState;
       events: CorrSagaEvent;
       commands: never;
-      infrastructure: Infrastructure & CQRSInfrastructure;
+      ports: Ports & CQRSPorts;
     };
 
     const CorrSaga = defineSaga<CorrSagaTypes>({
@@ -289,7 +289,7 @@ describe("SagaExecutor", () => {
     });
 
     const sagaPersistence = new InMemorySagaPersistence();
-    const infrastructure: Infrastructure & CQRSInfrastructure = {
+    const ports: Ports & CQRSPorts = {
       commandBus,
       eventBus: new EventEmitterEventBus(),
       queryBus: new InMemoryQueryBus(),
@@ -297,7 +297,7 @@ describe("SagaExecutor", () => {
     const uowStorage = new AsyncLocalStorage<UnitOfWork>();
 
     const executor = new SagaExecutor(
-      infrastructure,
+      ports,
       sagaPersistence,
       createInMemoryUnitOfWork,
       uowStorage,
@@ -333,7 +333,7 @@ describe("SagaExecutor", () => {
       state: RbSagaState;
       events: RbSagaEvent;
       commands: never;
-      infrastructure: Infrastructure & CQRSInfrastructure;
+      ports: Ports & CQRSPorts;
     };
 
     const RbSaga = defineSaga<RbSagaTypes>({
@@ -384,7 +384,7 @@ describe("SagaExecutor", () => {
       state: NoCmdSagaState;
       events: NoCmdSagaEvent;
       commands: never;
-      infrastructure: Infrastructure & CQRSInfrastructure;
+      ports: Ports & CQRSPorts;
     };
 
     const NoCmdSaga = defineSaga<NoCmdSagaTypes>({
@@ -429,7 +429,7 @@ describe("SagaExecutor", () => {
       state: FlowSagaState;
       events: FlowSagaEvent;
       commands: never;
-      infrastructure: Infrastructure & CQRSInfrastructure;
+      ports: Ports & CQRSPorts;
     };
 
     const FlowSaga = defineSaga<FlowSagaTypes>({

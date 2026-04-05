@@ -18,10 +18,10 @@ function defineAggregate<
   TEvents extends Event,
   TCommands extends AggregateCommand,
   TID,
-  TInfrastructure extends Infrastructure,
+  TPorts extends Ports,
 >(config: {
   /* ... */
-}): Aggregate<TState, TEvents, TCommands, TID, TInfrastructure>;
+}): Aggregate<TState, TEvents, TCommands, TID, TPorts>;
 
 // Usage — which parameter is which?
 defineAggregate<
@@ -57,7 +57,7 @@ type AggregateTypes = {
   state: any;
   events: Event;
   commands: AggregateCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 // Usage — self-documenting
@@ -65,7 +65,7 @@ type BankAccountDef = {
   state: BankAccountState;
   events: BankAccountEvent;
   commands: BankAccountCommand;
-  infrastructure: BankingInfrastructure;
+  ports: BankingInfrastructure;
 };
 
 defineAggregate<BankAccountDef>({
@@ -75,7 +75,7 @@ defineAggregate<BankAccountDef>({
 
 Benefits:
 
-- **Named members** — `state`, `events`, `commands`, `infrastructure` are self-documenting
+- **Named members** — `state`, `events`, `commands`, `ports` are self-documenting
 - **Single generic parameter** — `defineAggregate<T>` instead of `defineAggregate<A, B, C, D, E>`
 - **Extensible** — Adding a new member does not change the generic parameter count
 - **Reusable** — The type bundle can be referenced from other types (e.g., `InferAggregateState<T>`)
@@ -96,7 +96,7 @@ type BankAccountDef = {
   state: BankAccountState;
   events: BankAccountEvent;
   commands: BankAccountCommand;
-  infrastructure: BankingInfrastructure;
+  ports: BankingInfrastructure;
 };
 
 // One generic parameter, fully typed

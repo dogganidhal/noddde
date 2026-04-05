@@ -6,7 +6,7 @@ import type {
   DefineEvents,
   DefineQueries,
   EventSourcedAggregatePersistence,
-  Infrastructure,
+  Ports,
   ProjectionTypes,
   SagaTypes,
 } from "@noddde/core";
@@ -35,7 +35,7 @@ import { everyNEvents } from "@noddde/core";
 
 describe("wireDomain", () => {
   it("should return an initialized Domain instance", async () => {
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: {} },
       readModel: { projections: {} },
     });
@@ -49,31 +49,31 @@ describe("wireDomain", () => {
     });
 
     expect(domain).toBeInstanceOf(Domain);
-    expect(domain.infrastructure.commandBus).toBeInstanceOf(InMemoryCommandBus);
-    expect(domain.infrastructure.eventBus).toBeInstanceOf(EventEmitterEventBus);
-    expect(domain.infrastructure.queryBus).toBeInstanceOf(InMemoryQueryBus);
+    expect(domain.adapters.commandBus).toBeInstanceOf(InMemoryCommandBus);
+    expect(domain.adapters.eventBus).toBeInstanceOf(EventEmitterEventBus);
+    expect(domain.adapters.queryBus).toBeInstanceOf(InMemoryQueryBus);
   });
 });
 
 // ============================================================
-// init resolves custom infrastructure and merges with CQRS buses
+// init resolves custom ports and merges with CQRS buses
 // ============================================================
 
-interface TestInfrastructure {
+interface TestPorts {
   clock: { now(): Date };
 }
 
 describe("Domain.init", () => {
-  it("should merge custom infrastructure with CQRS infrastructure", async () => {
+  it("should merge custom ports with CQRS ports", async () => {
     const fixedDate = new Date("2025-01-01T00:00:00Z");
 
-    const definition = defineDomain<TestInfrastructure>({
+    const definition = defineDomain<TestPorts>({
       writeModel: { aggregates: {} },
       readModel: { projections: {} },
     });
 
     const domain = await wireDomain(definition, {
-      infrastructure: () => ({
+      adapters: () => ({
         clock: { now: () => fixedDate },
       }),
       buses: () => ({
@@ -83,10 +83,10 @@ describe("Domain.init", () => {
       }),
     });
 
-    expect(domain.infrastructure.clock.now()).toBe(fixedDate);
-    expect(domain.infrastructure.commandBus).toBeDefined();
-    expect(domain.infrastructure.eventBus).toBeDefined();
-    expect(domain.infrastructure.queryBus).toBeDefined();
+    expect(domain.adapters.clock.now()).toBe(fixedDate);
+    expect(domain.adapters.commandBus).toBeDefined();
+    expect(domain.adapters.eventBus).toBeDefined();
+    expect(domain.adapters.queryBus).toBeDefined();
   });
 });
 
@@ -110,7 +110,7 @@ type CounterTypes = AggregateTypes & {
   state: CounterState;
   events: CounterEvent;
   commands: CounterCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const Counter = defineAggregate<CounterTypes>({
@@ -144,7 +144,7 @@ describe("Domain.dispatchCommand", () => {
       publishedEvents.push(event);
     });
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: {
         aggregates: { Counter },
       },
@@ -219,7 +219,7 @@ type BalanceTypes = AggregateTypes & {
   state: BalanceState;
   events: BalanceEvent;
   commands: BalanceCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const BankAccount = defineAggregate<BalanceTypes>({
@@ -249,7 +249,7 @@ describe("Domain.dispatchCommand", () => {
   it("should replay events to rebuild state before executing a command", async () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { BankAccount } },
       readModel: { projections: {} },
     });
@@ -315,7 +315,7 @@ type ItemProjectionTypes = ProjectionTypes & {
   events: ItemEvent;
   queries: ItemQuery;
   view: Map<string, { id: string; name: string }>;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const ItemProjection = defineProjection<ItemProjectionTypes>({
@@ -337,7 +337,7 @@ const ItemProjection = defineProjection<ItemProjectionTypes>({
 
 describe("Domain.init - projection query handler registration", () => {
   it("should wire projection query handlers to the query bus", async () => {
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: {} },
       readModel: { projections: { ItemProjection } },
     });
@@ -350,7 +350,7 @@ describe("Domain.init - projection query handler registration", () => {
       }),
     });
 
-    const result = await domain.infrastructure.queryBus.dispatch({
+    const result = await domain.adapters.queryBus.dispatch({
       name: "GetItemById",
       payload: { id: "item-1" },
     } as ItemQuery);
@@ -377,7 +377,7 @@ type OrderTypes = AggregateTypes & {
   state: OrderState;
   events: OrderEvent;
   commands: OrderCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const OrderAggregate = defineAggregate<OrderTypes>({
@@ -411,7 +411,7 @@ type FulfillmentSagaTypes = SagaTypes & {
   state: FulfillmentState;
   events: OrderEvent;
   commands: OrderCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const OrderFulfillmentSaga = defineSaga<FulfillmentSagaTypes>({
@@ -442,7 +442,7 @@ describe("Domain - saga integration", () => {
     const sagaPersistence = new InMemorySagaPersistence();
     const aggregatePersistence = new InMemoryEventSourcedAggregatePersistence();
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { OrderAggregate } },
       readModel: { projections: {} },
       processModel: { sagas: { OrderFulfillmentSaga } },
@@ -490,15 +490,15 @@ describe("Domain - saga integration", () => {
 // ============================================================
 
 describe("wireDomain - error handling", () => {
-  it("should propagate errors from infrastructure factories", async () => {
-    const definition = defineDomain<Infrastructure>({
+  it("should propagate errors from adapter factories", async () => {
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: {} },
       readModel: { projections: {} },
     });
 
     await expect(
       wireDomain(definition, {
-        infrastructure: () => {
+        adapters: () => {
           throw new Error("Database connection failed");
         },
       }),
@@ -521,7 +521,7 @@ type TodoTypes = AggregateTypes & {
   state: TodoState;
   events: TodoEvent;
   commands: TodoCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const TodoList = defineAggregate<TodoTypes>({
@@ -543,7 +543,7 @@ describe("Domain - state-stored persistence", () => {
   it("should use state-stored persistence to save aggregate snapshots", async () => {
     const persistence = new InMemoryStateStoredAggregatePersistence();
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { TodoList } },
       readModel: { projections: {} },
     });
@@ -579,10 +579,10 @@ describe("Domain - state-stored persistence", () => {
 });
 
 // ============================================================
-// standalone command handlers receive merged infrastructure
+// standalone command handlers receive merged ports
 // ============================================================
 
-interface NotificationInfrastructure extends Infrastructure {
+interface NotificationPorts extends Ports {
   notifier: { send(message: string): void };
 }
 
@@ -592,15 +592,15 @@ type NotifyCommand = {
 };
 
 describe("Domain - standalone command handlers", () => {
-  it("should invoke standalone handler with merged infrastructure", async () => {
+  it("should invoke standalone handler with merged ports", async () => {
     const sendSpy = vi.fn();
 
-    const definition = defineDomain<NotificationInfrastructure, NotifyCommand>({
+    const definition = defineDomain<NotificationPorts, NotifyCommand>({
       writeModel: {
         aggregates: {},
         standaloneCommandHandlers: {
-          SendNotification: (command, infra) => {
-            infra.notifier.send(command.payload.message);
+          SendNotification: (command, ports) => {
+            ports.notifier.send(command.payload.message);
           },
         },
       },
@@ -608,7 +608,7 @@ describe("Domain - standalone command handlers", () => {
     });
 
     const domain = await wireDomain(definition, {
-      infrastructure: () => ({
+      adapters: () => ({
         notifier: { send: sendSpy },
       }),
       buses: () => ({
@@ -618,7 +618,7 @@ describe("Domain - standalone command handlers", () => {
       }),
     });
 
-    await domain.infrastructure.commandBus.dispatch({
+    await domain.adapters.commandBus.dispatch({
       name: "SendNotification",
       payload: { message: "Hello!" },
     });
@@ -638,7 +638,7 @@ type SimpleTypes = AggregateTypes & {
   state: SimpleState;
   events: SimpleEvent;
   commands: SimpleCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const SimpleAggregate = defineAggregate<SimpleTypes>({
@@ -668,7 +668,7 @@ describe("Domain - persistence failure", () => {
       },
     };
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { SimpleAggregate } },
       readModel: { projections: {} },
     });
@@ -715,7 +715,7 @@ type ProductProjectionTypes = ProjectionTypes & {
   events: ProductEvent;
   queries: ProductQuery;
   view: Map<string, { id: string; name: string; price: number }>;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 const ProductProjection = defineProjection<ProductProjectionTypes>({
@@ -738,7 +738,7 @@ const ProductProjection = defineProjection<ProductProjectionTypes>({
 
 describe("Domain.dispatchQuery", () => {
   it("should delegate to the query bus and return the handler result", async () => {
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: {} },
       readModel: { projections: { ProductProjection } },
     });
@@ -773,7 +773,7 @@ describe("Domain.dispatchQuery", () => {
 
 describe("Domain.dispatchQuery - error propagation", () => {
   it("should propagate query bus errors when no handler is registered", async () => {
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: {} },
       readModel: { projections: {} },
     });
@@ -812,7 +812,7 @@ describe("Domain.withUnitOfWork", () => {
       publishedEvents.push(event);
     });
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
     });
@@ -865,7 +865,7 @@ describe("Domain.withUnitOfWork", () => {
       timeline.push("publish:CounterCreated");
     });
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
     });
@@ -928,7 +928,7 @@ describe("Domain.withUnitOfWork", () => {
       },
     });
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { BrokenCounter } },
       readModel: { projections: {} },
     });
@@ -964,7 +964,7 @@ describe("Domain.withUnitOfWork", () => {
   });
 
   it("should throw on nested units of work", async () => {
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: {} },
       readModel: { projections: {} },
     });
@@ -987,7 +987,7 @@ describe("Domain.withUnitOfWork", () => {
   });
 
   it("should return the value from the unit of work function", async () => {
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
     });
@@ -1024,7 +1024,7 @@ describe("Domain - custom unitOfWorkFactory", () => {
     const factoryCalls: number[] = [];
     let callCount = 0;
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
     });
@@ -1067,7 +1067,7 @@ describe("Domain - pessimistic concurrency", () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const locker = new InMemoryAggregateLocker();
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
     });
@@ -1121,7 +1121,7 @@ describe("Domain - pessimistic concurrency", () => {
       },
     });
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { FailingCounter } },
       readModel: { projections: {} },
     });
@@ -1171,7 +1171,7 @@ describe("Domain - pessimistic concurrency", () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const locker = new InMemoryAggregateLocker();
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
     });
@@ -1233,7 +1233,7 @@ describe("Idempotent command processing", () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const idempotencyStore = new InMemoryIdempotencyStore();
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
     });
@@ -1273,7 +1273,7 @@ describe("Idempotent command processing", () => {
   it("should process first command with commandId and record it", async () => {
     const idempotencyStore = new InMemoryIdempotencyStore();
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
     });
@@ -1301,7 +1301,7 @@ describe("Idempotent command processing", () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     const idempotencyStore = new InMemoryIdempotencyStore();
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
     });
@@ -1349,7 +1349,7 @@ describe("Idempotent command processing", () => {
       },
     };
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
     });
@@ -1392,7 +1392,7 @@ describe("Per-aggregate persistence", () => {
     const esPersistence = new InMemoryEventSourcedAggregatePersistence();
     const ssPersistence = new InMemoryStateStoredAggregatePersistence();
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Counter, BankAccount } },
       readModel: { projections: {} },
     });
@@ -1440,7 +1440,7 @@ describe("Per-aggregate persistence via wireDomain", () => {
   it("should throw when per-aggregate persistence is missing entries", async () => {
     const esPersistence = new InMemoryEventSourcedAggregatePersistence();
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Counter, BankAccount } },
       readModel: { projections: {} },
     });
@@ -1470,7 +1470,7 @@ describe("Domain-wide persistence", () => {
   it("should use a single persistence factory for all aggregates", async () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
     });
@@ -1506,7 +1506,7 @@ describe("Per-aggregate persistence factory resolution", () => {
       async () => new InMemoryStateStoredAggregatePersistence(),
     );
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Counter, BankAccount } },
       readModel: { projections: {} },
     });
@@ -1536,7 +1536,7 @@ describe("Mixed persistence with snapshots", () => {
   it("should only create snapshots for event-sourced aggregates", async () => {
     const snapshotStore = new InMemorySnapshotStore();
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Counter, BankAccount } },
       readModel: { projections: {} },
     });
@@ -1598,7 +1598,7 @@ describe("defineDomain", () => {
       state: PingState;
       events: PingEvent;
       commands: PingCommand;
-      infrastructure: Infrastructure;
+      ports: Ports;
     };
 
     const Pinger = defineAggregate<PingTypes>({
@@ -1611,7 +1611,7 @@ describe("defineDomain", () => {
       },
     });
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Pinger } },
       readModel: { projections: {} },
     });
@@ -1640,7 +1640,7 @@ describe("wireDomain", () => {
     state: CounterState;
     events: CounterEvent;
     commands: CounterCommand;
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   const Counter = defineAggregate<CounterTypes>({
@@ -1662,7 +1662,7 @@ describe("wireDomain", () => {
   });
 
   it("should create an initialized Domain from definition + wiring", async () => {
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Counter } },
       readModel: { projections: {} },
     });
@@ -1705,7 +1705,7 @@ describe("wireDomain", () => {
       state: PingState;
       events: PingEvent;
       commands: PingCommand;
-      infrastructure: Infrastructure;
+      ports: Ports;
     };
 
     const Pinger = defineAggregate<PingTypes>({
@@ -1718,7 +1718,7 @@ describe("wireDomain", () => {
       },
     });
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Pinger } },
       readModel: { projections: {} },
     });
@@ -1732,8 +1732,8 @@ describe("wireDomain", () => {
     });
   });
 
-  it("should provide user infrastructure separated from framework plumbing", async () => {
-    interface AppInfrastructure {
+  it("should provide user ports separated from framework plumbing", async () => {
+    interface AppPorts {
       clock: { now(): Date };
     }
 
@@ -1744,15 +1744,15 @@ describe("wireDomain", () => {
       state: PingState;
       events: PingEvent;
       commands: PingCommand;
-      infrastructure: AppInfrastructure;
+      ports: AppPorts;
     };
 
     const Pinger = defineAggregate<PingTypes>({
       initialState: { lastPing: null },
       decide: {
-        Ping: (_cmd, _state, infra) => ({
+        Ping: (_cmd, _state, ports) => ({
           name: "Pinged",
-          payload: { at: infra.clock.now().toISOString() },
+          payload: { at: ports.clock.now().toISOString() },
         }),
       },
       evolve: {
@@ -1762,13 +1762,13 @@ describe("wireDomain", () => {
 
     const fixedDate = new Date("2025-06-01T12:00:00Z");
 
-    const definition = defineDomain<AppInfrastructure>({
+    const definition = defineDomain<AppPorts>({
       writeModel: { aggregates: { Pinger } },
       readModel: { projections: {} },
     });
 
     const domain = await wireDomain(definition, {
-      infrastructure: () => ({
+      adapters: () => ({
         clock: { now: () => fixedDate },
       }),
       buses: () => ({
@@ -1778,11 +1778,11 @@ describe("wireDomain", () => {
       }),
     });
 
-    // User infrastructure is accessible
-    expect(domain.infrastructure.clock.now()).toBe(fixedDate);
+    // User ports are accessible
+    expect(domain.adapters.clock.now()).toBe(fixedDate);
 
-    // CQRS buses are also on infrastructure (merged)
-    expect(domain.infrastructure.commandBus).toBeInstanceOf(InMemoryCommandBus);
+    // CQRS buses are also on adapters (merged)
+    expect(domain.adapters.commandBus).toBeInstanceOf(InMemoryCommandBus);
   });
 });
 
@@ -1798,7 +1798,7 @@ describe("wireDomain per-aggregate config", () => {
     state: CounterState;
     events: CounterEvent;
     commands: CounterCommand;
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   const Counter = defineAggregate<CounterTypes>({
@@ -1821,7 +1821,7 @@ describe("wireDomain per-aggregate config", () => {
     state: BalanceState;
     events: BalanceEvent;
     commands: BalanceCommand;
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   const BankAccount = defineAggregate<BalanceTypes>({
@@ -1842,7 +1842,7 @@ describe("wireDomain per-aggregate config", () => {
   it("should support different concurrency and snapshots per aggregate", async () => {
     const snapshotStore = new InMemorySnapshotStore();
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Counter, BankAccount } },
       readModel: { projections: {} },
     });
@@ -1912,7 +1912,7 @@ describe("wireDomain projection wiring", () => {
       events: ItemEvent;
       queries: ItemQuery;
       view: ItemView;
-      infrastructure: Infrastructure;
+      ports: Ports;
     };
 
     const ItemProjection = defineProjection<ItemProjectionTypes>({
@@ -1939,7 +1939,7 @@ describe("wireDomain projection wiring", () => {
       commands: DefineCommands<{
         AddItem: { id: string; name: string };
       }>;
-      infrastructure: Infrastructure;
+      ports: Ports;
     };
 
     const ItemAggregate = defineAggregate<ItemAggregateTypes>({
@@ -1957,7 +1957,7 @@ describe("wireDomain projection wiring", () => {
 
     const viewStore = new InMemoryViewStore<ItemView>();
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Item: ItemAggregate } },
       readModel: { projections: { ItemProjection } },
     });
@@ -2006,7 +2006,7 @@ describe("wireDomain hello world", () => {
       state: PingState;
       events: PingEvent;
       commands: PingCommand;
-      infrastructure: Infrastructure;
+      ports: Ports;
     };
 
     const Pinger = defineAggregate<PingTypes>({
@@ -2019,7 +2019,7 @@ describe("wireDomain hello world", () => {
       },
     });
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Pinger } },
       readModel: { projections: {} },
     });
@@ -2046,7 +2046,7 @@ describe("wireDomain hello world", () => {
       state: PingState;
       events: PingEvent;
       commands: PingCommand;
-      infrastructure: Infrastructure;
+      ports: Ports;
     };
 
     const Pinger = defineAggregate<PingTypes>({
@@ -2063,7 +2063,7 @@ describe("wireDomain hello world", () => {
       .spyOn(process.stderr, "write")
       .mockImplementation(() => true);
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Pinger } },
       readModel: { projections: {} },
     });
@@ -2087,7 +2087,7 @@ describe("wireDomain hello world", () => {
       state: PingState;
       events: PingEvent;
       commands: PingCommand;
-      infrastructure: Infrastructure;
+      ports: Ports;
     };
 
     const Pinger = defineAggregate<PingTypes>({
@@ -2104,7 +2104,7 @@ describe("wireDomain hello world", () => {
       .spyOn(process.stderr, "write")
       .mockImplementation(() => true);
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Pinger } },
       readModel: { projections: {} },
     });
@@ -2137,7 +2137,7 @@ describe("wireDomain hello world", () => {
       state: OrderState;
       events: OrderEvent;
       commands: OrderCommand;
-      infrastructure: Infrastructure;
+      ports: Ports;
     };
 
     const Order = defineAggregate<OrderTypes>({
@@ -2158,7 +2158,7 @@ describe("wireDomain hello world", () => {
       state: SagaState;
       events: OrderEvent;
       commands: OrderCommand;
-      infrastructure: Infrastructure;
+      ports: Ports;
     };
 
     const TestSaga = defineSaga<TestSagaTypes>({
@@ -2178,7 +2178,7 @@ describe("wireDomain hello world", () => {
       .spyOn(process.stderr, "write")
       .mockImplementation(() => true);
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { Order } },
       readModel: { projections: {} },
       processModel: { sagas: { TestSaga } },
@@ -2221,7 +2221,7 @@ describe("standalone event handlers", () => {
   it("should invoke handler when matching event is dispatched", async () => {
     const receivedEvents: Array<{ name: string; payload: unknown }> = [];
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { CounterAggregate } },
       readModel: { projections: {} },
       processModel: {
@@ -2259,7 +2259,7 @@ describe("standalone event handlers", () => {
   it("should not log saga persistence warning when processModel has only standaloneEventHandlers", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { CounterAggregate } },
       readModel: { projections: {} },
       processModel: {
@@ -2288,7 +2288,7 @@ describe("standalone event handlers", () => {
   it("should await async standalone event handlers before dispatch resolves", async () => {
     let completed = false;
 
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { CounterAggregate } },
       readModel: { projections: {} },
       processModel: {
@@ -2323,7 +2323,7 @@ describe("standalone event handlers", () => {
   });
 
   it("should handle empty standaloneEventHandlers gracefully", async () => {
-    const definition = defineDomain<Infrastructure>({
+    const definition = defineDomain<Ports>({
       writeModel: { aggregates: { CounterAggregate } },
       readModel: { projections: {} },
       processModel: {

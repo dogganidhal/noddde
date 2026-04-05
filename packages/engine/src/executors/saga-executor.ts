@@ -1,9 +1,9 @@
 /* eslint-disable no-unused-vars */
 import { AsyncLocalStorage } from "node:async_hooks";
 import type {
-  CQRSInfrastructure,
+  CQRSPorts,
   Event,
-  Infrastructure,
+  Ports,
   Logger,
   Saga,
   SagaPersistence,
@@ -25,7 +25,7 @@ import type { MetadataContext } from "../domain";
  */
 export class SagaExecutor {
   constructor(
-    private readonly infrastructure: Infrastructure & CQRSInfrastructure,
+    private readonly adapters: Ports & CQRSPorts,
     private readonly sagaPersistence: SagaPersistence,
     private readonly unitOfWorkFactory: UnitOfWorkFactory,
     private readonly uowStorage: AsyncLocalStorage<UnitOfWork>,
@@ -85,11 +85,7 @@ export class SagaExecutor {
     }
 
     // Step 5: Execute handler
-    const reaction = await onEntry.handle(
-      event,
-      currentState,
-      this.infrastructure,
-    );
+    const reaction = await onEntry.handle(event, currentState, this.adapters);
 
     const commandCount = reaction.commands
       ? Array.isArray(reaction.commands)
@@ -127,7 +123,7 @@ export class SagaExecutor {
               ? reaction.commands
               : [reaction.commands];
             for (const command of commands) {
-              await this.infrastructure.commandBus.dispatch(command);
+              await this.adapters.commandBus.dispatch(command);
             }
           }
 
@@ -136,7 +132,7 @@ export class SagaExecutor {
 
           // Step 10: Publish all deferred events
           for (const deferredEvent of events) {
-            await this.infrastructure.eventBus.dispatch(deferredEvent);
+            await this.adapters.eventBus.dispatch(deferredEvent);
           }
 
           // Best-effort post-dispatch callback (e.g., mark outbox entries published)

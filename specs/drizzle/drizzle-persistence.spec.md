@@ -10,7 +10,7 @@ exports:
   - AggregateStateTableConfig
   - StateTableColumnMap
   - createDrizzlePersistence (deprecated)
-  - DrizzlePersistenceInfrastructure (deprecated)
+  - DrizzlePersistencePorts (deprecated)
   - DrizzleNodddeSchema (deprecated)
   - DrizzleSnapshotStore
   - generateDrizzleMigration
@@ -214,7 +214,7 @@ export interface DrizzleNodddeSchema {
   outbox?: any;
 }
 
-export interface DrizzlePersistenceInfrastructure {
+export interface DrizzlePersistencePorts {
   eventSourcedPersistence: EventSourcedAggregatePersistence;
   stateStoredPersistence: StateStoredAggregatePersistence;
   sagaPersistence: SagaPersistence;
@@ -226,7 +226,7 @@ export interface DrizzlePersistenceInfrastructure {
 export function createDrizzlePersistence(
   db: any,
   schema: DrizzleNodddeSchema,
-): DrizzlePersistenceInfrastructure;
+): DrizzlePersistencePorts;
 ```
 
 ### Dialect schema exports
@@ -406,9 +406,9 @@ export function generateDrizzleMigration(
 
 ### Backwards Compatibility
 
-60. `createDrizzlePersistence(db, schema)` continues to work with the same signature and return type (`DrizzlePersistenceInfrastructure`).
+60. `createDrizzlePersistence(db, schema)` continues to work with the same signature and return type (`DrizzlePersistencePorts`).
 61. `createDrizzlePersistence` delegates to `createDrizzleAdapter` internally.
-62. The `DrizzlePersistenceInfrastructure` return type is unchanged.
+62. The `DrizzlePersistencePorts` return type is unchanged.
 
 ## Invariants
 

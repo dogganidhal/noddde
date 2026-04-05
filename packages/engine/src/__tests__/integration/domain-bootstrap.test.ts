@@ -4,7 +4,7 @@ import type {
   DefineCommands,
   DefineEvents,
   DefineQueries,
-  Infrastructure,
+  Ports,
 } from "@noddde/core";
 import { defineAggregate, defineProjection, defineSaga } from "@noddde/core";
 import {
@@ -38,40 +38,40 @@ describe("Domain bootstrap - minimal config", () => {
     });
 
     expect(domain).toBeDefined();
-    expect(domain.infrastructure).toBeDefined();
-    expect(domain.infrastructure.commandBus).toBeInstanceOf(InMemoryCommandBus);
-    expect(domain.infrastructure.eventBus).toBeInstanceOf(EventEmitterEventBus);
-    expect(domain.infrastructure.queryBus).toBeInstanceOf(InMemoryQueryBus);
+    expect(domain.adapters).toBeDefined();
+    expect(domain.adapters.commandBus).toBeInstanceOf(InMemoryCommandBus);
+    expect(domain.adapters.eventBus).toBeInstanceOf(EventEmitterEventBus);
+    expect(domain.adapters.queryBus).toBeInstanceOf(InMemoryQueryBus);
   });
 });
 
-// ---- Scenario 2: Custom infrastructure is merged with CQRS infrastructure ----
+// ---- Scenario 2: Custom ports are merged with CQRS ports ----
 
-interface TestInfrastructure extends Infrastructure {
+interface TestPorts extends Ports {
   clock: { now(): Date };
   apiKey: string;
 }
 
-describe("Domain bootstrap - custom infrastructure", () => {
-  it("should merge custom infrastructure with CQRS buses", async () => {
+describe("Domain bootstrap - custom ports", () => {
+  it("should merge custom ports with CQRS buses", async () => {
     const fixedDate = new Date("2025-01-01");
 
-    const definition = defineDomain<TestInfrastructure>({
+    const definition = defineDomain<TestPorts>({
       writeModel: { aggregates: {} },
       readModel: { projections: {} },
     });
 
     const domain = await wireDomain(definition, {
-      infrastructure: () => ({
+      adapters: () => ({
         clock: { now: () => fixedDate },
         apiKey: "secret-123",
       }),
       aggregates: {
         persistence: () => new InMemoryEventSourcedAggregatePersistence(),
       },
-      buses: (infra) => {
-        // Verify custom infrastructure is received
-        expect(infra.apiKey).toBe("secret-123");
+      buses: (ports) => {
+        // Verify custom ports are received
+        expect(ports.apiKey).toBe("secret-123");
         return {
           commandBus: new InMemoryCommandBus(),
           eventBus: new EventEmitterEventBus(),
@@ -80,19 +80,19 @@ describe("Domain bootstrap - custom infrastructure", () => {
       },
     });
 
-    // Merged infrastructure should contain both custom and CQRS
-    expect(domain.infrastructure.clock.now()).toEqual(fixedDate);
-    expect(domain.infrastructure.apiKey).toBe("secret-123");
-    expect(domain.infrastructure.commandBus).toBeDefined();
-    expect(domain.infrastructure.eventBus).toBeDefined();
-    expect(domain.infrastructure.queryBus).toBeDefined();
+    // Merged adapters should contain both custom and CQRS
+    expect(domain.adapters.clock.now()).toEqual(fixedDate);
+    expect(domain.adapters.apiKey).toBe("secret-123");
+    expect(domain.adapters.commandBus).toBeDefined();
+    expect(domain.adapters.eventBus).toBeDefined();
+    expect(domain.adapters.queryBus).toBeDefined();
   });
 });
 
-// ---- Scenario 3: Async infrastructure factories are awaited in order ----
+// ---- Scenario 3: Async adapter factories are awaited in order ----
 
 describe("Domain bootstrap - async factories", () => {
-  it("should await async infrastructure before calling buses", async () => {
+  it("should await async adapters before calling buses", async () => {
     const callOrder: string[] = [];
 
     const definition = defineDomain({
@@ -101,12 +101,12 @@ describe("Domain bootstrap - async factories", () => {
     });
 
     const domain = await wireDomain(definition, {
-      infrastructure: async () => {
+      adapters: async () => {
         await new Promise((resolve) => setTimeout(resolve, 10));
-        callOrder.push("infrastructure");
+        callOrder.push("adapters");
         return {};
       },
-      buses: async (infra) => {
+      buses: async (ports) => {
         callOrder.push("buses");
         return {
           commandBus: new InMemoryCommandBus(),
@@ -122,7 +122,7 @@ describe("Domain bootstrap - async factories", () => {
       },
     });
 
-    expect(callOrder[0]).toBe("infrastructure");
+    expect(callOrder[0]).toBe("adapters");
     expect(callOrder[1]).toBe("buses");
     expect(callOrder[2]).toBe("aggregatePersistence");
   });
@@ -174,7 +174,7 @@ describe("Domain bootstrap - full configuration", () => {
     state: { resolved: boolean };
     events: TicketEvent;
     commands: TicketCommand;
-    infrastructure: {};
+    ports: {};
   }>({
     initialState: { resolved: false },
     decide: {
@@ -197,7 +197,7 @@ describe("Domain bootstrap - full configuration", () => {
     events: TicketEvent;
     queries: DefineQueries<{ GetOpenTicketCount: { result: number } }>;
     view: { openCount: number };
-    infrastructure: {};
+    ports: {};
   }>({
     on: {
       TicketCreated: {
@@ -222,7 +222,7 @@ describe("Domain bootstrap - full configuration", () => {
     state: { notified: boolean };
     events: TicketEvent;
     commands: NotifyCommand;
-    infrastructure: {};
+    ports: {};
   }>({
     initialState: { notified: false },
     startedBy: ["TicketCreated"],
@@ -270,21 +270,21 @@ describe("Domain bootstrap - full configuration", () => {
     });
 
     expect(domain).toBeDefined();
-    expect(domain.infrastructure.commandBus).toBeDefined();
-    expect(domain.infrastructure.eventBus).toBeDefined();
-    expect(domain.infrastructure.queryBus).toBeDefined();
+    expect(domain.adapters.commandBus).toBeDefined();
+    expect(domain.adapters.eventBus).toBeDefined();
+    expect(domain.adapters.queryBus).toBeDefined();
   });
 });
 
-// ---- Scenario 6: buses receives the resolved custom infrastructure ----
+// ---- Scenario 6: buses receives the resolved custom ports ----
 
-interface AppInfra extends Infrastructure {
+interface AppInfra extends Ports {
   dbUrl: string;
 }
 
 describe("Domain bootstrap - buses parameter", () => {
-  it("should pass resolved custom infrastructure to buses factory", async () => {
-    let receivedInfra: any = null;
+  it("should pass resolved custom ports to buses factory", async () => {
+    let receivedPorts: any = null;
 
     const definition = defineDomain<AppInfra>({
       writeModel: { aggregates: {} },
@@ -292,9 +292,9 @@ describe("Domain bootstrap - buses parameter", () => {
     });
 
     await wireDomain(definition, {
-      infrastructure: () => ({ dbUrl: "postgres://localhost/test" }),
-      buses: (infra) => {
-        receivedInfra = infra;
+      adapters: () => ({ dbUrl: "postgres://localhost/test" }),
+      buses: (ports) => {
+        receivedPorts = ports;
         return {
           commandBus: new InMemoryCommandBus(),
           eventBus: new EventEmitterEventBus(),
@@ -306,7 +306,7 @@ describe("Domain bootstrap - buses parameter", () => {
       },
     });
 
-    expect(receivedInfra).not.toBeNull();
-    expect(receivedInfra.dbUrl).toBe("postgres://localhost/test");
+    expect(receivedPorts).not.toBeNull();
+    expect(receivedPorts.dbUrl).toBe("postgres://localhost/test");
   });
 });

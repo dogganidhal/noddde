@@ -6,7 +6,7 @@ status: implemented
 exports: [InMemoryQueryBus]
 depends_on: [cqrs/query/query-bus, cqrs/query/query, cqrs/query/query-handler]
 docs:
-  - infrastructure/in-memory-implementations.mdx
+  - ports/in-memory-implementations.mdx
 ---
 
 # InMemoryQueryBus
@@ -53,8 +53,8 @@ class InMemoryQueryBus implements QueryBus {
 ## Integration Points
 
 - **Domain.init()** -- The domain registers query handlers from projections (`Projection.queryHandlers`) and standalone query handlers from the read model configuration.
-- **CQRSInfrastructure** -- This bus is provided as `queryBus` in the merged infrastructure object.
-- **Standalone command handlers and saga handlers** -- May query the read model through this bus via `infrastructure.queryBus.dispatch(query)`.
+- **CQRSPorts** -- This bus is provided as `queryBus` in the merged ports object.
+- **Standalone command handlers and saga handlers** -- May query the read model through this bus via `ports.queryBus.dispatch(query)`.
 
 ## Test Scenarios
 

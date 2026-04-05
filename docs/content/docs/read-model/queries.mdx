@@ -103,23 +103,20 @@ async function handleGetAccount(
 
 ## The QueryHandler Type
 
-A `QueryHandler` receives a query payload and infrastructure, then returns the result:
+A `QueryHandler` receives a query payload and ports, then returns the result:
 
 ```ts
-type QueryHandler<
-  TInfrastructure extends Infrastructure,
-  TQuery extends Query<any>,
-> = (
+type QueryHandler<TPorts extends Ports, TQuery extends Query<any>> = (
   query: TQuery["payload"],
-  infrastructure: TInfrastructure,
+  ports: TPorts,
 ) => QueryResult<TQuery> | Promise<QueryResult<TQuery>>;
 ```
 
-| Parameter        | Type                  | Description                                                                                                         |
-| ---------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `query`          | `TQuery["payload"]`   | The query payload -- the filtering and lookup parameters. This is the `payload` field, not the entire query object. |
-| `infrastructure` | `TInfrastructure`     | Infrastructure services (repositories, caches, external clients).                                                   |
-| **Return**       | `QueryResult<TQuery>` | The result type inferred from the query definition. Can be sync or async.                                           |
+| Parameter  | Type                  | Description                                                                                                         |
+| ---------- | --------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `query`    | `TQuery["payload"]`   | The query payload -- the filtering and lookup parameters. This is the `payload` field, not the entire query object. |
+| `ports`    | `TPorts`              | Ports services (repositories, caches, external clients).                                                            |
+| **Return** | `QueryResult<TQuery>` | The result type inferred from the query definition. Can be sync or async.                                           |
 
 ### Basic Handler
 
@@ -132,7 +129,7 @@ const getBankAccountByIdHandler: QueryHandler<
 };
 ```
 
-The handler receives `query` as the payload (`{ id: string }` in this case), destructures the repository from infrastructure, and returns the result.
+The handler receives `query` as the payload (`{ id: string }` in this case), destructures the repository from ports, and returns the result.
 
 ### Handler with Filtering and Pagination
 
@@ -204,7 +201,7 @@ export const BankAccountProjection = defineProjection<BankAccountProjectionDef>(
 );
 ```
 
-`InferProjectionQueryHandler` automatically injects `{ views }` into the infrastructure parameter when your `ProjectionTypes` bundle has a `viewStore` field. See [Type Inference Helpers](/docs/modeling/type-inference#inferprojectionqueryhandler-and-inferprojectionqueryhandler) for details.
+`InferProjectionQueryHandler` automatically injects `{ views }` into the ports parameter when your `ProjectionTypes` bundle has a `viewStore` field. See [Type Inference Helpers](/docs/modeling/type-inference#inferprojectionqueryhandler-and-inferprojectionqueryhandler) for details.
 
 ### Standalone Query Handlers
 
@@ -332,16 +329,14 @@ app.get("/accounts/:id", async (req, res) => {
 For production, you may need a query bus with caching, middleware, or distributed routing. A custom implementation must satisfy the `QueryBus` interface:
 
 ```ts
-class ProductionQueryBus<TInfrastructure extends Infrastructure>
-  implements QueryBus
-{
+class ProductionQueryBus<TPorts extends Ports> implements QueryBus {
   private handlers = new Map<string, QueryHandler<any, any>>();
 
-  constructor(private infrastructure: TInfrastructure) {}
+  constructor(private ports: TPorts) {}
 
   register<TQuery extends Query<any>>(
     name: string,
-    handler: QueryHandler<TInfrastructure, TQuery>,
+    handler: QueryHandler<TPorts, TQuery>,
   ): void {
     this.handlers.set(name, handler);
   }
@@ -353,7 +348,7 @@ class ProductionQueryBus<TInfrastructure extends Infrastructure>
     if (!handler) {
       throw new Error(`No handler registered for query: ${String(query.name)}`);
     }
-    return handler(query.payload, this.infrastructure);
+    return handler(query.payload, this.ports);
   }
 }
 ```

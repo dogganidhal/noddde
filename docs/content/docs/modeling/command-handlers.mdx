@@ -1,6 +1,6 @@
 ---
 title: Decide Handlers
-description: Writing decide handler logic -- validation, returning events, infrastructure access, and type safety
+description: Writing decide handler logic -- validation, returning events, ports access, and type safety
 ---
 
 ## The Decide Handler Signature
@@ -8,15 +8,15 @@ description: Writing decide handler logic -- validation, returning events, infra
 Every aggregate decide handler has this shape:
 
 ```typescript
-(command: TCommand, state: TState, infrastructure: TInfrastructure) =>
+(command: TCommand, state: TState, ports: TPorts) =>
   TEvents | TEvents[] | Promise<TEvents | TEvents[]>;
 ```
 
-| Parameter        | Description                                                                                   |
-| ---------------- | --------------------------------------------------------------------------------------------- |
-| `command`        | The incoming command, narrowed to the specific command type for this handler                  |
-| `state`          | The current state of the aggregate instance (rebuilt from past events or loaded from storage) |
-| `infrastructure` | Your domain infrastructure (loggers, clocks, external services)                               |
+| Parameter | Description                                                                                   |
+| --------- | --------------------------------------------------------------------------------------------- |
+| `command` | The incoming command, narrowed to the specific command type for this handler                  |
+| `state`   | The current state of the aggregate instance (rebuilt from past events or loaded from storage) |
+| `ports`   | Your domain ports (loggers, clocks, external services)                                        |
 
 The return value is always one or more events describing what happened. The framework narrows the `command` parameter per handler -- when you write the handler for `AuthorizeTransaction`, the `command` type is narrowed to `{ name: "AuthorizeTransaction"; payload: { amount: number; merchant: string }; targetAggregateId: string }`. You never need to check the command name or cast anything.
 
@@ -270,7 +270,7 @@ Contrast this with throwing an exception: exceptions abort the command processin
 
 ## When to Throw Exceptions
 
-Throw exceptions only for truly unexpected situations -- programming errors, infrastructure failures, or invariants that indicate a bug in your code:
+Throw exceptions only for truly unexpected situations -- programming errors, adapter failures, or invariants that indicate a bug in your code:
 
 ```typescript
 export const decideAuthorizeTransaction: InferDecideHandler<
@@ -295,11 +295,11 @@ export const decideAuthorizeTransaction: InferDecideHandler<
 };
 ```
 
-The rule of thumb: if a human user could cause this condition through normal use of the application (insufficient funds, expired auction, duplicate request), model it as a rejection event. If only a programmer mistake or infrastructure failure can cause this condition, throw an exception.
+The rule of thumb: if a human user could cause this condition through normal use of the application (insufficient funds, expired auction, duplicate request), model it as a rejection event. If only a programmer mistake or adapter failure can cause this condition, throw an exception.
 
-## Using Infrastructure
+## Using Ports
 
-The third parameter gives you access to your domain infrastructure. Destructure the services you need directly in the function signature. `InferDecideHandler` automatically types the infrastructure from your `AggregateTypes` bundle:
+The third parameter gives you access to your domain ports. Destructure the services you need directly in the function signature. `InferDecideHandler` automatically types the ports from your `AggregateTypes` bundle:
 
 ```typescript
 // deciders/decide-place-bid.ts
@@ -316,7 +316,7 @@ export const decidePlaceBid: InferDecideHandler<AuctionDef, "PlaceBid"> = (
 };
 ```
 
-Common infrastructure services:
+Common port services:
 
 - **Loggers** -- for observability within handlers
 - **Clocks** -- for time-dependent logic (testable without mocking `Date`)
@@ -327,7 +327,7 @@ In tests, you inject fakes (a fixed clock, a stub fraud service). In production,
 
 ### Destructuring Multiple Services
 
-When a handler needs several infrastructure services, destructure them all:
+When a handler needs several port services, destructure them all:
 
 ```typescript
 // deciders/decide-authorize-transaction.ts
@@ -369,7 +369,7 @@ export const decideAuthorizeTransaction: InferDecideHandler<
 
 ## Async Decide Handlers
 
-Handlers can be asynchronous when they need to call external infrastructure. Mark the handler with `async` and the framework will `await` it before persisting events:
+Handlers can be asynchronous when they need to call external adapters. Mark the handler with `async` and the framework will `await` it before persisting events:
 
 ```typescript
 // deciders/decide-authorize-transaction.ts
@@ -425,7 +425,7 @@ The `decide` map is fully typed. When you use `InferDecideHandler<Def, "CommandN
 
 2. **Correct state type.** The `state` parameter is always the aggregate's state type (e.g., `BankAccountState`).
 
-3. **Correct infrastructure type.** The third parameter matches the `infrastructure` field from your `AggregateTypes` bundle. If you declared a `clock` and a `logger`, those are the only services available.
+3. **Correct ports type.** The third parameter matches the `ports` field from your `AggregateTypes` bundle. If you declared a `clock` and a `logger`, those are the only services available.
 
 4. **Valid event return type.** The handler must return events from the aggregate's event union. Returning an event with a name that does not exist in `DefineEvents` is a compile error.
 

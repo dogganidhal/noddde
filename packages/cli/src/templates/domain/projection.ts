@@ -23,7 +23,7 @@ export type ${ctx.name}ProjectionDef = {
   queries: ${ctx.name}Query;
   view: ${ctx.name}View;
   viewStore: ViewStore<${ctx.name}View>;
-  infrastructure: Record<string, never>;
+  ports: Record<string, never>;
 };
 
 export const ${ctx.name}Projection = defineProjection<${ctx.name}ProjectionDef>({

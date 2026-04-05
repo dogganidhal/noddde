@@ -60,7 +60,7 @@ Load state
   |     New instance: use initialState from the aggregate definition
   v
 Execute handler
-  |  4. commands[name](command, currentState, infrastructure) --> events
+  |  4. commands[name](command, currentState, ports) --> events
   v
 Apply events
   |  5. For each returned event: newState = apply[event.name](event.payload, state)
@@ -107,7 +107,7 @@ If no prior state exists (the aggregate instance is new), the `initialState` fro
 The matching handler is called with three arguments:
 
 ```typescript
-handler(command, currentState, infrastructure);
+handler(command, currentState, ports);
 ```
 
 The handler inspects the command and the current state, enforces business invariants, and returns one or more events representing what happened. See [Decide Handlers](/docs/modeling/command-handlers) for patterns on writing handler logic.
@@ -277,10 +277,10 @@ interface CommandBus {
 }
 ```
 
-It is part of `CQRSInfrastructure`, which is provided during domain configuration:
+It is part of `CQRSPorts`, which is provided during domain configuration:
 
 ```typescript
-interface CQRSInfrastructure {
+interface CQRSPorts {
   commandBus: CommandBus;
   eventBus: EventBus;
   queryBus: QueryBus;
@@ -309,7 +309,7 @@ buses: () => ({
 
 ### Custom Implementations
 
-For production systems, you may need a command bus that adds logging, retry logic, or publishes commands to a message broker. The `CommandBus` interface has a single method, making custom implementations straightforward. Common patterns include logging decorators, retry wrappers, and message-queue-backed buses. See [Infrastructure](/docs/running/infrastructure) for details on building custom bus implementations.
+For production systems, you may need a command bus that adds logging, retry logic, or publishes commands to a message broker. The `CommandBus` interface has a single method, making custom implementations straightforward. Common patterns include logging decorators, retry wrappers, and message-queue-backed buses. See [Ports](/docs/running/ports) for details on building custom bus implementations.
 
 ## The EventBus
 
@@ -321,7 +321,7 @@ interface EventBus {
 }
 ```
 
-Like the `CommandBus`, it is part of `CQRSInfrastructure`.
+Like the `CommandBus`, it is part of `CQRSPorts`.
 
 ### EventEmitterEventBus
 
@@ -350,7 +350,7 @@ During `wireDomain`, the framework reads the `on` map from each projection and t
 
 ### Custom Implementations
 
-For production deployments requiring durability, distribution, or at-least-once delivery, you can implement the `EventBus` interface with a message broker backend (Kafka, RabbitMQ, NATS) or build composite buses that fan out to multiple destinations. See [Infrastructure](/docs/running/infrastructure) for custom event bus patterns.
+For production deployments requiring durability, distribution, or at-least-once delivery, you can implement the `EventBus` interface with a message broker backend (Kafka, RabbitMQ, NATS) or build composite buses that fan out to multiple destinations. See [Ports](/docs/running/ports) for custom event bus patterns.
 
 ## Error Behavior
 
@@ -366,5 +366,5 @@ In practice, this means that the write side (command handling and persistence) i
 
 ## Next Steps
 
-- [Infrastructure](/docs/running/infrastructure) -- Custom `CommandBus` and `EventBus` implementations, logging decorators, and message broker adapters
+- [Ports](/docs/running/ports) -- Custom `CommandBus` and `EventBus` implementations, logging decorators, and message broker adapters
 - [Testing Domains](/docs/testing/testing-domains) -- Integration-level tests that exercise the full dispatch lifecycle

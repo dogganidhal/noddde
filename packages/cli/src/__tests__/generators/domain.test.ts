@@ -45,7 +45,7 @@ describe("generateDomain", () => {
       "domain/read-model/projections/bank-account/on-entries/on-bank-account-created.ts",
       // Domain wiring
       "domain/domain.ts",
-      "infrastructure/index.ts",
+      "ports/index.ts",
       "main.ts",
     ];
 
@@ -141,7 +141,7 @@ describe("generateDomain", () => {
     const domainPath = path.join(tmpDir, "bank-account/domain/domain.ts");
     const content = await readFile(domainPath, "utf-8");
     expect(content).toContain("defineDomain");
-    expect(content).toContain("BankAccountInfrastructure");
+    expect(content).toContain("BankAccountPorts");
     expect(content).toContain("BankAccount");
     expect(content).toContain("BankAccountProjection");
   });

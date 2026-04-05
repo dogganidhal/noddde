@@ -311,7 +311,7 @@ const auth: MyCommands = {
 
 ## The AggregateTypes Bundle
 
-When defining an aggregate, you need to specify several related types: the state shape, the command union, the event union, and the infrastructure type. A naive approach would use positional generics:
+When defining an aggregate, you need to specify several related types: the state shape, the command union, the event union, and the ports type. A naive approach would use positional generics:
 
 ```typescript
 // Hypothetical positional generics — NOT how noddde works
@@ -337,7 +337,7 @@ type AggregateTypes = {
   state: any;
   events: Event;
   commands: AggregateCommand<ID>;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 ```
 
@@ -348,7 +348,7 @@ type BankAccountTypes = {
   state: BankAccountState;
   commands: BankingCommand;
   events: BankingEvent;
-  infrastructure: {};
+  ports: {};
 };
 ```
 
@@ -377,7 +377,7 @@ type DecideHandlerMap<T extends AggregateTypes> = {
     Extract<T["commands"], { name: K }>, // Narrowed command type
     T["state"], // The state type
     T["events"], // The event union (return type)
-    T["infrastructure"] // Infrastructure for injection
+    T["ports"] // Ports for injection
   >;
 };
 
@@ -393,7 +393,7 @@ This means that when you write a decide handler for `AuthorizeTransaction`, Type
 
 - The `command` parameter has type `{ name: "AuthorizeTransaction"; targetAggregateId: string; payload: { amount: number; merchant: string } }`
 - The `state` parameter has type `BankAccountState`
-- The `infrastructure` parameter has type `{}`
+- The `ports` parameter has type `{}`
 - The return type must be `BankingEvent | BankingEvent[]`
 
 You get this without writing a single type annotation on the handler function:
@@ -401,7 +401,7 @@ You get this without writing a single type annotation on the handler function:
 ```typescript
 decide: {
   // TypeScript infers all parameter types from the bundle
-  AuthorizeTransaction: (command, state, infrastructure) => {
+  AuthorizeTransaction: (command, state, ports) => {
     // command.payload.amount  -- TypeScript knows this is `number`
     // state.balance           -- TypeScript knows this is `number`
     if (command.payload.amount > state.balance) {
@@ -441,7 +441,7 @@ type BankAccountTypes = {
   state: BankAccountState;
   commands: BankingCommand;
   events: BankingEvent;
-  infrastructure: MyInfrastructure;
+  ports: MyInfrastructure;
 };
 ```
 
@@ -461,7 +461,7 @@ Here is the complete flow of type information through a noddde aggregate definit
   chart={`graph TD
   A["1. Payload maps\n{ CreateBankAccount: void;\n  AuthorizeTransaction: ... }"]
   B["2. DefineCommands\nDiscriminated union with\nname + targetAggregateId + payload"]
-  C["3. AggregateTypes bundle\n{ state, commands, events, infrastructure }"]
+  C["3. AggregateTypes bundle\n{ state, commands, events, ports }"]
   D["4. defineAggregate\nTyped handler maps:\ncommands + apply"]
   A --> B --> C --> D
 `}
@@ -486,8 +486,8 @@ type InferAggregateCommands<T extends Aggregate> =
 type InferAggregateID<T extends AggregateTypes> =
   T["commands"]["targetAggregateId"];
 
-type InferAggregateInfrastructure<T extends Aggregate> =
-  T extends Aggregate<infer U> ? U["infrastructure"] : never;
+type InferAggregatePorts<T extends Aggregate> =
+  T extends Aggregate<infer U> ? U["ports"] : never;
 ```
 
 ### When to Use Them
@@ -555,13 +555,13 @@ decide: {
   AuthorizeTransaction: (
     command: Extract<BankingCommand, { name: "AuthorizeTransaction" }>,
     state: BankAccountState,
-    infrastructure: {},
+    ports: {},
   ) => { /* ... */ },
 }
 
 // Preferred — let inference do the work
 decide: {
-  AuthorizeTransaction: (command, state, infrastructure) => { /* ... */ },
+  AuthorizeTransaction: (command, state, ports) => { /* ... */ },
 }
 ```
 
@@ -575,7 +575,7 @@ type BankAccountTypes = {
   state: BankAccountState;
   commands: BankingCommand;
   events: BankingEvent;
-  infrastructure: {};
+  ports: {};
 };
 
 const BankAccount = defineAggregate<BankAccountTypes>({
@@ -587,7 +587,7 @@ const BankAccount = defineAggregate<{
   state: BankAccountState;
   commands: BankingCommand;
   events: BankingEvent;
-  infrastructure: {};
+  ports: {};
 }>({
   /* ... */
 });

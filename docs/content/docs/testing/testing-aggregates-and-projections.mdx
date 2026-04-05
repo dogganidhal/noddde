@@ -35,12 +35,12 @@ expect(result.state.availableBalance).toBe(500);
 
 ### Builder API
 
-| Method                       | Purpose                                                                                           |
-| ---------------------------- | ------------------------------------------------------------------------------------------------- |
-| `.given(...events)`          | Prior events to replay through `apply` handlers. Can be called multiple times; events accumulate. |
-| `.when(command)`             | The command to execute. Required before `.execute()`.                                             |
-| `.withInfrastructure(infra)` | Custom infrastructure for the handler. Defaults to `{}`.                                          |
-| `.execute()`                 | Runs the test and returns the result. Always async.                                               |
+| Method              | Purpose                                                                                           |
+| ------------------- | ------------------------------------------------------------------------------------------------- |
+| `.given(...events)` | Prior events to replay through `apply` handlers. Can be called multiple times; events accumulate. |
+| `.when(command)`    | The command to execute. Required before `.execute()`.                                             |
+| `.withPorts(infra)` | Custom ports for the handler. Defaults to `{}`.                                                   |
+| `.execute()`        | Runs the test and returns the result. Always async.                                               |
 
 ### Result Shape
 
@@ -88,9 +88,9 @@ expect(result.error!.message).toContain("insufficient");
 expect(result.events).toEqual([]);
 ```
 
-## Testing with Infrastructure
+## Testing with Ports
 
-Pass infrastructure via `.withInfrastructure()`. This is how you inject clocks, loggers, or any domain-specific dependency:
+Pass ports via `.withPorts()`. This is how you inject clocks, loggers, or any domain-specific dependency:
 
 ```ts
 const result = await testAggregate(BankAccount)
@@ -100,14 +100,14 @@ const result = await testAggregate(BankAccount)
     targetAggregateId: "acc-1",
     payload: { amount: 100, merchant: "Store" },
   })
-  .withInfrastructure({
+  .withPorts({
     clock: { now: () => new Date("2024-05-15T10:00:00Z") },
     logger: { info: vi.fn(), error: vi.fn() },
   })
   .execute();
 ```
 
-For infrastructure with multiple members, create a reusable mock factory to keep tests concise:
+For ports with multiple members, create a reusable mock factory to keep tests concise:
 
 ```ts
 function createMockBankingInfrastructure() {
@@ -123,7 +123,7 @@ function createMockBankingInfrastructure() {
 
 const result = await testAggregate(BankAccount)
   .when(createAccountCommand)
-  .withInfrastructure(createMockBankingInfrastructure())
+  .withPorts(createMockBankingInfrastructure())
   .execute();
 ```
 
@@ -191,7 +191,7 @@ Since handlers are extracted to standalone functions, you can import and call th
 // Decide handler — import the extracted function
 import { decideAuthorizeTransaction } from "./deciders/decide-authorize-transaction";
 
-const events = decideAuthorizeTransaction(command, state, infrastructure);
+const events = decideAuthorizeTransaction(command, state, ports);
 
 // evolve handler — import the extracted function
 import { evolveTransactionAuthorized } from "./evolvers/evolve-transaction-authorized";

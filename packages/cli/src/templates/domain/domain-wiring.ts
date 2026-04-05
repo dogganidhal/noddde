@@ -5,9 +5,9 @@ export function domainDefinitionTemplate(ctx: TemplateContext): string {
   return `import { defineDomain } from "@noddde/engine";
 import { ${ctx.name} } from "./write-model/aggregates/${ctx.kebabName}/index.js";
 import { ${ctx.name}Projection } from "./read-model/projections/${ctx.kebabName}/index.js";
-import type { ${ctx.name}Infrastructure } from "../infrastructure/index.js";
+import type { ${ctx.name}Ports } from "../ports/index.js";
 
-export const ${ctx.camelName}Domain = defineDomain<${ctx.name}Infrastructure>({
+export const ${ctx.camelName}Domain = defineDomain<${ctx.name}Ports>({
   writeModel: {
     aggregates: {
       ${ctx.name},
@@ -22,12 +22,12 @@ export const ${ctx.camelName}Domain = defineDomain<${ctx.name}Infrastructure>({
 `;
 }
 
-/** Template for infrastructure/index.ts — domain infrastructure interface. */
+/** Template for ports/index.ts — domain ports interface. */
 export function domainInfrastructureTemplate(ctx: TemplateContext): string {
-  return `import type { Infrastructure } from "@noddde/core";
+  return `import type { Ports } from "@noddde/core";
 
-/** Infrastructure dependencies shared across the ${ctx.name} domain. */
-export interface ${ctx.name}Infrastructure extends Infrastructure {
+/** Port dependencies shared across the ${ctx.name} domain. */
+export interface ${ctx.name}Ports extends Ports {
   // TODO: add domain-wide dependencies (clock, logger, external services)
 }
 `;
@@ -45,8 +45,8 @@ import { ${ctx.camelName}Domain } from "./domain/domain.js";
 
 const main = async () => {
   const domain = await wireDomain(${ctx.camelName}Domain, {
-    infrastructure: () => ({
-      // TODO: provide infrastructure implementations
+    adapters: () => ({
+      // TODO: provide adapter implementations
     }),
     buses: () => ({
       commandBus: new InMemoryCommandBus(),

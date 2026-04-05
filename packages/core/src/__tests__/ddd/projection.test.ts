@@ -3,15 +3,15 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
   DefineEvents,
   DefineQueries,
-  FrameworkInfrastructure,
+  FrameworkPorts,
   InferProjectionEventHandler,
   InferProjectionEvents,
-  InferProjectionInfrastructure,
+  InferProjectionPorts,
   InferProjectionQueries,
   InferProjectionQueryHandler,
-  InferProjectionQueryInfrastructure,
+  InferProjectionQueryPorts,
   InferProjectionView,
-  Infrastructure,
+  Ports,
   Query,
   ViewStore,
 } from "@noddde/core";
@@ -33,7 +33,7 @@ describe("defineProjection", () => {
     ListAccounts: { result: AccountView[] };
   }>;
 
-  interface AccountInfra extends Infrastructure {
+  interface AccountPorts extends Ports {
     accountRepo: { getById(id: string): Promise<AccountView> };
     accountListRepo: { getAll(): Promise<AccountView[]> };
   }
@@ -42,7 +42,7 @@ describe("defineProjection", () => {
     events: AccountEvent;
     queries: AccountQuery;
     view: AccountView;
-    infrastructure: AccountInfra;
+    ports: AccountPorts;
   };
 
   const projection = defineProjection<AccountProjectionDef>({
@@ -61,8 +61,8 @@ describe("defineProjection", () => {
       },
     },
     queryHandlers: {
-      GetAccountById: (payload, infra) => infra.accountRepo.getById(payload.id),
-      ListAccounts: (_payload, infra) => infra.accountListRepo.getAll(),
+      GetAccountById: (payload, ports) => ports.accountRepo.getById(payload.id),
+      ListAccounts: (_payload, ports) => ports.accountListRepo.getAll(),
     },
   });
 
@@ -83,7 +83,7 @@ describe("Reducer event parameter", () => {
     events: MyEvent;
     queries: Query<any>;
     view: string[];
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should pass the full event to reducer, not just payload", () => {
@@ -118,7 +118,7 @@ describe("Optional query handlers", () => {
     events: Events;
     queries: Queries;
     view: { id: string };
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should compile with empty query handlers", () => {
@@ -141,7 +141,7 @@ describe("Optional query handlers", () => {
         },
       },
       queryHandlers: {
-        GetById: (payload, _infra) => ({ id: payload.id }),
+        GetById: (payload, _ports) => ({ id: payload.id }),
       },
     });
     expect(projection.queryHandlers.GetById).toBeDefined();
@@ -154,7 +154,7 @@ describe("Projection Infer utilities", () => {
   }
   type MyEvent = DefineEvents<{ Added: { item: string } }>;
   type MyQuery = DefineQueries<{ GetItems: { result: string[] } }>;
-  interface MyInfra extends Infrastructure {
+  interface MyPorts extends Ports {
     db: { query(): Promise<string[]> };
   }
 
@@ -162,7 +162,7 @@ describe("Projection Infer utilities", () => {
     events: MyEvent;
     queries: MyQuery;
     view: MyView;
-    infrastructure: MyInfra;
+    ports: MyPorts;
   };
 
   const proj = defineProjection<Def>({
@@ -190,10 +190,8 @@ describe("Projection Infer utilities", () => {
     >().toEqualTypeOf<MyQuery>();
   });
 
-  it("should infer infrastructure type", () => {
-    expectTypeOf<
-      InferProjectionInfrastructure<typeof proj>
-    >().toEqualTypeOf<MyInfra>();
+  it("should infer ports type", () => {
+    expectTypeOf<InferProjectionPorts<typeof proj>>().toEqualTypeOf<MyPorts>();
   });
 });
 
@@ -203,7 +201,7 @@ describe("Async reducers", () => {
     events: Events;
     queries: Query<any>;
     view: string[];
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should accept async reducer functions", () => {
@@ -227,7 +225,7 @@ describe("defineProjection identity", () => {
     events: E;
     queries: Query<any>;
     view: number;
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should return the exact same config object", () => {
@@ -263,7 +261,7 @@ describe("Projection with id in on entries", () => {
     events: AccountEvent;
     queries: AccountQuery;
     view: AccountView;
-    infrastructure: Infrastructure;
+    ports: Ports;
     viewStore: AccountViewStore;
   };
 
@@ -316,11 +314,11 @@ describe("Query handlers with views injection", () => {
     events: ItemEvent;
     queries: ItemQuery;
     view: ItemView;
-    infrastructure: Infrastructure;
+    ports: Ports;
     viewStore: ItemViewStore;
   };
 
-  it("should inject typed views into query handler infrastructure", () => {
+  it("should inject typed views into query handler ports", () => {
     const projection = defineProjection<Def>({
       on: {
         ItemCreated: {
@@ -332,12 +330,12 @@ describe("Query handlers with views injection", () => {
         },
       },
       queryHandlers: {
-        GetItem: async (payload, infra) => {
-          expectTypeOf(infra.views).toMatchTypeOf<ItemViewStore>();
-          return (await infra.views.load(payload.id)) ?? null;
+        GetItem: async (payload, ports) => {
+          expectTypeOf(ports.views).toMatchTypeOf<ItemViewStore>();
+          return (await ports.views.load(payload.id)) ?? null;
         },
-        FindByName: (payload, infra) => {
-          return infra.views.findByName(payload.name);
+        FindByName: (payload, ports) => {
+          return ports.views.findByName(payload.name);
         },
       },
     });
@@ -347,7 +345,7 @@ describe("Query handlers with views injection", () => {
 });
 
 describe("Query handlers without viewStore (no views)", () => {
-  interface MyInfra extends Infrastructure {
+  interface MyPorts extends Ports {
     repo: { getById(id: string): Promise<{ id: string }> };
   }
 
@@ -360,10 +358,10 @@ describe("Query handlers without viewStore (no views)", () => {
     events: Events;
     queries: Queries;
     view: { id: string };
-    infrastructure: MyInfra;
+    ports: MyPorts;
   };
 
-  it("should use plain infrastructure without views", () => {
+  it("should use plain ports without views", () => {
     const projection = defineProjection<Def>({
       on: {
         Created: {
@@ -371,9 +369,9 @@ describe("Query handlers without viewStore (no views)", () => {
         },
       },
       queryHandlers: {
-        GetById: (payload, infra) => {
-          expectTypeOf(infra).toEqualTypeOf<MyInfra>();
-          return infra.repo.getById(payload.id);
+        GetById: (payload, ports) => {
+          expectTypeOf(ports).toEqualTypeOf<MyPorts>();
+          return ports.repo.getById(payload.id);
         },
       },
     });
@@ -388,7 +386,7 @@ describe("Projection with initialView", () => {
     events: Events;
     queries: Query<any>;
     view: string[];
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should accept initialView field", () => {
@@ -412,7 +410,7 @@ describe("Projection consistency mode", () => {
     events: Events;
     queries: Query<any>;
     view: { id: string };
-    infrastructure: Infrastructure;
+    ports: Ports;
     viewStore: ViewStore<{ id: string }>;
   };
 
@@ -457,7 +455,7 @@ describe("Partial on map", () => {
     events: Events;
     queries: Query<any>;
     view: { id: string; name: string };
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should compile with only a subset of events in on map", () => {
@@ -499,7 +497,7 @@ describe("Optional id in on entries", () => {
     events: Events;
     queries: Query<any>;
     view: { id: string; name: string };
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should compile with id on some entries but not others", () => {
@@ -550,7 +548,7 @@ describe("InferProjectionEventHandler", () => {
     events: ItemEvent;
     queries: Query<any>;
     view: ItemView;
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
   it("should narrow the event to the specific variant in reduce", () => {
@@ -613,7 +611,7 @@ describe("InferProjectionQueryHandler", () => {
     events: ItemEvent;
     queries: ItemQuery;
     view: ItemView;
-    infrastructure: Infrastructure;
+    ports: Ports;
     viewStore: ItemViewStore;
   };
 
@@ -621,23 +619,21 @@ describe("InferProjectionQueryHandler", () => {
     events: ItemEvent;
     queries: ItemQuery;
     view: ItemView;
-    infrastructure: Infrastructure;
+    ports: Ports;
   };
 
-  it("should include views in infrastructure when viewStore is defined", () => {
+  it("should include views in ports when viewStore is defined", () => {
     type Handler = InferProjectionQueryHandler<DefWithViewStore, "GetItem">;
-    type InfraParam = Parameters<Handler>[1];
-    expectTypeOf<InfraParam>().toEqualTypeOf<
-      Infrastructure & { views: ItemViewStore } & FrameworkInfrastructure
+    type PortsParam = Parameters<Handler>[1];
+    expectTypeOf<PortsParam>().toEqualTypeOf<
+      Ports & { views: ItemViewStore } & FrameworkPorts
     >();
   });
 
-  it("should use plain infrastructure when viewStore is absent", () => {
+  it("should use plain ports when viewStore is absent", () => {
     type Handler = InferProjectionQueryHandler<DefWithoutViewStore, "GetItem">;
-    type InfraParam = Parameters<Handler>[1];
-    expectTypeOf<InfraParam>().toEqualTypeOf<
-      Infrastructure & FrameworkInfrastructure
-    >();
+    type PortsParam = Parameters<Handler>[1];
+    expectTypeOf<PortsParam>().toEqualTypeOf<Ports & FrameworkPorts>();
   });
 
   it("should narrow the query payload", () => {
@@ -653,7 +649,7 @@ describe("InferProjectionQueryHandler", () => {
   });
 });
 
-describe("InferProjectionQueryInfrastructure", () => {
+describe("InferProjectionQueryPorts", () => {
   interface MyView {
     id: string;
   }
@@ -662,7 +658,7 @@ describe("InferProjectionQueryInfrastructure", () => {
     custom(): Promise<MyView[]>;
   }
 
-  interface MyInfra extends Infrastructure {
+  interface MyPorts extends Ports {
     db: { query(): Promise<MyView[]> };
   }
 
@@ -670,7 +666,7 @@ describe("InferProjectionQueryInfrastructure", () => {
     events: DefineEvents<{ Created: { id: string } }>;
     queries: Query<any>;
     view: MyView;
-    infrastructure: MyInfra;
+    ports: MyPorts;
     viewStore: MyViewStore;
   };
 
@@ -678,18 +674,18 @@ describe("InferProjectionQueryInfrastructure", () => {
     events: DefineEvents<{ Created: { id: string } }>;
     queries: Query<any>;
     view: MyView;
-    infrastructure: MyInfra;
+    ports: MyPorts;
   };
 
   it("should include views when viewStore is present", () => {
-    expectTypeOf<
-      InferProjectionQueryInfrastructure<WithViewStore>
-    >().toEqualTypeOf<MyInfra & { views: MyViewStore }>();
+    expectTypeOf<InferProjectionQueryPorts<WithViewStore>>().toEqualTypeOf<
+      MyPorts & { views: MyViewStore }
+    >();
   });
 
-  it("should be plain infrastructure when viewStore is absent", () => {
+  it("should be plain ports when viewStore is absent", () => {
     expectTypeOf<
-      InferProjectionQueryInfrastructure<WithoutViewStore>
-    >().toEqualTypeOf<MyInfra>();
+      InferProjectionQueryPorts<WithoutViewStore>
+    >().toEqualTypeOf<MyPorts>();
   });
 });

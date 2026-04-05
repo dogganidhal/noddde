@@ -165,9 +165,9 @@ export async function generateDomain(
       content: domainDefinitionTemplate(ctx),
     },
 
-    // ── Infrastructure ────────────────────────────────────────
+    // ── Ports ─────────────────────────────────────────────────
     {
-      relativePath: "infrastructure/index.ts",
+      relativePath: "ports/index.ts",
       content: domainInfrastructureTemplate(ctx),
     },
 

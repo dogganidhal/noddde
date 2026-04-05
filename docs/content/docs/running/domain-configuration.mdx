@@ -1,14 +1,14 @@
 ---
 title: Domain Configuration
-description: Using defineDomain and wireDomain to separate domain structure from runtime infrastructure, creating a running Domain instance.
+description: Using defineDomain and wireDomain to separate domain structure from runtime ports, creating a running Domain instance.
 ---
 
-The domain configuration is the entry point of every noddde application. It wires together your write model (aggregates), read model (projections), process model (sagas), and infrastructure into a single `Domain` instance that can dispatch commands and queries.
+The domain configuration is the entry point of every noddde application. It wires together your write model (aggregates), read model (projections), process model (sagas), and adapters into a single `Domain` instance that can dispatch commands and queries.
 
 The API is split into two phases:
 
-- **`defineDomain`** -- Captures the pure domain structure (aggregates, projections, sagas, handlers) as a sync identity function. No infrastructure, no async, no side effects.
-- **`wireDomain`** -- Connects that definition to infrastructure (persistence, buses, concurrency, snapshots) and returns a running `Domain` instance.
+- **`defineDomain`** -- Captures the pure domain structure (aggregates, projections, sagas, handlers) as a sync identity function. No ports, no async, no side effects.
+- **`wireDomain`** -- Connects that definition to adapters (persistence, buses, concurrency, snapshots) and returns a running `Domain` instance.
 
 This separation allows domain definitions to be shared, tested, and analyzed independently of runtime concerns.
 
@@ -55,7 +55,7 @@ The `DomainDefinition` type captures three top-level sections:
 - **`readModel`** -- What handles events and queries (projections and standalone query handlers)
 - **`processModel`** -- What coordinates cross-aggregate workflows (sagas). Optional -- omit if you have no sagas.
 
-The `TInfrastructure` generic is a type parameter only -- it flows through handler signatures for type safety but no infrastructure value is present in the definition.
+The `TPorts` generic is a type parameter only -- it flows through handler signatures for type safety but no ports value is present in the definition.
 
 ## Wiring the Domain
 
@@ -72,8 +72,8 @@ When you're ready for production, provide explicit wiring:
 
 ```ts
 const domain = await wireDomain(bankingDomain, {
-  // User-provided services (what handlers receive as `infrastructure`)
-  infrastructure: () => ({
+  // User-provided services (what handlers receive as `ports`)
+  adapters: () => ({
     bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
   }),
 
@@ -94,7 +94,7 @@ const domain = await wireDomain(bankingDomain, {
 
 ### In-Memory Default Warnings
 
-When infrastructure components fall back to in-memory defaults, the framework logs startup warnings via the configured logger. In development (TTY), you'll see colored output:
+When adapter components fall back to in-memory defaults, the framework logs startup warnings via the configured logger. In development (TTY), you'll see colored output:
 
 ```
 2026-03-28T12:00:00.000Z  WARN 12345 --- [noddde:domain] Using in-memory aggregate persistence. This is not suitable for production.
@@ -117,26 +117,26 @@ These warnings only appear when the framework itself supplies the default -- not
 
 ### DomainWiring Fields
 
-| Field              | Description                                                                                  |
-| ------------------ | -------------------------------------------------------------------------------------------- |
-| `infrastructure`   | Factory for user-provided services. What handlers receive as the `infrastructure` parameter. |
-| `aggregates`       | Aggregate runtime config -- global `AggregateWiring` or per-aggregate record. See below.     |
-| `projections`      | Per-projection view store wiring. See [Projection Wiring](#projection-wiring).               |
-| `sagas`            | Saga runtime config. Defaults to in-memory if `processModel` has sagas.                      |
-| `buses`            | Factory for CQRS buses. Receives resolved user infrastructure.                               |
-| `unitOfWork`       | Factory for the UnitOfWorkFactory.                                                           |
-| `idempotency`      | Factory for idempotency store (command dedup by commandId).                                  |
-| `outbox`           | Transactional outbox configuration.                                                          |
-| `metadataProvider` | Function called on every command dispatch for event metadata context.                        |
-| `logger`           | Framework logger instance. Defaults to `NodddeLogger` at `'warn'` level.                     |
+| Field              | Description                                                                              |
+| ------------------ | ---------------------------------------------------------------------------------------- |
+| `adapters`         | Factory for user-provided services. What handlers receive as the `ports` parameter.      |
+| `aggregates`       | Aggregate runtime config -- global `AggregateWiring` or per-aggregate record. See below. |
+| `projections`      | Per-projection view store wiring. See [Projection Wiring](#projection-wiring).           |
+| `sagas`            | Saga runtime config. Defaults to in-memory if `processModel` has sagas.                  |
+| `buses`            | Factory for CQRS buses. Receives resolved user adapters.                                 |
+| `unitOfWork`       | Factory for the UnitOfWorkFactory.                                                       |
+| `idempotency`      | Factory for idempotency store (command dedup by commandId).                              |
+| `outbox`           | Transactional outbox configuration.                                                      |
+| `metadataProvider` | Function called on every command dispatch for event metadata context.                    |
+| `logger`           | Framework logger instance. Defaults to `NodddeLogger` at `'warn'` level.                 |
 
 All fields are optional. Both `wireDomain(definition)` and `wireDomain(definition, {})` use in-memory defaults for everything.
 
 ### Logging
 
-The framework uses a `Logger` interface for all internal logging. By default, a `NodddeLogger` at `'warn'` level is used -- it auto-detects the environment (colored output in dev, NDJSON in production). The logger is also automatically available as `infrastructure.logger` in all handlers, and passed to the `infrastructure` factory so your custom services can use it too.
+The framework uses a `Logger` interface for all internal logging. By default, a `NodddeLogger` at `'warn'` level is used -- it auto-detects the environment (colored output in dev, NDJSON in production). The logger is also automatically available as `ports.logger` in all handlers, and passed to the `adapters` factory so your custom services can use it too.
 
-See [Logging](/docs/running/logging) for full details on output formats, log levels, using the logger in handlers and custom infrastructure, and bringing your own logger.
+See [Logging](/docs/running/logging) for full details on output formats, log levels, using the logger in handlers and custom ports, and bringing your own logger.
 
 ### Aggregate Wiring
 
@@ -180,15 +180,15 @@ View stores are configured per-projection in the wiring, separating runtime conc
 ```ts
 projections: {
   BankAccount: {
-    viewStore: (infra) => infra.bankAccountViewRepository,
+    viewStore: (adapters) => infra.bankAccountViewRepository,
   },
   TransactionHistory: {
-    viewStore: (infra) => new InMemoryViewStore(),
+    viewStore: (adapters) => new InMemoryViewStore(),
   },
 },
 ```
 
-The `viewStore` factory receives the resolved user infrastructure, allowing you to pull view stores from your infrastructure services.
+The `viewStore` factory receives the resolved user adapters, allowing you to pull view stores from your adapter services.
 
 > **Note**: The `Projection.viewStore` field is deprecated. Provide view stores via `DomainWiring.projections` instead. When both are set, the wiring version takes priority.
 
@@ -224,8 +224,8 @@ import { StandaloneCommandHandler } from "@noddde/core";
 const processSettlements: StandaloneCommandHandler<
   BankingInfrastructure,
   ProcessDailySettlementsCommand
-> = async (command, infrastructure) => {
-  const { commandBus } = infrastructure;
+> = async (command, ports) => {
+  const { commandBus } = ports;
 
   for (const accountId of command.payload.accountIds) {
     await commandBus.dispatch({
@@ -247,7 +247,7 @@ writeModel: {
 },
 ```
 
-Standalone command handlers receive the merged infrastructure (`TInfrastructure & CQRSInfrastructure`), giving them access to all three buses. This makes them suitable for orchestration tasks such as batch processing, system commands, and scheduled operations.
+Standalone command handlers receive the merged ports (`TPorts & CQRSPorts`), giving them access to all three buses. This makes them suitable for orchestration tasks such as batch processing, system commands, and scheduled operations.
 
 ## Read Model
 
@@ -264,7 +264,7 @@ readModel: {
     // With view store — enables auto-persistence
     BankAccount: {
       projection: BankAccountProjection,
-      viewStore: (infra) => infra.bankAccountViewStore,
+      viewStore: (adapters) => infra.bankAccountViewStore,
     },
     // Without view store — query-only or manually persisted
     TransactionHistory: TransactionHistoryProjection,
@@ -286,7 +286,7 @@ import { QueryHandler } from "@noddde/core";
 const getSystemStatus: QueryHandler<
   BankingInfrastructure,
   GetSystemStatusQuery
-> = async (_query, infrastructure) => {
+> = async (_query, ports) => {
   return {
     activeAccounts: 42,
     uptime: process.uptime(),
@@ -315,8 +315,8 @@ processModel: {
     BookingFulfillment: BookingFulfillmentSaga,
   },
   standaloneEventHandlers: {
-    BookingConfirmed: (event, infrastructure) => {
-      infrastructure.emailService.sendConfirmation(event.payload.guestEmail);
+    BookingConfirmed: (event, ports) => {
+      ports.emailService.sendConfirmation(event.payload.guestEmail);
     },
   },
 },
@@ -330,16 +330,16 @@ Standalone event handlers are lightweight, stateless functions that react to dom
 
 ```ts
 standaloneEventHandlers: {
-  OrderPlaced: async (event, infrastructure) => {
-    await infrastructure.analytics.track("order_placed", event.payload);
+  OrderPlaced: async (event, ports) => {
+    await ports.analytics.track("order_placed", event.payload);
   },
-  PaymentReceived: (event, infrastructure) => {
-    infrastructure.logger.info(`Payment received: ${event.payload.amount}`);
+  PaymentReceived: (event, ports) => {
+    ports.logger.info(`Payment received: ${event.payload.amount}`);
   },
 },
 ```
 
-Each handler receives the full event object (including metadata) and the domain infrastructure. Use a saga instead when you need state tracking, command dispatch, or multi-step coordination.
+Each handler receives the full event object (including metadata) and the domain ports. Use a saga instead when you need state tracking, command dispatch, or multi-step coordination.
 
 The process model is optional. Omit it entirely if your domain does not need cross-aggregate coordination or event-driven side effects.
 
@@ -369,27 +369,27 @@ const account = await domain.dispatchQuery({
 
 `dispatchQuery` is also strongly typed: only queries from registered projections and standalone query handlers are accepted. The result type is inferred from the query's phantom type parameter.
 
-### Accessing Infrastructure
+### Accessing Ports
 
 ```ts
-const { commandBus, eventBus, queryBus } = domain.infrastructure;
+const { commandBus, eventBus, queryBus } = domain.adapters;
 ```
 
-The `infrastructure` getter returns the merged custom infrastructure and CQRS infrastructure.
+The `adapters` getter returns the merged custom adapters and CQRS buses.
 
 ### Reading Projection Views
 
-Projection views are persisted via `ViewStore`. To read a projection's view, query through the query bus or access the view store directly from your infrastructure:
+Projection views are persisted via `ViewStore`. To read a projection's view, query through the query bus or access the view store directly from your adapters:
 
 ```ts
 // Via query bus
-const view = await domain.infrastructure.queryBus.dispatch({
+const view = await domain.adapters.queryBus.dispatch({
   name: "GetOrderSummary",
   payload: { orderId: "order-1" },
 });
 
-// Or via the view store on your infrastructure
-const view = await domain.infrastructure.orderSummaryViewStore.load("order-1");
+// Or via the view store on your ports
+const view = await domain.adapters.orderSummaryViewStore.load("order-1");
 ```
 
 See [View Persistence](/docs/read-model/view-persistence) for details on configuring projections with `ViewStore`.
@@ -480,7 +480,7 @@ const bankingDomain = defineDomain({
       // With view store — engine auto-persists views on each event
       BankAccount: {
         projection: BankAccountProjection,
-        viewStore: (infra) => infra.bankAccountViewStore,
+        viewStore: (adapters) => infra.bankAccountViewStore,
       },
       // Without view store — query-only or manually persisted
       TransactionHistory: TransactionHistoryProjection,
@@ -488,9 +488,9 @@ const bankingDomain = defineDomain({
   },
 });
 
-// Step 2: Wire with infrastructure (async)
+// Step 2: Wire with adapters (async)
 const domain = await wireDomain(bankingDomain, {
-  infrastructure: () => ({
+  adapters: () => ({
     bankAccountViewRepository: new InMemoryBankAccountViewRepository(),
     transactionViewRepository: new InMemoryTransactionViewRepository(),
   }),
@@ -499,10 +499,10 @@ const domain = await wireDomain(bankingDomain, {
   },
   projections: {
     BankAccount: {
-      viewStore: (infra) => infra.bankAccountViewRepository,
+      viewStore: (adapters) => infra.bankAccountViewRepository,
     },
     TransactionHistory: {
-      viewStore: (infra) => infra.transactionViewRepository,
+      viewStore: (adapters) => infra.transactionViewRepository,
     },
   },
   buses: () => ({
@@ -546,7 +546,7 @@ Shutdown proceeds through four sequential phases:
 1. **Reject** — New calls to `dispatchCommand()`, `dispatchQuery()`, and `withUnitOfWork()` immediately throw a `DomainShutdownError`.
 2. **Drain operations** — The domain waits for all in-flight commands, queries, and their cascading saga reactions to complete.
 3. **Drain outbox relay** — If configured, the outbox relay stops polling and processes any remaining unpublished entries until the outbox is empty.
-4. **Auto-close infrastructure** — The domain scans all registered infrastructure components and calls `close()` on any that implement the `Closeable` interface.
+4. **Auto-close adapters** — The domain scans all registered adapter components and calls `close()` on any that implement the `Closeable` interface.
 
 ### Timeout
 
@@ -578,9 +578,9 @@ try {
 
 Calling `shutdown()` multiple times returns the same promise. The shutdown sequence only runs once.
 
-### Making Infrastructure Closeable
+### Making Ports Closeable
 
-If your custom infrastructure holds resources (database connections, file handles, network sockets), implement the `Closeable` interface so the domain releases them automatically:
+If your custom adapters hold resources (database connections, file handles, network sockets), implement the `Closeable` interface so the domain releases them automatically:
 
 ```ts
 import type { Closeable } from "@noddde/core";
@@ -592,13 +592,13 @@ class MyDatabasePool implements Closeable {
 }
 ```
 
-The domain auto-detects `Closeable` implementations across all infrastructure you provide — custom infrastructure values, buses, persistence stores, and ORM adapters. No additional configuration is needed.
+The domain auto-detects `Closeable` implementations across all adapters you provide — custom adapter values, buses, persistence stores, and ORM adapters. No additional configuration is needed.
 
 `close()` must be idempotent: calling it more than once should have no additional effect.
 
 ## Next Steps
 
-- [Infrastructure](/docs/running/infrastructure) -- The infrastructure providers in detail
+- [Ports](/docs/running/ports) -- The ports and adapters providers in detail
 - [Persistence](/docs/running/persistence) -- Event-sourced vs. state-stored persistence
 - [Unit of Work](/docs/running/persistence#unit-of-work) -- Atomic command dispatch
 - [Process Managers](/docs/process-managers/sagas) -- Coordinating workflows across aggregates

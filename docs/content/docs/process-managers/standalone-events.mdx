@@ -7,7 +7,7 @@ description: Lightweight, stateless handlers that react to domain events with si
 
 Most event handling in noddde happens through [projections](/docs/read-model/projections) (updating read models) or [sagas](/docs/process-managers/sagas) (coordinating multi-step workflows). But some event reactions are simpler: send an email, log an audit entry, notify an external system. **Standalone event handlers** handle these cases without the ceremony of a full saga.
 
-A standalone event handler is a plain function that receives an event and infrastructure, performs a side effect, and returns nothing.
+A standalone event handler is a plain function that receives an event and ports, performs a side effect, and returns nothing.
 
 For stateful workflows that need to track progress, dispatch commands, or handle compensation, use [Sagas](/docs/process-managers/sagas) instead.
 
@@ -16,16 +16,16 @@ For stateful workflows that need to track progress, dispatch commands, or handle
 Standalone event handlers use the `EventHandler` type from `@noddde/core`:
 
 ```typescript
-type EventHandler<
-  TEvent extends Event,
-  TInfrastructure extends Infrastructure,
-> = (event: TEvent, infrastructure: TInfrastructure) => void | Promise<void>;
+type EventHandler<TEvent extends Event, TPorts extends Ports> = (
+  event: TEvent,
+  ports: TPorts,
+) => void | Promise<void>;
 ```
 
-| Parameter        | Description                                                  |
-| ---------------- | ------------------------------------------------------------ |
-| `event`          | The full event object (name, payload, and optional metadata) |
-| `infrastructure` | Your domain infrastructure (repositories, services, etc.)    |
+| Parameter | Description                                                  |
+| --------- | ------------------------------------------------------------ |
+| `event`   | The full event object (name, payload, and optional metadata) |
+| `ports`   | Your domain ports (repositories, services, etc.)             |
 
 Key characteristics:
 
@@ -46,16 +46,14 @@ const definition = defineDomain({
   readModel: { projections: { OrderSummary } },
   processModel: {
     standaloneEventHandlers: {
-      OrderPlaced: async (event, infrastructure) => {
-        await infrastructure.emailService.sendOrderConfirmation(
+      OrderPlaced: async (event, ports) => {
+        await ports.emailService.sendOrderConfirmation(
           event.payload.customerEmail,
           event.payload.orderId,
         );
       },
-      PaymentFailed: (event, infrastructure) => {
-        infrastructure.logger.warn(
-          `Payment failed for order ${event.payload.orderId}`,
-        );
+      PaymentFailed: (event, ports) => {
+        ports.logger.warn(`Payment failed for order ${event.payload.orderId}`);
       },
     },
   },
@@ -80,8 +78,8 @@ You can use `standaloneEventHandlers` without defining any sagas. The `sagas` fi
 ```typescript
 processModel: {
   standaloneEventHandlers: {
-    OrderShipped: (event, infrastructure) => {
-      infrastructure.analytics.track("order_shipped", event.payload);
+    OrderShipped: (event, ports) => {
+      ports.analytics.track("order_shipped", event.payload);
     },
   },
   // No sagas needed — saga persistence is not resolved

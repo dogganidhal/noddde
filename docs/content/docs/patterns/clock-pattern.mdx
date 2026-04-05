@@ -1,9 +1,9 @@
 ---
 title: The Clock Pattern
-description: How to inject time as an infrastructure dependency for deterministic, testable decide handlers.
+description: How to inject time as a ports dependency for deterministic, testable decide handlers.
 ---
 
-The Clock pattern is the canonical example of infrastructure injection in noddde. It solves a fundamental problem in event-sourced systems: non-deterministic behavior caused by direct calls to `new Date()`.
+The Clock pattern is the canonical example of ports injection in noddde. It solves a fundamental problem in event-sourced systems: non-deterministic behavior caused by direct calls to `new Date()`.
 
 ## The Problem
 
@@ -30,7 +30,7 @@ This handler is non-deterministic. It produces different results depending on wh
 
 ## The Solution
 
-Define a `Clock` interface and inject it through infrastructure:
+Define a `Clock` interface and inject it through ports:
 
 ```ts
 // Interface — the capability your domain needs
@@ -54,7 +54,7 @@ class FixedClock implements Clock {
 }
 ```
 
-Add it to your infrastructure type:
+Add it to your ports type:
 
 ```ts
 interface AuctionInfrastructure {
@@ -137,7 +137,7 @@ describe("PlaceBid", () => {
 
 ## Production Configuration
 
-In production, provide `SystemClock` via the `infrastructure` field in `wireDomain`:
+In production, provide `SystemClock` via the `adapters` field in `wireDomain`:
 
 ```ts
 import { defineDomain, wireDomain } from "@noddde/engine";
@@ -148,7 +148,7 @@ const auctionDomain = defineDomain({
 });
 
 const domain = await wireDomain(auctionDomain, {
-  infrastructure: () => ({
+  adapters: () => ({
     clock: new SystemClock(),
   }),
 });
@@ -171,12 +171,12 @@ The recipe is always the same:
 2. **Define an interface** for the capability
 3. **Create a production implementation** that wraps the real call
 4. **Create a test implementation** with predictable behavior
-5. **Add to infrastructure** and inject into handlers
+5. **Add to ports** and inject into handlers
 
 This keeps your domain logic pure and your tests reliable.
 
 ## Next Steps
 
-- [Custom Infrastructure](/docs/running/infrastructure) — Defining infrastructure types
-- [Testing Infrastructure](/docs/testing/testing-infrastructure) — Full testing patterns
-- [Why Injectable Infrastructure](/docs/design-decisions/why-injectable-infrastructure) — Design rationale
+- [Custom Ports](/docs/running/ports) — Defining ports types
+- [Testing Ports](/docs/testing/testing-ports) — Full testing patterns
+- [Why Injectable Ports](/docs/design-decisions/why-injectable-ports) — Design rationale

@@ -1,12 +1,12 @@
 ---
 title: "Logger & LogLevel"
-module: infrastructure/logger
-source_file: packages/core/src/infrastructure/logger.ts
+module: ports/logger
+source_file: packages/core/src/ports/logger.ts
 status: implemented
 exports: [Logger, LogLevel]
 depends_on: []
 docs:
-  - infrastructure/logging.mdx
+  - ports/logging.mdx
 ---
 
 # Logger & LogLevel

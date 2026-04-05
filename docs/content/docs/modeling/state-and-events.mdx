@@ -27,7 +27,7 @@ The return value is the new state after applying the event.
 
 Three things are deliberately absent from this signature:
 
-- **No infrastructure.** Evolve handlers cannot access loggers, databases, clocks, or any external service.
+- **No ports access.** Evolve handlers cannot access loggers, databases, clocks, or any external service.
 - **No `async`.** The return type is `TState`, not `Promise<TState>`.
 - **No side effects.** Evolve handlers must be pure functions -- deterministic, with no mutations beyond returning the new state.
 

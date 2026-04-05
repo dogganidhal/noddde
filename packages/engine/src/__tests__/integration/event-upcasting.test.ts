@@ -40,7 +40,7 @@ type AccountTypes = {
   state: AccountState;
   events: AccountEvent;
   commands: AccountCommand;
-  infrastructure: {};
+  ports: {};
 };
 
 // V1 payload types (historical)
@@ -359,7 +359,7 @@ describe("Event upcasting integration", () => {
         state: ItemState;
         events: ItemEvent;
         commands: ItemCommand;
-        infrastructure: {};
+        ports: {};
       };
 
       type ItemCreatedV1 = { name: string };
@@ -466,7 +466,7 @@ describe("Event upcasting integration", () => {
         state: TagState;
         events: TagEvent;
         commands: TagCommand;
-        infrastructure: {};
+        ports: {};
       };
 
       type TagV1 = { label: string };

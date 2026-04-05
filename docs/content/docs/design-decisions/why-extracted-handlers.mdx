@@ -48,14 +48,14 @@ Inline handlers are still valid TypeScript and will compile, but extracted handl
 Inline handlers concentrate all business logic in a single file. As aggregates grow, this leads to:
 
 - **Monolithic files.** A booking aggregate with 8 decide handlers and 8 evolve handlers means hundreds of lines of logic in one file. Finding the handler you need requires scrolling.
-- **Manual type annotations.** Without extraction, developers who want separate files must manually reconstruct the handler signature -- importing payload types, state types, infrastructure types, and event unions individually.
+- **Manual type annotations.** Without extraction, developers who want separate files must manually reconstruct the handler signature -- importing payload types, state types, ports types, and event unions individually.
 - **Coupled tests.** Testing a single handler requires importing the entire aggregate and either calling the handler through the aggregate object or duplicating its setup.
 
 ## How Extraction Solves It
 
 ### Testability
 
-Each handler is a plain function that can be tested in isolation. Pass in a command, a state snapshot, and (for decide handlers) an infrastructure stub -- assert on the returned events or new state. No aggregate wiring needed:
+Each handler is a plain function that can be tested in isolation. Pass in a command, a state snapshot, and (for decide handlers) a ports stub -- assert on the returned events or new state. No aggregate wiring needed:
 
 ```ts
 import { decidePlaceBid } from "./deciders/decide-place-bid";
@@ -83,7 +83,7 @@ The aggregate definition becomes a table of contents. You can see at a glance wh
 
 ### Type safety
 
-`InferDecideHandler<Def, "PlaceBid">` derives the full function signature from your `AggregateTypes` bundle. The command is narrowed to the specific variant, the state is typed, and infrastructure is correctly scoped with `FrameworkInfrastructure` merged in. The same pattern applies to all handler kinds:
+`InferDecideHandler<Def, "PlaceBid">` derives the full function signature from your `AggregateTypes` bundle. The command is narrowed to the specific variant, the state is typed, and ports is correctly scoped with `FrameworkPorts` merged in. The same pattern applies to all handler kinds:
 
 | Utility                             | Handler kind                                 |
 | ----------------------------------- | -------------------------------------------- |

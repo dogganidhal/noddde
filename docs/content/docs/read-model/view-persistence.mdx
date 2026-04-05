@@ -91,7 +91,7 @@ export type AccountProjectionDef = {
   events: AccountEvent;
   queries: AccountQuery;
   view: AccountView;
-  infrastructure: {};
+  ports: {};
   viewStore: AccountViewStore; // Type hint for { views } injection
 };
 ```
@@ -184,7 +184,7 @@ const definition = defineDomain({
 
 const domain = await wireDomain(definition, {
   projections: {
-    Account: { viewStore: (infra) => infra.accountViewStore },
+    Account: { viewStore: (adapters) => infra.accountViewStore },
   },
 });
 ```
@@ -251,15 +251,15 @@ readModel: {
   projections: {
     Account: {
       projection: AccountProjection,
-      viewStore: (infra) => infra.accountViewStore,
+      viewStore: (adapters) => infra.accountViewStore,
     },
   },
 },
 ```
 
-The factory receives the resolved infrastructure and should return an **already-initialized** view store instance from it. This keeps the projection definition free of infrastructure concerns — the view store is created and configured when you set up your infrastructure, not inside domain code. Constructing a view store inline (e.g., `new InMemoryViewStore()`) defeats the purpose of separating domain from infrastructure.
+The factory receives the resolved adapters and should return an **already-initialized** view store instance from it. This keeps the projection definition free of adapter concerns — the view store is created and configured when you set up your ports, not inside domain code. Constructing a view store inline (e.g., `new InMemoryViewStore()`) defeats the purpose of separating domain from adapters.
 
-The factory is **synchronous only**. The view store must be fully initialized before being provided via infrastructure — async initialization belongs in your infrastructure setup, not in a wiring factory. The factory is called during `wireDomain()` with the fully resolved infrastructure (custom + CQRS).
+The factory is **synchronous only**. The view store must be fully initialized before being provided via adapters — async initialization belongs in your adapter setup, not in a wiring factory. The factory is called during `wireDomain()` with the fully resolved adapters (custom + CQRS).
 
 ## Consistency Modes
 

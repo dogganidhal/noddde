@@ -1,9 +1,9 @@
 /* eslint-disable no-unused-vars */
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
-  CQRSInfrastructure,
+  CQRSPorts,
   DefineQueries,
-  Infrastructure,
+  Ports,
   Query,
   QueryHandler,
 } from "@noddde/core";
@@ -14,7 +14,7 @@ describe("QueryHandler", () => {
     balance: number;
   }
 
-  interface AccountInfra extends Infrastructure {
+  interface AccountPorts extends Ports {
     accountRepo: { getById(id: string): Promise<AccountView> };
   }
 
@@ -23,14 +23,14 @@ describe("QueryHandler", () => {
   }>;
 
   type GetAccountByIdQuery = Extract<AccountQuery, { name: "GetAccountById" }>;
-  type Handler = QueryHandler<AccountInfra, GetAccountByIdQuery>;
+  type Handler = QueryHandler<AccountPorts, GetAccountByIdQuery>;
 
   it("should receive query payload as first parameter", () => {
     expectTypeOf<Parameters<Handler>[0]>().toEqualTypeOf<{ id: string }>();
   });
 
-  it("should receive infrastructure as second parameter", () => {
-    expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<AccountInfra>();
+  it("should receive ports as second parameter", () => {
+    expectTypeOf<Parameters<Handler>[1]>().toEqualTypeOf<AccountPorts>();
   });
 
   it("should return the query result type or a promise of it", () => {
@@ -42,28 +42,24 @@ describe("QueryHandler", () => {
 
 describe("QueryHandler sync/async", () => {
   it("should allow synchronous handler", () => {
-    const handler: QueryHandler<Infrastructure, Query<number>> = (_payload) => {
+    const handler: QueryHandler<Ports, Query<number>> = (_payload) => {
       return 42;
     };
     expect(handler({}, {})).toBe(42);
   });
 
   it("should allow asynchronous handler", async () => {
-    const handler: QueryHandler<Infrastructure, Query<number>> = async (
-      _payload,
-    ) => {
+    const handler: QueryHandler<Ports, Query<number>> = async (_payload) => {
       return 42;
     };
     await expect(handler({}, {})).resolves.toBe(42);
   });
 });
 
-describe("QueryHandler infrastructure isolation", () => {
-  type Handler = QueryHandler<Infrastructure, Query<string>>;
+describe("QueryHandler ports isolation", () => {
+  type Handler = QueryHandler<Ports, Query<string>>;
 
-  it("should not have commandBus in infrastructure", () => {
-    expectTypeOf<
-      Parameters<Handler>[1]
-    >().not.toMatchTypeOf<CQRSInfrastructure>();
+  it("should not have commandBus in ports", () => {
+    expectTypeOf<Parameters<Handler>[1]>().not.toMatchTypeOf<CQRSPorts>();
   });
 });

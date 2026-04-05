@@ -30,7 +30,7 @@ describe("Event-to-projection flow", () => {
     state: { completed: boolean };
     events: TodoEvent;
     commands: TodoCommand;
-    infrastructure: {};
+    ports: {};
   };
 
   const Todo = defineAggregate<TodoTypes>({
@@ -67,7 +67,7 @@ describe("Event-to-projection flow", () => {
     events: TodoEvent;
     queries: TodoQuery;
     view: TodoView;
-    infrastructure: {};
+    ports: {};
   };
 
   const todoViewStore = new InMemoryViewStore<TodoView>();
@@ -169,7 +169,7 @@ describe("Multiple projections for same event", () => {
     state: { name: string | null };
     events: ItemEvent;
     commands: ItemCommand;
-    infrastructure: {};
+    ports: {};
   }>({
     initialState: { name: null },
     decide: {
@@ -196,7 +196,7 @@ describe("Multiple projections for same event", () => {
     events: ItemEvent;
     queries: never;
     view: { items: Array<{ id: string; name: string }> };
-    infrastructure: {};
+    ports: {};
   }>({
     on: {
       ItemCreated: {
@@ -222,7 +222,7 @@ describe("Multiple projections for same event", () => {
     events: ItemEvent;
     queries: never;
     view: { totalValue: number; count: number };
-    infrastructure: {};
+    ports: {};
   }>({
     on: {
       ItemCreated: {
@@ -296,7 +296,7 @@ describe("Async projection reducer", () => {
     state: {};
     events: LogEvent;
     commands: LogCommand;
-    infrastructure: {};
+    ports: {};
   }>({
     initialState: {},
     decide: {
@@ -316,7 +316,7 @@ describe("Async projection reducer", () => {
     events: LogEvent;
     queries: never;
     view: { entries: string[] };
-    infrastructure: {};
+    ports: {};
   }>({
     on: {
       EntryLogged: {
@@ -382,7 +382,7 @@ describe("Sequential events produce cumulative view", () => {
     state: { balance: number };
     events: BalanceEvent;
     commands: BalanceCommand;
-    infrastructure: {};
+    ports: {};
   }>({
     initialState: { balance: 0 },
     decide: {
@@ -414,7 +414,7 @@ describe("Sequential events produce cumulative view", () => {
     events: BalanceEvent;
     queries: never;
     view: { totalDeposits: number; totalWithdrawals: number };
-    infrastructure: {};
+    ports: {};
   }>({
     on: {
       Deposited: {

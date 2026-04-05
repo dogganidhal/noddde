@@ -47,7 +47,7 @@ export interface AggregateTestBuilder<T extends AggregateTypes> {
 
   /**
    * Sets the command to execute. Returns a builder that allows
-   * setting infrastructure and executing the test.
+   * setting ports and executing the test.
    */
   when(command: T["commands"]): AggregateTestBuilderWithCommand<T>;
 }
@@ -58,12 +58,10 @@ export interface AggregateTestBuilder<T extends AggregateTypes> {
  */
 export interface AggregateTestBuilderWithCommand<T extends AggregateTypes> {
   /**
-   * Provides infrastructure to the command handler.
+   * Provides ports to the command handler.
    * Defaults to `{}` if not called.
    */
-  withInfrastructure(
-    infrastructure: T["infrastructure"],
-  ): AggregateTestBuilderWithCommand<T>;
+  withPorts(ports: T["ports"]): AggregateTestBuilderWithCommand<T>;
 
   /**
    * Executes the test scenario:
@@ -112,7 +110,7 @@ export function testAggregate<T extends AggregateTypes>(
 ): AggregateTestBuilder<T> {
   const givenEvents: T["events"][] = [];
   let command: T["commands"] | undefined;
-  let infrastructure: T["infrastructure"] | undefined;
+  let ports: T["ports"] | undefined;
 
   const builder: AggregateTestBuilder<T> & AggregateTestBuilderWithCommand<T> =
     {
@@ -126,8 +124,8 @@ export function testAggregate<T extends AggregateTypes>(
         return builder;
       },
 
-      withInfrastructure(infra: T["infrastructure"]) {
-        infrastructure = infra;
+      withPorts(p: T["ports"]) {
+        ports = p;
         return builder;
       },
 
@@ -138,11 +136,11 @@ export function testAggregate<T extends AggregateTypes>(
           const handler = (aggregate.decide as Record<string, any>)[
             command!.name
           ];
-          const infra = {
+          const resolvedPorts = {
             logger: new NoopLogger(),
-            ...(infrastructure ?? ({} as T["infrastructure"])),
+            ...(ports ?? ({} as T["ports"])),
           };
-          const rawResult = await handler(command, priorState, infra);
+          const rawResult = await handler(command, priorState, resolvedPorts);
 
           const events: T["events"][] = Array.isArray(rawResult)
             ? rawResult

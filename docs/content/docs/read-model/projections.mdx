@@ -42,7 +42,7 @@ type MyProjectionDef = {
   events: MyEvent; // The event union this projection handles
   queries: MyQuery; // The query union this projection answers
   view: MyView; // The view model this projection builds
-  infrastructure: MyInfra; // Dependencies available to query handlers
+  ports: MyInfra; // Dependencies available to query handlers
   viewStore: MyViewStore; // (optional) Type hint for { views } injection into query handlers
 };
 ```
@@ -87,7 +87,7 @@ export type BankAccountProjectionDef = {
   events: BankAccountEvent;
   queries: BankAccountQuery;
   view: BankAccountView;
-  infrastructure: BankingInfrastructure;
+  ports: BankingInfrastructure;
   viewStore: ViewStore<BankAccountView>;
 };
 ```
@@ -253,7 +253,7 @@ The `on` map pattern mirrors the evolve handler pattern used in aggregates. Both
 
 ## Query Handlers
 
-The `queryHandlers` map contains handlers for serving queries from the projection's view. When the projection's `ProjectionTypes` bundle includes a `viewStore` type hint and the domain configuration provides the corresponding view store, handlers automatically receive `{ views }` -- a typed view store instance -- in their infrastructure parameter.
+The `queryHandlers` map contains handlers for serving queries from the projection's view. When the projection's `ProjectionTypes` bundle includes a `viewStore` type hint and the domain configuration provides the corresponding view store, handlers automatically receive `{ views }` -- a typed view store instance -- in their ports parameter.
 
 Extracted query handlers use `InferProjectionQueryHandler` to derive the full function type:
 
@@ -301,13 +301,13 @@ import type {
   InferProjectionView,
   InferProjectionEvents,
   InferProjectionQueries,
-  InferProjectionInfrastructure,
+  InferProjectionPorts,
 } from "@noddde/core";
 
 type View = InferProjectionView<typeof BankAccountProjection>; // BankAccountView
 type Events = InferProjectionEvents<typeof BankAccountProjection>; // BankAccountEvent
 type Queries = InferProjectionQueries<typeof BankAccountProjection>; // BankAccountQuery
-type Infra = InferProjectionInfrastructure<typeof BankAccountProjection>; // BankingInfrastructure
+type Infra = InferProjectionPorts<typeof BankAccountProjection>; // BankingInfrastructure
 ```
 
 These are useful when other modules need to reference projection types without importing the underlying type aliases directly. See [Type Inference Helpers](/docs/modeling/type-inference#handler-level-inference) for the full list.
@@ -360,7 +360,7 @@ type CrossDomainProjectionDef = {
   events: BankAccountEvent | AuditEvent;
   queries: ActivityQuery;
   view: ActivityFeedView;
-  infrastructure: AppInfrastructure;
+  ports: AppInfrastructure;
 };
 ```
 
@@ -382,7 +382,7 @@ const bankingDomain = defineDomain({
       // With view store — enables auto-persistence and { views } injection
       AccountBalance: {
         projection: AccountBalanceProjection,
-        viewStore: (infra) => infra.accountViewStore,
+        viewStore: (adapters) => infra.accountViewStore,
       },
       // Without view store — query-only or uses custom infra
       TransactionHistory: TransactionHistoryProjection,
@@ -395,7 +395,7 @@ const domain = await wireDomain(bankingDomain, {
 });
 ```
 
-The key in the projections map (e.g., `"AccountBalance"`) is the projection's name. It does not need to match the aggregate name. Passing `{ projection, viewStore }` connects the projection to a view store from your infrastructure, enabling automatic view persistence and `{ views }` injection into query handlers.
+The key in the projections map (e.g., `"AccountBalance"`) is the projection's name. It does not need to match the aggregate name. Passing `{ projection, viewStore }` connects the projection to a view store from your ports, enabling automatic view persistence and `{ views }` injection into query handlers.
 
 ## Event Delivery Guarantees
 
@@ -448,7 +448,7 @@ describe("BankAccountProjection handlers", () => {
 });
 ```
 
-No mocks needed. No infrastructure setup. Just inputs and outputs.
+No mocks needed. No ports setup. Just inputs and outputs.
 
 ## View Persistence
 
@@ -502,7 +502,7 @@ The view store itself is provided in the domain configuration (not in the projec
 
 ### Query Handler Views Injection
 
-When a projection's `ProjectionTypes` bundle declares a `viewStore` type hint and the domain configuration provides the corresponding view store, query handlers automatically receive `{ views }` in their infrastructure parameter, typed to the projection's view store. Extracted query handlers use `InferProjectionQueryHandler` to get this injection typed automatically:
+When a projection's `ProjectionTypes` bundle declares a `viewStore` type hint and the domain configuration provides the corresponding view store, query handlers automatically receive `{ views }` in their ports parameter, typed to the projection's view store. Extracted query handlers use `InferProjectionQueryHandler` to get this injection typed automatically:
 
 ```ts title="query-handlers/handle-get-accounts-in-range.ts"
 import type { InferProjectionQueryHandler } from "@noddde/core";

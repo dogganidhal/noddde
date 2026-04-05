@@ -7,8 +7,8 @@ import type {
   EventSourcedAggregatePersistence,
   ID,
   IdempotencyStore,
-  Infrastructure,
-  CQRSInfrastructure,
+  Ports,
+  CQRSPorts,
   Logger,
   PartialEventLoad,
   PersistenceConfiguration,
@@ -37,7 +37,7 @@ import type { MetadataEnricher } from "./metadata-enricher";
 export class CommandLifecycleExecutor {
   constructor(
     private readonly persistenceResolver: AggregatePersistenceResolver,
-    private readonly infrastructure: Infrastructure & CQRSInfrastructure,
+    private readonly adapters: Ports & CQRSPorts,
     private readonly unitOfWorkFactory: UnitOfWorkFactory,
     private readonly concurrencyStrategy: ConcurrencyStrategy,
     private readonly uowStorage: AsyncLocalStorage<UnitOfWork>,
@@ -92,8 +92,8 @@ export class CommandLifecycleExecutor {
     }
 
     const persistence = this.persistenceResolver.resolve(aggregateName);
-    const { infrastructure } = this;
-    const eventBus = infrastructure.eventBus;
+    const { adapters } = this;
+    const eventBus = adapters.eventBus;
 
     const existingUow = this.uowStorage.getStore();
     const ownsUow = !existingUow;
@@ -279,7 +279,7 @@ export class CommandLifecycleExecutor {
         `No command handler found for command: ${command.name} on aggregate: ${aggregateName}`,
       );
     }
-    const result = await handler(command, currentState, this.infrastructure);
+    const result = await handler(command, currentState, this.adapters);
 
     // Step 3: Normalize to array
     const newEvents: Event[] = Array.isArray(result) ? result : [result];

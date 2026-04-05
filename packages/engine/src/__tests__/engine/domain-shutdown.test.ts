@@ -134,7 +134,7 @@ describe("Domain.shutdown", () => {
     await p2;
   });
 
-  it("should call close() on infrastructure implementing Closeable", async () => {
+  it("should call close() on adapters implementing Closeable", async () => {
     const closeFn = vi.fn(async () => {});
 
     interface MyInfra {
@@ -147,7 +147,7 @@ describe("Domain.shutdown", () => {
         readModel: { projections: {} },
       }),
       {
-        infrastructure: () => ({
+        adapters: () => ({
           db: { query: () => {}, close: closeFn },
         }),
       },
@@ -158,7 +158,7 @@ describe("Domain.shutdown", () => {
     expect(closeFn).toHaveBeenCalledOnce();
   });
 
-  it("should close infrastructure in reverse order", async () => {
+  it("should close adapters in reverse order", async () => {
     const order: string[] = [];
 
     interface MyInfra {
@@ -172,7 +172,7 @@ describe("Domain.shutdown", () => {
         readModel: { projections: {} },
       }),
       {
-        infrastructure: () => ({
+        adapters: () => ({
           first: {
             close: async () => {
               order.push("first");
@@ -227,7 +227,7 @@ describe("Domain.shutdown", () => {
     expect(elapsed).toBeLessThan(500);
   });
 
-  it("should continue closing remaining infrastructure if one close() throws", async () => {
+  it("should continue closing remaining adapters if one close() throws", async () => {
     const order: string[] = [];
 
     interface MyInfra {
@@ -241,7 +241,7 @@ describe("Domain.shutdown", () => {
         readModel: { projections: {} },
       }),
       {
-        infrastructure: () => ({
+        adapters: () => ({
           failing: {
             close: async () => {
               order.push("failing");

@@ -8,37 +8,37 @@ export type { BackgroundProcess } from "./background-process";
 export type { Logger, LogLevel } from "./logger";
 
 /**
- * Base infrastructure type. Extend this interface to declare the external
+ * Base port type. Extend this interface to declare the external
  * dependencies your domain needs (repositories, clocks, API clients, etc.).
  *
  * @example
  * ```ts
- * interface MyInfrastructure extends Infrastructure {
+ * interface MyPorts extends Ports {
  *   clock: { now(): Date };
  *   emailService: { send(to: string, body: string): Promise<void> };
  * }
  * ```
  */
-export type Infrastructure = {};
+export type Ports = {};
 
 /**
- * Framework-provided infrastructure automatically available to all handlers.
+ * Framework-provided ports automatically available to all handlers.
  * Contains the framework logger and any future framework-level services.
  *
- * Merged into every handler's `infrastructure` parameter by the engine.
- * Handlers can use `infrastructure.logger` without declaring it in their
- * custom infrastructure type.
+ * Merged into every handler's `ports` parameter by the engine.
+ * Handlers can use `ports.logger` without declaring it in their
+ * custom ports type.
  */
-export interface FrameworkInfrastructure {
+export interface FrameworkPorts {
   /** Framework logger instance. Use `child()` to create scoped loggers. */
   logger: Logger;
 }
 
 /**
- * Infrastructure provided by the framework containing the three CQRS buses.
- * Automatically merged into the infrastructure available to standalone command handlers.
+ * Ports provided by the framework containing the three CQRS buses.
+ * Automatically merged into the ports available to standalone command handlers.
  */
-export interface CQRSInfrastructure {
+export interface CQRSPorts {
   /** Bus for dispatching commands to aggregates or standalone command handlers. */
   commandBus: CommandBus;
   /** Bus for publishing domain events to projections and event handlers. */

@@ -41,7 +41,7 @@ docs:
 
 ## Integration Points
 
-- `EventBus` is a member of `CQRSInfrastructure`, making it available to standalone command handlers and saga event handlers.
+- `EventBus` is a member of `CQRSPorts`, making it available to standalone command handlers and saga event handlers.
 - The engine/runtime uses `EventBus` to publish events after aggregate command handling.
 - Projections and event handlers subscribe to events through the `EventBus`.
 
