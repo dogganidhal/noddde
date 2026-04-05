@@ -1,6 +1,6 @@
 import { defineAggregate } from "@noddde/core";
 import type { AuctionEvent } from "../../../event-model";
-import type { AuctionInfrastructure } from "../../../../infrastructure";
+import type { AuctionPorts } from "../../../../infrastructure";
 import type { AuctionCommand } from "./commands";
 import { AuctionState, initialAuctionState } from "./state";
 import {
@@ -21,7 +21,7 @@ export type AuctionDef = {
   state: AuctionState;
   events: AuctionEvent;
   commands: AuctionCommand;
-  infrastructure: AuctionInfrastructure;
+  ports: AuctionPorts;
 };
 
 /**

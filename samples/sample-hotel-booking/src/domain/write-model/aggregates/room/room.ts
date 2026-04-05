@@ -1,5 +1,5 @@
 import { defineAggregate } from "@noddde/core";
-import type { HotelInfrastructure } from "../../../../infrastructure/types";
+import type { HotelPorts } from "../../../../infrastructure/types";
 import type { RoomEvent } from "../../../event-model";
 import type { RoomCommand } from "./commands";
 import type { RoomState } from "./state";
@@ -24,7 +24,7 @@ export type RoomDef = {
   state: RoomState;
   events: RoomEvent;
   commands: RoomCommand;
-  infrastructure: HotelInfrastructure;
+  ports: HotelPorts;
 };
 
 /**

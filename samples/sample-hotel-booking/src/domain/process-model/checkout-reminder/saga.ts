@@ -1,5 +1,5 @@
 import { defineSaga } from "@noddde/core";
-import type { HotelInfrastructure } from "../../../infrastructure/types";
+import type { HotelPorts } from "../../../infrastructure/types";
 import type { RoomEvent } from "../../event-model";
 import type { RoomCommand } from "../../write-model/aggregates/room/commands";
 import type { CheckoutReminderState } from "./state";
@@ -18,7 +18,7 @@ export type CheckoutReminderDef = {
   state: CheckoutReminderState;
   events: RoomEvent;
   commands: RoomCommand;
-  infrastructure: HotelInfrastructure;
+  ports: HotelPorts;
 };
 
 /**

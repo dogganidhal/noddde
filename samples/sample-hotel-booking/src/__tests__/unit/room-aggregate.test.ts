@@ -3,7 +3,7 @@ import { testAggregate } from "@noddde/testing";
 import { InMemoryViewStore } from "@noddde/engine";
 import { Room } from "../../domain/write-model/aggregates/room";
 import { FixedClock } from "../../infrastructure/services/clock";
-import type { HotelInfrastructure } from "../../infrastructure/types";
+import type { HotelPorts } from "../../infrastructure/types";
 import { InMemoryEmailService } from "../../infrastructure/services/email-service";
 import { InMemorySmsService } from "../../infrastructure/services/sms-service";
 import { InMemoryPaymentGateway } from "../../infrastructure/services/payment-gateway";
@@ -11,7 +11,7 @@ import { InMemoryRoomAvailabilityViewStore } from "../../infrastructure/services
 
 const fixedDate = new Date("2026-04-01T10:00:00Z");
 
-const infra: HotelInfrastructure = {
+const infra: HotelPorts = {
   clock: new FixedClock(fixedDate),
   emailService: new InMemoryEmailService(),
   smsService: new InMemorySmsService(),
@@ -35,7 +35,7 @@ describe("Room aggregate", () => {
             pricePerNight: 100,
           },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.events).toHaveLength(1);
@@ -73,7 +73,7 @@ describe("Room aggregate", () => {
             pricePerNight: 100,
           },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.error).toBeDefined();
@@ -98,7 +98,7 @@ describe("Room aggregate", () => {
           name: "MakeRoomAvailable",
           targetAggregateId: "room-101",
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.events[0]!.name).toBe("RoomMadeAvailable");
@@ -135,7 +135,7 @@ describe("Room aggregate", () => {
             checkOut: "2026-04-15",
           },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.events[0]!.name).toBe("RoomReserved");
@@ -165,7 +165,7 @@ describe("Room aggregate", () => {
             checkOut: "2026-04-15",
           },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.error).toBeDefined();
@@ -204,7 +204,7 @@ describe("Room aggregate", () => {
           targetAggregateId: "room-101",
           payload: { bookingId: "booking-1", guestId: "guest-1" },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.events[0]!.name).toBe("GuestCheckedIn");
@@ -241,7 +241,7 @@ describe("Room aggregate", () => {
           targetAggregateId: "room-101",
           payload: { bookingId: "wrong-booking", guestId: "guest-1" },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.error).toBeDefined();
@@ -289,7 +289,7 @@ describe("Room aggregate", () => {
           targetAggregateId: "room-101",
           payload: { bookingId: "booking-1", guestId: "guest-1" },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.events[0]!.name).toBe("GuestCheckedOut");
@@ -319,7 +319,7 @@ describe("Room aggregate", () => {
           targetAggregateId: "room-101",
           payload: { reason: "Plumbing repair", estimatedUntil: "2026-04-20" },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.events[0]!.name).toBe("RoomUnderMaintenance");
@@ -365,7 +365,7 @@ describe("Room aggregate", () => {
           targetAggregateId: "room-101",
           payload: { reason: "Plumbing repair", estimatedUntil: "2026-04-20" },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.error).toBeDefined();

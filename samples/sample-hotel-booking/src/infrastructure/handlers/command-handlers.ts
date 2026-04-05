@@ -1,6 +1,6 @@
 import { type DefineCommands } from "@noddde/core";
 import type { StandaloneCommandHandler } from "@noddde/core";
-import type { HotelInfrastructure } from "../types";
+import type { HotelPorts } from "../types";
 
 /**
  * Standalone command for the nightly audit process.
@@ -22,14 +22,14 @@ export type RunNightlyAuditCommand = DefineCommands<{
  * to interact with the domain without owning aggregate state.
  */
 export const RunNightlyAuditHandler: StandaloneCommandHandler<
-  HotelInfrastructure,
+  HotelPorts,
   RunNightlyAuditCommand
-> = async (command, infrastructure) => {
+> = async (command, ports) => {
   const { auditDate } = command.payload;
 
   // In a real system, this would query a read model for expired bookings.
   // For the sample, we log the audit action.
-  const { clock } = infrastructure;
+  const { clock } = ports;
   const now = clock.now().toISOString();
 
   // Example: could query bookings and cancel expired ones

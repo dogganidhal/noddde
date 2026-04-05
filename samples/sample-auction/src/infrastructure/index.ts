@@ -11,8 +11,8 @@ export class SystemClock implements Clock {
   }
 }
 
-/** Infrastructure dependencies for the auction domain. */
-export interface AuctionInfrastructure {
+/** Ports for the auction domain. */
+export interface AuctionPorts {
   /** Clock used for time-based bid validation. */
   clock: Clock;
 }

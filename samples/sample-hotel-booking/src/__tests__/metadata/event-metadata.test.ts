@@ -7,7 +7,7 @@ import {
   expectCausationChain,
 } from "@noddde/testing";
 import { InMemoryViewStore } from "@noddde/engine";
-import type { HotelInfrastructure } from "../../infrastructure/types";
+import type { HotelPorts } from "../../infrastructure/types";
 import { FixedClock } from "../../infrastructure/services/clock";
 import { InMemoryEmailService } from "../../infrastructure/services/email-service";
 import { InMemorySmsService } from "../../infrastructure/services/sms-service";
@@ -16,7 +16,7 @@ import { InMemoryRoomAvailabilityViewStore } from "../../infrastructure/services
 import { Room } from "../../domain/write-model/aggregates/room";
 import { Booking } from "../../domain/write-model/aggregates/booking";
 
-function createTestInfrastructure(): HotelInfrastructure {
+function createTestInfrastructure(): HotelPorts {
   return {
     clock: new FixedClock(new Date("2026-04-01T10:00:00Z")),
     emailService: new InMemoryEmailService(),
@@ -32,9 +32,9 @@ describe("Event metadata validation", () => {
   describe("stripMetadata", () => {
     it("should enable payload-only assertions on domain events", async () => {
       const infra = createTestInfrastructure();
-      const { domain, spy } = await testDomain<HotelInfrastructure>({
+      const { domain, spy } = await testDomain<HotelPorts>({
         aggregates: { Room },
-        infrastructure: infra,
+        ports: infra,
       });
 
       await domain.dispatchCommand({
@@ -62,9 +62,9 @@ describe("Event metadata validation", () => {
 
     it("should preserve event name and payload structure", async () => {
       const infra = createTestInfrastructure();
-      const { domain, spy } = await testDomain<HotelInfrastructure>({
+      const { domain, spy } = await testDomain<HotelPorts>({
         aggregates: { Booking },
-        infrastructure: infra,
+        ports: infra,
       });
 
       await domain.dispatchCommand({
@@ -94,9 +94,9 @@ describe("Event metadata validation", () => {
   describe("expectValidMetadata", () => {
     it("should validate metadata on domain events when metadata is present", async () => {
       const infra = createTestInfrastructure();
-      const { domain, spy } = await testDomain<HotelInfrastructure>({
+      const { domain, spy } = await testDomain<HotelPorts>({
         aggregates: { Room },
-        infrastructure: infra,
+        ports: infra,
       });
 
       await domain.dispatchCommand({
@@ -125,9 +125,9 @@ describe("Event metadata validation", () => {
   describe("expectSameCorrelation", () => {
     it("should verify all events from a single command share correlationId", async () => {
       const infra = createTestInfrastructure();
-      const { domain, spy } = await testDomain<HotelInfrastructure>({
+      const { domain, spy } = await testDomain<HotelPorts>({
         aggregates: { Room },
-        infrastructure: infra,
+        ports: infra,
       });
 
       await domain.dispatchCommand({
@@ -162,9 +162,9 @@ describe("Event metadata validation", () => {
   describe("expectCausationChain", () => {
     it("should verify causation chain across events from sequential commands", async () => {
       const infra = createTestInfrastructure();
-      const { domain, spy } = await testDomain<HotelInfrastructure>({
+      const { domain, spy } = await testDomain<HotelPorts>({
         aggregates: { Room },
-        infrastructure: infra,
+        ports: infra,
       });
 
       await domain.dispatchCommand({

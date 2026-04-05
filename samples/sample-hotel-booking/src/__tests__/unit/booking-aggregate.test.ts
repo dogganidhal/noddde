@@ -3,7 +3,7 @@ import { testAggregate } from "@noddde/testing";
 import { InMemoryViewStore } from "@noddde/engine";
 import { Booking } from "../../domain/write-model/aggregates/booking";
 import { FixedClock } from "../../infrastructure/services/clock";
-import type { HotelInfrastructure } from "../../infrastructure/types";
+import type { HotelPorts } from "../../infrastructure/types";
 import { InMemoryEmailService } from "../../infrastructure/services/email-service";
 import { InMemorySmsService } from "../../infrastructure/services/sms-service";
 import { InMemoryPaymentGateway } from "../../infrastructure/services/payment-gateway";
@@ -11,7 +11,7 @@ import { InMemoryRoomAvailabilityViewStore } from "../../infrastructure/services
 
 const fixedDate = new Date("2026-04-01T10:00:00Z");
 
-const infra: HotelInfrastructure = {
+const infra: HotelPorts = {
   clock: new FixedClock(fixedDate),
   emailService: new InMemoryEmailService(),
   smsService: new InMemorySmsService(),
@@ -49,7 +49,7 @@ describe("Booking aggregate", () => {
             totalAmount: 500,
           },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.events).toHaveLength(1);
@@ -77,7 +77,7 @@ describe("Booking aggregate", () => {
             totalAmount: 200,
           },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.error).toBeDefined();
@@ -94,7 +94,7 @@ describe("Booking aggregate", () => {
           targetAggregateId: "b-1",
           payload: { paymentId: "pay-1", amount: 500 },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.events[0]!.name).toBe("PaymentRequested");
@@ -124,7 +124,7 @@ describe("Booking aggregate", () => {
             amount: 500,
           },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.events[0]!.name).toBe("PaymentCompleted");
@@ -143,7 +143,7 @@ describe("Booking aggregate", () => {
             amount: 500,
           },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.error).toBeDefined();
@@ -168,7 +168,7 @@ describe("Booking aggregate", () => {
           targetAggregateId: "b-1",
           payload: { paymentId: "pay-1", reason: "Insufficient funds" },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.events[0]!.name).toBe("PaymentFailed");
@@ -194,7 +194,7 @@ describe("Booking aggregate", () => {
           targetAggregateId: "b-1",
           payload: { roomId: "room-101" },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.events[0]!.name).toBe("BookingConfirmed");
@@ -212,7 +212,7 @@ describe("Booking aggregate", () => {
           targetAggregateId: "b-1",
           payload: { reason: "Guest request" },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.events[0]!.name).toBe("BookingCancelled");
@@ -234,7 +234,7 @@ describe("Booking aggregate", () => {
           targetAggregateId: "b-1",
           payload: { reason: "Second cancel" },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.error).toBeDefined();
@@ -255,7 +255,7 @@ describe("Booking aggregate", () => {
             newTotalAmount: 600,
           },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.events[0]!.name).toBe("BookingModified");
@@ -295,7 +295,7 @@ describe("Booking aggregate", () => {
           targetAggregateId: "b-1",
           payload: { paymentId: "pay-1", amount: 500 },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.events[0]!.name).toBe("PaymentRefunded");
@@ -310,7 +310,7 @@ describe("Booking aggregate", () => {
           targetAggregateId: "b-1",
           payload: { paymentId: "pay-1", amount: 500 },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.error).toBeDefined();

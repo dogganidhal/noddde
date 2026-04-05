@@ -1,7 +1,7 @@
 import { defineProjection } from "@noddde/core";
 import type { ViewStore } from "@noddde/core";
 import type { RoomType } from "../../../../infrastructure/types";
-import type { HotelInfrastructure } from "../../../../infrastructure/types";
+import type { HotelPorts } from "../../../../infrastructure/types";
 import type { BookingEvent } from "../../../event-model";
 import type { GuestHistoryQuery } from "./queries";
 import { onBookingCreated } from "./on-entries";
@@ -24,7 +24,7 @@ export type GuestHistoryProjectionDef = {
   events: BookingEvent;
   queries: GuestHistoryQuery;
   view: GuestHistoryView;
-  infrastructure: HotelInfrastructure;
+  ports: HotelPorts;
   viewStore: ViewStore<GuestHistoryView>;
 };
 

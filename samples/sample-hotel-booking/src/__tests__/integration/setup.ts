@@ -22,7 +22,7 @@ import {
   InMemoryViewStore,
 } from "@noddde/engine";
 import { everyNEvents } from "@noddde/core";
-import type { HotelInfrastructure } from "../../infrastructure/types";
+import type { HotelPorts } from "../../infrastructure/types";
 import type {
   GuestHistoryView,
   RevenueView,
@@ -132,7 +132,7 @@ export async function createTestEnvironment() {
 
   // Wire with infrastructure (async)
   const domain = await wireDomain(hotelDomain, {
-    infrastructure: (): HotelInfrastructure => ({
+    adapters: (): HotelPorts => ({
       clock: new FixedClock(new Date("2026-04-01T10:00:00Z")),
       emailService,
       smsService,

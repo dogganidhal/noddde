@@ -32,13 +32,13 @@ export interface PaymentGateway {
   refund(transactionId: string): Promise<void>;
 }
 
-// ── Aggregate Infrastructure ────────────────────────────────────
+// ── Aggregate Ports ─────────────────────────────────────────────
 
 /**
- * Custom infrastructure dependencies for the hotel booking domain.
+ * Custom port dependencies for the hotel booking domain.
  * Injected into command handlers, saga handlers, and event handlers.
  */
-export interface HotelInfrastructure {
+export interface HotelPorts {
   clock: Clock;
   emailService: EmailService;
   smsService: SmsService;

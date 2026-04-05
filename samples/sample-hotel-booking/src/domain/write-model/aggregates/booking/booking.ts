@@ -1,5 +1,5 @@
 import { defineAggregate } from "@noddde/core";
-import type { HotelInfrastructure } from "../../../../infrastructure/types";
+import type { HotelPorts } from "../../../../infrastructure/types";
 import type { BookingEvent } from "../../../event-model";
 import type { BookingCommand } from "./commands";
 import type { BookingState } from "./state";
@@ -28,7 +28,7 @@ export type BookingDef = {
   state: BookingState;
   events: BookingEvent;
   commands: BookingCommand;
-  infrastructure: HotelInfrastructure;
+  ports: HotelPorts;
 };
 
 /**

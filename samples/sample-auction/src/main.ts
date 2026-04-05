@@ -32,7 +32,7 @@ const main = async () => {
 
   // ── Wire with infrastructure (async) ───────────────────────
   const domain = await wireDomain(auctionDomain, {
-    infrastructure: () => ({
+    adapters: () => ({
       clock: new SystemClock(),
     }),
     aggregates: {

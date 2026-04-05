@@ -22,7 +22,7 @@ describe("CheckoutReminder saga", () => {
           checkedInAt: "2026-04-10T14:00:00Z",
         },
       })
-      .withInfrastructure({
+      .withPorts({
         clock: { now: () => new Date() },
         emailService: { send: async () => {} },
         smsService,
@@ -65,7 +65,7 @@ describe("CheckoutReminder saga", () => {
           checkedOutAt: "2026-04-15T11:00:00Z",
         },
       })
-      .withInfrastructure({
+      .withPorts({
         clock: { now: () => new Date() },
         emailService: { send: async () => {} },
         smsService,

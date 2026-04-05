@@ -3,13 +3,13 @@ import { testAggregate } from "@noddde/testing";
 import { InMemoryViewStore } from "@noddde/engine";
 import { Inventory } from "../../domain/write-model/aggregates/inventory";
 import { FixedClock } from "../../infrastructure/services/clock";
-import type { HotelInfrastructure } from "../../infrastructure/types";
+import type { HotelPorts } from "../../infrastructure/types";
 import { InMemoryEmailService } from "../../infrastructure/services/email-service";
 import { InMemorySmsService } from "../../infrastructure/services/sms-service";
 import { InMemoryPaymentGateway } from "../../infrastructure/services/payment-gateway";
 import { InMemoryRoomAvailabilityViewStore } from "../../infrastructure/services/room-availability-view-store";
 
-const infra: HotelInfrastructure = {
+const infra: HotelPorts = {
   clock: new FixedClock(new Date("2026-04-01T10:00:00Z")),
   emailService: new InMemoryEmailService(),
   smsService: new InMemorySmsService(),
@@ -42,7 +42,7 @@ describe("Inventory aggregate", () => {
           targetAggregateId: "hotel-1",
           payload: { roomCounts: initialCounts },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.events).toHaveLength(1);
@@ -60,7 +60,7 @@ describe("Inventory aggregate", () => {
           targetAggregateId: "hotel-1",
           payload: { roomCounts: initialCounts },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.error).toBeDefined();
@@ -77,7 +77,7 @@ describe("Inventory aggregate", () => {
           targetAggregateId: "hotel-1",
           payload: { roomType: "double" },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.events[0]!.name).toBe("AvailabilityDecremented");
@@ -103,7 +103,7 @@ describe("Inventory aggregate", () => {
           targetAggregateId: "hotel-1",
           payload: { roomType: "single" },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.error).toBeDefined();
@@ -120,7 +120,7 @@ describe("Inventory aggregate", () => {
           targetAggregateId: "hotel-1",
           payload: { roomType: "suite" },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.events[0]!.name).toBe("AvailabilityIncremented");
@@ -137,7 +137,7 @@ describe("Inventory aggregate", () => {
           targetAggregateId: "hotel-1",
           payload: { roomType: "suite", total: 10, available: 7 },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.events[0]!.name).toBe("RoomTypeCountUpdated");
@@ -154,7 +154,7 @@ describe("Inventory aggregate", () => {
           targetAggregateId: "hotel-1",
           payload: { roomType: "suite", total: 10, available: 7 },
         })
-        .withInfrastructure(infra)
+        .withPorts(infra)
         .execute();
 
       expect(result.error).toBeDefined();

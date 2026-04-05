@@ -1,6 +1,6 @@
 import { defineProjection } from "@noddde/core";
 import type { ViewStore } from "@noddde/core";
-import type { HotelInfrastructure } from "../../../../infrastructure/types";
+import type { HotelPorts } from "../../../../infrastructure/types";
 import type { BookingEvent } from "../../../event-model";
 import type { RevenueQuery } from "./queries";
 import { onPaymentCompleted } from "./on-entries";
@@ -18,7 +18,7 @@ export type RevenueProjectionDef = {
   events: BookingEvent;
   queries: RevenueQuery;
   view: RevenueView;
-  infrastructure: HotelInfrastructure;
+  ports: HotelPorts;
   viewStore: ViewStore<RevenueView>;
 };
 

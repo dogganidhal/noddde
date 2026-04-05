@@ -1,5 +1,5 @@
 import { defineSaga } from "@noddde/core";
-import type { HotelInfrastructure } from "../../../infrastructure/types";
+import type { HotelPorts } from "../../../infrastructure/types";
 import type { BookingEvent } from "../../event-model";
 import type { BookingCommand } from "../../write-model/aggregates/booking/commands";
 import type { PaymentProcessingState } from "./state";
@@ -23,7 +23,7 @@ export type PaymentProcessingDef = {
   state: PaymentProcessingState;
   events: PaymentEvent;
   commands: BookingCommand;
-  infrastructure: HotelInfrastructure;
+  ports: HotelPorts;
 };
 
 /**

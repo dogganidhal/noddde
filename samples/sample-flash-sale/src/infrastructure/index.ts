@@ -1,4 +1,4 @@
-import type { Infrastructure } from "@noddde/core";
+import type { Ports } from "@noddde/core";
 
-/** Flash sale infrastructure -- uses base Infrastructure (no custom services needed). */
-export type FlashSaleInfrastructure = Infrastructure;
+/** Flash sale ports -- uses base Ports (no custom services needed). */
+export type FlashSalePorts = Ports;

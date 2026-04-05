@@ -74,7 +74,7 @@ describe("Auction aggregate — PlaceBid", () => {
         targetAggregateId: "auction-1",
         payload: { bidderId: "alice", amount: 150 },
       })
-      .withInfrastructure(clockAt(now))
+      .withPorts(clockAt(now))
       .execute();
 
     expect(result.events[0]!.name).toBe("BidPlaced");
@@ -93,7 +93,7 @@ describe("Auction aggregate — PlaceBid", () => {
         targetAggregateId: "auction-1",
         payload: { bidderId: "bob", amount: 200 },
       })
-      .withInfrastructure(clockAt(now))
+      .withPorts(clockAt(now))
       .execute();
 
     expect(result.events[0]!.name).toBe("BidPlaced");
@@ -112,7 +112,7 @@ describe("Auction aggregate — PlaceBid", () => {
         targetAggregateId: "auction-1",
         payload: { bidderId: "alice", amount: 50 },
       })
-      .withInfrastructure(clockAt(now))
+      .withPorts(clockAt(now))
       .execute();
 
     expect(result.events[0]!.name).toBe("BidRejected");
@@ -133,7 +133,7 @@ describe("Auction aggregate — PlaceBid", () => {
         targetAggregateId: "auction-1",
         payload: { bidderId: "bob", amount: 150 },
       })
-      .withInfrastructure(clockAt(now))
+      .withPorts(clockAt(now))
       .execute();
 
     expect(result.events[0]!.name).toBe("BidRejected");
@@ -148,7 +148,7 @@ describe("Auction aggregate — PlaceBid", () => {
         targetAggregateId: "auction-1",
         payload: { bidderId: "alice", amount: 500 },
       })
-      .withInfrastructure(clockAt(new Date("2031-01-01T00:00:00Z")))
+      .withPorts(clockAt(new Date("2031-01-01T00:00:00Z")))
       .execute();
 
     expect(result.events[0]!.name).toBe("BidRejected");
@@ -166,7 +166,7 @@ describe("Auction aggregate — PlaceBid", () => {
         targetAggregateId: "auction-1",
         payload: { bidderId: "alice", amount: 500 },
       })
-      .withInfrastructure(clockAt(now))
+      .withPorts(clockAt(now))
       .execute();
 
     expect(result.events[0]!.name).toBe("BidRejected");
@@ -181,7 +181,7 @@ describe("Auction aggregate — PlaceBid", () => {
         targetAggregateId: "auction-1",
         payload: { bidderId: "bob", amount: 100 },
       })
-      .withInfrastructure(clockAt(now))
+      .withPorts(clockAt(now))
       .execute();
 
     expect(result.events[0]!.name).toBe("BidRejected");

@@ -1,5 +1,5 @@
 import { defineAggregate } from "@noddde/core";
-import type { AggregateTypes, Infrastructure } from "@noddde/core";
+import type { AggregateTypes, Ports } from "@noddde/core";
 import type { FlashSaleEvent } from "../../../event-model";
 import type { FlashSaleCommand } from "./commands";
 import type { FlashSaleState } from "./state";
@@ -17,7 +17,7 @@ export type FlashSaleItemTypes = AggregateTypes & {
   state: FlashSaleState;
   events: FlashSaleEvent;
   commands: FlashSaleCommand;
-  infrastructure: Infrastructure;
+  ports: Ports;
 };
 
 /**
