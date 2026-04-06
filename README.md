@@ -31,6 +31,7 @@ Most TypeScript frameworks force you into a corner: either drown in OOP boilerpl
 - **The "Dual-Write" Problem, Solved:** Saving to a database and publishing an event usually leads to dropped messages if the server crashes. `noddde` solves this natively with a built-in **Transactional Outbox** and **Unit of Work**, ensuring your aggregate state and outgoing events commit in a single ACID transaction.
 - **Bring Your Own ORM:** No need to migrate to a niche database. `noddde` provides production-ready adapters for the tools you already use: **Drizzle, Prisma, and TypeORM** on top of standard Postgres, MySQL, or SQLite.
 - **Fearless Refactoring:** Zero runtime reflection. Because `noddde` relies entirely on strict TypeScript inference, if you change a command payload or an event schema, your IDE instantly highlights the exact projections, sagas, and tests that need updating.
+- **Native Observability:** Built-in [OpenTelemetry](https://opentelemetry.io/) instrumentation with zero required configuration. Install `@opentelemetry/api`, register a provider, and `noddde` automatically creates spans for command dispatch, projections, sagas, queries, and UoW commits — with full W3C Trace Context propagation through the event store. Works with any backend (Datadog, GCP, Jaeger, etc.).
 
 ## How does noddde compare to the alternatives?
 
@@ -46,6 +47,7 @@ The TypeScript ecosystem generally forces you to choose between heavyweight OOP 
 | **Infrastructure Focus** | Tightly coupled to the NestJS DI container. | Native append-only Event Stores (e.g., EventStoreDB). | **Relational First:** Native Drizzle/Prisma + Transactional Outbox. |
 | **Data Safety**          | Left entirely to the developer.             | Stream Versioning & Optimistic Concurrency.           | **ACID Unit of Work, Outbox, & Pessimistic Locks.**                 |
 | **Workflows / Sagas**    | Stateful classes listening to event buses.  | Process Managers reacting to streams.                 | **Pure functions** returning commands (executed in UoW).            |
+| **Observability**        | Manual instrumentation.                     | Manual instrumentation.                               | **Native OTel:** auto spans + W3C Trace Context propagation.        |
 
 ### State-Stored or Event-Sourced: You Decide
 
