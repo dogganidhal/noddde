@@ -27,34 +27,32 @@ Persistence (event store, state store, saga store, snapshot store, [outbox store
 
 For SQLite or any dialect without advisory lock support, use `InMemoryAggregateLocker` from `@noddde/engine` for single-process deployments, or choose the optimistic strategy instead.
 
-Each package exports a `createXxxAdapter` factory function that returns all persistence implementations wired to share a transaction context. The return type **narrows based on the config** -- only configured optional stores appear in the result, eliminating the need for `!` non-null assertions:
+Each package exports a class-based adapter that implements the `PersistenceAdapter` interface from `@noddde/core`. Pass it to `wireDomain` via the `persistenceAdapter` property and the engine resolves all persistence concerns automatically:
 
 ```ts
-import { createDrizzleAdapter } from "@noddde/drizzle";
-import { events, sagaStates, snapshots } from "@noddde/drizzle/pg";
+import { DrizzleAdapter } from "@noddde/drizzle";
+import { wireDomain } from "@noddde/engine";
 
-const adapter = createDrizzleAdapter(db, {
-  eventStore: events,
-  sagaStore: sagaStates,
-  snapshotStore: snapshots, // optional -- only include if needed
+const adapter = new DrizzleAdapter(db);
+
+const domain = await wireDomain(definition, {
+  persistenceAdapter: adapter,
+  aggregates: {
+    Room: { persistence: "event-sourced" },
+    Inventory: {}, // defaults to state-stored from adapter
+  },
 });
-
-// Always present:
-adapter.eventSourcedPersistence; // EventSourcedAggregatePersistence
-adapter.sagaPersistence; // SagaPersistence
-adapter.unitOfWorkFactory; // UnitOfWorkFactory
-
-// Present because snapshotStore was configured (non-optional, no `?` needed):
-adapter.snapshotStore; // SnapshotStore
-
-// Prisma and TypeORM are similar:
-// createPrismaAdapter(prisma)
-// createPrismaAdapter(prisma, { snapshotStore: true })
-// createTypeORMAdapter(dataSource)
-// createTypeORMAdapter(dataSource, { snapshotStore: true })
 ```
 
-All three adapters support [per-aggregate state tables](#per-aggregate-state-tables) via the `aggregateStates` config option.
+The adapter provides all stores (event-sourced, state-stored, saga, snapshot, outbox, UoW, advisory locker). The engine infers what it needs based on the domain definition -- no manual mapping required.
+
+All three adapters also support [per-aggregate state tables](#per-aggregate-state-tables) via the `stateStored()` helper method.
+
+<Callout type="info">
+  The `createXxxAdapter` factory functions are still supported but deprecated.
+  Prefer the class-based API (`DrizzleAdapter`, `PrismaAdapter`,
+  `TypeORMAdapter`) for new code.
+</Callout>
 
 ## Drizzle
 
@@ -103,23 +101,12 @@ You can also define your own tables matching the expected column structure -- th
 ```ts
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import { createDrizzleAdapter } from "@noddde/drizzle";
-import {
-  events,
-  aggregateStates,
-  sagaStates,
-  snapshots,
-} from "@noddde/drizzle/sqlite";
+import { DrizzleAdapter } from "@noddde/drizzle";
 import { everyNEvents } from "@noddde/core";
 import { defineDomain, wireDomain } from "@noddde/engine";
 
 const db = drizzle(new Database("app.db"));
-const adapter = createDrizzleAdapter(db, {
-  eventStore: events,
-  stateStore: aggregateStates,
-  sagaStore: sagaStates,
-  snapshotStore: snapshots,
-});
+const adapter = new DrizzleAdapter(db);
 
 const bankingDomain = defineDomain({
   writeModel: { aggregates: { BankAccount } },
@@ -127,19 +114,17 @@ const bankingDomain = defineDomain({
 });
 
 const domain = await wireDomain(bankingDomain, {
+  persistenceAdapter: adapter,
   aggregates: {
-    persistence: () => adapter.eventSourcedPersistence,
-    snapshots: {
-      store: () => adapter.snapshotStore,
-      strategy: everyNEvents(100),
+    BankAccount: {
+      persistence: "event-sourced",
+      snapshots: { strategy: everyNEvents(100) },
     },
   },
-  sagas: {
-    persistence: () => adapter.sagaPersistence,
-  },
-  unitOfWork: () => adapter.unitOfWorkFactory,
 });
 ```
+
+The adapter auto-infers the dialect from the Drizzle `db` instance and selects the correct pre-built schemas (PostgreSQL, MySQL, or SQLite). No schema imports or table config needed.
 
 ### How Drizzle Transactions Work
 
@@ -149,67 +134,51 @@ The persistence classes and `UnitOfWork` share a transaction store. When a trans
 
 ### Advanced Configuration
 
-The `createDrizzleAdapter` config supports optional stores and per-aggregate state tables. Only include what you need -- the return type narrows accordingly:
+For custom table overrides, pass a config object as the second argument:
 
 ```ts
-import { createDrizzleAdapter } from "@noddde/drizzle";
-import { events, sagaStates, snapshots, outbox } from "@noddde/drizzle/pg";
-import { orders, bankAccounts } from "./schema"; // your own Drizzle tables
+import { DrizzleAdapter } from "@noddde/drizzle";
+import { myEvents, mySagas } from "./schema"; // your own Drizzle tables
 
 const db = drizzle(pool);
-
-const adapter = createDrizzleAdapter(db, {
-  eventStore: events, // required
-  sagaStore: sagaStates, // required
-  stateStore: aggregateStates, // optional — shared state table
-  snapshotStore: snapshots, // optional
-  outboxStore: outbox, // optional
-  aggregateStates: {
-    // optional — per-aggregate tables
-    Order: {
-      table: orders,
-      columns: {
-        aggregateId: orders.id,
-        state: orders.data,
-        version: orders.version,
-      },
-    },
-    BankAccount: { table: bankAccounts }, // convention-based
-  },
+const adapter = new DrizzleAdapter(db, {
+  tables: { eventStore: myEvents, sagaStore: mySagas },
 });
 ```
 
-The result type reflects exactly what was configured:
+Custom tables override the auto-resolved ones for that specific store. Tables you don't override use the built-in schemas for the detected dialect.
+
+All stores are always present on the adapter:
 
 ```ts
-adapter.eventSourcedPersistence; // always present
-adapter.stateStoredPersistence; // present because stateStore was provided
-adapter.sagaPersistence; // always present
-adapter.unitOfWorkFactory; // always present
-adapter.snapshotStore; // present because snapshotStore was provided
-adapter.outboxStore; // present because outboxStore was provided
-adapter.stateStoreFor("Order"); // present because aggregateStates was provided
-adapter.stateStoreFor("BankAccount"); // compiles — configured name
-adapter.stateStoreFor("Unknown"); // compile error — not in aggregateStates
+adapter.eventSourcedPersistence; // EventSourcedAggregatePersistence
+adapter.stateStoredPersistence; // StateStoredAggregatePersistence (shared table)
+adapter.sagaPersistence; // SagaPersistence
+adapter.unitOfWorkFactory; // UnitOfWorkFactory
+adapter.snapshotStore; // SnapshotStore
+adapter.outboxStore; // OutboxStore
+adapter.aggregateLocker; // AggregateLocker (pg/mysql only)
 ```
 
 All persistence instances share the same transaction store, ensuring UoW atomicity across shared and dedicated tables.
 
-> **Deprecated**: The `createDrizzlePersistence(db, schema)` factory still works and delegates to `createDrizzleAdapter` internally. Prefer `createDrizzleAdapter` for new code.
+> **Deprecated**: The `createDrizzleAdapter` and `createDrizzlePersistence` factory functions still work but delegate to `DrizzleAdapter` internally. Prefer `new DrizzleAdapter(db)` for new code.
 
 ### Per-Aggregate State Tables
 
 By default, all state-stored aggregates share a single `noddde_aggregate_states` table, discriminated by an `aggregate_name` column. For production workloads, you may want each aggregate to have its own dedicated table with a domain-specific schema.
 
-Use the `aggregateStates` config to map aggregates to their own tables:
+Use the `stateStored()` helper method to bind an aggregate to a dedicated Drizzle table:
 
 ```ts
-const adapter = createDrizzleAdapter(db, {
-  eventStore: events,
-  sagaStore: sagaStates,
-  aggregateStates: {
-    Order: { table: orders },
-    BankAccount: { table: bankAccounts },
+const adapter = new DrizzleAdapter(db);
+
+const domain = await wireDomain(definition, {
+  persistenceAdapter: adapter,
+  aggregates: {
+    Payment: { persistence: "event-sourced" },
+    Order: { persistence: adapter.stateStored(orders) },
+    BankAccount: { persistence: adapter.stateStored(bankAccounts) },
   },
 });
 ```
@@ -218,42 +187,19 @@ const adapter = createDrizzleAdapter(db, {
 
 1. **Convention-based** (default): The adapter scans the Drizzle table definition for columns named `aggregate_id`, `state`, and `version`. If your table follows this naming, no explicit mapping is needed.
 
-2. **Explicit mapping**: For tables with custom column names, provide a `columns` object mapping logical names to Drizzle column references:
+2. **Explicit mapping**: For tables with custom column names, provide a `columns` object:
 
 ```ts
-const adapter = createDrizzleAdapter(db, {
-  eventStore: events,
-  sagaStore: sagaStates,
-  aggregateStates: {
-    Order: {
-      table: orders,
-      columns: {
-        aggregateId: orders.orderId,
-        state: orders.orderData,
-        version: orders.rev,
-      },
-    },
-  },
+adapter.stateStored(orders, {
+  aggregateId: orders.orderId,
+  state: orders.orderData,
+  version: orders.rev,
 });
 ```
 
-If convention-based resolution fails (columns not found), `createDrizzleAdapter` throws with a clear error listing the available columns in the table.
+If convention-based resolution fails (columns not found), the adapter throws with a clear error listing the available columns in the table.
 
-**Wiring with `wireDomain`**: Use per-aggregate mode to assign each aggregate its own persistence:
-
-```ts
-const domain = await wireDomain(definition, {
-  aggregates: {
-    Payment: { persistence: () => adapter.eventSourcedPersistence },
-    Order: { persistence: () => adapter.stateStoreFor("Order") },
-    BankAccount: { persistence: () => adapter.stateStoreFor("BankAccount") },
-  },
-  sagas: { persistence: () => adapter.sagaPersistence },
-  unitOfWork: () => adapter.unitOfWorkFactory,
-});
-```
-
-> **Important**: When using per-aggregate wiring, `wireDomain` requires **every** aggregate in the domain definition to have an explicit `persistence` factory. There are no silent in-memory defaults -- if an aggregate is missing, `wireDomain` throws at startup listing the unconfigured aggregates. This ensures 1 aggregate = 1 explicit persistence configuration.
+The `stateStored()` method returns a `StateStoredAggregatePersistence` that can be passed directly to the `persistence` field in per-aggregate wiring. It shares the same transaction store as all other stores on the adapter, ensuring UoW atomicity across shared and dedicated tables.
 
 ### Migration Generation
 
@@ -355,14 +301,12 @@ Then run `prisma generate` and your preferred migration command.
 
 ```ts
 import { PrismaClient } from "@prisma/client";
-import { createPrismaAdapter } from "@noddde/prisma";
+import { PrismaAdapter } from "@noddde/prisma";
 import { everyNEvents } from "@noddde/core";
 import { defineDomain, wireDomain } from "@noddde/engine";
 
 const prisma = new PrismaClient();
-const adapter = createPrismaAdapter(prisma, {
-  snapshotStore: true,
-});
+const adapter = new PrismaAdapter(prisma);
 
 const bankingDomain = defineDomain({
   writeModel: { aggregates: { BankAccount } },
@@ -370,21 +314,17 @@ const bankingDomain = defineDomain({
 });
 
 const domain = await wireDomain(bankingDomain, {
+  persistenceAdapter: adapter,
   aggregates: {
-    persistence: () => adapter.eventSourcedPersistence,
-    snapshots: {
-      store: () => adapter.snapshotStore,
-      strategy: everyNEvents(100),
+    BankAccount: {
+      persistence: "event-sourced",
+      snapshots: { strategy: everyNEvents(100) },
     },
   },
-  sagas: {
-    persistence: () => adapter.sagaPersistence,
-  },
-  unitOfWork: () => adapter.unitOfWorkFactory,
 });
 ```
 
-Unlike Drizzle, the Prisma adapter always creates the event store, state store, and saga store (using built-in Prisma models). The config only controls optional stores (`snapshotStore`, `outboxStore`) and per-aggregate tables. Call `createPrismaAdapter(prisma)` with no config for the minimal setup.
+The Prisma adapter uses built-in Prisma models (NodddeEvent, NodddeAggregateState, etc.) for all stores. No configuration needed beyond the PrismaClient instance.
 
 ### How Prisma Transactions Work
 
@@ -392,44 +332,46 @@ The Prisma adapter uses interactive transactions via `prisma.$transaction(async 
 
 ### Advanced Configuration
 
-For per-aggregate state tables or selective store setup, pass a config with `aggregateStates`:
+For per-aggregate state tables, use the `stateStored()` helper method:
 
 ```ts
-import { createPrismaAdapter } from "@noddde/prisma";
+const adapter = new PrismaAdapter(prisma);
 
-const prisma = new PrismaClient();
-
-const adapter = createPrismaAdapter(prisma, {
-  snapshotStore: true,
-  outboxStore: true,
-  aggregateStates: {
+const domain = await wireDomain(definition, {
+  persistenceAdapter: adapter,
+  aggregates: {
     Order: {
-      model: "order", // Prisma model delegate name (prisma.order)
-      columns: {
+      persistence: adapter.stateStored("order", {
         aggregateId: "orderId",
         state: "orderData",
         version: "rev",
-      },
+      }),
     },
   },
 });
 ```
 
-The result type narrows based on config:
+Since Prisma uses generated model delegates (e.g., `prisma.order`), the first argument to `stateStored()` must match the camelCase delegate name on your PrismaClient. The adapter validates that the model exists at creation time.
+
+For pessimistic concurrency, pass the `dialect` option since PrismaClient does not expose the database provider at runtime:
 
 ```ts
-adapter.eventSourcedPersistence; // always present
-adapter.stateStoredPersistence; // always present (Prisma built-in model)
-adapter.sagaPersistence; // always present
-adapter.unitOfWorkFactory; // always present
-adapter.snapshotStore; // present because snapshotStore: true
-adapter.outboxStore; // present because outboxStore: true
-adapter.stateStoreFor("Order"); // present because aggregateStates was provided
+const adapter = new PrismaAdapter(prisma, { dialect: "postgresql" });
 ```
 
-Since Prisma uses generated model delegates (e.g., `prisma.order`), the `model` field in the config must match the camelCase delegate name on your PrismaClient. The adapter validates that the model exists at creation time.
+All stores are always present on the adapter:
 
-> **Deprecated**: The `createPrismaPersistence(prisma)` factory still works and delegates to `createPrismaAdapter` internally. Prefer `createPrismaAdapter` for new code.
+```ts
+adapter.eventSourcedPersistence; // EventSourcedAggregatePersistence
+adapter.stateStoredPersistence; // StateStoredAggregatePersistence
+adapter.sagaPersistence; // SagaPersistence
+adapter.unitOfWorkFactory; // UnitOfWorkFactory
+adapter.snapshotStore; // SnapshotStore
+adapter.outboxStore; // OutboxStore
+adapter.aggregateLocker; // AggregateLocker (requires dialect option)
+```
+
+> **Deprecated**: The `createPrismaAdapter` and `createPrismaPersistence` factory functions still work but delegate to `PrismaAdapter` internally. Prefer `new PrismaAdapter(prisma)` for new code.
 
 ### Prisma Migration Generation
 
@@ -494,13 +436,11 @@ For production, use TypeORM migrations instead of `synchronize: true`.
 ### Configuration
 
 ```ts
-import { createTypeORMAdapter } from "@noddde/typeorm";
+import { TypeORMAdapter } from "@noddde/typeorm";
 import { everyNEvents } from "@noddde/core";
 import { defineDomain, wireDomain } from "@noddde/engine";
 
-const adapter = createTypeORMAdapter(dataSource, {
-  snapshotStore: true,
-});
+const adapter = new TypeORMAdapter(dataSource);
 
 const bankingDomain = defineDomain({
   writeModel: { aggregates: { BankAccount } },
@@ -508,21 +448,17 @@ const bankingDomain = defineDomain({
 });
 
 const domain = await wireDomain(bankingDomain, {
+  persistenceAdapter: adapter,
   aggregates: {
-    persistence: () => adapter.eventSourcedPersistence,
-    snapshots: {
-      store: () => adapter.snapshotStore,
-      strategy: everyNEvents(100),
+    BankAccount: {
+      persistence: "event-sourced",
+      snapshots: { strategy: everyNEvents(100) },
     },
   },
-  sagas: {
-    persistence: () => adapter.sagaPersistence,
-  },
-  unitOfWork: () => adapter.unitOfWorkFactory,
 });
 ```
 
-Like Prisma, the TypeORM adapter always creates the event store, state store, and saga store (using built-in entity classes). The config only controls optional stores (`snapshotStore`, `outboxStore`) and per-aggregate tables. Call `createTypeORMAdapter(dataSource)` with no config for the minimal setup.
+The TypeORM adapter uses built-in entity classes for all stores. The database type is auto-detected from `dataSource.options.type` for advisory locking support.
 
 ### How TypeORM Transactions Work
 
@@ -530,41 +466,41 @@ The TypeORM adapter uses `dataSource.manager.transaction()` to wrap operations. 
 
 ### Advanced Configuration
 
-For per-aggregate state tables or selective store setup, pass a config with `aggregateStates`:
+For per-aggregate state tables, use the `stateStored()` helper method with a TypeORM entity class:
 
 ```ts
-import { createTypeORMAdapter } from "@noddde/typeorm";
+import { TypeORMAdapter } from "@noddde/typeorm";
 import { OrderEntity } from "./entities"; // your own TypeORM entity
 
-const adapter = createTypeORMAdapter(dataSource, {
-  snapshotStore: true,
-  outboxStore: true,
-  aggregateStates: {
+const adapter = new TypeORMAdapter(dataSource);
+
+const domain = await wireDomain(definition, {
+  persistenceAdapter: adapter,
+  aggregates: {
     Order: {
-      entity: OrderEntity,
-      columns: {
-        aggregateId: "aggregateId", // entity property names
-        state: "state",
-        version: "version",
-      },
+      persistence: adapter.stateStored(OrderEntity, {
+        aggregateId: "orderId",
+        state: "orderData",
+        version: "rev",
+      }),
     },
   },
 });
 ```
 
-The result type narrows based on config:
+All stores are always present on the adapter:
 
 ```ts
-adapter.eventSourcedPersistence; // always present
-adapter.stateStoredPersistence; // always present (TypeORM built-in entity)
-adapter.sagaPersistence; // always present
-adapter.unitOfWorkFactory; // always present
-adapter.snapshotStore; // present because snapshotStore: true
-adapter.outboxStore; // present because outboxStore: true
-adapter.stateStoreFor("Order"); // present because aggregateStates was provided
+adapter.eventSourcedPersistence; // EventSourcedAggregatePersistence
+adapter.stateStoredPersistence; // StateStoredAggregatePersistence
+adapter.sagaPersistence; // SagaPersistence
+adapter.unitOfWorkFactory; // UnitOfWorkFactory
+adapter.snapshotStore; // SnapshotStore
+adapter.outboxStore; // OutboxStore
+adapter.aggregateLocker; // AggregateLocker (pg/mysql/mariadb/mssql)
 ```
 
-> **Deprecated**: The `createTypeORMPersistence(dataSource)` factory still works and delegates to `createTypeORMAdapter` internally. Prefer `createTypeORMAdapter` for new code.
+> **Deprecated**: The `createTypeORMAdapter` and `createTypeORMPersistence` factory functions still work but delegate to `TypeORMAdapter` internally. Prefer `new TypeORMAdapter(dataSource)` for new code.
 
 ### TypeORM Migration Generation
 

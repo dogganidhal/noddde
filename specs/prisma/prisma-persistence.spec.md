@@ -4,9 +4,10 @@ module: prisma/persistence
 source_file: packages/adapters/prisma/src/index.ts
 status: implemented
 exports:
-  - createPrismaAdapter
-  - PrismaAdapterConfig
-  - PrismaAdapterResult
+  - PrismaAdapter
+  - createPrismaAdapter (deprecated)
+  - PrismaAdapterConfig (deprecated)
+  - PrismaAdapterResult (deprecated)
   - PrismaAggregateStateTableConfig
   - PrismaStateTableColumnMap
   - createPrismaPersistence
@@ -27,6 +28,7 @@ depends_on:
   - core/persistence/unit-of-work
   - core/persistence/snapshot
   - core/persistence/outbox
+  - core/persistence/adapter
 docs:
   - running/orm-adapters.mdx
 ---
@@ -1044,4 +1046,145 @@ it("should save outbox entries within a UoW transaction", async () => {
   const events = await infra.eventSourcedPersistence.load("Order", "o-1");
   expect(events).toHaveLength(1);
 });
+```
+
+---
+
+## PrismaAdapter (Class-Based API)
+
+> Class-based adapter that implements `PersistenceAdapter` for use with `wireDomain({ persistenceAdapter })`. Replaces the lower-level `createPrismaAdapter` builder with a simpler constructor.
+
+### Type Contract
+
+````ts
+import type {
+  PersistenceAdapter,
+  EventSourcedAggregatePersistence,
+  StateStoredAggregatePersistence,
+  SagaPersistence,
+  UnitOfWorkFactory,
+  SnapshotStore,
+  OutboxStore,
+  AggregateLocker,
+} from "@noddde/core";
+
+/**
+ * Prisma-backed persistence adapter.
+ *
+ * Uses built-in Prisma models (NodddeEvent, NodddeAggregateState, etc.)
+ * for all stores. No configuration needed beyond the PrismaClient instance.
+ *
+ * @example
+ * ```ts
+ * import { PrismaAdapter } from "@noddde/prisma";
+ *
+ * const adapter = new PrismaAdapter(prisma);
+ * const domain = await wireDomain(definition, { persistenceAdapter: adapter });
+ * ```
+ */
+export class PrismaAdapter implements PersistenceAdapter {
+  constructor(prisma: any);
+
+  /** Always provided. */
+  unitOfWorkFactory: UnitOfWorkFactory;
+  /** Always provided. */
+  eventSourcedPersistence: EventSourcedAggregatePersistence;
+  /** Always provided. */
+  stateStoredPersistence: StateStoredAggregatePersistence;
+  /** Always provided. */
+  sagaPersistence: SagaPersistence;
+  /** Always provided. */
+  snapshotStore: SnapshotStore;
+  /** Always provided. */
+  outboxStore: OutboxStore;
+  /** Advisory locker. Available for PostgreSQL, MySQL, MariaDB. */
+  aggregateLocker?: AggregateLocker;
+
+  /**
+   * Returns a StateStoredAggregatePersistence bound to a dedicated Prisma model.
+   *
+   * @param model - The Prisma model name (e.g., "order").
+   * @param columns - Optional column mapping overrides.
+   */
+  stateStored(
+    model: string,
+    columns?: Partial<PrismaStateTableColumnMap>,
+  ): StateStoredAggregatePersistence;
+
+  /**
+   * Calls `prisma.$disconnect()` to close the connection pool.
+   */
+  close(): Promise<void>;
+}
+````
+
+### Behavioral Requirements (PrismaAdapter)
+
+29. The constructor accepts a PrismaClient instance and creates all persistence stores using built-in Prisma models.
+30. All persistence stores are created eagerly in the constructor.
+31. All persistence instances share a single `PrismaTransactionStore`, ensuring UoW atomicity.
+32. `aggregateLocker` is provided for databases that support advisory locks (PostgreSQL, MySQL, MariaDB). It is `undefined` for SQLite.
+33. `stateStored(model, columns?)` returns a `StateStoredAggregatePersistence` bound to the given Prisma model. The returned persistence shares the same transaction store.
+34. `close()` calls `prisma.$disconnect()` to clean up the connection pool.
+35. `isPersistenceAdapter(new PrismaAdapter(prisma))` returns `true`.
+36. The existing `createPrismaAdapter` function is marked `@deprecated` and delegates to `PrismaAdapter` internally.
+
+### Deprecation
+
+`createPrismaAdapter` is deprecated in favor of `PrismaAdapter`. It continues to work for backward compatibility.
+
+```ts
+/** @deprecated Use `new PrismaAdapter(prisma)` instead. */
+export function createPrismaAdapter(
+  prisma: any,
+  config?: PrismaAdapterConfig,
+): PrismaAdapterResult;
+```
+
+### Test Scenarios (PrismaAdapter)
+
+### PrismaAdapter implements PersistenceAdapter
+
+```ts
+import { isPersistenceAdapter } from "@noddde/core";
+import { PrismaAdapter } from "@noddde/prisma";
+
+const adapter = new PrismaAdapter(prisma);
+expect(isPersistenceAdapter(adapter)).toBe(true);
+```
+
+### PrismaAdapter provides all stores
+
+```ts
+const adapter = new PrismaAdapter(prisma);
+
+expect(adapter.unitOfWorkFactory).toBeDefined();
+expect(adapter.eventSourcedPersistence).toBeDefined();
+expect(adapter.stateStoredPersistence).toBeDefined();
+expect(adapter.sagaPersistence).toBeDefined();
+expect(adapter.snapshotStore).toBeDefined();
+expect(adapter.outboxStore).toBeDefined();
+```
+
+### PrismaAdapter.stateStored returns dedicated persistence
+
+```ts
+const adapter = new PrismaAdapter(prisma);
+const dedicated = adapter.stateStored("order");
+
+expect(dedicated).toBeDefined();
+expect(dedicated.save).toBeTypeOf("function");
+expect(dedicated.load).toBeTypeOf("function");
+```
+
+### PrismaAdapter close disconnects client
+
+```ts
+const disconnectSpy = vi
+  .spyOn(prisma, "$disconnect")
+  .mockResolvedValue(undefined);
+const adapter = new PrismaAdapter(prisma);
+await adapter.close();
+
+expect(disconnectSpy).toHaveBeenCalledOnce();
 ```

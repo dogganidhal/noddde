@@ -609,7 +609,10 @@ The domain configuration uses `defineDomain` to capture the pure domain structur
 
 ```ts
 // src/main.ts
+import { DrizzleAdapter } from "@noddde/drizzle";
 import { defineDomain, wireDomain } from "@noddde/engine";
+
+const adapter = new DrizzleAdapter(db);
 
 // Step 1: Define the domain structure (pure, sync)
 const hotelDomain = defineDomain({
@@ -640,6 +643,8 @@ const hotelDomain = defineDomain({
 
 // Step 2: Wire with infrastructure (async)
 const domain = await wireDomain(hotelDomain, {
+  persistenceAdapter: adapter,
+
   infrastructure: (): HotelInfrastructure => ({
     clock: new SystemClock(),
     paymentGateway: new FakePaymentGateway(),
@@ -647,28 +652,18 @@ const domain = await wireDomain(hotelDomain, {
     // ...emailService, smsService, guestHistoryViewStore, revenueViewStore
   }),
 
-  // Per-aggregate persistence: Room + Booking → event-sourced, Inventory → state-stored
+  // Per-aggregate persistence: Room + Booking → event-sourced, Inventory → state-stored (default)
   aggregates: {
     Room: {
-      persistence: () => drizzleInfra.eventSourcedPersistence,
+      persistence: "event-sourced",
       concurrency: { maxRetries: 3 },
-      snapshots: {
-        store: () => drizzleInfra.snapshotStore!,
-        strategy: everyNEvents(50),
-      },
+      snapshots: { strategy: everyNEvents(50) },
     },
     Booking: {
-      persistence: () => drizzleInfra.eventSourcedPersistence,
+      persistence: "event-sourced",
       concurrency: { maxRetries: 3 },
     },
-    Inventory: {
-      persistence: () => drizzleInfra.stateStoredPersistence,
-      concurrency: { maxRetries: 3 },
-    },
-  },
-
-  sagas: {
-    persistence: () => drizzleInfra.sagaPersistence,
+    Inventory: {},
   },
 
   buses: () => ({
@@ -677,13 +672,12 @@ const domain = await wireDomain(hotelDomain, {
     queryBus: new InMemoryQueryBus(),
   }),
 
-  unitOfWork: () => drizzleInfra.unitOfWorkFactory,
   idempotency: () => new InMemoryIdempotencyStore(),
   metadataProvider: () => requestMetadataStorage.getStore() ?? {},
 });
 ```
 
-Per-aggregate wiring allows each aggregate to have its own persistence strategy, concurrency settings, and snapshot configuration. Snapshots are only configured for `Room` since it is the longest-lived event-sourced aggregate.
+The `persistenceAdapter` provides all persistence stores. Per-aggregate wiring uses string shorthands (`"event-sourced"`) instead of factory functions. `Inventory` defaults to state-stored from the adapter. Saga persistence, unit-of-work, and snapshot store are all inferred from the adapter automatically. Snapshots are only configured for `Room` since it is the longest-lived event-sourced aggregate.
 
 ## Unit of Work
 

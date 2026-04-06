@@ -1,3 +1,4 @@
+export { PrismaAdapter } from "./prisma-adapter";
 export {
   PrismaEventSourcedAggregatePersistence,
   PrismaStateStoredAggregatePersistence,

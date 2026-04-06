@@ -13,16 +13,7 @@
  */
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
-import {
-  createDrizzleAdapter,
-  generateDrizzleMigration,
-} from "@noddde/drizzle";
-import {
-  events,
-  aggregateStates,
-  sagaStates,
-  snapshots,
-} from "@noddde/drizzle/pg";
+import { DrizzleAdapter, generateDrizzleMigration } from "@noddde/drizzle";
 import {
   defineDomain,
   wireDomain,
@@ -90,12 +81,7 @@ async function main() {
   `);
 
   const db = drizzle(pool);
-  const drizzleInfra = createDrizzleAdapter(db, {
-    eventStore: events,
-    stateStore: aggregateStates,
-    sagaStore: sagaStates,
-    snapshotStore: snapshots,
-  });
+  const adapter = new DrizzleAdapter(db);
 
   // -- Define the domain structure (pure, sync) --
   const hotelDomain = defineDomain({
@@ -128,6 +114,9 @@ async function main() {
 
   // -- Wire with infrastructure (async) --
   const domain = await wireDomain(hotelDomain, {
+    // Persistence adapter — handles event store, state store, sagas, snapshots, UoW
+    persistenceAdapter: adapter,
+
     // Custom infrastructure services (what handlers receive)
     infrastructure: () => ({
       clock: new SystemClock(),
@@ -139,22 +128,19 @@ async function main() {
       revenueViewStore: new InMemoryViewStore<RevenueView>(),
     }),
 
-    // Per-aggregate persistence, concurrency, and snapshots
+    // Per-aggregate persistence and concurrency
     aggregates: {
       Room: {
-        persistence: () => drizzleInfra.eventSourcedPersistence,
+        persistence: "event-sourced",
         concurrency: { maxRetries: 3 },
-        snapshots: {
-          store: () => drizzleInfra.snapshotStore,
-          strategy: everyNEvents(50),
-        },
+        snapshots: { strategy: everyNEvents(50) },
       },
       Booking: {
-        persistence: () => drizzleInfra.eventSourcedPersistence,
+        persistence: "event-sourced",
         concurrency: { maxRetries: 3 },
       },
       Inventory: {
-        persistence: () => drizzleInfra.stateStoredPersistence,
+        // Defaults to state-stored from adapter
       },
     },
 
@@ -171,20 +157,12 @@ async function main() {
       },
     },
 
-    // Saga persistence via Drizzle
-    sagas: {
-      persistence: () => drizzleInfra.sagaPersistence,
-    },
-
     // CQRS buses
     buses: () => ({
       commandBus: new InMemoryCommandBus(),
       eventBus: new EventEmitterEventBus(),
       queryBus: new InMemoryQueryBus(),
     }),
-
-    // Unit of work for atomic operations
-    unitOfWork: () => drizzleInfra.unitOfWorkFactory,
 
     // Idempotency for payment commands
     idempotency: () => new InMemoryIdempotencyStore(),

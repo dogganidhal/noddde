@@ -1,3 +1,4 @@
+export { TypeORMAdapter } from "./typeorm-adapter";
 export {
   NodddeEventEntity,
   NodddeAggregateStateEntity,
