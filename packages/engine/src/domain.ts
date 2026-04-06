@@ -611,8 +611,13 @@ export class Domain<
         // Ensure every aggregate has persistence resolved
         const missing = [...aggregateNames].filter((n) => !resolved.has(n));
         if (missing.length > 0 && resolved.size < aggregateNames.size) {
-          // Some aggregates have persistence, some don't — inconsistent
-          // For the missing ones, use in-memory fallback
+          if (!adapter) {
+            // No adapter — strict mode: explicit per-aggregate wiring must cover all aggregates
+            throw new Error(
+              `Per-aggregate persistence is missing entries for: ${missing.join(", ")}`,
+            );
+          }
+          // Adapter present but some aggregates didn't resolve — use in-memory fallback
           domainLog.warn(
             `Per-aggregate persistence is missing entries for: ${missing.join(", ")}. ` +
               `Using in-memory persistence for those aggregates.`,
