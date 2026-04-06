@@ -116,9 +116,14 @@ class Instrumentation {
 15. **Saga event handling span** — When the `SagaExecutor` processes an event, it wraps the full saga lifecycle (load → handle → persist → dispatch commands) in `instrumentation.withExtractedContext(event.metadata, ...)` followed by `instrumentation.withSpan("noddde.saga.handle", { "noddde.saga.name", "noddde.event.name" }, ...)`.
 16. **Saga commands inherit trace** — Commands dispatched by the saga reaction execute inside the saga's restored trace context, so their spans are children of the saga span, which is itself linked to the original command's trace.
 
+### Pipeline Integration — Unit of Work
+
+17. **UoW commit span (command)** — When `CommandLifecycleExecutor` commits an implicit UoW, it wraps the `uow.commit()` call in a span named `noddde.uow.commit` with attributes: `noddde.aggregate.name`, `noddde.aggregate.id`. This separates business logic (decide) latency from database (commit) latency.
+18. **UoW commit span (saga)** — When `SagaExecutor` commits the saga UoW, it wraps the `uow.commit()` call in a span named `noddde.uow.commit` with attribute `noddde.saga.name`.
+
 ### Pipeline Integration — Query Model
 
-17. **Query dispatch span** — `Domain.dispatchQuery()` wraps the query execution in a span named `noddde.query.dispatch` with attribute `noddde.query.name`.
+19. **Query dispatch span** — `Domain.dispatchQuery()` wraps the query execution in a span named `noddde.query.dispatch` with attribute `noddde.query.name`.
 
 ## Invariants
 
@@ -140,7 +145,7 @@ class Instrumentation {
 
 - **EventMetadata** — The `traceparent` and `tracestate` fields on `EventMetadata` carry trace context through the event store, enabling cross-process trace propagation.
 - **MetadataEnricher** — Modified to accept an optional `Instrumentation` and call `injectTraceContext()` during enrichment.
-- **CommandLifecycleExecutor** — Trace context flows implicitly via OTel's context propagation (the span started by `Domain.dispatchCommand` is the parent for all downstream operations).
+- **CommandLifecycleExecutor** — Modified to accept an optional `Instrumentation` and wrap implicit `uow.commit()` in a `noddde.uow.commit` span. Trace context flows implicitly via OTel's context propagation (the span started by `Domain.dispatchCommand` is the parent for all downstream operations).
 - **SagaExecutor** — Modified to accept an optional `Instrumentation` for extracting context from events and wrapping saga lifecycle in spans.
 - **Domain** — Calls `detectOTel()` during `init()`, constructs `Instrumentation`, passes to executors. Wraps `dispatchCommand` and `dispatchQuery` in spans.
 - **Engine package.json** — Adds `@opentelemetry/api` as optional peer dependency.

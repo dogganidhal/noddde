@@ -326,6 +326,48 @@ describe("Full pipeline tracing: command → projection", () => {
   });
 });
 
+describe("Full pipeline tracing: UoW commit span", () => {
+  it("should create a noddde.uow.commit span as child of command dispatch", async () => {
+    const definition = defineDomain({
+      writeModel: { aggregates: { Counter } },
+      readModel: {
+        projections: { CounterView },
+      },
+    });
+
+    const domain = await wireDomain(definition, {
+      projections: {
+        CounterView: { viewStore: () => new InMemoryViewStore() },
+      },
+    });
+
+    await domain.dispatchCommand({
+      name: "Increment",
+      payload: { counterId: "c1" },
+      targetAggregateId: "c1",
+    });
+
+    const spans = exporter.getFinishedSpans();
+
+    const commandSpan = spans.find((s) => s.name === "noddde.command.dispatch");
+    const uowSpan = spans.find((s) => s.name === "noddde.uow.commit");
+
+    expect(commandSpan).toBeDefined();
+    expect(uowSpan).toBeDefined();
+
+    // UoW span shares the same traceId as the command span
+    expect(uowSpan!.spanContext().traceId).toBe(
+      commandSpan!.spanContext().traceId,
+    );
+
+    // UoW span has aggregate attributes
+    expect(uowSpan!.attributes["noddde.aggregate.name"]).toBe("Counter");
+    expect(uowSpan!.attributes["noddde.aggregate.id"]).toBe("c1");
+
+    await domain.shutdown();
+  });
+});
+
 // ─── Full pipeline: command → saga → downstream command ─────────────
 
 type OrderEvents = DefineEvents<{
@@ -452,6 +494,21 @@ describe("Full pipeline tracing: command → saga → downstream command", () =>
     // Saga span attributes
     expect(sagaSpan!.attributes["noddde.saga.name"]).toBe("OrderSaga");
     expect(sagaSpan!.attributes["noddde.event.name"]).toBe("OrderPlaced");
+
+    // UoW commit spans: one for the initial PlaceOrder command, one for the saga
+    const uowSpans = spans.filter((s) => s.name === "noddde.uow.commit");
+    expect(uowSpans.length).toBeGreaterThanOrEqual(2);
+
+    // All UoW spans share the same traceId
+    for (const uowSpan of uowSpans) {
+      expect(uowSpan.spanContext().traceId).toBe(traceId);
+    }
+
+    // Saga UoW span has saga name attribute
+    const sagaUowSpan = uowSpans.find(
+      (s) => s.attributes["noddde.saga.name"] === "OrderSaga",
+    );
+    expect(sagaUowSpan).toBeDefined();
 
     await domain.shutdown();
   });

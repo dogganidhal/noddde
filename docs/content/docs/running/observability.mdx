@@ -93,6 +93,17 @@ When an event triggers a saga, the engine restores the trace context and creates
 
 Commands dispatched by the saga reaction are children of the saga span, which is itself linked to the original command's trace.
 
+### Unit of Work Commit
+
+Each implicit UoW commit (both in command handling and saga handling) gets its own span. This lets you separate business logic latency from database latency at a glance:
+
+| Attribute               | Value                                    |
+| ----------------------- | ---------------------------------------- |
+| **Span name**           | `noddde.uow.commit`                      |
+| `noddde.aggregate.name` | The aggregate type (command path)        |
+| `noddde.aggregate.id`   | The aggregate instance ID (command path) |
+| `noddde.saga.name`      | The saga name (saga path)                |
+
 ### Query Dispatch
 
 Every call to `domain.dispatchQuery()` creates a span:

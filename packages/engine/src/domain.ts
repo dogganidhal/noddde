@@ -788,6 +788,7 @@ export class Domain<
       onEventsProduced,
       onEventsDispatched,
       logger.child("command"),
+      this._instrumentation,
     );
 
     if (sagaPersistence) {

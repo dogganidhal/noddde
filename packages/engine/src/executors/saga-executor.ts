@@ -147,7 +147,14 @@ export class SagaExecutor {
               }
 
               // Step 9: Commit saga state + all aggregate changes atomically
-              const events = await uow.commit();
+              const commitFn = () => uow.commit();
+              const events = this.instrumentation
+                ? await this.instrumentation.withSpan(
+                    "noddde.uow.commit",
+                    { "noddde.saga.name": sagaName },
+                    commitFn,
+                  )
+                : await commitFn();
 
               // Step 10: Publish all deferred events
               for (const deferredEvent of events) {
