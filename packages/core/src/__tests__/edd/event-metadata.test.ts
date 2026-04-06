@@ -53,6 +53,29 @@ describe("EventMetadata optional fields", () => {
   });
 });
 
+describe("EventMetadata trace context fields", () => {
+  it("should accept traceparent and tracestate as optional string fields", () => {
+    const metadata: EventMetadata = {
+      eventId: "0190a6e0-0000-7000-8000-000000000001",
+      timestamp: "2024-01-01T00:00:00.000Z",
+      correlationId: "corr-1",
+      causationId: "cmd-1",
+      traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+      tracestate: "congo=t61rcWkgMzE",
+    };
+    expectTypeOf(metadata).toMatchTypeOf<EventMetadata>();
+  });
+
+  it("should have optional string types for trace context fields", () => {
+    expectTypeOf<EventMetadata["traceparent"]>().toEqualTypeOf<
+      string | undefined
+    >();
+    expectTypeOf<EventMetadata["tracestate"]>().toEqualTypeOf<
+      string | undefined
+    >();
+  });
+});
+
 describe("EventMetadata required fields", () => {
   it("should not allow omitting eventId", () => {
     expectTypeOf<{

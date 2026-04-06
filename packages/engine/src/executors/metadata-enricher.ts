@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { Event, ID } from "@noddde/core";
 import { uuidv7 } from "../uuid";
 import type { MetadataContext, MetadataProvider } from "../domain";
+import type { Instrumentation } from "../tracing";
 
 /**
  * Enriches raw events produced by command handlers with metadata
@@ -20,6 +21,7 @@ export class MetadataEnricher {
   constructor(
     private readonly metadataStorage: AsyncLocalStorage<MetadataContext>,
     private readonly metadataProvider?: MetadataProvider,
+    private readonly instrumentation?: Instrumentation,
   ) {}
 
   /**
@@ -50,6 +52,9 @@ export class MetadataEnricher {
     const correlationId = mergedCtx.correlationId ?? uuidv7();
     const causationId = mergedCtx.causationId ?? causationFallback;
 
+    // Inject W3C Trace Context from active OTel span (no-op when OTel is absent)
+    const traceCtx = this.instrumentation?.injectTraceContext() ?? {};
+
     return events.map((event, index) => ({
       ...event,
       metadata: {
@@ -62,6 +67,7 @@ export class MetadataEnricher {
         aggregateName,
         aggregateId,
         sequenceNumber: version + index + 1,
+        ...traceCtx,
       },
     }));
   }

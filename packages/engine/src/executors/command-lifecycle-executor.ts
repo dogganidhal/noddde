@@ -23,6 +23,7 @@ import { upcastEvents, currentEventVersion } from "@noddde/core";
 import type { AggregatePersistenceResolver } from "../aggregate-persistence-resolver";
 import type { ConcurrencyStrategy } from "../concurrency-strategy";
 import type { MetadataEnricher } from "./metadata-enricher";
+import type { Instrumentation } from "../tracing";
 
 /**
  * Executes the full aggregate command lifecycle: load state, execute
@@ -52,6 +53,7 @@ export class CommandLifecycleExecutor {
     ) => Promise<void>,
     private readonly onEventsDispatched?: (events: Event[]) => Promise<void>,
     private readonly logger?: Logger,
+    private readonly instrumentation?: Instrumentation,
   ) {}
 
   /**
@@ -125,7 +127,17 @@ export class CommandLifecycleExecutor {
           const uow = this.unitOfWorkFactory();
           try {
             await runLifecycle(uow);
-            return await uow.commit();
+            const commitFn = () => uow.commit();
+            return this.instrumentation
+              ? await this.instrumentation.withSpan(
+                  "noddde.uow.commit",
+                  {
+                    "noddde.aggregate.name": aggregateName,
+                    "noddde.aggregate.id": String(command.targetAggregateId),
+                  },
+                  commitFn,
+                )
+              : await commitFn();
           } catch (error) {
             try {
               await uow.rollback();

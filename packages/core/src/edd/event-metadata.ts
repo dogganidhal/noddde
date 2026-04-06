@@ -31,4 +31,15 @@ export interface EventMetadata {
   aggregateId?: ID;
   /** Position in the aggregate's event stream. */
   sequenceNumber?: number;
+  /**
+   * W3C Trace Context traceparent header. Injected by the engine when
+   * OpenTelemetry is detected at runtime. Enables distributed trace
+   * propagation through the event store.
+   */
+  traceparent?: string;
+  /**
+   * W3C Trace Context tracestate header. Carries vendor-specific trace
+   * information alongside {@link traceparent}.
+   */
+  tracestate?: string;
 }

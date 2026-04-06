@@ -39,6 +39,7 @@ import { isCloseable } from "@noddde/core";
 import { OutboxRelay } from "./outbox-relay";
 import type { OutboxRelayOptions } from "./outbox-relay";
 import { uuidv7 } from "./uuid";
+import { detectOTel, Instrumentation } from "./tracing";
 
 /**
  * Error thrown when a command or query is dispatched after
@@ -388,6 +389,7 @@ export class Domain<
   private _sagaExecutor?: SagaExecutor;
   private _outboxStore?: OutboxStore;
   private _outboxRelay?: OutboxRelay;
+  private _instrumentation!: Instrumentation;
   private _shuttingDown = false;
   private _shutdownPromise: Promise<void> | null = null;
   private _activeOperations = 0;
@@ -423,6 +425,15 @@ export class Domain<
     // Step 0: Resolve logger (before everything else, so all init steps can log)
     const logger = wiring.logger ?? new NodddeLogger();
     const domainLog = logger.child("domain");
+
+    // Step 0.5: Detect OpenTelemetry at runtime
+    const otelApi = await detectOTel();
+    this._instrumentation = new Instrumentation(otelApi);
+    if (otelApi) {
+      domainLog.info("OpenTelemetry detected. Tracing enabled.");
+    } else {
+      domainLog.debug("OpenTelemetry not detected. Tracing disabled.");
+    }
 
     // Step 1: Resolve custom infrastructure
     const customInfra = wiring.infrastructure
@@ -655,6 +666,7 @@ export class Domain<
     const metadataEnricher = new MetadataEnricher(
       this._metadataStorage,
       wiring.metadataProvider,
+      this._instrumentation,
     );
 
     // Step 5.9: Resolve view stores for projections
@@ -776,6 +788,7 @@ export class Domain<
       onEventsProduced,
       onEventsDispatched,
       logger.child("command"),
+      this._instrumentation,
     );
 
     if (sagaPersistence) {
@@ -787,6 +800,7 @@ export class Domain<
         this._metadataStorage,
         onEventsDispatched,
         logger.child("saga"),
+        this._instrumentation,
       );
     }
 
@@ -826,13 +840,28 @@ export class Domain<
       definition.writeModel.aggregates,
     )) {
       for (const commandName of Object.keys(aggregate.decide)) {
+        const aggName = aggregateName;
+        const agg = aggregate;
+        const instr = this._instrumentation;
         (commandBus as InMemoryCommandBus).register(
           commandName,
           async (command: Command) => {
-            await this._commandExecutor.execute(
-              aggregateName,
-              aggregate,
-              command as AggregateCommand,
+            await instr.withSpan(
+              "noddde.command.dispatch",
+              {
+                "noddde.command.name": commandName,
+                "noddde.aggregate.name": aggName,
+                "noddde.aggregate.id": String(
+                  (command as AggregateCommand).targetAggregateId,
+                ),
+              },
+              async () => {
+                await this._commandExecutor.execute(
+                  aggName,
+                  agg,
+                  command as AggregateCommand,
+                );
+              },
             );
           },
         );
@@ -908,12 +937,32 @@ export class Domain<
       for (const eventName of Object.keys(projection.on)) {
         const handler = (projection.on as any)[eventName];
         if (!handler?.id) continue;
+        const pName = projectionName;
+        const instr = this._instrumentation;
         this.subscribeToEvent(eventBus, eventName, async (event: Event) => {
-          const viewId = handler.id(event);
-          const currentView =
-            (await viewStoreInstance.load(viewId)) ?? projection.initialView;
-          const newView = await handler.reduce(event, currentView);
-          await viewStoreInstance.save(viewId, newView);
+          const runProjection = async (): Promise<void> => {
+            const viewId = handler.id(event);
+            const currentView =
+              (await viewStoreInstance.load(viewId)) ?? projection.initialView;
+            const newView = await handler.reduce(event, currentView);
+            await viewStoreInstance.save(viewId, newView);
+          };
+
+          const traceCarrier = {
+            traceparent: event.metadata?.traceparent,
+            tracestate: event.metadata?.tracestate,
+          };
+
+          await instr.withExtractedContext(traceCarrier, () =>
+            instr.withSpan(
+              "noddde.projection.handle",
+              {
+                "noddde.projection.name": pName,
+                "noddde.event.name": event.name,
+              },
+              runProjection,
+            ),
+          );
         });
       }
     }
@@ -1206,29 +1255,55 @@ export class Domain<
   > {
     this._acquireOperation();
     try {
-      // Route: find the aggregate that handles this command
-      for (const [aggregateName, aggregate] of Object.entries(
-        this.definition.writeModel.aggregates,
-      )) {
-        if (command.name in aggregate.decide) {
-          await this._commandExecutor.execute(
-            aggregateName,
-            aggregate,
-            command as AggregateCommand<any>,
-          );
-          return (command as AggregateCommand<any>).targetAggregateId as any;
+      const spanAttributes: Record<string, string | number | undefined> = {
+        "noddde.command.name": command.name,
+      };
+      if ("targetAggregateId" in command) {
+        const aggCmd = command as AggregateCommand<any>;
+        spanAttributes["noddde.aggregate.id"] = String(
+          aggCmd.targetAggregateId,
+        );
+        // Find aggregate name for the span
+        for (const [aggregateName, aggregate] of Object.entries(
+          this.definition.writeModel.aggregates,
+        )) {
+          if (command.name in aggregate.decide) {
+            spanAttributes["noddde.aggregate.name"] = aggregateName;
+            break;
+          }
         }
       }
 
-      // If no aggregate handles it, try the command bus (standalone handlers)
-      await this._infrastructure.commandBus.dispatch(command);
-      // Standalone commands return void; aggregate commands reaching here
-      // still return targetAggregateId for backward compatibility
-      return (
-        "targetAggregateId" in command
-          ? (command as AggregateCommand<any>).targetAggregateId
-          : undefined
-      ) as any;
+      return await this._instrumentation.withSpan(
+        "noddde.command.dispatch",
+        spanAttributes,
+        async () => {
+          // Route: find the aggregate that handles this command
+          for (const [aggregateName, aggregate] of Object.entries(
+            this.definition.writeModel.aggregates,
+          )) {
+            if (command.name in aggregate.decide) {
+              await this._commandExecutor.execute(
+                aggregateName,
+                aggregate,
+                command as AggregateCommand<any>,
+              );
+              return (command as AggregateCommand<any>)
+                .targetAggregateId as any;
+            }
+          }
+
+          // If no aggregate handles it, try the command bus (standalone handlers)
+          await this._infrastructure.commandBus.dispatch(command);
+          // Standalone commands return void; aggregate commands reaching here
+          // still return targetAggregateId for backward compatibility
+          return (
+            "targetAggregateId" in command
+              ? (command as AggregateCommand<any>).targetAggregateId
+              : undefined
+          ) as any;
+        },
+      );
     } finally {
       this._releaseOperation();
     }
@@ -1251,7 +1326,13 @@ export class Domain<
   > {
     this._acquireOperation();
     try {
-      return (await this._infrastructure.queryBus.dispatch(query)) as any;
+      return await this._instrumentation.withSpan(
+        "noddde.query.dispatch",
+        { "noddde.query.name": query.name },
+        async () => {
+          return (await this._infrastructure.queryBus.dispatch(query)) as any;
+        },
+      );
     } finally {
       this._releaseOperation();
     }

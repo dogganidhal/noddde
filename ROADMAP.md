@@ -43,7 +43,7 @@ _These items must be completed to guarantee state consistency and developer ergo
 
 _Features required for deploying noddde across multi-node, high-throughput microservice environments._
 
-- [ ] **Observability & OpenTelemetry (OTel)**
+- [x] **Observability & OpenTelemetry (OTel)**
   - Native OTel trace context propagation spanning the full asynchronous lifecycle: API -> Command Bus -> Aggregate -> Event Bus -> Saga -> Read Model.
 - [ ] **Distributed Event Bus Adapters**
   - Official adapters for Kafka, NATS, or RabbitMQ with consumer group support, ensuring events are routed safely across multiple instances.
