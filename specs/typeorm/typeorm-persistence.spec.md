@@ -4,9 +4,10 @@ module: typeorm/persistence
 source_file: packages/adapters/typeorm/src/index.ts
 status: implemented
 exports:
-  - createTypeORMAdapter
-  - TypeORMAdapterConfig
-  - TypeORMAdapterResult
+  - TypeORMAdapter
+  - createTypeORMAdapter (deprecated)
+  - TypeORMAdapterConfig (deprecated)
+  - TypeORMAdapterResult (deprecated)
   - TypeORMAggregateStateTableConfig
   - TypeORMStateTableColumnMap
   - createTypeORMPersistence (deprecated)
@@ -31,6 +32,7 @@ depends_on:
   - core/persistence/unit-of-work
   - core/persistence/snapshot
   - core/persistence/outbox
+  - core/persistence/adapter
 docs:
   - running/orm-adapters.mdx
 ---
@@ -1156,4 +1158,143 @@ it("should save outbox entries within a UoW transaction", async () => {
   const events = await infra.eventSourcedPersistence.load("Order", "o-1");
   expect(events).toHaveLength(1);
 });
+```
+
+---
+
+## TypeORMAdapter (Class-Based API)
+
+> Class-based adapter that implements `PersistenceAdapter` for use with `wireDomain({ persistenceAdapter })`. Replaces the lower-level `createTypeORMAdapter` builder with a simpler constructor.
+
+### Type Contract
+
+````ts
+import type {
+  PersistenceAdapter,
+  EventSourcedAggregatePersistence,
+  StateStoredAggregatePersistence,
+  SagaPersistence,
+  UnitOfWorkFactory,
+  SnapshotStore,
+  OutboxStore,
+  AggregateLocker,
+} from "@noddde/core";
+
+/**
+ * TypeORM-backed persistence adapter.
+ *
+ * Uses built-in entity classes (NodddeEventEntity, NodddeAggregateStateEntity, etc.)
+ * for all stores. No configuration needed beyond the DataSource instance.
+ *
+ * @example
+ * ```ts
+ * import { TypeORMAdapter } from "@noddde/typeorm";
+ *
+ * const adapter = new TypeORMAdapter(dataSource);
+ * const domain = await wireDomain(definition, { persistenceAdapter: adapter });
+ * ```
+ */
+export class TypeORMAdapter implements PersistenceAdapter {
+  constructor(dataSource: any);
+
+  /** Always provided. */
+  unitOfWorkFactory: UnitOfWorkFactory;
+  /** Always provided. */
+  eventSourcedPersistence: EventSourcedAggregatePersistence;
+  /** Always provided. */
+  stateStoredPersistence: StateStoredAggregatePersistence;
+  /** Always provided. */
+  sagaPersistence: SagaPersistence;
+  /** Always provided. */
+  snapshotStore: SnapshotStore;
+  /** Always provided. */
+  outboxStore: OutboxStore;
+  /** Dialect-aware advisory locker. Available for PostgreSQL, MySQL, MariaDB, MSSQL. */
+  aggregateLocker?: AggregateLocker;
+
+  /**
+   * Returns a StateStoredAggregatePersistence bound to a dedicated TypeORM entity.
+   *
+   * @param entity - A TypeORM entity class.
+   * @param columns - Optional column mapping overrides.
+   */
+  stateStored(
+    entity: Function,
+    columns?: Partial<TypeORMStateTableColumnMap>,
+  ): StateStoredAggregatePersistence;
+
+  /**
+   * Calls `dataSource.destroy()` to close the connection pool.
+   */
+  close(): Promise<void>;
+}
+````
+
+### Behavioral Requirements (TypeORMAdapter)
+
+29. The constructor accepts a TypeORM DataSource instance and creates all persistence stores using built-in entity classes.
+30. All persistence stores are created eagerly in the constructor.
+31. All persistence instances share a single `TypeORMTransactionStore`, ensuring UoW atomicity.
+32. `aggregateLocker` is provided for databases that support advisory locks (PostgreSQL, MySQL, MariaDB, MSSQL). It is `undefined` for SQLite/better-sqlite3.
+33. `stateStored(entity, columns?)` returns a `StateStoredAggregatePersistence` bound to the given entity class. The returned persistence shares the same transaction store.
+34. `close()` calls `dataSource.destroy()` to clean up the connection pool.
+35. `isPersistenceAdapter(new TypeORMAdapter(dataSource))` returns `true`.
+36. The existing `createTypeORMAdapter` function is marked `@deprecated` and delegates to `TypeORMAdapter` internally.
+
+### Deprecation
+
+`createTypeORMAdapter` is deprecated in favor of `TypeORMAdapter`. It continues to work for backward compatibility.
+
+```ts
+/** @deprecated Use `new TypeORMAdapter(dataSource)` instead. */
+export function createTypeORMAdapter<const C extends TypeORMAdapterConfig>(
+  dataSource: any,
+  config?: C,
+): TypeORMAdapterResult<C>;
+```
+
+### Test Scenarios (TypeORMAdapter)
+
+### TypeORMAdapter implements PersistenceAdapter
+
+```ts
+import { isPersistenceAdapter } from "@noddde/core";
+import { TypeORMAdapter } from "@noddde/typeorm";
+
+const adapter = new TypeORMAdapter(dataSource);
+expect(isPersistenceAdapter(adapter)).toBe(true);
+```
+
+### TypeORMAdapter provides all stores
+
+```ts
+const adapter = new TypeORMAdapter(dataSource);
+
+expect(adapter.unitOfWorkFactory).toBeDefined();
+expect(adapter.eventSourcedPersistence).toBeDefined();
+expect(adapter.stateStoredPersistence).toBeDefined();
+expect(adapter.sagaPersistence).toBeDefined();
+expect(adapter.snapshotStore).toBeDefined();
+expect(adapter.outboxStore).toBeDefined();
+```
+
+### TypeORMAdapter.stateStored returns dedicated persistence
+
+```ts
+const adapter = new TypeORMAdapter(dataSource);
+const dedicated = adapter.stateStored(CustomEntity);
+
+expect(dedicated).toBeDefined();
+expect(dedicated.save).toBeTypeOf("function");
+expect(dedicated.load).toBeTypeOf("function");
+```
+
+### TypeORMAdapter close destroys data source
+
+```ts
+const destroySpy = vi.spyOn(dataSource, "destroy").mockResolvedValue(undefined);
+const adapter = new TypeORMAdapter(dataSource);
+await adapter.close();
+
+expect(destroySpy).toHaveBeenCalledOnce();
 ```

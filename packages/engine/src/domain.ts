@@ -18,6 +18,7 @@ import type {
   InferSagaMapInfrastructure,
   Logger,
   PersistenceConfiguration,
+  PersistenceAdapter,
   Projection,
   Query,
   QueryHandler,
@@ -160,23 +161,119 @@ type PersistenceFactory = () =>
 // ---- New API: defineDomain + wireDomain ----
 
 /**
+ * Shorthand string for persistence strategy. Resolved from the adapter.
+ * - `'event-sourced'` → adapter.eventSourcedPersistence
+ * - `'state-stored'` → adapter.stateStoredPersistence
+ */
+type PersistenceShorthand = "event-sourced" | "state-stored";
+
+/**
+ * Resolves a persistence value from the various forms it can take:
+ * - string shorthand → resolved from adapter
+ * - function → factory, called to get config
+ * - object with save/load → PersistenceConfiguration, used directly
+ * - undefined → default from adapter (stateStoredPersistence)
+ * @internal
+ */
+async function resolveAggregatePersistence(
+  aggregateName: string,
+  persistence:
+    | PersistenceFactory
+    | PersistenceShorthand
+    | PersistenceConfiguration
+    | undefined,
+  adapter: PersistenceAdapter | undefined,
+): Promise<PersistenceConfiguration | undefined> {
+  if (persistence === undefined) {
+    // Default: use adapter's stateStoredPersistence if available
+    if (adapter?.stateStoredPersistence) {
+      return adapter.stateStoredPersistence;
+    }
+    // No adapter or adapter doesn't provide stateStoredPersistence — return undefined for in-memory fallback
+    return undefined;
+  }
+
+  if (typeof persistence === "string") {
+    // Shorthand — requires adapter
+    if (!adapter) {
+      throw new Error(
+        `Aggregate "${aggregateName}": persistence shorthand '${persistence}' requires a persistenceAdapter in DomainWiring.`,
+      );
+    }
+    if (persistence === "event-sourced") {
+      if (!adapter.eventSourcedPersistence) {
+        throw new Error(
+          `Aggregate "${aggregateName}": persistence '${persistence}' requested but the adapter does not provide eventSourcedPersistence.`,
+        );
+      }
+      return adapter.eventSourcedPersistence;
+    }
+    if (persistence === "state-stored") {
+      if (!adapter.stateStoredPersistence) {
+        throw new Error(
+          `Aggregate "${aggregateName}": persistence '${persistence}' requested but the adapter does not provide stateStoredPersistence.`,
+        );
+      }
+      return adapter.stateStoredPersistence;
+    }
+    throw new Error(
+      `Aggregate "${aggregateName}": unknown persistence shorthand '${persistence}'.`,
+    );
+  }
+
+  if (typeof persistence === "function") {
+    // Factory function — call it
+    return await persistence();
+  }
+
+  // Object — PersistenceConfiguration, used directly
+  return persistence;
+}
+
+/**
  * Per-aggregate runtime configuration. Groups persistence, concurrency,
  * and snapshot settings.
+ *
+ * When a `persistenceAdapter` is provided in `DomainWiring`:
+ * - `persistence` defaults to `adapter.stateStoredPersistence` if omitted
+ * - `persistence` accepts string shorthands (`'event-sourced'`, `'state-stored'`)
+ * - `persistence` accepts a `PersistenceConfiguration` object directly (e.g., from `adapter.stateStored(table)`)
+ * - `concurrency` accepts string shorthands (`'pessimistic'`, `'optimistic'`)
+ * - `snapshots.store` is inferred from `adapter.snapshotStore` when omitted
  */
 export type AggregateWiring = {
-  /** Persistence factory for this aggregate. */
-  persistence?: PersistenceFactory;
-  /** Concurrency control for this aggregate. */
+  /**
+   * Persistence for this aggregate. Accepts:
+   * - A factory function: `() => PersistenceConfiguration`
+   * - A shorthand string: `'event-sourced'` | `'state-stored'` (resolved from adapter)
+   * - A `PersistenceConfiguration` object directly (e.g., from `adapter.stateStored(table)`)
+   * - Omitted: defaults to `adapter.stateStoredPersistence` (when adapter present) or in-memory
+   */
+  persistence?:
+    | PersistenceFactory
+    | PersistenceShorthand
+    | PersistenceConfiguration;
+  /**
+   * Concurrency control for this aggregate. Accepts:
+   * - `'optimistic'`: default retries (0), same as omitting
+   * - `'pessimistic'`: auto-resolves locker from adapter
+   * - Object form for customization
+   */
   concurrency?:
+    | "pessimistic"
+    | "optimistic"
     | { strategy?: "optimistic"; maxRetries?: number }
     | {
         strategy: "pessimistic";
-        locker: AggregateLocker;
+        locker?: AggregateLocker;
         lockTimeoutMs?: number;
       };
-  /** Snapshot configuration for this aggregate (event-sourced only). */
+  /**
+   * Snapshot configuration for this aggregate (event-sourced only).
+   * When `store` is omitted, it is inferred from `adapter.snapshotStore`.
+   */
   snapshots?: {
-    store: () => SnapshotStore | Promise<SnapshotStore>;
+    store?: () => SnapshotStore | Promise<SnapshotStore>;
     strategy: SnapshotStrategy;
   };
 };
@@ -253,6 +350,13 @@ export type DomainWiring<
   TAggregates extends AggregateMap = AggregateMap,
 > = {
   /**
+   * Persistence adapter providing default stores for the domain.
+   * When provided, the engine resolves aggregate persistence, saga persistence,
+   * unit-of-work, snapshots, outbox, idempotency, and locking from the adapter
+   * when not explicitly wired. Explicit wiring always overrides adapter defaults.
+   */
+  persistenceAdapter?: PersistenceAdapter;
+  /**
    * Factory for user-provided infrastructure services.
    * Receives the framework logger so custom services can use it.
    */
@@ -267,7 +371,7 @@ export type DomainWiring<
   projections?: Record<string, ProjectionWiring<TInfrastructure>>;
   /** Saga runtime config. Required if processModel has sagas. */
   sagas?: {
-    persistence: () => SagaPersistence | Promise<SagaPersistence>;
+    persistence?: () => SagaPersistence | Promise<SagaPersistence>;
   };
   /** Factory for CQRS buses. Receives resolved user infrastructure. */
   buses?: (
@@ -435,6 +539,13 @@ export class Domain<
       domainLog.debug("OpenTelemetry not detected. Tracing disabled.");
     }
 
+    // Step 0.6: Initialize persistence adapter (if provided)
+    const adapter = wiring.persistenceAdapter;
+    if (adapter) {
+      await adapter.init?.();
+      domainLog.info("Persistence adapter initialized.");
+    }
+
     // Step 1: Resolve custom infrastructure
     const customInfra = wiring.infrastructure
       ? await wiring.infrastructure(logger)
@@ -468,47 +579,62 @@ export class Domain<
     let persistenceResolver: AggregatePersistenceResolver;
 
     if (perAggregateWirings) {
-      // Per-aggregate mode: build persistence from each aggregate's wiring
-      const persistenceRecord: Record<string, PersistenceFactory> = {};
-      let hasPersistence = false;
-      for (const [name, aw] of perAggregateWirings) {
-        if (aw.persistence) {
-          persistenceRecord[name] = aw.persistence;
-          hasPersistence = true;
-        }
-      }
-      if (hasPersistence) {
-        // Runtime validation: every aggregate must have explicit persistence
-        const aggregateNames = new Set(
-          Object.keys(definition.writeModel.aggregates),
-        );
-        const configNames = new Set(Object.keys(persistenceRecord));
+      // Per-aggregate mode: resolve persistence from each aggregate's wiring + adapter fallback
+      const resolved = new Map<string, PersistenceConfiguration>();
+      const aggregateNames = new Set(
+        Object.keys(definition.writeModel.aggregates),
+      );
 
-        const missing = [...aggregateNames].filter((n) => !configNames.has(n));
-        if (missing.length > 0) {
+      // Validate no unknown aggregate names in wiring
+      for (const name of perAggregateWirings.keys()) {
+        if (!aggregateNames.has(name)) {
           throw new Error(
-            `Per-aggregate persistence is missing entries for: ${missing.join(", ")}. ` +
-              `All aggregates must have a persistence factory.`,
-          );
-        }
-        const unknown = [...configNames].filter((n) => !aggregateNames.has(n));
-        if (unknown.length > 0) {
-          throw new Error(
-            `Per-aggregate persistence references unknown aggregates: ${unknown.join(", ")}. ` +
+            `Per-aggregate wiring references unknown aggregate: ${name}. ` +
               `Registered aggregates: ${[...aggregateNames].join(", ")}.`,
           );
         }
+      }
 
-        const resolved = new Map<string, PersistenceConfiguration>();
-        for (const [name, factory] of Object.entries(persistenceRecord)) {
-          resolved.set(name, await factory());
+      for (const aggregateName of aggregateNames) {
+        const aw = perAggregateWirings.get(aggregateName);
+        const persistence = await resolveAggregatePersistence(
+          aggregateName,
+          aw?.persistence,
+          adapter,
+        );
+        if (persistence) {
+          resolved.set(aggregateName, persistence);
+        }
+      }
+
+      if (resolved.size > 0) {
+        // Ensure every aggregate has persistence resolved
+        const missing = [...aggregateNames].filter((n) => !resolved.has(n));
+        if (missing.length > 0 && resolved.size < aggregateNames.size) {
+          if (!adapter) {
+            // No adapter — strict mode: explicit per-aggregate wiring must cover all aggregates
+            throw new Error(
+              `Per-aggregate persistence is missing entries for: ${missing.join(", ")}`,
+            );
+          }
+          // Adapter present but some aggregates didn't resolve — use in-memory fallback
+          domainLog.warn(
+            `Per-aggregate persistence is missing entries for: ${missing.join(", ")}. ` +
+              `Using in-memory persistence for those aggregates.`,
+          );
+          const fallback = new InMemoryEventSourcedAggregatePersistence();
+          for (const name of missing) {
+            resolved.set(name, fallback);
+          }
         }
         persistenceResolver = new PerAggregatePersistenceResolver(resolved);
       } else {
-        // Per-aggregate mode but no persistence specified — use in-memory default
-        domainLog.warn(
-          "Using in-memory aggregate persistence. This is not suitable for production.",
-        );
+        // Per-aggregate mode but no persistence resolved — use in-memory default
+        if (!adapter) {
+          domainLog.warn(
+            "Using in-memory aggregate persistence. This is not suitable for production.",
+          );
+        }
         persistenceResolver = new GlobalAggregatePersistenceResolver(
           new InMemoryEventSourcedAggregatePersistence(),
         );
@@ -518,8 +644,14 @@ export class Domain<
       const globalWiring = wiring.aggregates as AggregateWiring | undefined;
       const globalPersistence = globalWiring?.persistence;
 
-      if (!globalPersistence) {
-        // Omitted — in-memory default for all
+      const resolvedPersistence = await resolveAggregatePersistence(
+        "(global)",
+        globalPersistence,
+        adapter,
+      );
+
+      if (!resolvedPersistence) {
+        // Omitted and no adapter — in-memory default for all
         domainLog.warn(
           "Using in-memory aggregate persistence. This is not suitable for production.",
         );
@@ -527,9 +659,8 @@ export class Domain<
           new InMemoryEventSourcedAggregatePersistence(),
         );
       } else {
-        // Domain-wide factory
         persistenceResolver = new GlobalAggregatePersistenceResolver(
-          await globalPersistence(),
+          resolvedPersistence,
         );
       }
     }
@@ -549,7 +680,17 @@ export class Domain<
       >();
       for (const [name, aw] of perAggregateWirings) {
         if (aw.snapshots) {
-          const store = await aw.snapshots.store();
+          let store: SnapshotStore;
+          if (aw.snapshots.store) {
+            store = await aw.snapshots.store();
+          } else if (adapter?.snapshotStore) {
+            store = adapter.snapshotStore;
+          } else {
+            throw new Error(
+              `Aggregate "${name}": snapshots.strategy is set but no snapshot store is available. ` +
+                `Provide snapshots.store or use a persistenceAdapter with snapshotStore.`,
+            );
+          }
           resolvedSnapshots.set(name, {
             store,
             strategy: aw.snapshots.strategy,
@@ -565,7 +706,17 @@ export class Domain<
       const globalWiring = wiring.aggregates as AggregateWiring | undefined;
       const snapshotConfig = globalWiring?.snapshots;
       if (snapshotConfig) {
-        const snapshotStore = await snapshotConfig.store();
+        let snapshotStore: SnapshotStore;
+        if (snapshotConfig.store) {
+          snapshotStore = await snapshotConfig.store();
+        } else if (adapter?.snapshotStore) {
+          snapshotStore = adapter.snapshotStore;
+        } else {
+          throw new Error(
+            `Global snapshots.strategy is set but no snapshot store is available. ` +
+              `Provide snapshots.store or use a persistenceAdapter with snapshotStore.`,
+          );
+        }
         snapshotResolver = () => ({
           store: snapshotStore,
           strategy: snapshotConfig.strategy,
@@ -581,6 +732,8 @@ export class Domain<
     if (hasSagas) {
       if (wiring.sagas?.persistence) {
         sagaPersistence = await wiring.sagas.persistence();
+      } else if (adapter?.sagaPersistence) {
+        sagaPersistence = adapter.sagaPersistence;
       } else {
         domainLog.warn(
           "Using in-memory saga persistence. This is not suitable for production.",
@@ -590,40 +743,73 @@ export class Domain<
     }
 
     // Step 5.5: Resolve UnitOfWork factory
-    this._unitOfWorkFactory = wiring.unitOfWork
-      ? await wiring.unitOfWork()
-      : createInMemoryUnitOfWork;
+    if (wiring.unitOfWork) {
+      this._unitOfWorkFactory = await wiring.unitOfWork();
+    } else if (adapter?.unitOfWorkFactory) {
+      this._unitOfWorkFactory = adapter.unitOfWorkFactory;
+    } else {
+      this._unitOfWorkFactory = createInMemoryUnitOfWork;
+    }
 
     // Step 5.6: Resolve concurrency strategy
     const concurrencyLog = logger.child("concurrency");
     let concurrencyStrategy: ConcurrencyStrategy;
+
+    /**
+     * Resolves a concurrency config (shorthand or object) into a ConcurrencyStrategy.
+     */
+    const resolveConcurrency = (
+      aggregateName: string,
+      concurrency: AggregateWiring["concurrency"],
+    ): ConcurrencyStrategy => {
+      if (!concurrency || concurrency === "optimistic") {
+        return new OptimisticConcurrencyStrategy(0, concurrencyLog);
+      }
+
+      if (concurrency === "pessimistic") {
+        // Shorthand — auto-resolve locker from adapter
+        if (!adapter?.aggregateLocker) {
+          throw new Error(
+            `Aggregate "${aggregateName}": concurrency 'pessimistic' requires an aggregate locker. ` +
+              `Provide a persistenceAdapter with aggregateLocker or use object form with explicit locker.`,
+          );
+        }
+        return new PessimisticConcurrencyStrategy(
+          adapter.aggregateLocker,
+          undefined,
+          concurrencyLog,
+        );
+      }
+
+      // Object form
+      if ("strategy" in concurrency && concurrency.strategy === "pessimistic") {
+        const locker = concurrency.locker ?? adapter?.aggregateLocker;
+        if (!locker) {
+          throw new Error(
+            `Aggregate "${aggregateName}": pessimistic concurrency requires a locker. ` +
+              `Provide concurrency.locker or use a persistenceAdapter with aggregateLocker.`,
+          );
+        }
+        return new PessimisticConcurrencyStrategy(
+          locker,
+          concurrency.lockTimeoutMs,
+          concurrencyLog,
+        );
+      }
+
+      // Optimistic with options
+      return new OptimisticConcurrencyStrategy(
+        (concurrency as { maxRetries?: number })?.maxRetries ?? 0,
+        concurrencyLog,
+      );
+    };
 
     if (perAggregateWirings) {
       // Per-aggregate concurrency
       const strategies = new Map<string, ConcurrencyStrategy>();
       for (const [name, aw] of perAggregateWirings) {
         if (aw.concurrency) {
-          if (
-            "strategy" in aw.concurrency &&
-            aw.concurrency.strategy === "pessimistic"
-          ) {
-            strategies.set(
-              name,
-              new PessimisticConcurrencyStrategy(
-                aw.concurrency.locker,
-                aw.concurrency.lockTimeoutMs,
-                concurrencyLog,
-              ),
-            );
-          } else {
-            strategies.set(
-              name,
-              new OptimisticConcurrencyStrategy(
-                (aw.concurrency as { maxRetries?: number })?.maxRetries ?? 0,
-                concurrencyLog,
-              ),
-            );
-          }
+          strategies.set(name, resolveConcurrency(name, aw.concurrency));
         }
       }
       const defaultStrategy = new OptimisticConcurrencyStrategy(
@@ -637,29 +823,18 @@ export class Domain<
     } else {
       // Global concurrency from global AggregateWiring
       const globalWiring = wiring.aggregates as AggregateWiring | undefined;
-      const concurrency = globalWiring?.concurrency;
-      if (
-        concurrency &&
-        "strategy" in concurrency &&
-        concurrency.strategy === "pessimistic"
-      ) {
-        concurrencyStrategy = new PessimisticConcurrencyStrategy(
-          concurrency.locker,
-          concurrency.lockTimeoutMs,
-          concurrencyLog,
-        );
-      } else {
-        concurrencyStrategy = new OptimisticConcurrencyStrategy(
-          (concurrency as { maxRetries?: number } | undefined)?.maxRetries ?? 0,
-          concurrencyLog,
-        );
-      }
+      concurrencyStrategy = resolveConcurrency(
+        "(global)",
+        globalWiring?.concurrency,
+      );
     }
 
     // Step 5.7: Resolve idempotency store
     let idempotencyStore: IdempotencyStore | undefined;
     if (wiring.idempotency) {
       idempotencyStore = await wiring.idempotency();
+    } else if (adapter?.idempotencyStore) {
+      idempotencyStore = adapter.idempotencyStore;
     }
 
     // Step 5.8: Create metadata enricher
@@ -711,6 +886,8 @@ export class Domain<
     // Step 5.8b: Resolve outbox store
     if (wiring.outbox) {
       this._outboxStore = await wiring.outbox.store();
+    } else if (adapter?.outboxStore) {
+      this._outboxStore = adapter.outboxStore;
     }
 
     // Step 5.10: Build strong-consistency callback for projections
@@ -1001,7 +1178,9 @@ export class Domain<
     });
 
     // Step 13: Collect all infrastructure components for auto-close discovery
-    // Custom infrastructure values come first (discovery order)
+    // Persistence adapter (if provided) — close it during shutdown
+    if (adapter) this._allComponents.push(adapter);
+    // Custom infrastructure values come next (discovery order)
     for (const value of Object.values(customInfra as Record<string, unknown>)) {
       this._allComponents.push(value);
     }

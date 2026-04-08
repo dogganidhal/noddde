@@ -117,20 +117,57 @@ These warnings only appear when the framework itself supplies the default -- not
 
 ### DomainWiring Fields
 
-| Field              | Description                                                                                  |
-| ------------------ | -------------------------------------------------------------------------------------------- |
-| `infrastructure`   | Factory for user-provided services. What handlers receive as the `infrastructure` parameter. |
-| `aggregates`       | Aggregate runtime config -- global `AggregateWiring` or per-aggregate record. See below.     |
-| `projections`      | Per-projection view store wiring. See [Projection Wiring](#projection-wiring).               |
-| `sagas`            | Saga runtime config. Defaults to in-memory if `processModel` has sagas.                      |
-| `buses`            | Factory for CQRS buses. Receives resolved user infrastructure.                               |
-| `unitOfWork`       | Factory for the UnitOfWorkFactory.                                                           |
-| `idempotency`      | Factory for idempotency store (command dedup by commandId).                                  |
-| `outbox`           | Transactional outbox configuration.                                                          |
-| `metadataProvider` | Function called on every command dispatch for event metadata context.                        |
-| `logger`           | Framework logger instance. Defaults to `NodddeLogger` at `'warn'` level.                     |
+| Field                | Description                                                                                                                                   |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `persistenceAdapter` | A `PersistenceAdapter` instance (e.g., `DrizzleAdapter`, `PrismaAdapter`, `TypeORMAdapter`). See [Persistence Adapter](#persistence-adapter). |
+| `infrastructure`     | Factory for user-provided services. What handlers receive as the `infrastructure` parameter.                                                  |
+| `aggregates`         | Aggregate runtime config -- global `AggregateWiring` or per-aggregate record. See below.                                                      |
+| `projections`        | Per-projection view store wiring. See [Projection Wiring](#projection-wiring).                                                                |
+| `sagas`              | Saga runtime config. Defaults to adapter or in-memory if `processModel` has sagas.                                                            |
+| `buses`              | Factory for CQRS buses. Receives resolved user infrastructure.                                                                                |
+| `unitOfWork`         | Factory for the UnitOfWorkFactory.                                                                                                            |
+| `idempotency`        | Factory for idempotency store (command dedup by commandId).                                                                                   |
+| `outbox`             | Transactional outbox configuration.                                                                                                           |
+| `metadataProvider`   | Function called on every command dispatch for event metadata context.                                                                         |
+| `logger`             | Framework logger instance. Defaults to `NodddeLogger` at `'warn'` level.                                                                      |
 
 All fields are optional. Both `wireDomain(definition)` and `wireDomain(definition, {})` use in-memory defaults for everything.
+
+### Persistence Adapter
+
+The `persistenceAdapter` field accepts a `PersistenceAdapter` instance. When provided, the engine resolves aggregate persistence, saga persistence, unit-of-work, snapshots, outbox, idempotency, and locking from the adapter when not explicitly wired. Explicit wiring always takes precedence over adapter defaults.
+
+```ts
+import { DrizzleAdapter } from "@noddde/drizzle";
+
+const adapter = new DrizzleAdapter(db);
+
+const domain = await wireDomain(bankingDomain, {
+  persistenceAdapter: adapter,
+  infrastructure: () => ({
+    /* ... */
+  }),
+  aggregates: {
+    BankAccount: {
+      persistence: "event-sourced",
+      snapshots: { strategy: everyNEvents(100) },
+    },
+    Ledger: {}, // defaults to state-stored from adapter
+  },
+});
+```
+
+When an adapter is present:
+
+- Aggregates that omit `persistence` default to the adapter's `stateStoredPersistence` (state-stored is the default -- event sourcing is opt-in)
+- `persistence` accepts string shorthands: `"event-sourced"` or `"state-stored"`, resolved from the adapter
+- `persistence` also accepts `adapter.stateStored(table)` for dedicated per-aggregate state tables
+- `snapshots.store` is inferred from the adapter when omitted (but `strategy` is still required)
+- `sagas.persistence`, `unitOfWork`, `idempotency`, and `outbox` are all inferred from the adapter when omitted
+- `adapter.init?.()` is called at the start of domain initialization
+- `adapter.close?.()` is called during domain shutdown (auto-discovered via `isCloseable()`)
+
+See [ORM Adapters](/docs/running/orm-adapters) for adapter-specific setup.
 
 ### Logging
 
@@ -145,33 +182,49 @@ The `aggregates` field accepts either a global config (applies to all aggregates
 ```ts
 // Global: all aggregates share the same config
 aggregates: {
-  persistence: () => drizzle.eventSourcedPersistence,
+  persistence: () => adapter.eventSourcedPersistence,
   concurrency: { maxRetries: 3 },
 },
 
 // Per-aggregate: each aggregate configured independently
 aggregates: {
   Order: {
-    persistence: () => drizzle.eventSourcedPersistence,
+    persistence: "event-sourced",
     concurrency: { maxRetries: 5 },
-    snapshots: {
-      store: () => drizzle.snapshotStore,
-      strategy: everyNEvents(50),
-    },
+    snapshots: { strategy: everyNEvents(50) },
   },
-  Inventory: {
-    persistence: () => drizzle.stateStoredPersistence,
-  },
+  Inventory: {}, // defaults to state-stored from adapter
 },
 ```
 
-> **Strict validation**: When using per-aggregate wiring (a record of aggregate names), `wireDomain` requires **every** aggregate in the domain definition to have an explicit `persistence` factory. If any aggregate is missing from the record, `wireDomain` throws at startup with an error listing the unconfigured aggregates. This prevents silent in-memory fallbacks and ensures 1 aggregate = 1 explicit persistence. Global mode (a single `AggregateWiring` object) is unaffected -- all aggregates share the same config.
-
 Each `AggregateWiring` groups three concerns:
 
-- **`persistence`** -- Factory returning `EventSourcedAggregatePersistence` or `StateStoredAggregatePersistence`
+- **`persistence`** -- The persistence strategy for this aggregate
 - **`concurrency`** -- Optimistic (with retries) or pessimistic (with locker)
-- **`snapshots`** -- Snapshot store + strategy for event-sourced aggregates
+- **`snapshots`** -- Snapshot strategy for event-sourced aggregates (store inferred from adapter)
+
+#### Persistence
+
+The `persistence` field accepts multiple forms:
+
+| Form             | Example                               | Description                                                                      |
+| ---------------- | ------------------------------------- | -------------------------------------------------------------------------------- |
+| Omitted          | `{}`                                  | Defaults to `adapter.stateStoredPersistence` (when adapter present) or in-memory |
+| String shorthand | `"event-sourced"` or `"state-stored"` | Resolved from the adapter. Requires `persistenceAdapter`                         |
+| Direct config    | `adapter.stateStored(table)`          | A `PersistenceConfiguration` object used directly                                |
+| Factory function | `() => myPersistence`                 | Existing pattern -- called to get the config                                     |
+
+#### Concurrency
+
+The `concurrency` field accepts string shorthands or object form:
+
+| Form                 | Example                                     | Description                                                   |
+| -------------------- | ------------------------------------------- | ------------------------------------------------------------- |
+| Omitted              |                                             | Optimistic with 0 retries (default)                           |
+| `"optimistic"`       | `concurrency: "optimistic"`                 | Same as omitting                                              |
+| `"pessimistic"`      | `concurrency: "pessimistic"`                | Auto-resolves locker from `adapter.aggregateLocker`           |
+| Object (optimistic)  | `{ maxRetries: 5 }`                         | Optimistic with custom retries                                |
+| Object (pessimistic) | `{ strategy: "pessimistic", locker?: ... }` | Pessimistic; `locker` auto-resolved from adapter when omitted |
 
 ### Projection Wiring
 

@@ -44,7 +44,12 @@ export function domainMainTemplate(ctx: TemplateContext): string {
 import { ${ctx.camelName}Domain } from "./domain/domain.js";
 
 const main = async () => {
+  // For production, use a persistence adapter:
+  //   import { DrizzleAdapter } from "@noddde/drizzle";
+  //   const adapter = new DrizzleAdapter(db);
+  //   ... then pass persistenceAdapter: adapter to wireDomain.
   const domain = await wireDomain(${ctx.camelName}Domain, {
+    // persistenceAdapter: adapter,
     infrastructure: () => ({
       // TODO: provide infrastructure implementations
     }),

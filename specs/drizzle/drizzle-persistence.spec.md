@@ -4,9 +4,11 @@ module: drizzle/persistence
 source_file: packages/adapters/drizzle/src/index.ts
 status: implemented
 exports:
-  - createDrizzleAdapter
-  - DrizzleAdapterConfig
-  - DrizzleAdapterResult
+  - DrizzleAdapter
+  - DrizzleAdapterOptions
+  - createDrizzleAdapter (deprecated)
+  - DrizzleAdapterConfig (deprecated)
+  - DrizzleAdapterResult (deprecated)
   - AggregateStateTableConfig
   - StateTableColumnMap
   - createDrizzlePersistence (deprecated)
@@ -38,6 +40,7 @@ depends_on:
   - core/persistence/unit-of-work
   - core/persistence/snapshot
   - core/persistence/outbox
+  - core/persistence/adapter
 docs:
   - docs/content/docs/infrastructure/orm-adapters.mdx
   - docs/content/docs/domain-configuration/unit-of-work.mdx
@@ -1517,4 +1520,159 @@ it("generates MySQL-specific DDL", () => {
   expect(sql).toContain("JSON NOT NULL");
   expect(sql).toContain("VARCHAR(255) NOT NULL");
 });
+```
+
+---
+
+## DrizzleAdapter (Class-Based API)
+
+> Class-based adapter that implements `PersistenceAdapter` for use with `wireDomain({ persistenceAdapter })`. Replaces the lower-level `createDrizzleAdapter` builder with a simpler constructor that auto-infers the database dialect.
+
+### Type Contract
+
+````ts
+import type {
+  PersistenceAdapter,
+  EventSourcedAggregatePersistence,
+  StateStoredAggregatePersistence,
+  SagaPersistence,
+  UnitOfWorkFactory,
+  SnapshotStore,
+  OutboxStore,
+  AggregateLocker,
+} from "@noddde/core";
+
+/**
+ * Optional configuration for DrizzleAdapter.
+ * When omitted, tables are auto-resolved from the dialect.
+ */
+export interface DrizzleAdapterOptions {
+  /** Override auto-resolved table definitions. Partial — only override what you need. */
+  tables?: {
+    eventStore?: any;
+    stateStore?: any;
+    sagaStore?: any;
+    snapshotStore?: any;
+    outboxStore?: any;
+  };
+}
+
+/**
+ * Drizzle-backed persistence adapter.
+ *
+ * Infers the database dialect from the Drizzle `db` instance (via `db._.dialect`)
+ * and auto-resolves pre-built table schemas for that dialect. All persistence
+ * stores are created eagerly in the constructor.
+ *
+ * @example
+ * ```ts
+ * import { DrizzleAdapter } from "@noddde/drizzle";
+ *
+ * const adapter = new DrizzleAdapter(db);
+ * const domain = await wireDomain(definition, { persistenceAdapter: adapter });
+ * ```
+ */
+export class DrizzleAdapter implements PersistenceAdapter {
+  constructor(db: any, options?: DrizzleAdapterOptions);
+
+  /** Always provided. */
+  unitOfWorkFactory: UnitOfWorkFactory;
+  /** Always provided. */
+  eventSourcedPersistence: EventSourcedAggregatePersistence;
+  /** Always provided. */
+  stateStoredPersistence: StateStoredAggregatePersistence;
+  /** Always provided. */
+  sagaPersistence: SagaPersistence;
+  /** Always provided. */
+  snapshotStore: SnapshotStore;
+  /** Always provided. */
+  outboxStore: OutboxStore;
+  /** Dialect-aware advisory locker. Only for PostgreSQL and MySQL. */
+  aggregateLocker?: AggregateLocker;
+
+  /**
+   * Returns a StateStoredAggregatePersistence bound to a dedicated Drizzle table.
+   * Use this when an aggregate needs its own state table instead of the shared one.
+   *
+   * @param table - A Drizzle table definition.
+   * @param columns - Optional column mapping overrides.
+   */
+  stateStored(
+    table: any,
+    columns?: Partial<StateTableColumnMap>,
+  ): StateStoredAggregatePersistence;
+
+  /**
+   * No-op — Drizzle does not own the database connection.
+   * The caller is responsible for closing the underlying pool.
+   */
+  close(): Promise<void>;
+}
+````
+
+### Behavioral Requirements (DrizzleAdapter)
+
+29. The constructor infers the dialect from `db._.dialect` and selects the corresponding pre-built table schemas (`@noddde/drizzle/pg`, `@noddde/drizzle/sqlite`, `@noddde/drizzle/mysql`).
+30. When `options.tables` is provided, specified tables override the auto-resolved ones.
+31. All persistence stores (`eventSourcedPersistence`, `stateStoredPersistence`, `sagaPersistence`, `snapshotStore`, `outboxStore`, `unitOfWorkFactory`) are created eagerly in the constructor.
+32. All persistence instances share a single `DrizzleTransactionStore`, ensuring UoW atomicity.
+33. `aggregateLocker` is provided for PostgreSQL and MySQL dialects (via `DrizzleAdvisoryLocker`). It is `undefined` for SQLite.
+34. `stateStored(table, columns?)` returns a `StateStoredAggregatePersistence` bound to the given table. The returned persistence shares the same transaction store.
+35. `close()` is a no-op that resolves immediately. Drizzle does not own the database connection pool.
+36. `isPersistenceAdapter(new DrizzleAdapter(db))` returns `true`.
+37. The existing `createDrizzleAdapter` function is marked `@deprecated` and delegates to `DrizzleAdapter` internally.
+
+### Deprecation
+
+`createDrizzleAdapter` is deprecated in favor of `DrizzleAdapter`. It continues to work for backward compatibility but delegates internally to the class-based implementation.
+
+```ts
+/** @deprecated Use `new DrizzleAdapter(db, options)` instead. */
+export function createDrizzleAdapter<const C extends DrizzleAdapterConfig>(
+  db: any,
+  config: C,
+): DrizzleAdapterResult<C>;
+```
+
+### Test Scenarios (DrizzleAdapter)
+
+### DrizzleAdapter implements PersistenceAdapter
+
+```ts
+import { isPersistenceAdapter } from "@noddde/core";
+import { DrizzleAdapter } from "@noddde/drizzle";
+
+const adapter = new DrizzleAdapter(db);
+expect(isPersistenceAdapter(adapter)).toBe(true);
+```
+
+### DrizzleAdapter provides all stores
+
+```ts
+const adapter = new DrizzleAdapter(db);
+
+expect(adapter.unitOfWorkFactory).toBeDefined();
+expect(adapter.eventSourcedPersistence).toBeDefined();
+expect(adapter.stateStoredPersistence).toBeDefined();
+expect(adapter.sagaPersistence).toBeDefined();
+expect(adapter.snapshotStore).toBeDefined();
+expect(adapter.outboxStore).toBeDefined();
+```
+
+### DrizzleAdapter.stateStored returns dedicated persistence
+
+```ts
+const adapter = new DrizzleAdapter(db);
+const dedicated = adapter.stateStored(customTable);
+
+expect(dedicated).toBeDefined();
+expect(dedicated.save).toBeTypeOf("function");
+expect(dedicated.load).toBeTypeOf("function");
+```
+
+### DrizzleAdapter close is a no-op
+
+```ts
+const adapter = new DrizzleAdapter(db);
+await expect(adapter.close()).resolves.toBeUndefined();
 ```
