@@ -560,7 +560,7 @@ describe("TypeORMOutboxStore", () => {
       event: { name: "TestEvent", payload: { value: 1 } },
       aggregateName: "TestAggregate",
       aggregateId: "agg-1",
-      createdAt: new Date().toISOString(),
+      createdAt: new Date(),
       publishedAt: null,
       ...overrides,
     };

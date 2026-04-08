@@ -4,6 +4,7 @@ import {
   serial,
   integer,
   jsonb,
+  timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
@@ -22,6 +23,9 @@ export const events = pgTable(
     eventName: text("event_name").notNull(),
     payload: jsonb("payload").notNull(),
     metadata: jsonb("metadata"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
   },
   (table) => ({
     streamVersionIdx: uniqueIndex("noddde_events_stream_version_idx").on(
@@ -78,6 +82,8 @@ export const outbox = pgTable("noddde_outbox", {
   event: jsonb("event").notNull(),
   aggregateName: text("aggregate_name"),
   aggregateId: text("aggregate_id"),
-  createdAt: text("created_at").notNull(),
-  publishedAt: text("published_at"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+  publishedAt: timestamp("published_at", { withTimezone: true, mode: "date" }),
 });

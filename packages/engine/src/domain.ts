@@ -931,7 +931,7 @@ export class Domain<
                   event.metadata?.aggregateId != null
                     ? String(event.metadata.aggregateId)
                     : undefined,
-                createdAt: new Date().toISOString(),
+                createdAt: new Date(),
                 publishedAt: null,
               }));
               uow.enlist(() => outboxStore.save(entries));

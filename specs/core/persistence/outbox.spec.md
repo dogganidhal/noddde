@@ -35,10 +35,10 @@ interface OutboxEntry {
   aggregateName?: string;
   /** Which aggregate instance produced this event (for debugging/filtering). Optional for the same reason. */
   aggregateId?: string;
-  /** ISO 8601 timestamp of when the entry was created. */
-  createdAt: string;
-  /** ISO 8601 timestamp of when the entry was published, or null if pending. */
-  publishedAt: string | null;
+  /** When the entry was created. */
+  createdAt: Date;
+  /** When the entry was published, or null if pending. */
+  publishedAt: Date | null;
 }
 
 /**
@@ -93,14 +93,14 @@ interface OutboxStore {
 
 - `OutboxEntry.event` stores the fully enriched event (with metadata). The outbox does not modify or re-enrich events.
 - `OutboxEntry.aggregateName` and `aggregateId` are optional convenience fields extracted from `event.metadata` for debugging and operational queries. They are not used by the relay.
-- `OutboxEntry.publishedAt` is `null` when the entry is pending and set to an ISO 8601 timestamp when published. This is the primary discriminator for `loadUnpublished`.
+- `OutboxEntry.publishedAt` is `null` when the entry is pending and set to a `Date` when published. This is the primary discriminator for `loadUnpublished`.
 - `markPublishedByEventIds` exists because after `uow.commit()`, the Domain has the dispatched `Event[]` but not the outbox entry IDs (those were generated inside the `onEventsProduced` callback closure). Using `event.metadata.eventId` as a correlation key avoids threading entry IDs through the UoW.
 
 ## Behavioral Requirements
 
 1. **save persists entries atomically** -- `save(entries)` stores all provided entries. It is designed to be enlisted in a `UnitOfWork` so that outbox writes commit atomically with aggregate persistence.
 2. **loadUnpublished returns pending entries ordered by createdAt** -- Returns entries where `publishedAt === null`, sorted by `createdAt` ascending (oldest first). Limited by `batchSize` (defaults to 100 if omitted).
-3. **markPublished sets publishedAt for matching entry IDs** -- For each entry ID in `ids`, sets `publishedAt` to the current ISO 8601 timestamp. Non-matching IDs are silently ignored.
+3. **markPublished sets publishedAt for matching entry IDs** -- For each entry ID in `ids`, sets `publishedAt` to the current `Date` (`new Date()`). Non-matching IDs are silently ignored.
 4. **markPublishedByEventIds matches on event metadata** -- For each `eventId`, finds entries whose `event.metadata.eventId` matches and sets their `publishedAt`. Non-matching event IDs are silently ignored.
 5. **deletePublished removes old published entries** -- Removes entries where `publishedAt !== null` and `createdAt < olderThan`. If `olderThan` is omitted, removes all published entries regardless of age.
 6. **loadUnpublished respects batchSize** -- If there are more unpublished entries than `batchSize`, only the oldest `batchSize` entries are returned.
@@ -197,8 +197,8 @@ describe("OutboxEntry Interface", () => {
   it("should have required fields with correct types", () => {
     expectTypeOf<OutboxEntry["id"]>().toBeString();
     expectTypeOf<OutboxEntry["event"]>().toMatchTypeOf<Event>();
-    expectTypeOf<OutboxEntry["createdAt"]>().toBeString();
-    expectTypeOf<OutboxEntry["publishedAt"]>().toMatchTypeOf<string | null>();
+    expectTypeOf<OutboxEntry["createdAt"]>().toMatchTypeOf<Date>();
+    expectTypeOf<OutboxEntry["publishedAt"]>().toMatchTypeOf<Date | null>();
   });
 
   it("should have optional aggregateName and aggregateId", () => {

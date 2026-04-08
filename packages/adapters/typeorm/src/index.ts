@@ -26,11 +26,6 @@ export {
   type TypeORMAggregateStateTableConfig,
   type TypeORMStateTableColumnMap,
 } from "./builder";
-export {
-  generateTypeORMMigration,
-  type TypeORMMigrationOptions,
-} from "./migrations";
-
 import type { DataSource } from "typeorm";
 import type { UnitOfWorkFactory } from "@noddde/core";
 import type {

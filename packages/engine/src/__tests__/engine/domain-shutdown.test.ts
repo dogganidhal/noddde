@@ -397,7 +397,7 @@ describe("Domain.shutdown outbox relay", () => {
       {
         id: "relay-test",
         event: { name: "Deposited", payload: { amount: 50 } },
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(),
         publishedAt: null,
       },
     ]);

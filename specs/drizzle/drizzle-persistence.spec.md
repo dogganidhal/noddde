@@ -15,8 +15,6 @@ exports:
   - DrizzlePersistenceInfrastructure (deprecated)
   - DrizzleNodddeSchema (deprecated)
   - DrizzleSnapshotStore
-  - generateDrizzleMigration
-  - DrizzleMigrationOptions
   # @noddde/drizzle/sqlite
   - events (sqliteTable)
   - aggregateStates (sqliteTable)
@@ -42,7 +40,7 @@ depends_on:
   - core/persistence/outbox
   - core/persistence/adapter
 docs:
-  - docs/content/docs/infrastructure/orm-adapters.mdx
+  - docs/content/docs/infrastructure/persistence-adapters.mdx
   - docs/content/docs/domain-configuration/unit-of-work.mdx
 ---
 
@@ -274,51 +272,6 @@ export const outbox: MySqlTableWithColumns<...>;
 
 All three dialects define the same logical schema with the same table names (`noddde_events`, `noddde_aggregate_states`, `noddde_saga_states`) and column names.
 
-### Migration Generation
-
-```ts
-/**
- * Options for generating Drizzle-Kit compatible migration SQL.
- */
-export interface DrizzleMigrationOptions {
-  /** Which shared noddde tables to include. */
-  sharedTables?: {
-    events?: boolean; // default true
-    aggregateStates?: boolean; // default true
-    sagaStates?: boolean; // default true
-    snapshots?: boolean; // default false
-    outbox?: boolean; // default false
-  };
-  /** Per-aggregate state tables to include in the migration. */
-  aggregateStateTables?: Record<
-    string,
-    {
-      /** Table name in the database. */
-      tableName: string;
-      /** Custom column names. Defaults: aggregate_id, state, version. */
-      columns?: {
-        aggregateId?: string;
-        state?: string;
-        version?: string;
-      };
-    }
-  >;
-}
-
-/**
- * Generates a Drizzle-Kit compatible migration SQL string.
- * Can be written to a migration directory for drizzle-kit push/migrate.
- *
- * @param dialect - Target SQL dialect.
- * @param options - Migration configuration.
- * @returns SQL string with CREATE TABLE and CREATE INDEX statements.
- */
-export function generateDrizzleMigration(
-  dialect: "postgresql" | "mysql" | "sqlite",
-  options?: DrizzleMigrationOptions,
-): string;
-```
-
 ## Behavioral Requirements
 
 ### Factory
@@ -331,7 +284,7 @@ export function generateDrizzleMigration(
 ### Persistence (dialect-agnostic)
 
 5. Persistence classes accept schema tables as constructor parameters instead of importing them directly.
-6. `EventSourcedAggregatePersistence.save()` appends events with incrementing sequence numbers per `(aggregateName, aggregateId)`.
+6. `EventSourcedAggregatePersistence.save()` appends events with incrementing sequence numbers per `(aggregateName, aggregateId)`. The `created_at` column is set from `event.metadata.timestamp` (parsed to a Date), falling back to `new Date()` if metadata is absent.
 7. `EventSourcedAggregatePersistence.load()` returns events ordered by sequence number ascending, with JSON-parsed payloads.
 8. `EventSourcedAggregatePersistence.load()` returns `[]` for a nonexistent aggregate.
 9. `EventSourcedAggregatePersistence.save()` with an empty events array is a no-op.
@@ -372,7 +325,7 @@ export function generateDrizzleMigration(
 
 33. `DrizzleOutboxStore.save()` inserts entries with `JSON.stringify(entry.event)` for the event column. Runs inside active transaction via `txStore.current`.
 34. `DrizzleOutboxStore.loadUnpublished()` returns entries where `published_at IS NULL` ordered by `created_at ASC`, limited by `batchSize` (default 100). Deserializes event from JSON.
-35. `DrizzleOutboxStore.markPublished()` updates `published_at` to current ISO timestamp for matching entry IDs.
+35. `DrizzleOutboxStore.markPublished()` updates `published_at` to the current timestamp (`new Date()`) for matching entry IDs.
 36. `DrizzleOutboxStore.markPublishedByEventIds()` loads unpublished entries, filters by deserialized `event.metadata.eventId`, and marks matching entries as published.
 37. `DrizzleOutboxStore.deletePublished()` removes rows where `published_at IS NOT NULL` and optionally `created_at < olderThan`.
 38. `outboxStore` is only included in the result when `config.outboxStore` is provided (same pattern as `snapshotStore`).
@@ -398,20 +351,11 @@ export function generateDrizzleMigration(
 52. If convention-based column resolution fails (required columns not found), `createDrizzleAdapter` throws at call time with a clear error listing the available columns in the table.
 53. Dedicated state persistence participates in the same UoW transaction as shared persistence via the shared `DrizzleTransactionStore`.
 
-### Migration Generation
-
-54. `generateDrizzleMigration(dialect)` returns a SQL string with `CREATE TABLE IF NOT EXISTS` and `CREATE UNIQUE INDEX IF NOT EXISTS` statements.
-55. Default (no options) includes shared tables: `noddde_events`, `noddde_aggregate_states`, `noddde_saga_states`.
-56. When `options.sharedTables.snapshots` or `.outbox` is `true`, the corresponding table is included.
-57. When `options.aggregateStateTables` is provided, generates `CREATE TABLE IF NOT EXISTS` for each custom table with `aggregate_id TEXT NOT NULL PRIMARY KEY`, `state` (dialect-appropriate JSON type), `version INTEGER NOT NULL DEFAULT 0` columns (or custom column names from config).
-58. Output is dialect-aware: PostgreSQL uses `SERIAL`/`JSONB`/`TEXT`, MySQL uses `INT AUTO_INCREMENT`/`JSON`/`VARCHAR(255)`, SQLite uses `INTEGER`/`TEXT`.
-59. All DDL statements use `IF NOT EXISTS` for idempotent migrations.
-
 ### Backwards Compatibility
 
-60. `createDrizzlePersistence(db, schema)` continues to work with the same signature and return type (`DrizzlePersistenceInfrastructure`).
-61. `createDrizzlePersistence` delegates to `createDrizzleAdapter` internally.
-62. The `DrizzlePersistenceInfrastructure` return type is unchanged.
+54. `createDrizzlePersistence(db, schema)` continues to work with the same signature and return type (`DrizzlePersistenceInfrastructure`).
+55. `createDrizzlePersistence` delegates to `createDrizzleAdapter` internally.
+56. The `DrizzlePersistenceInfrastructure` return type is unchanged.
 
 ## Invariants
 
@@ -444,7 +388,6 @@ export function generateDrizzleMigration(
 - **Convention resolution with missing columns**: `createDrizzleAdapter` throws at call time listing available columns and which required columns are missing.
 - **Dedicated and shared persistence in same UoW**: Both participate in the same transaction via shared txStore.
 - **Multiple dedicated tables in same UoW**: All share the same transaction.
-- **Migration generation with empty options**: Returns SQL for all three shared tables.
 
 ## Integration Points
 
@@ -465,7 +408,9 @@ noddde_events
 ├── aggregate_id     (string, NOT NULL)
 ├── sequence_number  (integer, NOT NULL)
 ├── event_name       (string, NOT NULL)
-└── payload          (JSON string, NOT NULL)
+├── payload          (JSON string, NOT NULL)
+├── metadata         (JSON string, nullable)
+└── created_at       (timestamp, NOT NULL)
 
 noddde_aggregate_states
 ├── aggregate_name   (string, PK part 1)
@@ -488,8 +433,8 @@ noddde_outbox
 ├── event            (JSON string, NOT NULL)
 ├── aggregate_name   (string, nullable)
 ├── aggregate_id     (string, nullable)
-├── created_at       (string, NOT NULL)
-└── published_at     (string, nullable)
+├── created_at       (timestamp, NOT NULL)
+└── published_at     (timestamp, nullable)
 ```
 
 ## Test Scenarios
@@ -1442,83 +1387,6 @@ it("createDrizzleAdapter throws clear error when convention resolution fails", (
       },
     }),
   ).toThrow(/aggregate_id.*state.*version/);
-});
-```
-
-### Migration generation: default shared tables
-
-```ts
-import { generateDrizzleMigration } from "@noddde/drizzle";
-
-it("generates SQL for default shared tables (SQLite)", () => {
-  const sql = generateDrizzleMigration("sqlite");
-
-  expect(sql).toContain("CREATE TABLE IF NOT EXISTS noddde_events");
-  expect(sql).toContain("CREATE TABLE IF NOT EXISTS noddde_aggregate_states");
-  expect(sql).toContain("CREATE TABLE IF NOT EXISTS noddde_saga_states");
-  expect(sql).toContain("CREATE UNIQUE INDEX IF NOT EXISTS");
-  expect(sql).not.toContain("noddde_snapshots");
-  expect(sql).not.toContain("noddde_outbox");
-});
-```
-
-### Migration generation: includes optional tables when requested
-
-```ts
-it("includes snapshots and outbox tables when requested", () => {
-  const sql = generateDrizzleMigration("sqlite", {
-    sharedTables: { snapshots: true, outbox: true },
-  });
-
-  expect(sql).toContain("CREATE TABLE IF NOT EXISTS noddde_snapshots");
-  expect(sql).toContain("CREATE TABLE IF NOT EXISTS noddde_outbox");
-});
-```
-
-### Migration generation: per-aggregate state tables
-
-```ts
-it("generates per-aggregate state tables", () => {
-  const sql = generateDrizzleMigration("sqlite", {
-    aggregateStateTables: {
-      Order: { tableName: "orders" },
-      BankAccount: {
-        tableName: "bank_accounts",
-        columns: { aggregateId: "account_id", state: "data", version: "ver" },
-      },
-    },
-  });
-
-  expect(sql).toContain("CREATE TABLE IF NOT EXISTS orders");
-  expect(sql).toContain("aggregate_id TEXT NOT NULL PRIMARY KEY");
-  expect(sql).toContain("CREATE TABLE IF NOT EXISTS bank_accounts");
-  expect(sql).toContain("account_id TEXT NOT NULL PRIMARY KEY");
-  expect(sql).toContain("data TEXT NOT NULL");
-  expect(sql).toContain("ver INTEGER NOT NULL DEFAULT 0");
-});
-```
-
-### Migration generation: PostgreSQL dialect
-
-```ts
-it("generates PostgreSQL-specific DDL", () => {
-  const sql = generateDrizzleMigration("postgresql");
-
-  expect(sql).toContain("SERIAL PRIMARY KEY");
-  expect(sql).toContain("JSONB NOT NULL");
-  expect(sql).toContain("TEXT NOT NULL");
-});
-```
-
-### Migration generation: MySQL dialect
-
-```ts
-it("generates MySQL-specific DDL", () => {
-  const sql = generateDrizzleMigration("mysql");
-
-  expect(sql).toContain("INT AUTO_INCREMENT PRIMARY KEY");
-  expect(sql).toContain("JSON NOT NULL");
-  expect(sql).toContain("VARCHAR(255) NOT NULL");
 });
 ```
 

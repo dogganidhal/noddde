@@ -9,13 +9,14 @@ datasource db {
 
 /// Events table for event-sourced aggregate persistence.
 model NodddeEvent {
-  id             Int    @id @default(autoincrement())
-  aggregateName  String @map("aggregate_name")
-  aggregateId    String @map("aggregate_id")
-  sequenceNumber Int    @map("sequence_number")
-  eventName      String @map("event_name")
+  id             Int      @id @default(autoincrement())
+  aggregateName  String   @map("aggregate_name")
+  aggregateId    String   @map("aggregate_id")
+  sequenceNumber Int      @map("sequence_number")
+  eventName      String   @map("event_name")
   payload        String
   metadata       String?
+  createdAt      DateTime @map("created_at")
 
   @@unique([aggregateName, aggregateId, sequenceNumber])
   @@map("noddde_events")
@@ -59,8 +60,8 @@ model NodddeOutboxEntry {
   event         String
   aggregateName String? @map("aggregate_name")
   aggregateId   String? @map("aggregate_id")
-  createdAt     String  @map("created_at")
-  publishedAt   String? @map("published_at")
+  createdAt     DateTime  @map("created_at")
+  publishedAt   DateTime? @map("published_at")
 
   @@map("noddde_outbox")
 }

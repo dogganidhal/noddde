@@ -110,7 +110,7 @@ describe("Outbox Delivery", () => {
         },
         aggregateName: "Order",
         aggregateId: "order-crash",
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(),
         publishedAt: null,
       },
     ]);

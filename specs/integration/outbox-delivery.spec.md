@@ -33,7 +33,7 @@ docs:
 
 1. **Atomic outbox writes**: When a command is dispatched with outbox configured, outbox entries are written atomically with aggregate persistence within the same UoW.
 2. **Happy-path delivery**: On the happy path, events are dispatched immediately via the EventBus after UoW commit, and outbox entries are marked as published.
-3. **Entry content**: Each outbox entry contains the fully enriched event (with metadata), aggregate name/id, and a createdAt timestamp.
+3. **Entry content**: Each outbox entry contains the fully enriched event (with metadata), aggregate name/id, and a `createdAt` Date.
 4. **Relay recovery**: If outbox entries remain unpublished (simulating a crash between commit and dispatch), `processOutboxOnce()` dispatches them and marks them published.
 5. **Explicit UoW + outbox**: `withUnitOfWork()` writes outbox entries for all commands in the batch, dispatches events after commit, and marks entries as published.
 6. **No outbox without config**: When outbox is not configured, no outbox entries are written and `processOutboxOnce()` returns 0.
@@ -177,7 +177,7 @@ it("should recover unpublished entries via processOutboxOnce", async () => {
       },
       aggregateName: "Order",
       aggregateId: "order-crash",
-      createdAt: new Date().toISOString(),
+      createdAt: new Date(),
       publishedAt: null,
     },
   ]);

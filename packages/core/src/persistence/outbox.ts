@@ -15,10 +15,10 @@ export interface OutboxEntry {
   aggregateName?: string;
   /** Which aggregate instance produced this event (for debugging/filtering). */
   aggregateId?: string;
-  /** ISO 8601 timestamp of when the entry was created. */
-  createdAt: string;
-  /** ISO 8601 timestamp of when the entry was published, or null if pending. */
-  publishedAt: string | null;
+  /** When the entry was created. */
+  createdAt: Date;
+  /** When the entry was published, or null if pending. */
+  publishedAt: Date | null;
 }
 
 /**

@@ -26,13 +26,13 @@ export class InMemoryOutboxStore implements OutboxStore {
         unpublished.push(entry);
       }
     }
-    unpublished.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    unpublished.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
     return unpublished.slice(0, batchSize);
   }
 
   /** @inheritdoc */
   async markPublished(ids: string[]): Promise<void> {
-    const now = new Date().toISOString();
+    const now = new Date();
     for (const id of ids) {
       const entry = this.entries.get(id);
       if (entry && entry.publishedAt === null) {
@@ -44,7 +44,7 @@ export class InMemoryOutboxStore implements OutboxStore {
   /** @inheritdoc */
   async markPublishedByEventIds(eventIds: string[]): Promise<void> {
     const idSet = new Set(eventIds);
-    const now = new Date().toISOString();
+    const now = new Date();
     for (const entry of this.entries.values()) {
       if (
         entry.publishedAt === null &&
@@ -60,7 +60,7 @@ export class InMemoryOutboxStore implements OutboxStore {
   async deletePublished(olderThan?: Date): Promise<void> {
     for (const [id, entry] of this.entries) {
       if (entry.publishedAt !== null) {
-        if (!olderThan || new Date(entry.createdAt) < olderThan) {
+        if (!olderThan || entry.createdAt < olderThan) {
           this.entries.delete(id);
         }
       }

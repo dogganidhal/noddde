@@ -473,7 +473,7 @@ describe("PrismaOutboxStore", () => {
       },
       aggregateName: overrides.aggregateName,
       aggregateId: overrides.aggregateId,
-      createdAt: overrides.createdAt ?? new Date().toISOString(),
+      createdAt: overrides.createdAt ?? new Date(),
       publishedAt: overrides.publishedAt ?? null,
     };
   }

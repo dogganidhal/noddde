@@ -25,8 +25,6 @@ exports:
   - NodddeSnapshotEntity
   - TypeORMOutboxStore
   - NodddeOutboxEntryEntity
-  - generateTypeORMMigration
-  - TypeORMMigrationOptions
 depends_on:
   - core/persistence/persistence
   - core/persistence/unit-of-work
@@ -34,7 +32,7 @@ depends_on:
   - core/persistence/outbox
   - core/persistence/adapter
 docs:
-  - running/orm-adapters.mdx
+  - running/persistence-adapters.mdx
 ---
 
 # TypeORM Persistence
@@ -293,6 +291,12 @@ export class NodddeEventEntity {
 
   @Column({ type: "text" })
   payload!: string;
+
+  @Column({ type: "text", nullable: true })
+  metadata!: string | null;
+
+  @Column({ name: "created_at", type: "datetime" })
+  createdAt!: Date;
 }
 
 /**
@@ -363,11 +367,11 @@ export class NodddeOutboxEntryEntity {
   @Column({ name: "aggregate_id", nullable: true })
   aggregateId!: string | null;
 
-  @Column({ name: "created_at" })
-  createdAt!: string;
+  @Column({ name: "created_at", type: "datetime" })
+  createdAt!: Date;
 
-  @Column({ name: "published_at", nullable: true })
-  publishedAt!: string | null;
+  @Column({ name: "published_at", type: "datetime", nullable: true })
+  publishedAt!: Date | null;
 }
 ```
 
@@ -382,7 +386,7 @@ export class NodddeOutboxEntryEntity {
 
 ### Event-Sourced Aggregate Persistence
 
-5. `save(aggregateName, aggregateId, events, expectedVersion)` creates `NodddeEventEntity` instances with `sequenceNumber = expectedVersion + index + 1` for each event, then saves them via the repository.
+5. `save(aggregateName, aggregateId, events, expectedVersion)` creates `NodddeEventEntity` instances with `sequenceNumber = expectedVersion + index + 1` for each event, then saves them via the repository. The `created_at` column is set from `event.metadata.timestamp` (parsed to a Date), falling back to `new Date()` if metadata is absent.
 6. `save()` with an empty events array is a no-op (returns immediately).
 7. `save()` catches errors whose message matches `/UNIQUE|duplicate|unique/i` (regex) and throws `ConcurrencyError`.
 8. `load(aggregateName, aggregateId)` returns events found via `repo.find()` with `order: { sequenceNumber: "ASC" }`, mapping each row to `{ name: row.eventName, payload: JSON.parse(row.payload) }`.
@@ -425,7 +429,7 @@ export class NodddeOutboxEntryEntity {
 
 ### Entity Definitions
 
-30. `NodddeEventEntity` maps to table `noddde_events` with a `@PrimaryGeneratedColumn()` id and a unique `@Index` on `[aggregateName, aggregateId, sequenceNumber]`. Columns use `@Column({ name: "snake_case" })` for mapping.
+30. `NodddeEventEntity` maps to table `noddde_events` with a `@PrimaryGeneratedColumn()` id, a unique `@Index` on `[aggregateName, aggregateId, sequenceNumber]`, nullable `metadata` text column, and a `created_at` datetime column. Columns use `@Column({ name: "snake_case" })` for mapping.
 31. `NodddeAggregateStateEntity` maps to table `noddde_aggregate_states` with `@PrimaryColumn` composite key on `[aggregateName, aggregateId]` and a `version` column with `default: 0`.
 32. `NodddeSagaStateEntity` maps to table `noddde_saga_states` with `@PrimaryColumn` composite key on `[sagaName, sagaId]`.
 
@@ -441,10 +445,10 @@ export class NodddeOutboxEntryEntity {
 
 38. `TypeORMOutboxStore.save()` creates `NodddeOutboxEntryEntity` instances with `JSON.stringify(entry.event)` for the event column and saves them via the repository. Runs inside active transaction via `txStore.current`.
 39. `TypeORMOutboxStore.loadUnpublished()` returns entries where `publishedAt IS NULL` ordered by `createdAt ASC`, limited by `take: batchSize` (default 100). Deserializes event from JSON.
-40. `TypeORMOutboxStore.markPublished()` updates `publishedAt` to current ISO timestamp for entries matching the given IDs.
+40. `TypeORMOutboxStore.markPublished()` updates `publishedAt` to the current timestamp (`new Date()`) for entries matching the given IDs.
 41. `TypeORMOutboxStore.markPublishedByEventIds()` loads unpublished entries, filters by deserialized `event.metadata.eventId`, and marks matching entries as published.
 42. `TypeORMOutboxStore.deletePublished()` removes rows where `publishedAt IS NOT NULL` and optionally `createdAt < olderThan`.
-43. `NodddeOutboxEntryEntity` maps to table `noddde_outbox` with a string `@PrimaryColumn()` id, `text` event column, nullable `aggregate_name` and `aggregate_id`, and `created_at`/`published_at` (nullable) columns.
+43. `NodddeOutboxEntryEntity` maps to table `noddde_outbox` with a string `@PrimaryColumn()` id, `text` event column, nullable `aggregate_name` and `aggregate_id`, a `created_at` datetime column, and a nullable `published_at` datetime column.
 44. Outbox operations route through `txStore.current` like all other persistence operations.
 
 ### Config-Based Adapter
@@ -466,21 +470,12 @@ export class NodddeOutboxEntryEntity {
 56. `save()` uses `findOne` + version check: if entity exists and version doesn't match, throws `ConcurrencyError`; if entity doesn't exist and `expectedVersion !== 0`, throws `ConcurrencyError`.
 57. `load()` uses `findOne` and returns `{ state: JSON.parse(stateValue), version }` or `null`.
 
-### Migration Generation
-
-58. `generateTypeORMMigration(dialect)` returns a SQL string with `CREATE TABLE IF NOT EXISTS` and `CREATE UNIQUE INDEX IF NOT EXISTS` statements.
-59. Default (no options) includes shared tables: `noddde_events`, `noddde_aggregate_states`, `noddde_saga_states`.
-60. When `options.sharedTables.snapshots` or `.outbox` is `true`, the corresponding table is included.
-61. When `options.aggregateStateTables` is provided, generates `CREATE TABLE IF NOT EXISTS` for each custom table with the configured column names.
-62. Output is dialect-aware: PostgreSQL uses `SERIAL`/`JSONB`/`TEXT`, MySQL uses `INT AUTO_INCREMENT`/`JSON`/`VARCHAR(255)`, SQLite uses `INTEGER`/`TEXT`, MSSQL uses `INT IDENTITY(1,1)`/`NVARCHAR(MAX)`/`NVARCHAR(255)`.
-63. All DDL statements use `IF NOT EXISTS` for idempotent migrations.
-
 ### Backwards Compatibility
 
-64. `createTypeORMPersistence(dataSource)` continues to work with the same signature and return type (`TypeORMPersistenceInfrastructure`).
-65. `createTypeORMPersistence` delegates to `createTypeORMAdapter` internally with `{ snapshotStore: true, outboxStore: true }`.
-66. The `TypeORMPersistenceInfrastructure` return type is unchanged.
-67. `createTypeORMPersistence` is marked `@deprecated` in JSDoc, recommending `createTypeORMAdapter` instead.
+58. `createTypeORMPersistence(dataSource)` continues to work with the same signature and return type (`TypeORMPersistenceInfrastructure`).
+59. `createTypeORMPersistence` delegates to `createTypeORMAdapter` internally with `{ snapshotStore: true, outboxStore: true }`.
+60. The `TypeORMPersistenceInfrastructure` return type is unchanged.
+61. `createTypeORMPersistence` is marked `@deprecated` in JSDoc, recommending `createTypeORMAdapter` instead.
 
 ## Invariants
 
@@ -517,8 +512,6 @@ export class NodddeOutboxEntryEntity {
 - **stateStoreFor unknown aggregate**: Throws `"No dedicated state table configured for aggregate \"Foo\". Add \"Foo\" to the aggregateStates config."`.
 - **Dedicated and shared persistence in same UoW**: Both participate in the same transaction via shared txStore.
 - **Multiple dedicated tables in same UoW**: All share the same transaction.
-- **Migration generation with empty options**: Returns SQL for all three shared tables.
-- **MSSQL dialect in migration**: Uses `INT IDENTITY(1,1)`, `NVARCHAR(MAX)`, `NVARCHAR(255)` types.
 
 ## Integration Points
 
@@ -539,7 +532,9 @@ noddde_events
 ├── aggregate_id     (string, NOT NULL)
 ├── sequence_number  (integer, NOT NULL)
 ├── event_name       (string, NOT NULL)
-└── payload          (text, NOT NULL)
+├── payload          (text, NOT NULL)
+├── metadata         (text, nullable)
+└── created_at       (datetime, NOT NULL)
 UNIQUE INDEX: (aggregate_name, aggregate_id, sequence_number)
 
 noddde_aggregate_states
@@ -564,8 +559,8 @@ noddde_outbox
 ├── event            (text, NOT NULL)
 ├── aggregate_name   (string, nullable)
 ├── aggregate_id     (string, nullable)
-├── created_at       (string, NOT NULL)
-└── published_at     (string, nullable)
+├── created_at       (datetime, NOT NULL)
+└── published_at     (datetime, nullable)
 ```
 
 ## Test Scenarios

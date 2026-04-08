@@ -216,7 +216,7 @@ const domain = await wireDomain(myDomain, {
 
 ## Concurrency Control
 
-noddde offers three concurrency modes for aggregate persistence, configured via the `concurrency` field in aggregate wiring. All modes work with every database dialect -- only pessimistic locking has [dialect restrictions](/docs/running/orm-adapters#dialect-support-matrix).
+noddde offers three concurrency modes for aggregate persistence, configured via the `concurrency` field in aggregate wiring. All modes work with every database dialect -- only pessimistic locking has [dialect restrictions](/docs/running/persistence-adapters#dialect-support-matrix).
 
 With `wireDomain`, concurrency can be configured globally (all aggregates) or per-aggregate.
 
@@ -305,7 +305,7 @@ For production, use database-backed advisory lockers instead of the in-memory im
 | `@noddde/prisma`  | `PrismaAdvisoryLocker`  | `pg_advisory_lock` | `GET_LOCK`      | —               |
 | `@noddde/typeorm` | `TypeORMAdvisoryLocker` | `pg_advisory_lock` | `GET_LOCK`      | `sp_getapplock` |
 
-SQLite does not support advisory locks -- use `InMemoryAggregateLocker` for single-process SQLite deployments. See the [Dialect Support Matrix](/docs/running/orm-adapters#dialect-support-matrix) for full details.
+SQLite does not support advisory locks -- use `InMemoryAggregateLocker` for single-process SQLite deployments. See the [Dialect Support Matrix](/docs/running/persistence-adapters#dialect-support-matrix) for full details.
 
 ### When to Choose Each Strategy
 
@@ -488,7 +488,7 @@ Key implementation considerations:
 - **Concurrency** -- Use a unique constraint on `(aggregate_name, aggregate_id, sequence_number)` to detect concurrent writes. The `expectedVersion` tells you which sequence numbers to use for the new events.
 - **Serialization** -- Event payloads must round-trip correctly. JSON is the common choice, but be careful with types like `Date` that do not survive `JSON.parse`.
 
-For production-ready persistence with transaction support, consider the [ORM Adapters](/docs/running/orm-adapters) packages instead of writing custom implementations.
+For production-ready persistence with transaction support, consider the [Persistence Adapters](/docs/running/persistence-adapters) packages instead of writing custom implementations.
 
 ## Moving to Production
 
@@ -614,12 +614,12 @@ const domain = await wireDomain(bankingDomain, {
 
 The factory is a function that returns a `UnitOfWorkFactory` (a function that returns a `UnitOfWork`). The outer function is called once during domain initialization. The inner factory is called once per unit of work boundary.
 
-For database-backed unit of work implementations using real transactions, see the [ORM Adapters](/docs/running/orm-adapters) packages.
+For database-backed unit of work implementations using real transactions, see the [Persistence Adapters](/docs/running/persistence-adapters) packages.
 
 ## Next Steps
 
 - [Idempotent Commands](/docs/running/idempotent-commands) -- Preventing duplicate command execution
 - [Outbox Pattern](/docs/running/outbox-pattern) -- Guaranteeing at-least-once event delivery after commit
-- [ORM Adapters](/docs/running/orm-adapters) -- Production persistence using Drizzle, Prisma, or TypeORM
+- [Persistence Adapters](/docs/running/persistence-adapters) -- Production persistence using Drizzle, Prisma, or TypeORM
 - [Infrastructure](/docs/running/infrastructure) -- The full infrastructure provider system
 - [CQRS and Event Sourcing](/docs/core-concepts/cqrs-and-event-sourcing) -- Conceptual foundation
