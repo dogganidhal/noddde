@@ -42,6 +42,22 @@ Drives the full pipeline: spec → RED tests → implement → GREEN tests → v
 | `/spec <description>` | Full 6-step pipeline from description    |
 | `/spec-status`        | Show all specs and their pipeline status |
 
+## Multi-Agent Pipeline Architecture
+
+The `/spec` pipeline uses three agent roles. The developer workflow is unchanged — `/spec` remains the single entry point.
+
+| Role             | Model  | Steps              | Responsibility                                                                  |
+| ---------------- | ------ | ------------------ | ------------------------------------------------------------------------------- |
+| **Orchestrator** | Opus   | 0-1 + coordination | Understand intent, write/edit spec, Gate 1, spawn agents, handle feedback loops |
+| **Builder**      | Sonnet | 2-4                | Generate RED tests, implement code, run GREEN tests. Produces Build Report      |
+| **Auditor**      | Opus   | 5-6                | Independent validation, coherence review, docs. Produces Audit Report           |
+
+The Builder and Auditor run in **separate agent contexts** — the Auditor has no memory of the Builder's implementation decisions (fresh-eyes review). Communication happens through file artifacts in `specs/reports/`.
+
+**Feedback loop**: If the Auditor FAILs, the Builder re-runs with Audit findings (max 2 cycles). If issues persist or the Auditor raises a CONCERN, the developer decides.
+
+**Skills**: `build-spec/SKILL.md` (Builder), `audit-spec/SKILL.md` (Auditor). Handoff formats: `shared/build-report.md`, `shared/audit-report.md`.
+
 ## Coding Conventions
 
 ### Style
