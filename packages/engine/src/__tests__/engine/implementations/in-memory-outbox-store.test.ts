@@ -11,7 +11,7 @@ describe("InMemoryOutboxStore", () => {
         event: { name: "OrderCreated", payload: { orderId: "o1" } },
         aggregateName: "Order",
         aggregateId: "o1",
-        createdAt: "2025-01-01T00:00:00.000Z",
+        createdAt: new Date("2025-01-01T00:00:00.000Z"),
         publishedAt: null,
       },
       {
@@ -19,7 +19,7 @@ describe("InMemoryOutboxStore", () => {
         event: { name: "OrderShipped", payload: { orderId: "o1" } },
         aggregateName: "Order",
         aggregateId: "o1",
-        createdAt: "2025-01-01T00:00:01.000Z",
+        createdAt: new Date("2025-01-01T00:00:01.000Z"),
         publishedAt: null,
       },
     ];
@@ -37,7 +37,7 @@ describe("InMemoryOutboxStore", () => {
     const entries: OutboxEntry[] = Array.from({ length: 5 }, (_, i) => ({
       id: `entry-${i}`,
       event: { name: "Evt", payload: {} },
-      createdAt: `2025-01-01T00:00:0${i}.000Z`,
+      createdAt: new Date(`2025-01-01T00:00:0${i}.000Z`),
       publishedAt: null,
     }));
 
@@ -56,13 +56,13 @@ describe("InMemoryOutboxStore", () => {
       {
         id: "late",
         event: { name: "Evt", payload: {} },
-        createdAt: "2025-01-01T00:00:02.000Z",
+        createdAt: new Date("2025-01-01T00:00:02.000Z"),
         publishedAt: null,
       },
       {
         id: "early",
         event: { name: "Evt", payload: {} },
-        createdAt: "2025-01-01T00:00:00.000Z",
+        createdAt: new Date("2025-01-01T00:00:00.000Z"),
         publishedAt: null,
       },
     ]);
@@ -78,13 +78,13 @@ describe("InMemoryOutboxStore", () => {
       {
         id: "e1",
         event: { name: "Evt", payload: {} },
-        createdAt: "2025-01-01T00:00:00.000Z",
+        createdAt: new Date("2025-01-01T00:00:00.000Z"),
         publishedAt: null,
       },
       {
         id: "e2",
         event: { name: "Evt", payload: {} },
-        createdAt: "2025-01-01T00:00:01.000Z",
+        createdAt: new Date("2025-01-01T00:00:01.000Z"),
         publishedAt: null,
       },
     ]);
@@ -113,7 +113,7 @@ describe("InMemoryOutboxStore", () => {
             timestamp: "2025-01-01T00:00:00.000Z",
           },
         },
-        createdAt: "2025-01-01T00:00:00.000Z",
+        createdAt: new Date("2025-01-01T00:00:00.000Z"),
         publishedAt: null,
       },
       {
@@ -126,7 +126,7 @@ describe("InMemoryOutboxStore", () => {
             timestamp: "2025-01-01T00:00:01.000Z",
           },
         },
-        createdAt: "2025-01-01T00:00:01.000Z",
+        createdAt: new Date("2025-01-01T00:00:01.000Z"),
         publishedAt: null,
       },
     ]);
@@ -144,13 +144,13 @@ describe("InMemoryOutboxStore", () => {
       {
         id: "old",
         event: { name: "Evt", payload: {} },
-        createdAt: "2025-01-01T00:00:00.000Z",
+        createdAt: new Date("2025-01-01T00:00:00.000Z"),
         publishedAt: null,
       },
       {
         id: "recent",
         event: { name: "Evt", payload: {} },
-        createdAt: "2025-06-01T00:00:00.000Z",
+        createdAt: new Date("2025-06-01T00:00:00.000Z"),
         publishedAt: null,
       },
     ]);
@@ -169,13 +169,13 @@ describe("InMemoryOutboxStore", () => {
       {
         id: "e1",
         event: { name: "Evt", payload: {} },
-        createdAt: "2025-01-01T00:00:00.000Z",
+        createdAt: new Date("2025-01-01T00:00:00.000Z"),
         publishedAt: null,
       },
       {
         id: "e2",
         event: { name: "Evt", payload: {} },
-        createdAt: "2025-06-01T00:00:00.000Z",
+        createdAt: new Date("2025-06-01T00:00:00.000Z"),
         publishedAt: null,
       },
     ]);
