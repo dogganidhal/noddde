@@ -66,7 +66,7 @@ async function main() {
       "postgres://noddde:noddde@localhost:5432/hotel_booking",
   });
 
-  // Auto-create noddde tables (see docs/running/orm-adapters for schema reference)
+  // Auto-create noddde tables (see docs/running/persistence-adapters for schema reference)
   await pool.query(`
     CREATE TABLE IF NOT EXISTS noddde_events (
       id SERIAL PRIMARY KEY,

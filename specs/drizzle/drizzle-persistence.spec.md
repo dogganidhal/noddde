@@ -40,7 +40,7 @@ depends_on:
   - core/persistence/outbox
   - core/persistence/adapter
 docs:
-  - docs/content/docs/infrastructure/orm-adapters.mdx
+  - docs/content/docs/infrastructure/persistence-adapters.mdx
   - docs/content/docs/domain-configuration/unit-of-work.mdx
 ---
 

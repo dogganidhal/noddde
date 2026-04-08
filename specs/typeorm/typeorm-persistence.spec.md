@@ -32,7 +32,7 @@ depends_on:
   - core/persistence/outbox
   - core/persistence/adapter
 docs:
-  - running/orm-adapters.mdx
+  - running/persistence-adapters.mdx
 ---
 
 # TypeORM Persistence

@@ -75,7 +75,7 @@ infrastructure: {
 }
 ```
 
-For production, all three [ORM adapter packages](/docs/running/orm-adapters) (`@noddde/drizzle`, `@noddde/prisma`, `@noddde/typeorm`) include a database-backed `OutboxStore` that participates in the same database transaction as your aggregate persistence:
+For production, all three [persistence adapter packages](/docs/running/persistence-adapters) (`@noddde/drizzle`, `@noddde/prisma`, `@noddde/typeorm`) include a database-backed `OutboxStore` that participates in the same database transaction as your aggregate persistence:
 
 ```ts
 // Drizzle (outbox schema table required)
@@ -185,4 +185,4 @@ The outbox integrates seamlessly with all UoW scenarios:
 
 - [Persistence](/docs/running/persistence) -- Unit of Work and persistence strategies
 - [Idempotent Commands](/docs/running/idempotent-commands) -- Preventing duplicate command execution
-- [ORM Adapters](/docs/running/orm-adapters) -- Production persistence with database transactions
+- [Persistence Adapters](/docs/running/persistence-adapters) -- Production persistence with database transactions

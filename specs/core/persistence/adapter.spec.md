@@ -14,7 +14,7 @@ depends_on:
   - core/persistence/idempotency
   - core/infrastructure
 docs:
-  - docs/content/docs/infrastructure/orm-adapters.mdx
+  - docs/content/docs/infrastructure/persistence-adapters.mdx
 ---
 
 # Persistence Adapter Interface
