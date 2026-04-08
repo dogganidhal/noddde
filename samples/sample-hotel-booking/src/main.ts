@@ -13,7 +13,7 @@
  */
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { DrizzleAdapter, generateDrizzleMigration } from "@noddde/drizzle";
+import { DrizzleAdapter } from "@noddde/drizzle";
 import {
   defineDomain,
   wireDomain,
@@ -66,11 +66,41 @@ async function main() {
       "postgres://noddde:noddde@localhost:5432/hotel_booking",
   });
 
-  // Auto-create noddde tables + hotel_views using migration generation
-  const migrationSql = generateDrizzleMigration("postgresql", {
-    sharedTables: { snapshots: true },
-  });
-  await pool.query(migrationSql);
+  // Auto-create noddde tables (see docs/running/orm-adapters for schema reference)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS noddde_events (
+      id SERIAL PRIMARY KEY,
+      aggregate_name TEXT NOT NULL,
+      aggregate_id TEXT NOT NULL,
+      sequence_number INTEGER NOT NULL,
+      event_name TEXT NOT NULL,
+      payload JSONB NOT NULL,
+      metadata JSONB,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS noddde_events_stream_version_idx
+      ON noddde_events (aggregate_name, aggregate_id, sequence_number);
+    CREATE TABLE IF NOT EXISTS noddde_aggregate_states (
+      aggregate_name TEXT NOT NULL,
+      aggregate_id TEXT NOT NULL,
+      state JSONB NOT NULL,
+      version INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (aggregate_name, aggregate_id)
+    );
+    CREATE TABLE IF NOT EXISTS noddde_saga_states (
+      saga_name TEXT NOT NULL,
+      saga_id TEXT NOT NULL,
+      state JSONB NOT NULL,
+      PRIMARY KEY (saga_name, saga_id)
+    );
+    CREATE TABLE IF NOT EXISTS noddde_snapshots (
+      aggregate_name TEXT NOT NULL,
+      aggregate_id TEXT NOT NULL,
+      state JSONB NOT NULL,
+      version INTEGER NOT NULL,
+      PRIMARY KEY (aggregate_name, aggregate_id)
+    );
+  `);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS hotel_views (
       view_type TEXT NOT NULL,

@@ -53,6 +53,10 @@ export class DrizzleEventSourcedAggregatePersistence
           eventName: event.name,
           payload: JSON.stringify(event.payload),
           metadata: JSON.stringify(event.metadata ?? null),
+          createdAt: (event.metadata?.timestamp
+            ? new Date(event.metadata.timestamp)
+            : new Date()
+          ).toISOString(),
         })),
       );
     } catch (error: any) {
@@ -406,8 +410,8 @@ export class DrizzleOutboxStore implements OutboxStore {
         event: JSON.stringify(e.event),
         aggregateName: e.aggregateName ?? null,
         aggregateId: e.aggregateId ?? null,
-        createdAt: e.createdAt,
-        publishedAt: e.publishedAt,
+        createdAt: e.createdAt.toISOString(),
+        publishedAt: e.publishedAt?.toISOString() ?? null,
       })),
     );
   }
@@ -425,8 +429,8 @@ export class DrizzleOutboxStore implements OutboxStore {
       event: typeof row.event === "string" ? JSON.parse(row.event) : row.event,
       aggregateName: row.aggregateName ?? undefined,
       aggregateId: row.aggregateId ?? undefined,
-      createdAt: row.createdAt,
-      publishedAt: row.publishedAt,
+      createdAt: new Date(row.createdAt),
+      publishedAt: row.publishedAt != null ? new Date(row.publishedAt) : null,
     }));
   }
 

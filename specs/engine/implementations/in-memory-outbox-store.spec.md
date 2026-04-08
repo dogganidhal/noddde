@@ -38,7 +38,7 @@ class InMemoryOutboxStore implements OutboxStore {
 
 1. **save stores entries by ID** -- Each entry is stored in the internal `Map` keyed by `entry.id`. Existing entries with the same ID are overwritten.
 2. **loadUnpublished filters and sorts** -- Iterates the map, selects entries where `publishedAt === null`, sorts by `createdAt` ascending, and returns up to `batchSize` entries (default 100).
-3. **markPublished sets publishedAt** -- For each ID, looks up the entry in the map and sets `publishedAt` to the current ISO 8601 timestamp. Missing IDs are ignored.
+3. **markPublished sets publishedAt** -- For each ID, looks up the entry in the map and sets `publishedAt` to `new Date()`. Missing IDs are ignored.
 4. **markPublishedByEventIds matches on event metadata** -- Iterates all entries, finds those whose `entry.event.metadata?.eventId` matches any of the provided event IDs, and sets their `publishedAt`.
 5. **deletePublished removes matching entries** -- Iterates the map, removes entries where `publishedAt !== null` and `createdAt < olderThan` (or all published entries if `olderThan` is omitted).
 6. **findAll returns all entries** -- Returns all entries from the map as an array, regardless of published status.
@@ -81,7 +81,7 @@ describe("InMemoryOutboxStore", () => {
         event: { name: "OrderCreated", payload: { orderId: "o1" } },
         aggregateName: "Order",
         aggregateId: "o1",
-        createdAt: "2025-01-01T00:00:00.000Z",
+        createdAt: new Date("2025-01-01T00:00:00.000Z"),
         publishedAt: null,
       },
       {
@@ -89,7 +89,7 @@ describe("InMemoryOutboxStore", () => {
         event: { name: "OrderShipped", payload: { orderId: "o1" } },
         aggregateName: "Order",
         aggregateId: "o1",
-        createdAt: "2025-01-01T00:00:01.000Z",
+        createdAt: new Date("2025-01-01T00:00:01.000Z"),
         publishedAt: null,
       },
     ];
@@ -117,7 +117,7 @@ describe("InMemoryOutboxStore", () => {
     const entries: OutboxEntry[] = Array.from({ length: 5 }, (_, i) => ({
       id: `entry-${i}`,
       event: { name: "Evt", payload: {} },
-      createdAt: `2025-01-01T00:00:0${i}.000Z`,
+      createdAt: new Date(`2025-01-01T00:00:0${i}.000Z`),
       publishedAt: null,
     }));
 
@@ -146,13 +146,13 @@ describe("InMemoryOutboxStore", () => {
       {
         id: "late",
         event: { name: "Evt", payload: {} },
-        createdAt: "2025-01-01T00:00:02.000Z",
+        createdAt: new Date("2025-01-01T00:00:02.000Z"),
         publishedAt: null,
       },
       {
         id: "early",
         event: { name: "Evt", payload: {} },
-        createdAt: "2025-01-01T00:00:00.000Z",
+        createdAt: new Date("2025-01-01T00:00:00.000Z"),
         publishedAt: null,
       },
     ]);
@@ -178,13 +178,13 @@ describe("InMemoryOutboxStore", () => {
       {
         id: "e1",
         event: { name: "Evt", payload: {} },
-        createdAt: "2025-01-01T00:00:00.000Z",
+        createdAt: new Date("2025-01-01T00:00:00.000Z"),
         publishedAt: null,
       },
       {
         id: "e2",
         event: { name: "Evt", payload: {} },
-        createdAt: "2025-01-01T00:00:01.000Z",
+        createdAt: new Date("2025-01-01T00:00:01.000Z"),
         publishedAt: null,
       },
     ]);
@@ -223,7 +223,7 @@ describe("InMemoryOutboxStore", () => {
             timestamp: "2025-01-01T00:00:00.000Z",
           },
         },
-        createdAt: "2025-01-01T00:00:00.000Z",
+        createdAt: new Date("2025-01-01T00:00:00.000Z"),
         publishedAt: null,
       },
       {
@@ -236,7 +236,7 @@ describe("InMemoryOutboxStore", () => {
             timestamp: "2025-01-01T00:00:01.000Z",
           },
         },
-        createdAt: "2025-01-01T00:00:01.000Z",
+        createdAt: new Date("2025-01-01T00:00:01.000Z"),
         publishedAt: null,
       },
     ]);
@@ -264,13 +264,13 @@ describe("InMemoryOutboxStore", () => {
       {
         id: "old",
         event: { name: "Evt", payload: {} },
-        createdAt: "2025-01-01T00:00:00.000Z",
+        createdAt: new Date("2025-01-01T00:00:00.000Z"),
         publishedAt: null,
       },
       {
         id: "recent",
         event: { name: "Evt", payload: {} },
-        createdAt: "2025-06-01T00:00:00.000Z",
+        createdAt: new Date("2025-06-01T00:00:00.000Z"),
         publishedAt: null,
       },
     ]);
@@ -299,13 +299,13 @@ describe("InMemoryOutboxStore", () => {
       {
         id: "e1",
         event: { name: "Evt", payload: {} },
-        createdAt: "2025-01-01T00:00:00.000Z",
+        createdAt: new Date("2025-01-01T00:00:00.000Z"),
         publishedAt: null,
       },
       {
         id: "e2",
         event: { name: "Evt", payload: {} },
-        createdAt: "2025-06-01T00:00:00.000Z",
+        createdAt: new Date("2025-06-01T00:00:00.000Z"),
         publishedAt: null,
       },
     ]);

@@ -21,8 +21,6 @@ exports:
   - PrismaTransactionStore
   - PrismaOutboxStore
   - createPrismaUnitOfWorkFactory
-  - generatePrismaMigration
-  - PrismaMigrationOptions
 depends_on:
   - core/persistence/persistence
   - core/persistence/unit-of-work
@@ -279,7 +277,7 @@ export class PrismaOutboxStore implements OutboxStore {
 
 ### Event-Sourced Aggregate Persistence
 
-4. `save(aggregateName, aggregateId, events, expectedVersion)` appends events with `createMany`, assigning `sequenceNumber = expectedVersion + index + 1` for each event.
+4. `save(aggregateName, aggregateId, events, expectedVersion)` appends events with `createMany`, assigning `sequenceNumber = expectedVersion + index + 1` for each event. The `created_at` column is set from `event.metadata.timestamp` (parsed to a Date), falling back to `new Date()` if metadata is absent.
 5. `save()` with an empty events array is a no-op (returns immediately).
 6. `save()` catches Prisma error code `P2002` (unique constraint violation on `[aggregateName, aggregateId, sequenceNumber]`) and throws `ConcurrencyError`.
 7. `load(aggregateName, aggregateId)` returns events ordered by `sequenceNumber: "asc"`, with `JSON.parse(row.payload)` for each event.
@@ -329,7 +327,7 @@ export class PrismaOutboxStore implements OutboxStore {
 
 31. `PrismaOutboxStore.save()` inserts entries with `JSON.stringify(entry.event)` for the event column via `createMany`. Runs inside active transaction via `txStore.current`.
 32. `PrismaOutboxStore.loadUnpublished()` returns entries where `publishedAt: null` ordered by `createdAt: "asc"`, limited by `take: batchSize` (default 100). Deserializes event from JSON.
-33. `PrismaOutboxStore.markPublished()` updates `publishedAt` to current ISO timestamp for entries matching the given IDs via `updateMany`.
+33. `PrismaOutboxStore.markPublished()` updates `publishedAt` to the current timestamp (`new Date()`) for entries matching the given IDs via `updateMany`.
 34. `PrismaOutboxStore.markPublishedByEventIds()` loads unpublished entries, filters by deserialized `event.metadata.eventId`, and marks matching entries as published.
 35. `PrismaOutboxStore.deletePublished()` deletes rows where `publishedAt` is not null and optionally `createdAt < olderThan` via `deleteMany`.
 36. `outboxStore` is only present in the result when `config.outboxStore` is `true`. Same for `snapshotStore`.
@@ -358,21 +356,12 @@ export class PrismaOutboxStore implements OutboxStore {
 54. `save()` with `expectedVersion === 0` uses `create()`; catches Prisma `P2002` (unique constraint violation) and rethrows as `ConcurrencyError`.
 55. `save()` with `expectedVersion > 0` uses `updateMany()` with version match; throws `ConcurrencyError` if `count === 0`.
 
-### Migration Generation
-
-56. `generatePrismaMigration(dialect)` returns a SQL string with `CREATE TABLE IF NOT EXISTS` and `CREATE UNIQUE INDEX IF NOT EXISTS` statements.
-57. Default (no options) includes shared tables: `noddde_events`, `noddde_aggregate_states`, `noddde_saga_states`.
-58. When `options.sharedTables.snapshots` or `.outbox` is `true`, the corresponding table is included.
-59. When `options.aggregateStateTables` is provided, generates `CREATE TABLE IF NOT EXISTS` for each custom table with `aggregate_id TEXT NOT NULL PRIMARY KEY`, `state` (dialect-appropriate JSON type), `version INTEGER NOT NULL DEFAULT 0` columns (or custom column names from config).
-60. Output is dialect-aware: PostgreSQL uses `SERIAL`/`JSONB`/`TEXT`, MySQL uses `INT AUTO_INCREMENT`/`JSON`/`VARCHAR(255)`, SQLite uses `INTEGER`/`TEXT`.
-61. All DDL statements use `IF NOT EXISTS` for idempotent migrations.
-
 ### Backwards Compatibility
 
-62. `createPrismaPersistence(prisma)` continues to work with the same signature and return type (`PrismaPersistenceInfrastructure`).
-63. `createPrismaPersistence` delegates to `createPrismaAdapter` internally with `{ snapshotStore: true, outboxStore: true }`.
-64. The `PrismaPersistenceInfrastructure` return type is unchanged.
-65. `createPrismaPersistence` is marked `@deprecated` in JSDoc, recommending `createPrismaAdapter` instead.
+56. `createPrismaPersistence(prisma)` continues to work with the same signature and return type (`PrismaPersistenceInfrastructure`).
+57. `createPrismaPersistence` delegates to `createPrismaAdapter` internally with `{ snapshotStore: true, outboxStore: true }`.
+58. The `PrismaPersistenceInfrastructure` return type is unchanged.
+59. `createPrismaPersistence` is marked `@deprecated` in JSDoc, recommending `createPrismaAdapter` instead.
 
 ## Invariants
 
@@ -405,7 +394,6 @@ export class PrismaOutboxStore implements OutboxStore {
 - **Dedicated and shared persistence in same UoW**: Both participate in the same transaction via shared txStore.
 - **Multiple dedicated tables in same UoW**: All share the same transaction.
 - **No config (minimal call)**: `createPrismaAdapter(prisma)` returns only always-present stores; no `snapshotStore`, `outboxStore`, or `stateStoreFor`.
-- **Migration generation with empty options**: Returns SQL for all three shared tables.
 
 ## Integration Points
 
@@ -422,12 +410,14 @@ export class PrismaOutboxStore implements OutboxStore {
 
 ```prisma
 model NodddeEvent {
-  id             Int    @id @default(autoincrement())
-  aggregateName  String @map("aggregate_name")
-  aggregateId    String @map("aggregate_id")
-  sequenceNumber Int    @map("sequence_number")
-  eventName      String @map("event_name")
+  id             Int      @id @default(autoincrement())
+  aggregateName  String   @map("aggregate_name")
+  aggregateId    String   @map("aggregate_id")
+  sequenceNumber Int      @map("sequence_number")
+  eventName      String   @map("event_name")
   payload        String
+  metadata       String?
+  createdAt      DateTime @map("created_at")
 
   @@unique([aggregateName, aggregateId, sequenceNumber])
   @@map("noddde_events")
@@ -463,12 +453,12 @@ model NodddeSnapshot {
 }
 
 model NodddeOutboxEntry {
-  id            String  @id
+  id            String    @id
   event         String
-  aggregateName String? @map("aggregate_name")
-  aggregateId   String? @map("aggregate_id")
-  createdAt     String  @map("created_at")
-  publishedAt   String? @map("published_at")
+  aggregateName String?   @map("aggregate_name")
+  aggregateId   String?   @map("aggregate_id")
+  createdAt     DateTime  @map("created_at")
+  publishedAt   DateTime? @map("published_at")
 
   @@map("noddde_outbox")
 }

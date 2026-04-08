@@ -57,6 +57,9 @@ export class TypeORMEventSourcedAggregatePersistence
       entity.eventName = event.name;
       entity.payload = JSON.stringify(event.payload);
       entity.metadata = event.metadata ? JSON.stringify(event.metadata) : null;
+      entity.createdAt = event.metadata?.timestamp
+        ? new Date(event.metadata.timestamp)
+        : new Date();
       return entity;
     });
 
@@ -326,7 +329,7 @@ export class TypeORMOutboxStore implements OutboxStore {
       entity.aggregateName = e.aggregateName ?? null;
       entity.aggregateId = e.aggregateId ?? null;
       entity.createdAt = e.createdAt;
-      entity.publishedAt = e.publishedAt;
+      entity.publishedAt = e.publishedAt ?? null;
       return entity;
     });
     await repo.save(entities);
@@ -345,8 +348,8 @@ export class TypeORMOutboxStore implements OutboxStore {
       event: JSON.parse(row.event),
       aggregateName: row.aggregateName ?? undefined,
       aggregateId: row.aggregateId ?? undefined,
-      createdAt: row.createdAt,
-      publishedAt: row.publishedAt,
+      createdAt: new Date(row.createdAt),
+      publishedAt: row.publishedAt != null ? new Date(row.publishedAt) : null,
     }));
   }
 
@@ -354,10 +357,7 @@ export class TypeORMOutboxStore implements OutboxStore {
     if (ids.length === 0) return;
     const manager = this.getManager();
     const repo = manager.getRepository(NodddeOutboxEntryEntity);
-    await repo.update(
-      { id: In(ids) },
-      { publishedAt: new Date().toISOString() },
-    );
+    await repo.update({ id: In(ids) }, { publishedAt: new Date() });
   }
 
   async markPublishedByEventIds(eventIds: string[]): Promise<void> {
@@ -382,7 +382,7 @@ export class TypeORMOutboxStore implements OutboxStore {
     if (olderThan) {
       await repo.delete({
         publishedAt: Not(IsNull()),
-        createdAt: LessThan(olderThan.toISOString()),
+        createdAt: LessThan(olderThan),
       });
     } else {
       await repo.delete({ publishedAt: Not(IsNull()) });

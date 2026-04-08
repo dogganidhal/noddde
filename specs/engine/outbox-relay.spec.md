@@ -130,7 +130,7 @@ describe("OutboxRelay", () => {
       {
         id: "e1",
         event: { name: "OrderCreated", payload: { orderId: "o1" } },
-        createdAt: "2025-01-01T00:00:00.000Z",
+        createdAt: new Date("2025-01-01T00:00:00.000Z"),
         publishedAt: null,
       },
     ]);
@@ -191,13 +191,13 @@ describe("OutboxRelay", () => {
       {
         id: "fail",
         event: { name: "FailEvent", payload: {} },
-        createdAt: "2025-01-01T00:00:00.000Z",
+        createdAt: new Date("2025-01-01T00:00:00.000Z"),
         publishedAt: null,
       },
       {
         id: "success",
         event: { name: "SuccessEvent", payload: {} },
-        createdAt: "2025-01-01T00:00:01.000Z",
+        createdAt: new Date("2025-01-01T00:00:01.000Z"),
         publishedAt: null,
       },
     ]);
@@ -305,7 +305,7 @@ describe("OutboxRelay", () => {
       Array.from({ length: 5 }, (_, i) => ({
         id: `e${i}`,
         event: { name: "Evt", payload: { i } },
-        createdAt: `2025-01-01T00:00:0${i}.000Z`,
+        createdAt: new Date(`2025-01-01T00:00:0${i}.000Z`),
         publishedAt: null,
       })),
     );

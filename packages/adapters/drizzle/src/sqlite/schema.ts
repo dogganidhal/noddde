@@ -19,6 +19,7 @@ export const events = sqliteTable(
     eventName: text("event_name").notNull(),
     payload: text("payload").notNull(),
     metadata: text("metadata"),
+    createdAt: text("created_at").notNull(),
   },
   (table) => ({
     streamVersionIdx: uniqueIndex("noddde_events_stream_version_idx").on(

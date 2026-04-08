@@ -19,11 +19,6 @@ export {
   type PrismaAggregateStateTableConfig,
   type PrismaStateTableColumnMap,
 } from "./builder";
-export {
-  generatePrismaMigration,
-  type PrismaMigrationOptions,
-} from "./migrations";
-
 import type { PrismaClient } from "@prisma/client";
 import type {
   UnitOfWorkFactory,

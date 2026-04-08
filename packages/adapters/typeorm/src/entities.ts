@@ -32,6 +32,9 @@ export class NodddeEventEntity {
 
   @Column({ type: "text", nullable: true })
   metadata!: string | null;
+
+  @Column({ name: "created_at", type: "datetime" })
+  createdAt!: Date;
 }
 
 /**
@@ -102,9 +105,9 @@ export class NodddeOutboxEntryEntity {
   @Column({ name: "aggregate_id", type: "varchar", nullable: true })
   aggregateId!: string | null;
 
-  @Column({ name: "created_at" })
-  createdAt!: string;
+  @Column({ name: "created_at", type: "datetime" })
+  createdAt!: Date;
 
-  @Column({ name: "published_at", type: "varchar", nullable: true })
-  publishedAt!: string | null;
+  @Column({ name: "published_at", type: "datetime", nullable: true })
+  publishedAt!: Date | null;
 }

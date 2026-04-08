@@ -567,7 +567,7 @@ describe("Drizzle Multi-Dialect Persistence", () => {
           event: { name: "OrderPlaced", payload: { total: 100 } },
           aggregateName: "Order",
           aggregateId: "order-1",
-          createdAt: "2024-01-01T00:00:00Z",
+          createdAt: new Date("2024-01-01T00:00:00Z"),
           publishedAt: null,
         },
         {
@@ -575,7 +575,7 @@ describe("Drizzle Multi-Dialect Persistence", () => {
           event: { name: "OrderConfirmed", payload: {} },
           aggregateName: "Order",
           aggregateId: "order-1",
-          createdAt: "2024-01-01T00:00:01Z",
+          createdAt: new Date("2024-01-01T00:00:01Z"),
           publishedAt: null,
         },
       ]);
@@ -604,13 +604,13 @@ describe("Drizzle Multi-Dialect Persistence", () => {
         {
           id: "entry-1",
           event: { name: "OrderPlaced", payload: {} },
-          createdAt: "2024-01-01T00:00:00Z",
+          createdAt: new Date("2024-01-01T00:00:00Z"),
           publishedAt: null,
         },
         {
           id: "entry-2",
           event: { name: "OrderConfirmed", payload: {} },
-          createdAt: "2024-01-01T00:00:01Z",
+          createdAt: new Date("2024-01-01T00:00:01Z"),
           publishedAt: null,
         },
       ]);
@@ -645,7 +645,7 @@ describe("Drizzle Multi-Dialect Persistence", () => {
               causationId: "cmd-1",
             },
           },
-          createdAt: "2024-01-01T00:00:00Z",
+          createdAt: new Date("2024-01-01T00:00:00Z"),
           publishedAt: null,
         },
         {
@@ -660,7 +660,7 @@ describe("Drizzle Multi-Dialect Persistence", () => {
               causationId: "cmd-2",
             },
           },
-          createdAt: "2024-01-01T00:00:01Z",
+          createdAt: new Date("2024-01-01T00:00:01Z"),
           publishedAt: null,
         },
       ]);
@@ -686,13 +686,13 @@ describe("Drizzle Multi-Dialect Persistence", () => {
         {
           id: "entry-1",
           event: { name: "OrderPlaced", payload: {} },
-          createdAt: "2024-01-01T00:00:00Z",
+          createdAt: new Date("2024-01-01T00:00:00Z"),
           publishedAt: null,
         },
         {
           id: "entry-2",
           event: { name: "OrderConfirmed", payload: {} },
-          createdAt: "2024-01-01T00:00:01Z",
+          createdAt: new Date("2024-01-01T00:00:01Z"),
           publishedAt: null,
         },
       ]);

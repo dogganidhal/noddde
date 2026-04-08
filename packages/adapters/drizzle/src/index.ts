@@ -19,11 +19,6 @@ export {
   type AggregateStateTableConfig,
   type StateTableColumnMap,
 } from "./builder";
-export {
-  generateDrizzleMigration,
-  type DrizzleMigrationOptions,
-} from "./migrations";
-
 /**
  * Schema tables the developer passes to the factory.
  * Each field is a Drizzle table definition (any dialect).

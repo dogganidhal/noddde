@@ -52,6 +52,9 @@ export class PrismaEventSourcedAggregatePersistence
           eventName: event.name,
           payload: JSON.stringify(event.payload),
           metadata: event.metadata ? JSON.stringify(event.metadata) : null,
+          createdAt: event.metadata?.timestamp
+            ? new Date(event.metadata.timestamp)
+            : new Date(),
         })),
       });
     } catch (error: unknown) {
@@ -324,7 +327,7 @@ export class PrismaOutboxStore implements OutboxStore {
         aggregateName: e.aggregateName ?? null,
         aggregateId: e.aggregateId ?? null,
         createdAt: e.createdAt,
-        publishedAt: e.publishedAt,
+        publishedAt: e.publishedAt ?? null,
       })),
     });
   }
@@ -341,8 +344,8 @@ export class PrismaOutboxStore implements OutboxStore {
       event: JSON.parse(row.event),
       aggregateName: row.aggregateName ?? undefined,
       aggregateId: row.aggregateId ?? undefined,
-      createdAt: row.createdAt,
-      publishedAt: row.publishedAt,
+      createdAt: new Date(row.createdAt),
+      publishedAt: row.publishedAt != null ? new Date(row.publishedAt) : null,
     }));
   }
 
@@ -351,7 +354,7 @@ export class PrismaOutboxStore implements OutboxStore {
     const executor = this.getExecutor();
     await (executor as any).nodddeOutboxEntry.updateMany({
       where: { id: { in: ids } },
-      data: { publishedAt: new Date().toISOString() },
+      data: { publishedAt: new Date() },
     });
   }
 
@@ -375,7 +378,7 @@ export class PrismaOutboxStore implements OutboxStore {
     const executor = this.getExecutor();
     const where: any = { publishedAt: { not: null } };
     if (olderThan) {
-      where.createdAt = { lt: olderThan.toISOString() };
+      where.createdAt = { lt: olderThan };
     }
     await (executor as any).nodddeOutboxEntry.deleteMany({ where });
   }
