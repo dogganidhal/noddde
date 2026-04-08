@@ -8,22 +8,30 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 
 # Spec-Driven Development Orchestrator
 
-You are the orchestrator of a 6-step spec-driven pipeline. The developer describes what they want. You plan, execute, loop, and deliver — only pausing at gate points.
+You are the orchestrator of a 6-step spec-driven pipeline. The developer describes what they want. You plan, coordinate agents, and deliver — only pausing at gate points.
+
+## Multi-Agent Architecture
+
+The pipeline uses three roles:
+
+| Role                   | Agent              | Steps | Purpose                                        |
+| ---------------------- | ------------------ | ----- | ---------------------------------------------- |
+| **Orchestrator** (you) | Main context       | 0-1   | Understand intent, write/edit spec, coordinate |
+| **Builder**            | Sub-agent (Sonnet) | 2-4   | Generate RED tests, implement, run GREEN tests |
+| **Auditor**            | Sub-agent (Opus)   | 5-6   | Independent validation, coherence review, docs |
+
+The Builder and Auditor run in **separate agent contexts**. The Auditor has no memory of the Builder's work — it reviews with fresh eyes. Communication happens through **file artifacts** (Build Report, Audit Report).
 
 ## Pipeline Overview
 
 ```
-  Gate 1 ──→ Step 1: SPEC         Write/edit the spec
+  Gate 1 ──→ Step 1: SPEC           Write/edit the spec (you, directly)
     ↓
-  (auto)  ──→ Step 2: TEST (RED)   Generate tests, confirm they fail
+  (auto)  ──→ Steps 2-4: BUILD      [Builder agent] RED tests → implement → GREEN
     ↓
-  (auto)  ──→ Step 3: IMPLEMENT    Write code to make tests pass
+  (auto)  ──→ Steps 5-6: AUDIT      [Auditor agent] Validate + coherence + docs
     ↓
-  (loop)  ──→ Step 4: TEST (GREEN) Run tests — loop back to step 3 if RED
-    ↓
-  (auto)  ──→ Step 5: VALIDATE     Final cross-check
-    ↓
-  (auto)  ──→ Step 6: DOCS         Update documentation pages
+  (loop)  ──→ FEEDBACK LOOP          If Auditor FAILs → re-run Builder (max 2 cycles)
     ↓
   Report  ──→ Done
 ```
@@ -32,9 +40,10 @@ You are the orchestrator of a 6-step spec-driven pipeline. The developer describ
 
 - **Gate 1**: After planning the spec — "Here's what I'll spec. Approve?"
 - **Breaking changes**: If detected during step 1 — "Breaking change. How to handle?"
-- **Stuck loop**: If step 3↔4 fails 3+ times on the same test — "I can't fix this. Here's what's happening."
+- **Stuck loop**: If the Builder gets stuck (3+ failures on same test) — "Builder can't fix this. Here's what's happening."
+- **Auditor CONCERN**: If the Auditor raises issues requiring developer judgment
 
-**Everything else runs autonomously.** Don't ask for permission between steps 2→3→4→5→6.
+**Everything else runs autonomously.** Don't ask for permission between steps.
 
 ---
 
@@ -42,19 +51,19 @@ You are the orchestrator of a 6-step spec-driven pipeline. The developer describ
 
 Determine what the developer wants:
 
-| Developer says...                                             | Action                                                  |
-| ------------------------------------------------------------- | ------------------------------------------------------- |
-| "Add <feature>" / "Create <module>" / "New <thing>"           | → New spec (full pipeline)                              |
-| "Fix <bug>" / "Handle <edge case>"                            | → Edit existing spec (find it first)                    |
-| "Change <API>" / "Rename <type>" / "Add field to <interface>" | → Edit existing spec (breaking change likely)           |
-| "Implement <spec-path>"                                       | → Skip to step 2 (spec already exists)                  |
-| "The tests are failing on <spec>"                             | → Skip to step 3 (tests exist, need implementation fix) |
+| Developer says...                                             | Action                                                   |
+| ------------------------------------------------------------- | -------------------------------------------------------- |
+| "Add <feature>" / "Create <module>" / "New <thing>"           | → New spec (full pipeline)                               |
+| "Fix <bug>" / "Handle <edge case>"                            | → Edit existing spec (find it first)                     |
+| "Change <API>" / "Rename <type>" / "Add field to <interface>" | → Edit existing spec (breaking change likely)            |
+| "Implement <spec-path>"                                       | → Skip to Builder (spec already exists)                  |
+| "The tests are failing on <spec>"                             | → Skip to Builder (tests exist, need implementation fix) |
 
 If the developer provides a spec path, read it and determine which step to start from based on current state:
 
-- Spec exists, no test file → start at step 2
-- Spec exists, test file exists, tests RED → start at step 3
-- Spec exists, tests GREEN → start at step 5 (validate)
+- Spec exists, no test file → start at Builder
+- Spec exists, test file exists, tests RED → start at Builder
+- Spec exists, tests GREEN → start at Auditor (validate)
 
 ---
 
@@ -163,170 +172,152 @@ Wait for developer choice, then:
 - **Deprecate**: add `@deprecated` JSDoc, write `## Migration` section, note version
 - **Accept**: infer version bump (minor for 0.x, major for ≥1.0), flag downstream specs for update
 
-**If no breaking changes**, proceed silently to step 2.
+**If no breaking changes**, proceed silently to the Builder.
 
 ---
 
-## Step 2: Generate Tests (RED)
+## Spawn Builder Agent (Steps 2-4)
 
 **Run autonomously — no gate.**
 
-1. Determine test file path:
+Spawn a sub-agent to execute the Builder role. The Builder will generate RED tests, implement code, and run tests until GREEN (or get stuck).
 
-   - `specs/core/<path>/<name>.spec.md` → `packages/core/src/__tests__/<path>/<name>.test.ts`
-   - `specs/integration/<name>.spec.md` → `packages/core/src/__tests__/integration/<name>.test.ts`
-
-2. Create parent directories if needed.
-
-3. Generate the test file:
-
-   - Each `### Heading` in `## Test Scenarios` → one `it()` block
-   - Group under `describe("<spec title>", () => { ... })`
-   - Use `import { ... } from "@noddde/core"` for framework imports
-   - Use `expectTypeOf` for type-level assertions, `expect` for runtime assertions
-   - If test file already exists: add new tests, update changed tests, preserve manually-added tests
-
-4. Run the tests:
-
-   ```bash
-   cd packages/core && npx vitest run --reporter=verbose <test-file>
-   ```
-
-5. **Expect RED.** Categorize results:
-
-   - Tests failing because implementation is a stub → correct (RED)
-   - Tests failing because of test code errors → fix the test code NOW, then re-run
-   - Type-level tests passing → fine (types may already exist)
-
-6. Report briefly and continue:
-   ```
-   🔴 Step 2 complete: <N> tests generated, <M> RED (expected). Proceeding to implementation.
-   ```
-
----
-
-## Step 3: Implement
-
-**Run autonomously — no gate.**
-
-1. Read the spec, source file, existing RED tests, and dependency source files.
-
-2. Update spec frontmatter: `status: implementing`
-
-3. Replace `throw new Error("Not implemented")` stubs with working code.
-
-   - Implement behavioral requirements in numbered order
-   - Follow conventions from CLAUDE.md:
-     - Functional style: no classes for domain concepts
-     - Strict TypeScript: `strict: true`, `noUncheckedIndexedAccess: true`
-     - JSDoc on all public exports
-     - Handler signatures must match exactly
-   - Do NOT modify the test file
-
-4. Run type check:
-
-   ```bash
-   cd packages/core && npx tsc --noEmit
-   ```
-
-   Fix type errors in the implementation (not in tests — the spec is the authority).
-
-5. Proceed directly to step 4.
-
----
-
-## Step 4: Run Tests (GREEN)
-
-**Run autonomously — loop back to step 3 if needed.**
-
-1. Run tests:
-
-   ```bash
-   cd packages/core && npx vitest run --reporter=verbose <test-file>
-   ```
-
-2. **If ALL GREEN**: proceed to step 5.
-
-3. **If some RED**: analyze each failure:
-
-   - Is it a missing implementation? → go back to step 3, implement the specific requirement
-   - Is it a bug in the implementation? → go back to step 3, fix the bug
-   - Is it a test code issue? → fix the test (but flag it — the spec may need updating)
-
-4. **Loop**: go back to step 3 → fix → step 4 → test. Repeat.
-
-5. **Stuck detection**: If the SAME test fails 3 times in a row with the same error, STOP and escalate:
-
-   ```
-   🔴 Stuck on test: "<test name>"
-
-   Error (3 consecutive failures):
-     <error message>
-
-   What I've tried:
-     1. <attempt 1>
-     2. <attempt 2>
-     3. <attempt 3>
-
-   This might indicate:
-     - A spec requirement that's ambiguous or contradictory
-     - A dependency that isn't implemented yet
-     - A fundamental design issue
-
-   How would you like to proceed?
-   ```
-
----
-
-## Step 5: Validate
-
-**Run autonomously — no gate.**
-
-1. **Export coverage**: Compare spec `exports` frontmatter vs source file actual exports.
-2. **Behavioral requirements**: For each numbered requirement, check: implemented + tested?
-3. **Invariants**: For each invariant, check: enforced by types or runtime? Tested?
-4. **Edge cases**: For each edge case, check: handled? Tested?
-5. **Stub check**: `grep -n "throw new Error" <source-file>` — must be zero.
-6. **Final test run**: Run tests one more time to confirm GREEN.
-7. **CLI template check**: If the spec changed any of these, CLI templates in `packages/cli/src/templates/` MUST be updated:
-
-   - `defineAggregate`, `defineProjection`, `defineSaga`, `defineDomain`, `wireDomain` signatures or config shape
-   - `DefineEvents`, `DefineCommands`, `DefineQueries` type helpers
-   - Handler signatures (command, apply, saga `on` map `{ id, handle }`, projection `on` map `{ id?, reduce }`)
-   - Persistence, bus, or infrastructure interfaces referenced by generated code
-
-   If affected: update templates, run `cd packages/cli && npx vitest run` to verify, and flag CLI docs for step 6.
-
-Update spec frontmatter: `status: implemented`
-
----
-
-## Step 6: Update Documentation
-
-**Run autonomously — no gate.**
-
-1. Read the spec's `docs` frontmatter field for explicitly mapped documentation pages.
-2. Grep `docs/content/docs/` for references to the spec's exports (discover additional pages).
-3. For each affected documentation page:
-   - Update code examples that use changed API signatures
-   - Update explanatory text if behavioral requirements changed
-   - Add deprecation notices if applicable
-4. If this is a new spec (new module), create stub documentation pages in the appropriate category under `docs/content/docs/` and update the category's `meta.json`.
-5. Flag auto-generated API reference pages (in `docs/src/content/docs/api/`) for regeneration if exports changed — do NOT manually edit them.
-6. If CLI templates were updated in step 5, also update `docs/content/docs/getting-started/cli.mdx` and `docs/content/docs/getting-started/project-structure.mdx` to reflect any changes to generated file structure, handler patterns, or command output.
-7. Report briefly and continue to the Final Report:
-   ```
-   📖 Step 6 complete: Documentation updated
-     Pages updated: <N>
-     Pages created: <N>
-     API reference: <status>
-     Flagged for review: <N>
-   ```
-
-If no documentation updates are needed (internal-only change, no API surface affected):
+Use the `Agent` tool to spawn the Builder:
 
 ```
-📖 Step 6 complete: No documentation updates needed
+Agent(
+  description: "Builder: RED tests → implement → GREEN for <spec-name>",
+  model: "sonnet",
+  prompt: <see below>
+)
+```
+
+### Builder Prompt Template
+
+Construct the prompt by including:
+
+1. **The full contents of `.claude/skills/build-spec/SKILL.md`** (read it and include it)
+2. **The project's coding conventions from `CLAUDE.md`** (include the Coding Conventions section)
+3. **The spec path and any context**:
+
+```
+## Your Task
+
+Execute the Builder pipeline for:
+- Spec: <spec-path>
+
+<if re-run after audit>
+This is a re-run. Read the Audit Report at specs/reports/<spec-name>.audit-report.md
+and address all findings before proceeding.
+</if>
+
+Follow the build-spec procedure above. Write the Build Report when done.
+```
+
+### After Builder Completes
+
+1. Read the Build Report at `specs/reports/<spec-name>.build-report.md`.
+2. If `Result: GREEN` → proceed to spawn the Auditor.
+3. If `Result: STUCK` → escalate to the developer:
+
+```
+🔴 Builder stuck on: <spec title>
+
+<stuck details from Build Report>
+
+This might indicate:
+  - A spec requirement that's ambiguous or contradictory
+  - A dependency that isn't implemented yet
+  - A fundamental design issue
+
+How would you like to proceed?
+```
+
+---
+
+## Spawn Auditor Agent (Steps 5-6)
+
+**Run autonomously — no gate (unless CONCERN).**
+
+Spawn a sub-agent to execute the Auditor role. The Auditor validates independently and updates docs.
+
+Use the `Agent` tool to spawn the Auditor:
+
+```
+Agent(
+  description: "Auditor: validate + review + docs for <spec-name>",
+  model: "opus",
+  prompt: <see below>
+)
+```
+
+### Auditor Prompt Template
+
+Construct the prompt by including:
+
+1. **The full contents of `.claude/skills/audit-spec/SKILL.md`** (read it and include it)
+2. **The project's coding conventions from `CLAUDE.md`** (include the Coding Conventions section)
+3. **The spec path and cycle number**:
+
+```
+## Your Task
+
+Execute the Auditor pipeline for:
+- Spec: <spec-path>
+- Build Report: specs/reports/<spec-name>.build-report.md
+- Cycle: <1 or 2>
+
+Follow the audit-spec procedure above. Write the Audit Report when done.
+```
+
+### After Auditor Completes
+
+1. Read the Audit Report at `specs/reports/<spec-name>.audit-report.md`.
+2. Handle the verdict:
+
+#### PASS
+
+Pipeline complete. Proceed to the Final Report.
+
+#### FAIL (cycle 1)
+
+Re-spawn the Builder with audit findings:
+
+1. Report briefly to the developer:
+   ```
+   🔄 Auditor found issues. Re-running Builder (cycle 2/2).
+   Findings: <brief summary from Audit Report>
+   ```
+2. Spawn the Builder again with the re-run prompt (it will read the Audit Report).
+3. After Builder completes, spawn the Auditor again with `Cycle: 2`.
+
+#### FAIL (cycle 2)
+
+The Builder-Auditor loop has reached its limit. Escalate remaining issues to the developer:
+
+```
+⚠️  Auditor found persistent issues after 2 cycles:
+
+<findings from cycle 2 Audit Report>
+
+Options:
+  1. Accept as-is (mark implemented with notes)
+  2. I'll fix these manually
+  3. Revise the spec to accommodate the implementation
+
+Which approach?
+```
+
+#### CONCERN
+
+Escalate to the developer immediately:
+
+```
+🤔 Auditor raised concerns requiring your judgment:
+
+<concerns from Audit Report>
+
+How would you like to proceed?
 ```
 
 ---
@@ -338,24 +329,24 @@ Present the complete result:
 ```
 ✅ Pipeline complete: <spec title>
 
-  Step 1: Spec written     → <spec-path>
-  Step 2: Tests generated  → <test-path> (<N> scenarios)
-  Step 3: Implemented      → <source-path>
-  Step 4: Tests GREEN      → <N>/<N> passing
-  Step 5: Validated        → <coverage summary>
-  Step 6: Docs updated     → <N> pages updated, <M> created
+  Step 1: Spec written       → <spec-path>
+  Steps 2-4: Builder         → <source-path> (<N> tests, <M> loops)
+  Steps 5-6: Auditor         → <verdict> (<N> pages updated)
 
   Status: implemented
   Breaking changes: <none | managed via deprecation | accepted>
-  Implementation loops: <N> (step 3↔4 iterations)
+  Builder-Auditor cycles: <1 or 2>
+
+  Artifacts:
+    Build Report:  specs/reports/<spec-name>.build-report.md
+    Audit Report:  specs/reports/<spec-name>.audit-report.md
 ```
 
-If there are remaining gaps from validation:
+If there are remaining gaps from the Auditor:
 
 ```
 ⚠️  Minor gaps (non-blocking):
-  - Invariant "<name>" not enforced at runtime (type-level only)
-  - Edge case "<name>" not tested (covered by implementation)
+  - <from Audit Report>
 
 These are noted but don't block the `implemented` status.
 ```
