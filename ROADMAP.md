@@ -2,7 +2,7 @@
 
 Where noddde is headed: what is shipped, what is required for v1.0, and our vision for distributed TypeScript domains.
 
-**Current Status:** Pre-1.0. The core Decider pattern and type-inference engine are stable. We are currently focused on production hardening, fault tolerance, and developer guardrails ahead of our v1.0 Release Candidate.
+**Current Status:** Pre-1.0. The core Decider pattern, type-inference engine, persistence adapters, distributed event buses, and observability are all shipped. We are currently focused on error isolation and developer ergonomics ahead of our v1.0 Release Candidate.
 
 ---
 
@@ -19,6 +19,8 @@ Where noddde is headed: what is shipped, what is required for v1.0, and our visi
 - [x] **State Snapshotting:** Configurable strategies (e.g., every N events).
 - [x] **ORM Adapters:** Drizzle, Prisma, and TypeORM with UoW transaction support.
 - [x] **Testing Toolkit:** Type-safe Given-When-Then test harnesses (`@noddde/testing`).
+- [x] **Observability & OpenTelemetry (OTel):** Native OTel trace context propagation spanning the full asynchronous lifecycle: API -> Command Bus -> Aggregate -> Event Bus -> Saga -> Read Model. Zero required configuration — auto-detects `@opentelemetry/api` at runtime.
+- [x] **Distributed Event Bus Adapters:** Official adapters for RabbitMQ (`@noddde/rabbitmq`), NATS (`@noddde/nats`), and Kafka (`@noddde/kafka`) with consumer group support, at-least-once delivery, manual acknowledgment, and configurable retry policies.
 
 ---
 
@@ -43,10 +45,6 @@ _These items must be completed to guarantee state consistency and developer ergo
 
 _Features required for deploying noddde across multi-node, high-throughput microservice environments._
 
-- [x] **Observability & OpenTelemetry (OTel)**
-  - Native OTel trace context propagation spanning the full asynchronous lifecycle: API -> Command Bus -> Aggregate -> Event Bus -> Saga -> Read Model.
-- [ ] **Distributed Event Bus Adapters**
-  - Official adapters for Kafka, NATS, or RabbitMQ with consumer group support, ensuring events are routed safely across multiple instances.
 - [ ] **Advanced Outbox Management**
   - Add poison pill detection, exponential backoff, and Dead Letter Queues (DLQ) to the Outbox Relay to handle downstream event bus outages.
   - Optimize ORM outbox polling with `SKIP LOCKED` to prevent contention in multi-node deployments.

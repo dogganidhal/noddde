@@ -45,28 +45,38 @@ jobs:
           echo "Publishing version: $VERSION"
 
           # Set own version for all publishable packages
-          for dir in packages/core packages/engine packages/testing packages/adapters/drizzle packages/adapters/prisma packages/adapters/typeorm; do
+          for dir in packages/core packages/engine packages/cli packages/testing packages/adapters/drizzle packages/adapters/prisma packages/adapters/typeorm packages/adapters/rabbitmq packages/adapters/nats packages/adapters/kafka; do
             cd "$dir"
             npm pkg set "version=$VERSION"
             cd "$GITHUB_WORKSPACE"
           done
 
           # Rewrite internal dependency versions
+          # Tier 2: depends on core only
           for dir in packages/engine packages/adapters/drizzle packages/adapters/prisma packages/adapters/typeorm; do
             cd "$dir"
             npm pkg set "dependencies.@noddde/core=$VERSION"
             cd "$GITHUB_WORKSPACE"
           done
 
-          cd packages/testing
-          npm pkg set "dependencies.@noddde/core=$VERSION"
-          npm pkg set "dependencies.@noddde/engine=$VERSION"
-          cd "$GITHUB_WORKSPACE"
+          # Tier 3: depends on core + engine
+          for dir in packages/testing packages/adapters/rabbitmq packages/adapters/nats packages/adapters/kafka; do
+            cd "$dir"
+            npm pkg set "dependencies.@noddde/core=$VERSION"
+            npm pkg set "dependencies.@noddde/engine=$VERSION"
+            cd "$GITHUB_WORKSPACE"
+          done
 
       # Tier 1: no internal dependencies
       - name: Publish @noddde/core
         run: npm publish --access public --provenance
         working-directory: packages/core
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @noddde/cli
+        run: npm publish --access public --provenance
+        working-directory: packages/cli
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -99,5 +109,23 @@ jobs:
       - name: Publish @noddde/testing
         run: npm publish --access public --provenance
         working-directory: packages/testing
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @noddde/rabbitmq
+        run: npm publish --access public --provenance
+        working-directory: packages/adapters/rabbitmq
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @noddde/nats
+        run: npm publish --access public --provenance
+        working-directory: packages/adapters/nats
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @noddde/kafka
+        run: npm publish --access public --provenance
+        working-directory: packages/adapters/kafka
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
