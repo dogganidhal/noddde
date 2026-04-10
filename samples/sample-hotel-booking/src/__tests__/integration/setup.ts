@@ -59,7 +59,8 @@ export async function createTestEnvironment() {
       sequence_number INTEGER NOT NULL,
       event_name TEXT NOT NULL,
       payload TEXT NOT NULL,
-      metadata TEXT
+      metadata TEXT,
+      created_at TEXT NOT NULL DEFAULT ''
     );
     CREATE UNIQUE INDEX noddde_events_stream_version_idx
       ON noddde_events(aggregate_name, aggregate_id, sequence_number);
