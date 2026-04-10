@@ -208,7 +208,7 @@ const eventBus = new RabbitMqEventBus({
 | `exchangeType`              | `"topic" \| "fanout"` | No       | `"topic"`                                 | Exchange type                                                                                                             |
 | `queuePrefix`               | `string`              | No       | `"noddde"`                                | Queue name prefix                                                                                                         |
 | `prefetchCount`             | `number`              | No       | `10`                                      | Maximum unacknowledged messages per consumer. Provides backpressure control                                               |
-| `resilience.maxAttempts`    | `number`              | No       | `3`                                       | Maximum number of connection attempts                                                                                     |
+| `resilience.maxAttempts`    | `number`              | No       | `3`                                       | Maximum number of initial connection attempts. Mid-session reconnection retries indefinitely until `close()` is called    |
 | `resilience.initialDelayMs` | `number`              | No       | `1000`                                    | Initial delay between retries in milliseconds. Doubles on each retry                                                      |
 | `resilience.maxDelayMs`     | `number`              | No       | `30000`                                   | Maximum delay between retries in milliseconds                                                                             |
 | `logger`                    | `Logger`              | No       | `NodddeLogger("warn", "noddde:rabbitmq")` | Framework logger instance from `@noddde/core`. All internal logging goes through this logger with structured context data |
@@ -220,7 +220,7 @@ const eventBus = new RabbitMqEventBus({
 - **Delivery**: At-least-once with manual acknowledgment. On handler success, the message is acked. On handler failure, the message is nacked with requeue for redelivery.
 - **Poison message protection**: Malformed messages that fail JSON deserialization are acknowledged and skipped, preventing infinite nack/requeue loops. If `resilience.maxRetries` is configured, messages that exceed the delivery count limit (tracked via an in-memory counter per message) are also acknowledged and discarded. The in-memory approach is used instead of `x-death` headers because `x-death` requires a dead-letter exchange to be configured.
 - **Backpressure**: The `prefetchCount` option limits how many unacknowledged messages the broker sends to this consumer, providing natural backpressure when handlers are slow.
-- **Connection resilience**: The `resilience` option enables retry with exponential backoff on initial connection failure. Delay doubles on each attempt, capped at `maxDelayMs`. If all attempts fail, the last error is thrown. After a successful connection, `error` and `close` handlers are registered on the AMQP connection to detect unexpected disconnections. On unexpected close, the bus automatically attempts reconnection using the same backoff configuration, then re-establishes all consumers.
+- **Connection resilience**: The `resilience` option enables retry with exponential backoff on initial connection failure. Delay doubles on each attempt, capped at `maxDelayMs`. If all attempts fail, the last error is thrown. After a successful connection, `error` and `close` handlers are registered on the AMQP connection to detect unexpected disconnections. On unexpected close, the bus automatically attempts reconnection **indefinitely** using jittered exponential backoff (base delay doubles each attempt, capped at `maxDelayMs`, with +-25% random jitter to prevent thundering herd). Unlike the initial `connect()`, mid-session reconnection ignores `maxAttempts` and retries until either the broker recovers or `close()` is called. During reconnection, `dispatch()` rejects with a connection error. Once reconnected, the exchange and all consumers are re-established automatically.
 - **Logging**: All internal logging uses the framework `Logger` interface from `@noddde/core`. Pass a custom `logger` in the config or accept the default (`NodddeLogger("warn", "noddde:rabbitmq")`). All log calls include structured context data (event name, error details).
 
 ### Wiring with Domain
@@ -256,11 +256,11 @@ All three broker adapters accept an optional `resilience` field of type `BrokerR
 
 ### Connection Resilience
 
-| Field            | Kafka               | NATS                                   | RabbitMQ                         |
-| ---------------- | ------------------- | -------------------------------------- | -------------------------------- |
-| `maxAttempts`    | `retries` (minus 1) | `maxReconnectAttempts` (-1 = infinite) | Connection retry attempts        |
-| `initialDelayMs` | `initialRetryTime`  | `reconnectTimeWait` (fixed interval)   | Base delay (exponential backoff) |
-| `maxDelayMs`     | `maxRetryTime`      | Ignored (fixed intervals)              | Backoff cap                      |
+| Field            | Kafka               | NATS                                   | RabbitMQ                                                                |
+| ---------------- | ------------------- | -------------------------------------- | ----------------------------------------------------------------------- |
+| `maxAttempts`    | `retries` (minus 1) | `maxReconnectAttempts` (-1 = infinite) | Initial connect retry attempts (mid-session reconnection is indefinite) |
+| `initialDelayMs` | `initialRetryTime`  | `reconnectTimeWait` (fixed interval)   | Base delay (exponential backoff)                                        |
+| `maxDelayMs`     | `maxRetryTime`      | Ignored (fixed intervals)              | Backoff cap                                                             |
 
 ### Message Delivery Resilience
 

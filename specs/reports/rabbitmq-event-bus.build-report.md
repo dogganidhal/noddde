@@ -1,97 +1,62 @@
-# Build Report: RabbitMqEventBus (messageId + framework logger)
+## Build Report: RabbitMqEventBus
 
-**Spec**: `specs/adapters/rabbitmq/rabbitmq-event-bus.spec.md`
-**Builder**: Claude Sonnet 4.6
-**Date**: 2026-04-10
-**Status**: GREEN — 24/24 tests passing
+- **Spec**: specs/adapters/rabbitmq/rabbitmq-event-bus.spec.md
+- **Source**: packages/adapters/rabbitmq/src/rabbitmq-event-bus.ts
+- **Tests**: packages/adapters/rabbitmq/src/**tests**/rabbitmq-event-bus.test.ts
+- **Result**: GREEN
+- **Tests passing**: 28/28
+- **Loop count**: 2
 
----
+### Test Results
 
-## Changes Made (this iteration)
+| Test                                                                                             | Status |
+| ------------------------------------------------------------------------------------------------ | ------ |
+| should publish event to exchange with event name as routing key                                  | PASS   |
+| should set persistent flag on published messages                                                 | PASS   |
+| should throw when dispatching before connect                                                     | PASS   |
+| should invoke registered handler when event is consumed                                          | PASS   |
+| should invoke all handlers concurrently via Promise.all                                          | PASS   |
+| should reject if any handler throws during parallel invocation                                   | PASS   |
+| should call channel.prefetch with configured prefetchCount                                       | PASS   |
+| should retry connection with exponential backoff                                                 | PASS   |
+| should close channel and connection on close                                                     | PASS   |
+| should not throw when close is called multiple times                                             | PASS   |
+| should nack message when handler throws                                                          | PASS   |
+| should serialize the full event object including metadata                                        | PASS   |
+| should use createConfirmChannel instead of createChannel                                         | PASS   |
+| should call waitForConfirms after publish in dispatch                                            | PASS   |
+| should ack and skip poison messages that fail deserialization                                    | PASS   |
+| should register error and close handlers on connection after connect                             | PASS   |
+| should set \_connected=false and attempt reconnect on unexpected close                           | PASS   |
+| should track delivery count in memory and discard after maxRetries                               | PASS   |
+| should not crash when ack throws on stale channel after successful handler                       | PASS   |
+| should not crash when nack throws on stale channel after handler failure                         | PASS   |
+| should ack poison messages in \_setupConsumer consumer                                           | PASS   |
+| should set messageId from event.metadata.eventId when present                                    | PASS   |
+| should not set messageId when event has no metadata                                              | PASS   |
+| should use provided logger for warn and error logging with structured data                       | PASS   |
+| mid-session reconnection: should retry reconnection indefinitely and stop when close() is called | PASS   |
+| mid-session reconnection: should apply jittered exponential backoff during reconnection          | PASS   |
+| mid-session reconnection: should stop reconnection immediately when close() is called            | PASS   |
+| should reject dispatch calls while reconnection is in progress                                   | PASS   |
 
-Two correctness fixes from the spec review (Requirements 3 and 18).
+### Changes Made
 
-### Fix 1: Stable messageId on publish (Requirement 3)
+**Implementation** (`packages/adapters/rabbitmq/src/rabbitmq-event-bus.ts`):
 
-**File**: `packages/adapters/rabbitmq/src/rabbitmq-event-bus.ts`
+1. **Replaced `_handleUnexpectedClose()` delegation**: Previously called `_connectWithRetry()` (bounded by `maxAttempts`). Now calls `_reconnectPersistently()` which runs an unbounded `while (!this._closed)` loop.
 
-In `dispatch()`, added `messageId` to the publish options when `event.metadata?.eventId` is present:
+2. **Added `_reconnectPersistently()` method**: Indefinitely retries connecting to RabbitMQ using jittered exponential backoff. On each failed attempt, computes `baseDelay = min(initialDelayMs * 2^attempt, maxDelayMs)` and `jitteredDelay = baseDelay * (0.75 + Math.random() * 0.5)`. Checks `_closed` before and after each sleep to exit cleanly when `close()` is called. On success, re-asserts exchange, re-establishes all consumers, resets `attempt` counter.
 
-```ts
-const messageId = (event as { metadata?: { eventId?: string } }).metadata
-  ?.eventId;
-this._channel.publish(this._exchangeName, event.name, body, {
-  persistent: true,
-  ...(messageId !== undefined ? { messageId } : {}),
-});
-```
+3. **Fixed `close()` idempotency guard**: Changed from `if (!this._connected) return` to `if (this._closed) return`. The old guard caused `close()` to be a no-op during reconnection (when `_connected === false`), which meant `_closed` was never set to `true` and the reconnection loop would not stop when `close()` was called during active reconnection.
 
-When metadata is absent, `messageId` is omitted (no crash). This gives consumers a stable, globally unique identifier for retry tracking via `msg.properties.messageId`.
+**Tests** (`packages/adapters/rabbitmq/src/__tests__/rabbitmq-event-bus.test.ts`):
 
-### Fix 2: Framework logger replaces console.\* (Requirement 18)
+4. **Added 4 new test scenarios** from spec requirement 11b in a `describe("mid-session reconnection")` block with `vi.useFakeTimers()` / `vi.useRealTimers()` lifecycle hooks.
 
-**Files**: `packages/adapters/rabbitmq/src/rabbitmq-event-bus.ts`, `packages/adapters/rabbitmq/package.json`, `packages/adapters/rabbitmq/vitest.config.mts`
+5. **Added `beforeEach` mock setup** in the reconnection describe block: sets `amqplib.connect` to always reject with `ECONNREFUSED` — necessary to prevent mock state leakage from earlier tests that configured `amqplib.connect` to succeed with a real-looking mock connection.
 
-- Added `logger?: Logger` to `RabbitMqEventBusConfig` (imported from `@noddde/core`).
-- Added `private readonly _logger: Logger` field initialized from `config.logger ?? new NodddeLogger("warn", "noddde:rabbitmq")`.
-- Added `@noddde/engine` as a dependency in `package.json` and as an alias in `vitest.config.mts` (matching the pattern from the NATS adapter).
-- Replaced ALL `console.error`/`console.warn` calls (5 total) with `this._logger.error`/`this._logger.warn` with structured second parameter.
-- Zero `console.*` calls remain in the implementation.
+### Concerns
 
----
-
-## Test Changes
-
-### New tests added (3)
-
-- **"should set messageId from event.metadata.eventId when present"** — verifies `publishOptions.messageId === "evt-unique-123"` when metadata is provided.
-- **"should not set messageId when event has no metadata"** — verifies `publishOptions.messageId` is `undefined` when no metadata is provided.
-- **"should use provided logger for warn and error logging with structured data"** — injects a mock `Logger`, triggers poison message path via invalid JSON, verifies `logger.warn` was called with a string containing `"deserialize"` and `{ eventName: "TestEvent" }` structured data.
-
----
-
-## Test Results
-
-```
-Test Files  1 passed (1)
-      Tests  24 passed (24)
-   Duration  ~303ms
-```
-
-## TypeScript Check
-
-`cd packages/adapters/rabbitmq && npx tsc --noEmit` — passes with zero errors.
-
-## Lint / Format
-
-- `npx prettier --check` — all files pass.
-- `npx eslint . --max-warnings 0` — zero warnings.
-
----
-
-## Requirements Coverage
-
-| Requirement                               | Status                            |
-| ----------------------------------------- | --------------------------------- |
-| 1. Exchange routing                       | Covered                           |
-| 2. JSON serialization                     | Covered                           |
-| 3. Persistent messages + stable messageId | Covered (new test this iteration) |
-| 3b. Publisher confirms                    | Covered                           |
-| 4. Dispatch before connect throws         | Covered                           |
-| 5. on registers handlers                  | Covered                           |
-| 6. Queue binding                          | Covered                           |
-| 7. Consumer setup                         | Covered                           |
-| 7b. Poison message protection             | Covered                           |
-| 8. Parallel handler invocation            | Covered                           |
-| 8b. maxRetries delivery limit (in-memory) | Covered                           |
-| 9. Manual ack after handlers (try/catch)  | Covered                           |
-| 10. Prefetch configuration                | Covered                           |
-| 11. connect with retry + confirm channel  | Covered                           |
-| 11b. Mid-session reconnection             | Covered                           |
-| 12. connect is idempotent                 | Covered                           |
-| 13. close closes channel and connection   | Covered                           |
-| 14. close is idempotent                   | Covered                           |
-| 15. Handler errors cause nack (try/catch) | Covered                           |
-| 16. Serialization errors on dispatch      | Covered                           |
-| 17. Connection errors on dispatch         | Covered                           |
-| 18. Framework logger (no console.\*)      | Covered (new test this iteration) |
+- The spec test scenarios as written don't include amqplib mock reset, which would cause flaky tests due to mock state leakage from earlier tests. A `beforeEach` that sets `mockRejectedValue` was added to the reconnection describe block to ensure reliability.
+- The jittered backoff uses `Math.random()` which is not mocked by `vi.useFakeTimers()`. The jitter range (±25%) is non-deterministic, but tests use large timer advances that comfortably cover the range.

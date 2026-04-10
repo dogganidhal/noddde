@@ -1,123 +1,81 @@
-# Audit Report: RabbitMqEventBus (messageId + framework logger)
+## Audit Report: RabbitMqEventBus (persistent reconnection + close guard fix)
 
-**Spec**: `specs/adapters/rabbitmq/rabbitmq-event-bus.spec.md`
-**Auditor**: Claude Opus 4.6
-**Date**: 2026-04-10
-**Cycle**: 1
-**Verdict**: **PASS** (with minor fix applied by Auditor)
+- **Verdict**: PASS
+- **Cycle**: 1
 
----
+### Mechanical Checks
 
-## Phase A: Validation
-
-### A1: Read Everything
-
-All five artifacts read and cross-referenced:
-
-- Spec: 18 behavioral requirements, 9 invariants, 13 edge cases.
-- Source: `rabbitmq-event-bus.ts` (427 lines).
-- Tests: `rabbitmq-event-bus.test.ts` (657 lines, 24 tests).
-- Build Report: Confirms two fixes (messageId, logger).
-- Logger interface: `Logger` from `@noddde/core` -- `data?` parameter is optional.
-
-### A2: Mechanical Checks
-
-| Check               | Result                                                                                                                     |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| **Export coverage** | PASS -- `RabbitMqEventBus` + `RabbitMqEventBusConfig` both exported via `index.ts`                                         |
-| **Stub check**      | PASS -- only 2 `throw new Error` calls (lines 237, 268): both are intentional guard clauses (closed-state + not-connected) |
-| **Console check**   | PASS -- zero `console.*` calls in source                                                                                   |
-| **TypeScript**      | PASS -- `tsc --noEmit` zero errors                                                                                         |
-| **Tests**           | PASS -- 24/24 green, 300ms                                                                                                 |
+| Check               | Result | Details                                                            |
+| ------------------- | ------ | ------------------------------------------------------------------ |
+| Export coverage     | PASS   | 2/2 exports present (`RabbitMqEventBus`, `RabbitMqEventBusConfig`) |
+| Stubs remaining     | PASS   | 0 stubs                                                            |
+| Console.\* check    | PASS   | 0 instances of `console.log`, `console.warn`, or `console.error`   |
+| Type check          | PASS   | `tsc --noEmit` clean                                               |
+| Tests               | PASS   | 28/28 passing (314ms)                                              |
+| Invariants enforced | PASS   | 9/9 enforced                                                       |
+| Edge cases covered  | PASS   | 13/13 covered                                                      |
 
 ### Behavioral Requirement Audit
 
-| #   | Requirement                           | Implemented | Tested   |
-| --- | ------------------------------------- | ----------- | -------- |
-| 1   | Exchange routing                      | Yes         | Yes      |
-| 2   | JSON serialization                    | Yes         | Yes      |
-| 3   | Persistent messages + messageId       | Yes         | Yes      |
-| 3b  | Publisher confirms                    | Yes         | Yes      |
-| 4   | Dispatch before connect throws        | Yes         | Yes      |
-| 5   | on registers handlers                 | Yes         | Yes      |
-| 6   | Queue binding                         | Yes         | Yes      |
-| 7   | Consumer setup                        | Yes         | Yes      |
-| 7b  | Poison message protection             | Yes         | Yes      |
-| 8   | Parallel handler invocation           | Yes         | Yes      |
-| 8b  | maxRetries delivery limit (in-memory) | Yes         | Yes      |
-| 9   | Manual ack after handlers (try/catch) | Yes         | Yes      |
-| 10  | Prefetch configuration                | Yes         | Yes      |
-| 11  | connect with retry + confirm channel  | Yes         | Yes      |
-| 11b | Mid-session reconnection              | Yes         | Yes      |
-| 12  | connect is idempotent                 | Yes         | Yes      |
-| 13  | close closes channel and connection   | Yes         | Yes      |
-| 14  | close is idempotent                   | Yes         | Yes      |
-| 15  | Handler errors cause nack (try/catch) | Yes         | Yes      |
-| 16  | Serialization errors on dispatch      | Yes         | Implicit |
-| 17  | Connection errors on dispatch         | Yes         | Yes      |
-| 18  | Framework logger (no console.\*)      | Yes         | Yes      |
+| Req | Description                                      | Implemented | Tested   |
+| --- | ------------------------------------------------ | ----------- | -------- |
+| 1   | Exchange routing with event name as routing key  | Yes         | Yes      |
+| 2   | JSON serialization of full event                 | Yes         | Yes      |
+| 3   | Persistent messages with messageId               | Yes         | Yes      |
+| 3b  | Publisher confirms (waitForConfirms)             | Yes         | Yes      |
+| 4   | Dispatch before connect throws                   | Yes         | Yes      |
+| 5   | on registers handlers by event name              | Yes         | Yes      |
+| 6   | Queue binding                                    | Yes         | Yes      |
+| 7   | Consumer setup                                   | Yes         | Yes      |
+| 7b  | Poison message protection                        | Yes         | Yes      |
+| 8   | Parallel handler invocation                      | Yes         | Yes      |
+| 8b  | maxRetries delivery limit                        | Yes         | Yes      |
+| 9   | Manual ack after handlers (try/catch wrapped)    | Yes         | Yes      |
+| 10  | Prefetch configuration                           | Yes         | Yes      |
+| 11  | connect with retry and confirm channel           | Yes         | Yes      |
+| 11b | Mid-session reconnection (persistent/indefinite) | Yes         | Yes      |
+| 12  | connect is idempotent                            | Yes         | Yes      |
+| 13  | close closes channel and connection              | Yes         | Yes      |
+| 14  | close is idempotent                              | Yes         | Yes      |
+| 15  | Handler errors cause nack                        | Yes         | Yes      |
+| 16  | Serialization errors on dispatch                 | Yes         | Implicit |
+| 17  | Connection errors on dispatch                    | Yes         | Yes      |
+| 18  | Framework logger                                 | Yes         | Yes      |
 
-### Invariant Check
+### Coherence Review
 
-| Invariant                               | Status |
-| --------------------------------------- | ------ |
-| Events serialized as JSON               | PASS   |
-| Handlers receive full Event object      | PASS   |
-| Ack only after success; nack on failure | PASS   |
-| No deduplication                        | PASS   |
-| Exchange durable                        | PASS   |
-| Queues durable                          | PASS   |
-| Messages persistent                     | PASS   |
-| messageId from eventId when available   | PASS   |
-| No console.\* calls                     | PASS   |
+- **Spec intent alignment**: The implementation faithfully reflects the spec's revised requirement 11b. Key observations:
 
-### Edge Case Coverage
+  1. **Persistent reconnection**: `_reconnectPersistently()` uses `while (!this._closed)` -- genuinely unbounded. The `resilience.maxAttempts` field is correctly scoped to `_connectWithRetry()` (initial connect) only, as the spec states.
 
-| Edge Case                      | Covered                                            |
-| ------------------------------ | -------------------------------------------------- |
-| No handler for consumed queue  | Yes                                                |
-| Handler throws                 | Yes                                                |
-| Dispatch with no payload       | Yes                                                |
-| Multiple handlers same event   | Yes                                                |
-| on() before connect()          | Yes                                                |
-| on() after close()             | Yes                                                |
-| Exchange does not exist        | Yes                                                |
-| Fanout exchange type           | Config stored, not specifically tested but trivial |
-| Dispatch without metadata      | Yes                                                |
-| Dispatch with metadata.eventId | Yes                                                |
-| No logger provided             | Yes                                                |
+  2. **Jittered exponential backoff**: Formula `baseDelay * (0.75 + Math.random() * 0.5)` produces +-25% jitter around the exponential base delay `min(initialDelayMs * 2^attempt, maxDelayMs)`. This matches the spec exactly.
 
-### A3: Coherence Review
+  3. **Close cancels reconnection**: Two `_closed` checks (before sleep at line 278, after sleep at line 296) plus the loop guard ensure clean exit. The `_handleUnexpectedClose()` guard against re-entrant calls (`if (this._reconnecting) return`) prevents multiple reconnection loops.
 
-**Requirement 3 (messageId)**: The `dispatch()` method at lines 274-279 correctly extracts `event.metadata?.eventId` and conditionally includes it in publish options via spread. When metadata is absent, the spread of an empty object means `messageId` is simply not set. The `_setupConsumer` method at lines 379-381 correctly uses `msg.properties.messageId` as the preferred key for delivery counting, falling back to a base64 content hash. The messageId flow is end-to-end correct and benefits the retry counter as expected.
+  4. **close() guard fix**: Changed from `if (!this._connected) return` to `if (this._closed) return`. The old guard was a genuine bug: during reconnection `_connected === false`, so `close()` would no-op, leaving `_closed` unset and the reconnection loop running indefinitely. The new guard is correct -- `close()` should be idempotent based on whether it was already called, not on connection state.
 
-**Requirement 18 (logger)**: After the Auditor's fix, all logger calls include structured context data. Two calls in `_handleUnexpectedClose` (lines 214 and 218) were missing the structured second parameter. The Auditor added `{ url: this._url }` to both. All other logger calls already had structured data (e.g., `{ eventName }`, `{ error: String(err) }`, `{ eventName, maxRetries, count }`).
+  5. **Consumer re-establishment**: On successful reconnection, the implementation re-asserts the exchange, re-establishes consumers for all registered handlers, and resets the backoff counter. This matches the spec.
 
-**Convention compliance**: JSDoc present on all public methods and the class. TypeScript strictness honored (`noUncheckedIndexedAccess` safe via optional chaining). Infrastructure class pattern is appropriate. No decorators, no DI.
+  6. **Dispatch during reconnection**: `dispatch()` checks `!this._connected` which is `false` during reconnection, correctly rejecting with a connection error per the spec.
 
----
+- **Unhandled scenarios**: None. All spec edge cases (close during reconnection, dispatch during reconnection, broker recovery after extended outage) are handled and tested.
 
-## Phase B: Documentation
+- **Convention compliance**: Compliant.
 
-Updated `docs/content/docs/running/event-bus-adapters.mdx`:
+  - Infrastructure class pattern (appropriate for broker adapter).
+  - JSDoc on all public methods and the class.
+  - Zero `console.*` calls; all logging via `Logger` interface with structured context data.
+  - TypeScript strict mode honored.
+  - No decorators, no DI containers.
 
-1. **Config table**: Added `logger` row with type `Logger`, default `NodddeLogger("warn", "noddde:rabbitmq")`, and description.
-2. **Publishing bullet**: Added sentence about `messageId` being set from `event.metadata.eventId` for consumer retry tracking.
-3. **Logging bullet**: Added new "Logging" entry to "How It Works" section, consistent with the NATS adapter documentation pattern.
-4. **Formatting**: Ran `prettier --write` to fix table alignment.
+- **Breaking change propagation**: N/A. No breaking changes -- the public API is unchanged. This is an internal behavioral fix.
 
----
+### Documentation
 
-## Auditor Fixes Applied
-
-1. **Source fix** (Req 18 compliance): Added structured context data (`{ url: this._url }`) to two logger calls in `_handleUnexpectedClose` at lines 214 and 218 of `rabbitmq-event-bus.ts`. This brings all logger calls into compliance with the spec requirement that "All log calls pass structured context data as the second parameter."
-2. **Doc updates**: Three additions to `event-bus-adapters.mdx` as described above.
-
----
-
-## Final Verification
-
-- `tsc --noEmit`: PASS (zero errors)
-- `vitest run`: PASS (24/24 tests, 300ms)
-- `console.*` grep: zero hits
-- `prettier --check`: PASS (after auto-format)
+- **Pages updated**: 1 (`docs/content/docs/running/event-bus-adapters.mdx`)
+  - Updated "Connection resilience" bullet for RabbitMQ section: now describes persistent/indefinite mid-session reconnection with jittered exponential backoff, dispatch rejection during reconnection, and automatic consumer re-establishment after recovery.
+  - Updated `resilience.maxAttempts` config table entry: clarified it only governs initial `connect()`, while mid-session reconnection retries indefinitely until `close()`.
+  - Updated connection resilience comparison table: RabbitMQ `maxAttempts` row now notes mid-session reconnection is indefinite.
+  - Ran `prettier --write` for formatting compliance.
+- **Pages created**: 0
+- **API reference updated**: 0 (no API reference pages exist for adapters)
