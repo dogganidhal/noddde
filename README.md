@@ -16,7 +16,7 @@
 
 ---
 
-> **Status:** Pre-1.0 Release Candidate. The core API is stable. We are currently hardening distributed systems features (Outbox, Graceful Shutdown) ahead of v1.0.
+> **Status:** Pre-1.0 Release Candidate. The core API is stable. Outbox, Graceful Shutdown, and distributed event bus adapters (RabbitMQ, NATS, Kafka) are shipped. We are currently focused on error isolation and developer ergonomics ahead of v1.0.
 
 Building a CQRS and Event Sourced system in TypeScript usually involves significant boilerplate. Developers often end up extending `AggregateRoot` base classes, decorating methods with `@CommandHandler()`, wiring up DI containers, and working around the type system.
 

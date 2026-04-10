@@ -2,7 +2,7 @@
 
 Where noddde is headed: what is shipped, what is required for v1.0, and our vision for distributed TypeScript domains.
 
-**Current Status:** Pre-1.0. The core Decider pattern and type-inference engine are stable. We are currently focused on production hardening, fault tolerance, and developer guardrails ahead of our v1.0 Release Candidate.
+**Current Status:** Pre-1.0. The core Decider pattern, type-inference engine, persistence adapters, distributed event buses, and observability are all shipped. We are currently focused on error isolation and developer ergonomics ahead of our v1.0 Release Candidate.
 
 ---
 
