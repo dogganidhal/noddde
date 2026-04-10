@@ -23,21 +23,21 @@
 
 **This is the core resilience fix. Each NATS acknowledgment call can fail if the connection drops between message receipt and acknowledgment. Without individual try/catch, the consumer loop would crash.**
 
-| Aspect                    | Verification                                                                                                          | Verdict |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------- |
-| `msg.term()` try/catch   | Lines 247-249: `try { msg.term(); } catch { /* connection dropped between receipt and term */ }`                      | PASS    |
-| `msg.ack()` try/catch    | Lines 256-258: `try { msg.ack(); } catch { /* connection dropped between handler completion and ack */ }`             | PASS    |
-| `msg.nak()` try/catch    | Lines 267-269: `try { msg.nak(); } catch { /* connection dropped between handler failure and nak */ }`                | PASS    |
-| All three independent     | Each call has its own try/catch -- one failing does not affect the others                                             | PASS    |
-| Consumer loop continues   | After any caught error, execution falls through to `continue` (for term) or loop continues naturally (for ack/nak)    | PASS    |
+| Aspect                  | Verification                                                                                                       | Verdict |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------ | ------- |
+| `msg.term()` try/catch  | Lines 247-249: `try { msg.term(); } catch { /* connection dropped between receipt and term */ }`                   | PASS    |
+| `msg.ack()` try/catch   | Lines 256-258: `try { msg.ack(); } catch { /* connection dropped between handler completion and ack */ }`          | PASS    |
+| `msg.nak()` try/catch   | Lines 267-269: `try { msg.nak(); } catch { /* connection dropped between handler failure and nak */ }`             | PASS    |
+| All three independent   | Each call has its own try/catch -- one failing does not affect the others                                          | PASS    |
+| Consumer loop continues | After any caught error, execution falls through to `continue` (for term) or loop continues naturally (for ack/nak) | PASS    |
 
 **Test coverage (3 dedicated tests)**:
 
-| Test                                                          | What it verifies                                                                                      | Lines | Verdict |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ----- | ------- |
-| "should not crash consumer loop when msg.term() throws"       | Poison message + term() throws Error("connection dropped") -- resolves without throwing               | 304-329 | PASS    |
-| "should not crash consumer loop when msg.nak() throws"        | Handler fails + nak() throws Error("connection dropped") -- resolves without throwing                 | 331-358 | PASS    |
-| "should not crash consumer loop when msg.ack() throws"        | Handler succeeds + ack() throws Error("connection dropped") -- resolves without throwing, handler ran | 360-386 | PASS    |
+| Test                                                    | What it verifies                                                                                      | Lines   | Verdict |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ------- | ------- |
+| "should not crash consumer loop when msg.term() throws" | Poison message + term() throws Error("connection dropped") -- resolves without throwing               | 304-329 | PASS    |
+| "should not crash consumer loop when msg.nak() throws"  | Handler fails + nak() throws Error("connection dropped") -- resolves without throwing                 | 331-358 | PASS    |
+| "should not crash consumer loop when msg.ack() throws"  | Handler succeeds + ack() throws Error("connection dropped") -- resolves without throwing, handler ran | 360-386 | PASS    |
 
 **Spec alignment**: Spec Req 7: "The `msg.term()` call is itself wrapped in try/catch -- if the connection dropped between receipt and term, the error is logged but the consumer loop continues." Same for Reqs 8 (nak) and 9 (ack).
 
@@ -45,13 +45,13 @@
 
 ### Fix 2: `.catch()` on `_consumeSubscription()` promise
 
-| Aspect                  | Verification                                                                                                                                   | Verdict |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| Source code             | Lines 217-221: `this._consumeSubscription(sub, eventName).catch((err) => { console.error('[NatsEventBus] Consumer loop for "${eventName}" terminated:', err); })` | PASS    |
-| NOT fire-and-forget     | Previous code used `void this._consumeSubscription(...)` which swallowed rejections. Now uses `.catch()`.                                      | PASS    |
-| Error logging           | Line 219: `console.error(...)` with event name and error object                                                                                | PASS    |
-| Test                    | Test "should use .catch() on consumer loop to prevent unhandled promise rejections" (line 388)                                                  | PASS    |
-| Test mechanism          | Creates an async generator that throws, verifies the test completes without unhandled rejection                                                 | PASS    |
+| Aspect              | Verification                                                                                                                                                      | Verdict |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| Source code         | Lines 217-221: `this._consumeSubscription(sub, eventName).catch((err) => { console.error('[NatsEventBus] Consumer loop for "${eventName}" terminated:', err); })` | PASS    |
+| NOT fire-and-forget | Previous code used `void this._consumeSubscription(...)` which swallowed rejections. Now uses `.catch()`.                                                         | PASS    |
+| Error logging       | Line 219: `console.error(...)` with event name and error object                                                                                                   | PASS    |
+| Test                | Test "should use .catch() on consumer loop to prevent unhandled promise rejections" (line 388)                                                                    | PASS    |
+| Test mechanism      | Creates an async generator that throws, verifies the test completes without unhandled rejection                                                                   | PASS    |
 
 **Spec alignment**: Spec Req 15b: "The consumer loop promise (`_consumeSubscription`) must NOT be fire-and-forget (`void`). It must have a `.catch()` handler that logs the error."
 
@@ -59,11 +59,11 @@
 
 ### Fix 3 (implicit): Error logged in subscription creation catch block
 
-| Aspect              | Verification                                                                                                     | Verdict |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------- | ------- |
+| Aspect              | Verification                                                                                                             | Verdict |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------- |
 | Source code         | Lines 223-228: `catch (err) { console.error('[NatsEventBus] Failed to create subscription for "${eventName}":', err); }` | PASS    |
-| Error NOT swallowed | The catch block logs the error before silently returning -- operators can see subscription failures in logs        | PASS    |
-| Spec alignment      | Spec Req 15b combined with general error handling expectations                                                    | PASS    |
+| Error NOT swallowed | The catch block logs the error before silently returning -- operators can see subscription failures in logs              | PASS    |
+| Spec alignment      | Spec Req 15b combined with general error handling expectations                                                           | PASS    |
 
 ---
 
@@ -86,12 +86,12 @@
 
 All fixes verified:
 
-| Fix | Description | Lines | Tests | Verdict |
-| --- | --- | --- | --- | --- |
-| 1 | `msg.term()` wrapped in try/catch | 247-249 | "should not crash when msg.term() throws" | PASS |
-| 1 | `msg.nak()` wrapped in try/catch | 267-269 | "should not crash when msg.nak() throws" | PASS |
-| 1 | `msg.ack()` wrapped in try/catch | 256-258 | "should not crash when msg.ack() throws" | PASS |
-| 2 | `.catch()` on `_consumeSubscription()` | 217-221 | "should use .catch() on consumer loop" | PASS |
-| 3 | Error logging in subscription creation catch | 223-228 | (implicit via .catch test) | PASS |
+| Fix | Description                                  | Lines   | Tests                                     | Verdict |
+| --- | -------------------------------------------- | ------- | ----------------------------------------- | ------- |
+| 1   | `msg.term()` wrapped in try/catch            | 247-249 | "should not crash when msg.term() throws" | PASS    |
+| 1   | `msg.nak()` wrapped in try/catch             | 267-269 | "should not crash when msg.nak() throws"  | PASS    |
+| 1   | `msg.ack()` wrapped in try/catch             | 256-258 | "should not crash when msg.ack() throws"  | PASS    |
+| 2   | `.catch()` on `_consumeSubscription()`       | 217-221 | "should use .catch() on consumer loop"    | PASS    |
+| 3   | Error logging in subscription creation catch | 223-228 | (implicit via .catch test)                | PASS    |
 
 **Overall verdict: PASS**. All fixes are correctly implemented, tested, and aligned with the spec.

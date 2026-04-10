@@ -14,6 +14,7 @@
 #### Fix 1: Explicit `commitOffsets()` + `_deliveryCounts` pruning (Requirement 10)
 
 In the `eachMessage` callback inside `connect()`, after `_handleMessage` resolves successfully:
+
 1. `consumer.commitOffsets([{ topic, partition, offset: (BigInt(message.offset) + 1n).toString() }])` is now called explicitly to persist the offset to Kafka.
 2. `this._deliveryCounts.delete(offsetKey)` prunes the in-memory counter to prevent unbounded growth.
 
@@ -22,6 +23,7 @@ Previously `autoCommit: false` was set but `commitOffsets()` was never called, m
 #### Fix 2: `connect()` mutex (Requirement 13)
 
 Added `private _connecting: Promise<void> | null = null`. The `connect()` method now:
+
 - Returns immediately if `_connected === true`.
 - Returns the existing in-flight promise if `_connecting != null` (deduplicates concurrent calls without starting a second connection attempt).
 - Otherwise creates the connection promise, assigns it to `_connecting`, runs the connection logic, and clears `_connecting` in a `finally` block.
@@ -29,6 +31,7 @@ Added `private _connecting: Promise<void> | null = null`. The `connect()` method
 #### Fix 3: `on()` subscribe error handling (Requirement 7)
 
 When `on()` is called after `connect()`, the subscribe call now uses `.catch()` instead of the previous `void` pattern:
+
 - On rejection: logs via `console.error`.
 - Removes the topic from `_subscribedTopics` so a future `on()` call can retry.
 

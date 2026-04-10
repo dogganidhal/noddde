@@ -24,6 +24,7 @@ The refactored `_consumeSubscription` now parses JSON into a typed `Event` varia
 **Fix 2: Consumer loop .catch() instead of void (Requirement 15b)**
 
 In `_createSubscriptionForEvent`:
+
 - Replaced `void this._consumeSubscription(sub, eventName)` with `.catch()` that logs the termination error. If the async iterator throws (e.g., connection drop), the error is caught and logged rather than becoming an unhandled promise rejection.
 - Also added error logging to the subscription creation catch block (previously silently swallowed).
 
@@ -53,6 +54,7 @@ All 19 tests GREEN.
 ## TypeScript Check
 
 3 pre-existing type errors remain (not introduced by this change, existed before this PR):
+
 - `AsyncEventHandler` not matching export name in `@noddde/core`
 - `BrokerResilience` not exported from `@noddde/core`
 - `Connectable` not exported from `@noddde/core`
@@ -63,13 +65,13 @@ These are unrelated to the distributed audit fixes.
 
 ## Requirements Coverage
 
-| Req | Description                                                       | Status |
-| --- | ----------------------------------------------------------------- | ------ |
-| 7   | Poison message: msg.term() wrapped in try/catch                   | FIXED  |
-| 8   | Handler failure: msg.nak() wrapped in try/catch                   | FIXED  |
-| 9   | Success: msg.ack() wrapped in try/catch                           | FIXED  |
-| 15b | Consumer loop has .catch() handler (not fire-and-forget with void) | FIXED  |
-| All others | Pre-existing requirements                                  | GREEN  |
+| Req        | Description                                                        | Status |
+| ---------- | ------------------------------------------------------------------ | ------ |
+| 7          | Poison message: msg.term() wrapped in try/catch                    | FIXED  |
+| 8          | Handler failure: msg.nak() wrapped in try/catch                    | FIXED  |
+| 9          | Success: msg.ack() wrapped in try/catch                            | FIXED  |
+| 15b        | Consumer loop has .catch() handler (not fire-and-forget with void) | FIXED  |
+| All others | Pre-existing requirements                                          | GREEN  |
 
 ---
 
