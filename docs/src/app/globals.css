@@ -1,3 +1,5 @@
+@import "fumadocs-ui/css/style.css";
+
 .logo-light {
   display: block;
 }
@@ -9,4 +11,13 @@
 }
 .dark .logo-dark {
   display: block;
+}
+
+.dashed-grid-bg {
+  background-image:
+    linear-gradient(to right, var(--color-fd-border) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--color-fd-border) 1px, transparent 1px);
+  background-size: 120px 120px;
+  mask-image: radial-gradient(ellipse 60% 60% at 50% 50%, black 20%, transparent 100%);
+  opacity: 0.4;
 }
