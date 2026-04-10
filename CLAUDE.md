@@ -66,6 +66,7 @@ The Builder and Auditor run in **separate agent contexts** — the Auditor has n
 - Strict TypeScript: `strict: true`, `noUncheckedIndexedAccess: true`, ES2022, NodeNext.
 - JSDoc on all public types and functions.
 - No decorators, no DI containers, no base classes for domain concepts.
+- Never use `console.log`, `console.warn`, or `console.error` in library code. Use the framework `Logger` interface from `@noddde/core` instead. Infrastructure classes should accept an optional `Logger` in their config and default to `NodddeLogger` from `@noddde/engine`.
 
 ### Naming
 

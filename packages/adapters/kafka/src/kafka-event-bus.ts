@@ -4,8 +4,10 @@ import type {
   BrokerResilience,
   Connectable,
   EventBus,
+  Logger,
 } from "@noddde/core";
 import type { Event } from "@noddde/core";
+import { NodddeLogger } from "@noddde/engine";
 
 /**
  * Configuration for the KafkaEventBus.
@@ -28,6 +30,15 @@ export interface KafkaEventBusConfig {
   heartbeatInterval?: number;
   /** Connection resilience configuration (default: maxAttempts=6, initialDelayMs=300, maxDelayMs=30000). Mapped to kafkajs retry options. */
   resilience?: BrokerResilience;
+  /**
+   * Strategy for deriving the Kafka message key from an event.
+   * - `"aggregateId"` (default): uses `event.metadata?.aggregateId` (stringified). Falls back to `null` (round-robin).
+   * - Function: custom strategy receiving the event, returning the key string or `null`.
+   */
+  // eslint-disable-next-line no-unused-vars
+  partitionKeyStrategy?: "aggregateId" | ((event: Event) => string | null);
+  /** Framework logger instance. Defaults to NodddeLogger("warn", "noddde:kafka") from @noddde/engine. */
+  logger?: Logger;
 }
 
 /**
@@ -46,6 +57,7 @@ export interface KafkaEventBusConfig {
  */
 export class KafkaEventBus implements EventBus, Connectable {
   private readonly _config: KafkaEventBusConfig;
+  private readonly _logger: Logger;
   /** The kafkajs Kafka client. Exposed as a field so tests can inject a mock. */
   private _kafka: Pick<Kafka, "producer" | "consumer">;
   private _producer: Producer | null = null;
@@ -70,6 +82,7 @@ export class KafkaEventBus implements EventBus, Connectable {
 
   constructor(config: KafkaEventBusConfig) {
     this._config = config;
+    this._logger = config.logger ?? new NodddeLogger("warn", "noddde:kafka");
     this._kafka = new Kafka({
       brokers: config.brokers,
       clientId: config.clientId,
@@ -196,9 +209,9 @@ export class KafkaEventBus implements EventBus, Connectable {
         this._consumer
           .subscribe({ topic, fromBeginning: false })
           .catch((err: unknown) => {
-            console.error(
-              `[KafkaEventBus] Failed to subscribe to topic "${topic}". It will be retried on the next on() call.`,
-              err,
+            this._logger.error(
+              `Failed to subscribe to topic "${topic}". It will be retried on the next on() call.`,
+              { topic, error: String(err) },
             );
             this._subscribedTopics.delete(topic);
           });
@@ -209,7 +222,8 @@ export class KafkaEventBus implements EventBus, Connectable {
   /**
    * Publishes an event to the Kafka topic derived from the event name.
    * The full event object is serialized as JSON.
-   * If `event.metadata?.correlationId` is set, it is used as the message key.
+   * The message key is derived from the `partitionKeyStrategy` config option
+   * (default: `"aggregateId"` — uses `event.metadata?.aggregateId`).
    *
    * @throws If called before `connect()` or after `close()`.
    */
@@ -220,13 +234,13 @@ export class KafkaEventBus implements EventBus, Connectable {
 
     const topic = this._topicName(event.name);
     const value = JSON.stringify(event);
-    const key = event.metadata?.correlationId ?? undefined;
+    const key = this._resolvePartitionKey(event);
 
     await this._producer.send({
       topic,
       messages: [
         {
-          key: key ?? null,
+          key,
           value,
         },
       ],
@@ -298,8 +312,9 @@ export class KafkaEventBus implements EventBus, Connectable {
       const current = (this._deliveryCounts.get(offsetKey) ?? 0) + 1;
       this._deliveryCounts.set(offsetKey, current);
       if (current > maxRetries) {
-        console.warn(
-          `[KafkaEventBus] Message at ${offsetKey} exceeded maxRetries (${maxRetries}). Skipping.`,
+        this._logger.warn(
+          `Message at ${offsetKey} exceeded maxRetries (${maxRetries}). Skipping.`,
+          { offsetKey, maxRetries, deliveryCount: current },
         );
         return;
       }
@@ -310,9 +325,9 @@ export class KafkaEventBus implements EventBus, Connectable {
     try {
       event = JSON.parse(rawValue) as Event;
     } catch (err) {
-      console.warn(
-        `[KafkaEventBus] Failed to deserialize message for event "${eventName}". Skipping poison message.`,
-        err,
+      this._logger.warn(
+        `Failed to deserialize message for event "${eventName}". Skipping poison message.`,
+        { eventName, error: String(err) },
       );
       return;
     }
@@ -320,6 +335,17 @@ export class KafkaEventBus implements EventBus, Connectable {
     const handlers = this._handlers.get(eventName) ?? [];
 
     await Promise.all(handlers.map((handler) => handler(event)));
+  }
+
+  /**
+   * Resolves the Kafka message key for a given event using the configured
+   * `partitionKeyStrategy`. Returns `null` for round-robin partition assignment.
+   */
+  private _resolvePartitionKey(event: Event): string | null {
+    const strategy = this._config.partitionKeyStrategy ?? "aggregateId";
+    if (typeof strategy === "function") return strategy(event);
+    const id = event.metadata?.aggregateId;
+    return id != null ? String(id) : null;
   }
 
   /** Derives the Kafka topic name for a given event name. */

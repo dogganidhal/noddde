@@ -41,7 +41,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@noddde/core": "0.0.0"
+    "@noddde/core": "0.0.0",
+    "@noddde/engine": "0.0.0"
   },
   "peerDependencies": {
     "amqplib": ">=0.10.0"

@@ -10,6 +10,7 @@ depends_on:
   - core/infrastructure/closeable
   - core/infrastructure/connectable
   - core/infrastructure/broker-resilience
+  - core/infrastructure/logger
 docs: []
 ---
 
@@ -25,6 +26,8 @@ import type {
   AsyncEventHandler,
   Connectable,
   BrokerResilience,
+  Logger,
+  Event,
 } from "@noddde/core";
 
 /** Configuration for the KafkaEventBus. */
@@ -43,6 +46,14 @@ export interface KafkaEventBusConfig {
   heartbeatInterval?: number;
   /** Connection resilience configuration (default: maxAttempts=6, initialDelayMs=300, maxDelayMs=30000). Mapped to kafkajs retry options. */
   resilience?: BrokerResilience;
+  /**
+   * Strategy for deriving the Kafka message key from an event.
+   * - `"aggregateId"` (default): uses `event.metadata?.aggregateId` (stringified). Falls back to `null` (round-robin).
+   * - Function: custom strategy receiving the event, returning the key string or `null`.
+   */
+  partitionKeyStrategy?: "aggregateId" | ((event: Event) => string | null);
+  /** Framework logger instance. Defaults to NodddeLogger("warn", "noddde:kafka") from @noddde/engine. */
+  logger?: Logger;
 }
 
 export class KafkaEventBus implements EventBus, Connectable {
@@ -68,7 +79,7 @@ export class KafkaEventBus implements EventBus, Connectable {
 
 1. **Topic derivation** -- `dispatch(event)` publishes to a Kafka topic named `${topicPrefix}${event.name}` (default prefix is empty, so topic = event name).
 2. **JSON serialization** -- The full event object (`{ name, payload, metadata? }`) is serialized as JSON in the message value.
-3. **Message key** -- If `event.metadata?.correlationId` exists, it is used as the message key (enables partition-level ordering for correlated events). Otherwise, no key is set.
+3. **Message key via partition key strategy** -- The message key is derived from the `partitionKeyStrategy` config option. Default strategy is `"aggregateId"`: uses `event.metadata?.aggregateId` (stringified via `String()`) when present, falls back to `null` (round-robin partition assignment). When a custom function is provided, it receives the full event and returns the key string or `null`. This ensures per-aggregate ordering by default, which is the correct default for event sourcing.
 4. **Producer acknowledgment** -- `dispatch` awaits the producer `send()` and resolves when Kafka acknowledges receipt (at-least-once for the publish side).
 5. **Dispatch before connect throws** -- Calling `dispatch` before `connect()` throws an error.
 
@@ -98,6 +109,10 @@ export class KafkaEventBus implements EventBus, Connectable {
 17. **Serialization errors on dispatch** -- If event serialization fails, `dispatch` rejects with the serialization error.
 18. **Connection errors on dispatch** -- If the broker is unreachable during `dispatch`, the promise rejects with a connection error.
 
+### Logging
+
+19. **Framework logger** -- All internal logging uses the `Logger` interface from `@noddde/core`. The logger is resolved from `config.logger` or defaults to `new NodddeLogger("warn", "noddde:kafka")` from `@noddde/engine`. All log calls pass structured context data as the second parameter (e.g., `{ eventName }`, `{ topic }`, `{ error: String(err) }`). No `console.log`, `console.warn`, or `console.error` calls exist in the implementation.
+
 ## Invariants
 
 - All dispatched events are serialized as JSON (must be JSON-serializable).
@@ -105,6 +120,8 @@ export class KafkaEventBus implements EventBus, Connectable {
 - Offset commits happen only after successful handler completion.
 - The bus does not deduplicate events (same event dispatched twice = two deliveries).
 - Topic names follow the pattern `${topicPrefix}${eventName}`.
+- Message key defaults to `event.metadata?.aggregateId` (stringified) for per-aggregate partition ordering.
+- No `console.*` calls exist in the implementation — all logging goes through the `Logger` interface.
 
 ## Edge Cases
 
@@ -115,6 +132,10 @@ export class KafkaEventBus implements EventBus, Connectable {
 - **on() called before connect()**: Handlers are buffered; subscriptions happen when `connect()` is called.
 - **on() called after close()**: Throws an error.
 - **Large message payloads**: Subject to Kafka's `message.max.bytes` broker config. No framework-level compression.
+- **Dispatch without metadata**: Message key is `null` (round-robin partition). No crash.
+- **Dispatch with metadata.aggregateId**: Message key is `String(aggregateId)` by default.
+- **Custom partitionKeyStrategy function**: Function receives the full event, returns key or `null`.
+- **No logger provided**: Defaults to `NodddeLogger("warn", "noddde:kafka")`.
 
 ## Integration Points
 
@@ -531,6 +552,178 @@ describe("KafkaEventBus", () => {
     const sentValue = mockProducer.send.mock.calls[0]![0].messages[0].value;
     const parsed = JSON.parse(sentValue);
     expect(parsed).toEqual(event);
+  });
+});
+```
+
+### default partition key strategy uses aggregateId
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { KafkaEventBus } from "@noddde/kafka";
+
+describe("KafkaEventBus", () => {
+  it("should use aggregateId as message key by default", async () => {
+    const mockProducer = {
+      send: vi.fn().mockResolvedValue(undefined),
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+    };
+    const mockConsumer = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      subscribe: vi.fn().mockResolvedValue(undefined),
+      run: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+    };
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+    (bus as any)._kafka = mockKafka;
+
+    await bus.connect();
+    await bus.dispatch({
+      name: "OrderPlaced",
+      payload: {},
+      metadata: {
+        eventId: "evt-1",
+        correlationId: "corr-1",
+        timestamp: "2024-01-01T00:00:00.000Z",
+        causationId: "cmd-1",
+        aggregateId: "order-123",
+      },
+    } as any);
+
+    const sentKey = mockProducer.send.mock.calls[0]![0].messages[0].key;
+    expect(sentKey).toBe("order-123");
+  });
+});
+```
+
+### partition key is null when aggregateId is absent
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { KafkaEventBus } from "@noddde/kafka";
+
+describe("KafkaEventBus", () => {
+  it("should use null key when event has no aggregateId", async () => {
+    const mockProducer = {
+      send: vi.fn().mockResolvedValue(undefined),
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+    };
+    const mockConsumer = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      subscribe: vi.fn().mockResolvedValue(undefined),
+      run: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+    };
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+    (bus as any)._kafka = mockKafka;
+
+    await bus.connect();
+    await bus.dispatch({ name: "TestEvent", payload: {} });
+
+    const sentKey = mockProducer.send.mock.calls[0]![0].messages[0].key;
+    expect(sentKey).toBeNull();
+  });
+});
+```
+
+### custom partition key strategy function
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { KafkaEventBus } from "@noddde/kafka";
+
+describe("KafkaEventBus", () => {
+  it("should use custom function for partition key when provided", async () => {
+    const mockProducer = {
+      send: vi.fn().mockResolvedValue(undefined),
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+    };
+    const mockConsumer = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      subscribe: vi.fn().mockResolvedValue(undefined),
+      run: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+    };
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+      partitionKeyStrategy: (event) => `custom-${event.name}`,
+    });
+    (bus as any)._kafka = mockKafka;
+
+    await bus.connect();
+    await bus.dispatch({ name: "OrderPlaced", payload: {} });
+
+    const sentKey = mockProducer.send.mock.calls[0]![0].messages[0].key;
+    expect(sentKey).toBe("custom-OrderPlaced");
+  });
+});
+```
+
+### logger receives structured calls instead of console
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { KafkaEventBus } from "@noddde/kafka";
+import type { Logger } from "@noddde/core";
+
+describe("KafkaEventBus", () => {
+  it("should use provided logger for warn logging with structured data", async () => {
+    const mockLogger: Logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      child: vi.fn().mockReturnThis(),
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+      logger: mockLogger,
+    });
+
+    const handler = vi.fn();
+    bus.on("TestEvent", handler);
+
+    // Trigger poison message logging via _handleMessage
+    await (bus as any)._handleMessage("TestEvent", "not valid json {{{");
+
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("deserialize"),
+      expect.objectContaining({ eventName: "TestEvent" }),
+    );
   });
 });
 ```

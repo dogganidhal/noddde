@@ -577,4 +577,80 @@ describe("RabbitMqEventBus", () => {
     expect(mockChannel.nack).not.toHaveBeenCalled();
     expect(handler).not.toHaveBeenCalled();
   });
+
+  it("should set messageId from event.metadata.eventId when present", async () => {
+    const mockChannel = {
+      publish: vi.fn().mockReturnValue(true),
+      waitForConfirms: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    (bus as any)._connection = {};
+    (bus as any)._channel = mockChannel;
+    (bus as any)._connected = true;
+
+    const event = {
+      name: "AccountCreated",
+      payload: { id: "acc-1" },
+      metadata: {
+        eventId: "evt-unique-123",
+        correlationId: "corr-1",
+        timestamp: "2024-01-01T00:00:00.000Z",
+        causationId: "cmd-1",
+      },
+    };
+    await bus.dispatch(event);
+
+    const publishOptions = mockChannel.publish.mock.calls[0]![3];
+    expect(publishOptions.messageId).toBe("evt-unique-123");
+  });
+
+  it("should not set messageId when event has no metadata", async () => {
+    const mockChannel = {
+      publish: vi.fn().mockReturnValue(true),
+      waitForConfirms: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    (bus as any)._connection = {};
+    (bus as any)._channel = mockChannel;
+    (bus as any)._connected = true;
+
+    await bus.dispatch({ name: "TestEvent", payload: {} });
+
+    const publishOptions = mockChannel.publish.mock.calls[0]![3];
+    expect(publishOptions.messageId).toBeUndefined();
+  });
+
+  it("should use provided logger for warn and error logging with structured data", async () => {
+    const mockLogger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      child: vi.fn().mockReturnThis(),
+    };
+
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      logger: mockLogger,
+    });
+
+    const handler = vi.fn();
+    bus.on("TestEvent", handler);
+
+    // Trigger poison message logging
+    const result = await (bus as any)._handleMessage(
+      "TestEvent",
+      Buffer.from("not valid json {{{"),
+    );
+
+    expect(result).toEqual({ poisoned: true });
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("deserialize"),
+      expect.objectContaining({ eventName: "TestEvent" }),
+    );
+  });
 });

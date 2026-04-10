@@ -10,6 +10,7 @@ depends_on:
   - core/infrastructure/closeable
   - core/infrastructure/connectable
   - core/infrastructure/broker-resilience
+  - core/infrastructure/logger
 docs: []
 ---
 
@@ -25,6 +26,7 @@ import type {
   AsyncEventHandler,
   Connectable,
   BrokerResilience,
+  Logger,
 } from "@noddde/core";
 
 /** Configuration for the RabbitMqEventBus. */
@@ -41,6 +43,8 @@ export interface RabbitMqEventBusConfig {
   prefetchCount?: number;
   /** Connection resilience configuration (default: maxAttempts=3, initialDelayMs=1000, maxDelayMs=30000). amqplib has no built-in reconnection — retry is implemented manually with exponential backoff. */
   resilience?: BrokerResilience;
+  /** Framework logger instance. Defaults to NodddeLogger("warn", "noddde:rabbitmq") from @noddde/engine. */
+  logger?: Logger;
 }
 
 export class RabbitMqEventBus implements EventBus, Connectable {
@@ -66,7 +70,7 @@ export class RabbitMqEventBus implements EventBus, Connectable {
 
 1. **Exchange routing** -- `dispatch(event)` publishes to the configured exchange with `event.name` as the routing key (for topic exchanges). For fanout exchanges, the routing key is ignored.
 2. **JSON serialization** -- The full event object (`{ name, payload, metadata? }`) is serialized as JSON in the message body (Buffer).
-3. **Persistent messages** -- Messages are published with `{ persistent: true }` (delivery mode 2) so they survive broker restarts.
+3. **Persistent messages with stable messageId** -- Messages are published with `{ persistent: true }` (delivery mode 2) so they survive broker restarts. When `event.metadata?.eventId` is present, it is set as `properties.messageId` on the published message. This provides consumers with a stable, globally unique identifier for retry tracking instead of relying on content-derived fallback hashes. When metadata is absent, `messageId` is omitted (no crash).
    3b. **Publisher confirms** -- After publishing, `dispatch()` awaits `channel.waitForConfirms()` to ensure the broker has accepted the message. This guarantees at-least-once delivery on the publish side. Without publisher confirms, `channel.publish()` is fire-and-forget and messages can be silently dropped.
 4. **Dispatch before connect throws** -- Calling `dispatch` before `connect()` throws an error.
 
@@ -98,6 +102,10 @@ export class RabbitMqEventBus implements EventBus, Connectable {
 16. **Serialization errors on dispatch** -- If event serialization fails, `dispatch` rejects with the serialization error.
 17. **Connection errors on dispatch** -- If the channel is closed or RabbitMQ is unreachable, `dispatch` rejects with a connection error.
 
+### Logging
+
+18. **Framework logger** -- All internal logging uses the `Logger` interface from `@noddde/core`. The logger is resolved from `config.logger` or defaults to `new NodddeLogger("warn", "noddde:rabbitmq")` from `@noddde/engine`. All log calls pass structured context data as the second parameter (e.g., `{ eventName }`, `{ error: String(err) }`). No `console.log`, `console.warn`, or `console.error` calls exist in the implementation.
+
 ## Invariants
 
 - All dispatched events are serialized as JSON (must be JSON-serializable).
@@ -107,6 +115,8 @@ export class RabbitMqEventBus implements EventBus, Connectable {
 - Exchange is durable (survives broker restarts).
 - Queues are durable (survive broker restarts).
 - Messages are persistent (survive broker restarts).
+- Published messages include `messageId` from `event.metadata.eventId` when available.
+- No `console.*` calls exist in the implementation — all logging goes through the `Logger` interface.
 
 ## Edge Cases
 
@@ -118,6 +128,9 @@ export class RabbitMqEventBus implements EventBus, Connectable {
 - **on() called after close()**: Throws an error.
 - **Exchange does not exist**: `connect()` asserts (creates) the exchange.
 - **Fanout exchange type**: Routing key is ignored; all bound queues receive all messages.
+- **Dispatch without metadata**: `messageId` is not set on published message (no crash). Consumer retry falls back to content-derived hash.
+- **Dispatch with metadata.eventId**: `messageId` is set to `event.metadata.eventId` on published message.
+- **No logger provided**: Defaults to `NodddeLogger("warn", "noddde:rabbitmq")` — behaves like the previous `console.error`/`console.warn` output but with structured formatting.
 
 ## Integration Points
 
@@ -456,6 +469,105 @@ describe("RabbitMqEventBus", () => {
     const sentBuffer = mockChannel.publish.mock.calls[0]![2];
     const parsed = JSON.parse(sentBuffer.toString());
     expect(parsed).toEqual(event);
+  });
+});
+```
+
+### dispatch sets messageId from event metadata eventId
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { RabbitMqEventBus } from "@noddde/rabbitmq";
+
+describe("RabbitMqEventBus", () => {
+  it("should set messageId from event.metadata.eventId when present", async () => {
+    const mockChannel = {
+      publish: vi.fn().mockReturnValue(true),
+      waitForConfirms: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    (bus as any)._connection = {};
+    (bus as any)._channel = mockChannel;
+    (bus as any)._connected = true;
+
+    const event = {
+      name: "AccountCreated",
+      payload: { id: "acc-1" },
+      metadata: { eventId: "evt-unique-123", correlationId: "corr-1", timestamp: "2024-01-01T00:00:00.000Z", causationId: "cmd-1" },
+    };
+    await bus.dispatch(event);
+
+    const publishOptions = mockChannel.publish.mock.calls[0]![3];
+    expect(publishOptions.messageId).toBe("evt-unique-123");
+  });
+});
+```
+
+### dispatch omits messageId when metadata is absent
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { RabbitMqEventBus } from "@noddde/rabbitmq";
+
+describe("RabbitMqEventBus", () => {
+  it("should not set messageId when event has no metadata", async () => {
+    const mockChannel = {
+      publish: vi.fn().mockReturnValue(true),
+      waitForConfirms: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    (bus as any)._connection = {};
+    (bus as any)._channel = mockChannel;
+    (bus as any)._connected = true;
+
+    await bus.dispatch({ name: "TestEvent", payload: {} });
+
+    const publishOptions = mockChannel.publish.mock.calls[0]![3];
+    expect(publishOptions.messageId).toBeUndefined();
+  });
+});
+```
+
+### logger receives structured calls instead of console
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { RabbitMqEventBus } from "@noddde/rabbitmq";
+import type { Logger } from "@noddde/core";
+
+describe("RabbitMqEventBus", () => {
+  it("should use provided logger for warn and error logging with structured data", async () => {
+    const mockLogger: Logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      child: vi.fn().mockReturnThis(),
+    };
+
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      logger: mockLogger,
+    });
+
+    const handler = vi.fn();
+    bus.on("TestEvent", handler);
+
+    // Trigger poison message logging
+    const result = await (bus as any)._handleMessage(
+      "TestEvent",
+      Buffer.from("not valid json {{{"),
+    );
+
+    expect(result).toEqual({ poisoned: true });
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("deserialize"),
+      expect.objectContaining({ eventName: "TestEvent" }),
+    );
   });
 });
 ```
