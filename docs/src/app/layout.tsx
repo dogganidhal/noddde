@@ -1,5 +1,4 @@
 import { RootProvider } from "fumadocs-ui/provider/next";
-import "fumadocs-ui/style.css";
 import "./globals.css";
 import type { Metadata } from "next";
 import { Instrument_Sans, JetBrains_Mono } from "next/font/google";
