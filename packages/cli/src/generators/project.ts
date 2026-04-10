@@ -2,6 +2,7 @@ import path from "node:path";
 import { buildContext } from "../utils/context.js";
 import { writeFileIfNotExists } from "../utils/fs.js";
 import { validateName } from "../utils/naming.js";
+import type { EventBusAdapter } from "../utils/event-bus.js";
 import type { PersistenceAdapter } from "../utils/persistence.js";
 
 // Project config templates
@@ -61,6 +62,7 @@ export async function generateProject(
   name: string,
   basePath: string,
   adapter: PersistenceAdapter,
+  eventBus: EventBusAdapter = "event-emitter",
 ): Promise<void> {
   validateName(name);
   const ctx = buildContext(name);
@@ -73,7 +75,7 @@ export async function generateProject(
     // ── Project config ──────────────────────────────────────────
     {
       relativePath: "package.json",
-      content: packageJsonTemplate(ctx, adapter),
+      content: packageJsonTemplate(ctx, adapter, eventBus),
     },
     { relativePath: "tsconfig.json", content: tsconfigTemplate() },
     { relativePath: "vitest.config.mts", content: vitestConfigTemplate() },
@@ -192,7 +194,7 @@ export async function generateProject(
     // ── Main ────────────────────────────────────────────────────
     {
       relativePath: "src/main.ts",
-      content: domainMainTemplate(ctx),
+      content: domainMainTemplate(ctx, eventBus),
     },
   ];
 

@@ -2341,4 +2341,96 @@ describe("standalone event handlers", () => {
 
     expect(domain).toBeInstanceOf(Domain);
   });
+
+  it("should auto-connect buses that implement Connectable", async () => {
+    const connectCalls: string[] = [];
+
+    const connectableEventBus = {
+      dispatch: vi.fn().mockResolvedValue(undefined),
+      on: vi.fn(),
+      close: vi.fn().mockResolvedValue(undefined),
+      connect: vi.fn().mockImplementation(async () => {
+        connectCalls.push("eventBus.connect");
+      }),
+    };
+
+    const definition = defineDomain<Infrastructure>({
+      writeModel: { aggregates: {} },
+      readModel: { projections: {} },
+    });
+
+    await wireDomain(definition, {
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: connectableEventBus as unknown as EventEmitterEventBus,
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    expect(connectCalls).toContain("eventBus.connect");
+    expect(connectableEventBus.connect).toHaveBeenCalledOnce();
+  });
+
+  it("should auto-connect buses AFTER all handler registration to prevent race conditions", async () => {
+    const callOrder: string[] = [];
+
+    const connectableEventBus = {
+      dispatch: vi.fn().mockResolvedValue(undefined),
+      on: vi.fn().mockImplementation(() => {
+        callOrder.push("on");
+      }),
+      close: vi.fn().mockResolvedValue(undefined),
+      connect: vi.fn().mockImplementation(async () => {
+        callOrder.push("connect");
+      }),
+    };
+
+    const definition = defineDomain<Infrastructure>({
+      writeModel: { aggregates: {} },
+      readModel: { projections: {} },
+      processModel: {
+        standaloneEventHandlers: {
+          SomeEvent: async () => {},
+        },
+      },
+    });
+
+    await wireDomain(definition, {
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: connectableEventBus as unknown as EventEmitterEventBus,
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    // All on() calls must precede connect()
+    const lastOnIndex = callOrder.lastIndexOf("on");
+    const connectIndex = callOrder.indexOf("connect");
+    expect(connectIndex).toBeGreaterThan(-1);
+    expect(lastOnIndex).toBeGreaterThan(-1);
+    expect(connectIndex).toBeGreaterThan(lastOnIndex);
+  });
+
+  it("should not call connect on non-connectable buses (in-memory)", async () => {
+    const commandBus = new InMemoryCommandBus();
+    const eventBus = new EventEmitterEventBus();
+    const queryBus = new InMemoryQueryBus();
+
+    // These in-memory buses do not have a connect method
+    expect(typeof (commandBus as any).connect).toBe("undefined");
+    expect(typeof (eventBus as any).connect).toBe("undefined");
+    expect(typeof (queryBus as any).connect).toBe("undefined");
+
+    const definition = defineDomain<Infrastructure>({
+      writeModel: { aggregates: {} },
+      readModel: { projections: {} },
+    });
+
+    // wireDomain should succeed without any issues
+    const domain = await wireDomain(definition, {
+      buses: () => ({ commandBus, eventBus, queryBus }),
+    });
+
+    expect(domain).toBeInstanceOf(Domain);
+  });
 });

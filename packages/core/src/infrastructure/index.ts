@@ -4,6 +4,8 @@ import type { Logger } from "./logger";
 
 export type { Closeable } from "./closeable";
 export { isCloseable } from "./closeable";
+export type { Connectable, BrokerResilience } from "./connectable";
+export { isConnectable } from "./connectable";
 export type { BackgroundProcess } from "./background-process";
 export type { Logger, LogLevel } from "./logger";
 

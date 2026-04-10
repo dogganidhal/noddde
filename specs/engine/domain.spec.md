@@ -2,7 +2,7 @@
 title: "Domain Definition & Wiring"
 module: engine/domain
 source_file: packages/engine/src/domain.ts
-status: implemented
+status: ready
 exports:
   [
     Domain,
@@ -324,6 +324,7 @@ The `init()` method must execute the following steps in order:
 
 1. **Resolve custom infrastructure** -- Call `wiring.infrastructure()` if provided. Store the result. If not provided, use `{}` as the default infrastructure.
 2. **Resolve CQRS infrastructure** -- Call `wiring.buses(infrastructure)` if provided, passing the resolved custom infrastructure. Store the `CommandBus`, `EventBus`, and `QueryBus`. If not provided, create default in-memory implementations (`InMemoryCommandBus`, `EventEmitterEventBus`, `InMemoryQueryBus`) and log a warning: `[noddde] Using in-memory CQRS buses. This is not suitable for production.`
+   _Note: Auto-connect is deferred to step 13b (after all handler registration) to prevent a race condition where broker-backed buses deliver queued messages before handlers are registered._
 3. **Merge infrastructure** -- Combine custom infrastructure and CQRS infrastructure into `this._infrastructure` as `TInfrastructure & CQRSInfrastructure`.
 4. **Resolve aggregate persistence** -- Build an `AggregatePersistenceResolver` (strategy pattern, engine-internal) based on the `wiring.aggregates` configuration:
    - **Omitted** (`undefined`): Create a `GlobalAggregatePersistenceResolver` wrapping a default `InMemoryEventSourcedAggregatePersistence` and log a warning: `[noddde] Using in-memory aggregate persistence. This is not suitable for production.`
@@ -340,6 +341,7 @@ The `init()` method must execute the following steps in order:
 11. **Register event listeners for projections** -- For each projection, subscribe to each event name in `Projection.on` on the event bus. When an event arrives, invoke the reducer to update the projection's view.
 12. **Register event listeners for sagas** -- For each saga in `processModel.sagas` (if defined), subscribe to each event name in `Object.keys(saga.on)` on the event bus. When an event arrives, execute the saga event handling lifecycle.
 13. **Register standalone event handlers** -- For each handler in `processModel.standaloneEventHandlers` (if defined), subscribe it to the event bus for the corresponding event name. When an event arrives, invoke the handler with the full event and the merged infrastructure (`TInfrastructure & CQRSInfrastructure`). Runs after saga handler registration.
+    13b. **Auto-connect buses** -- After ALL handler registration is complete (steps 7-13), iterate over `{ commandBus, eventBus, queryBus }`. For each that passes `isConnectable(bus)`, call `await bus.connect()`. If any `connect()` rejects, propagate the error immediately (fail-fast — the domain cannot operate without its buses). Connecting AFTER handler registration ensures that broker-backed buses do not deliver queued messages before handlers are ready. All adapter implementations support `on()` before `connect()` (handlers are buffered and subscriptions are activated during `connect()`). In-memory buses (which are not `Connectable`) are unaffected.
 
 ### Domain.dispatchCommand() -- Command Dispatch Lifecycle
 
@@ -355,7 +357,7 @@ The `dispatchCommand` method executes the following lifecycle for aggregate comm
 5. **Persist** -- Save the results with optimistic concurrency:
    - **Event-sourced**: Call `persistence.save(aggregateName, command.targetAggregateId, newEvents, version)` to append the new events. `version` is the stream length observed at load time.
    - **State-stored**: Call `persistence.save(aggregateName, command.targetAggregateId, newState, version)` to store the updated state. `version` is the version observed at load time.
-6. **Publish** -- For each new event, call `eventBus.dispatch(event)`. This triggers projections and sagas.
+6. **Publish** -- Dispatch all new events sequentially via `for (const e of events) { await eventBus.dispatch(e); }`. This triggers projections and sagas. Sequential dispatch preserves event ordering from a single command — events are guaranteed to arrive at consumers in the same order they were produced by the aggregate's `evolve` chain. This is critical for event-sourced systems where downstream consumers (projections, sagas) depend on causal ordering. After all dispatches complete, proceed to snapshot evaluation.
 7. **Snapshot (best-effort)** -- After successful persistence and before returning, if both a `SnapshotStore` and `SnapshotStrategy` are configured, evaluate the strategy with `{ version: newVersion, lastSnapshotVersion, eventsSinceSnapshot }`. If the strategy returns `true`, save a snapshot with the new state and version. Snapshot saving is best-effort: failures are silently ignored and do not affect the command result.
 8. **Return** -- Return `command.targetAggregateId`.
 
@@ -515,7 +517,7 @@ In global mode, the same snapshot config applies to all event-sourced aggregates
 - `defineDomain` is sync, pure, and has no side effects. It returns the input unchanged.
 - The command bus enforces single-handler-per-command-name. If two aggregates define handlers for the same command name, registration must fail.
 - Events are published only after successful persistence. If persistence fails, events must not be published (to avoid inconsistency between the store and downstream subscribers).
-- The order of event publication matches the order of events returned by the decide handler.
+- All events from a command are dispatched sequentially after successful persistence. Event ordering from a single command is preserved — events arrive at consumers in the order they were produced.
 - When idempotency is active, the idempotency record and event persistence MUST be in the same UoW transaction. If event persistence fails, the idempotency record must not be saved.
 - Duplicate commands (same `commandId`, already processed) must produce zero side effects: no events persisted, no state changes, no events published.
 

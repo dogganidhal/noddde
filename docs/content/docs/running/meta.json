@@ -8,6 +8,7 @@
     "persistence",
     "idempotent-commands",
     "outbox-pattern",
-    "persistence-adapters"
+    "persistence-adapters",
+    "event-bus-adapters"
   ]
 }

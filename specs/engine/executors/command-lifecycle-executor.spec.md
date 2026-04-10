@@ -138,7 +138,7 @@ class CommandLifecycleExecutor {
     - On success, `uow.commit()` is called and returns the deferred events.
     - On failure, `uow.rollback()` is called (best-effort; rollback errors are swallowed).
     - After successful commit, the pending snapshot (if any) is saved to the snapshot store (best-effort; save errors are swallowed).
-    - After successful commit, all returned events are dispatched via `eventBus.dispatch(event)` one by one.
+    - After successful commit, all returned events are dispatched sequentially via `for (const e of events) { await eventBus.dispatch(e); }` to preserve causal ordering.
 
 12. **Explicit UoW (existing UoW in storage)** -- When a UoW is already in the `AsyncLocalStorage` (via `withUnitOfWork` or saga handling):
     - The concurrency strategy wraps only the lifecycle execution (not UoW creation/commit).
@@ -154,7 +154,7 @@ class CommandLifecycleExecutor {
 
 14. **Snapshot save is best-effort** -- After implicit UoW commit, if a pending snapshot exists and a `SnapshotStore` is configured, the snapshot is saved. If the save fails, the error is silently swallowed. Snapshot failure does not affect the command result.
 
-15. **Event publishing after implicit commit** -- After implicit UoW commit, all committed events are dispatched sequentially via `eventBus.dispatch(event)`.
+15. **Event publishing after implicit commit** -- After implicit UoW commit, all committed events are dispatched sequentially via `for (const e of events) { await eventBus.dispatch(e); }`. Sequential dispatch preserves causal ordering — events from a single command arrive at consumers in the order they were produced by the aggregate.
 
 16. **Post-dispatch callback (best-effort)** -- After dispatching all events in the implicit UoW path, if `onEventsDispatched` is provided, call `onEventsDispatched(events)`. Errors from this callback are silently swallowed. This enables the Domain to mark outbox entries as published after successful dispatch.
 

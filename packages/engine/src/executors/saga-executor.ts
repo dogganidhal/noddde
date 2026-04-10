@@ -156,9 +156,9 @@ export class SagaExecutor {
                   )
                 : await commitFn();
 
-              // Step 10: Publish all deferred events
-              for (const deferredEvent of events) {
-                await this.infrastructure.eventBus.dispatch(deferredEvent);
+              // Step 10: Publish all deferred events sequentially
+              for (const e of events) {
+                await this.infrastructure.eventBus.dispatch(e);
               }
 
               // Best-effort post-dispatch callback (e.g., mark outbox entries published)

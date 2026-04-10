@@ -36,7 +36,7 @@ import type {
   OutboxEntry,
 } from "@noddde/core";
 import type { AggregateLocker, Closeable } from "@noddde/core";
-import { isCloseable } from "@noddde/core";
+import { isCloseable, isConnectable } from "@noddde/core";
 import { OutboxRelay } from "./outbox-relay";
 import type { OutboxRelayOptions } from "./outbox-relay";
 import { uuidv7 } from "./uuid";
@@ -1169,6 +1169,17 @@ export class Domain<
       }
     }
 
+    // Step 13b: Auto-connect buses that implement Connectable
+    // Must happen AFTER all handler registration (steps 6-12) to prevent a race
+    // condition where broker-backed buses deliver queued messages before handlers
+    // are registered. All adapter implementations support on() before connect()
+    // (handlers are buffered and subscriptions are activated during connect()).
+    for (const bus of [commandBus, eventBus, queryBus]) {
+      if (isConnectable(bus)) {
+        await bus.connect();
+      }
+    }
+
     domainLog.info("Domain initialized.", {
       aggregates: Object.keys(definition.writeModel.aggregates),
       projections: Object.keys(definition.readModel.projections),
@@ -1193,17 +1204,14 @@ export class Domain<
   }
 
   /**
-   * Subscribes to an event on the event bus. Uses the {@link EventEmitterEventBus}
-   * `on` method to register an async-capable handler.
+   * Subscribes to an event on the event bus.
    */
   private subscribeToEvent(
     eventBus: EventBus,
     eventName: string,
     handler: (event: Event) => void | Promise<void>,
   ): void {
-    // The EventBus interface only exposes dispatch (publish),
-    // so we use a type assertion to reach the on() method.
-    (eventBus as EventEmitterEventBus).on(eventName, handler);
+    eventBus.on(eventName, handler);
   }
 
   private _acquireOperation(): void {
@@ -1270,11 +1278,9 @@ export class Domain<
       await Promise.race([drainRelay, timeoutRace]);
     }
 
-    // Phase 3: Remove event bus listeners
+    // Phase 3: Close the event bus (clears all handlers, idempotent)
     const eventBus = this._infrastructure.eventBus;
-    if ("removeAllListeners" in eventBus) {
-      (eventBus as EventEmitterEventBus).removeAllListeners();
-    }
+    await eventBus.close();
 
     // Phase 4: Auto-close Closeable infrastructure (reverse order)
     const closeables = this._allComponents.filter(isCloseable).reverse();
@@ -1323,8 +1329,8 @@ export class Domain<
         try {
           const result = await fn();
           const events = await uow.commit();
-          for (const event of events) {
-            await this._infrastructure.eventBus.dispatch(event);
+          for (const e of events) {
+            await this._infrastructure.eventBus.dispatch(e);
           }
 
           // Best-effort post-dispatch outbox marking

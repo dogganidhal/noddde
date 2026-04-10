@@ -107,6 +107,89 @@ describe("generateProject", () => {
     expect(pkg.dependencies["@noddde/typeorm"]).toBeDefined();
   });
 
+  it("generates kafka event bus package.json with adapter deps", async () => {
+    await generateProject("HotelBooking", tmpDir, "in-memory", "kafka");
+
+    const pkg = JSON.parse(
+      await readFile(path.join(tmpDir, "hotel-booking/package.json"), "utf-8"),
+    );
+    expect(pkg.dependencies["@noddde/kafka"]).toBeDefined();
+    expect(pkg.dependencies["kafkajs"]).toBeDefined();
+  });
+
+  it("generates nats event bus package.json with adapter deps", async () => {
+    await generateProject("HotelBooking", tmpDir, "in-memory", "nats");
+
+    const pkg = JSON.parse(
+      await readFile(path.join(tmpDir, "hotel-booking/package.json"), "utf-8"),
+    );
+    expect(pkg.dependencies["@noddde/nats"]).toBeDefined();
+    expect(pkg.dependencies["nats"]).toBeDefined();
+  });
+
+  it("generates rabbitmq event bus package.json with adapter deps", async () => {
+    await generateProject("HotelBooking", tmpDir, "in-memory", "rabbitmq");
+
+    const pkg = JSON.parse(
+      await readFile(path.join(tmpDir, "hotel-booking/package.json"), "utf-8"),
+    );
+    expect(pkg.dependencies["@noddde/rabbitmq"]).toBeDefined();
+    expect(pkg.dependencies["amqplib"]).toBeDefined();
+    expect(pkg.devDependencies["@types/amqplib"]).toBeDefined();
+  });
+
+  it("generates kafka main.ts with KafkaEventBus wiring", async () => {
+    await generateProject("HotelBooking", tmpDir, "in-memory", "kafka");
+
+    const mainTs = await readFile(
+      path.join(tmpDir, "hotel-booking/src/main.ts"),
+      "utf-8",
+    );
+    expect(mainTs).toContain("KafkaEventBus");
+    expect(mainTs).toContain("@noddde/kafka");
+    expect(mainTs).not.toContain("eventBus.connect()");
+    expect(mainTs).not.toContain("EventEmitterEventBus");
+  });
+
+  it("generates nats main.ts with NatsEventBus wiring", async () => {
+    await generateProject("HotelBooking", tmpDir, "in-memory", "nats");
+
+    const mainTs = await readFile(
+      path.join(tmpDir, "hotel-booking/src/main.ts"),
+      "utf-8",
+    );
+    expect(mainTs).toContain("NatsEventBus");
+    expect(mainTs).toContain("@noddde/nats");
+    expect(mainTs).not.toContain("eventBus.connect()");
+    expect(mainTs).not.toContain("EventEmitterEventBus");
+  });
+
+  it("generates rabbitmq main.ts with RabbitMqEventBus wiring", async () => {
+    await generateProject("HotelBooking", tmpDir, "in-memory", "rabbitmq");
+
+    const mainTs = await readFile(
+      path.join(tmpDir, "hotel-booking/src/main.ts"),
+      "utf-8",
+    );
+    expect(mainTs).toContain("RabbitMqEventBus");
+    expect(mainTs).toContain("@noddde/rabbitmq");
+    expect(mainTs).not.toContain("eventBus.connect()");
+    expect(mainTs).not.toContain("EventEmitterEventBus");
+  });
+
+  it("generates event-emitter main.ts with EventEmitterEventBus by default", async () => {
+    await generateProject("HotelBooking", tmpDir, "in-memory");
+
+    const mainTs = await readFile(
+      path.join(tmpDir, "hotel-booking/src/main.ts"),
+      "utf-8",
+    );
+    expect(mainTs).toContain("EventEmitterEventBus");
+    expect(mainTs).not.toContain("KafkaEventBus");
+    expect(mainTs).not.toContain("NatsEventBus");
+    expect(mainTs).not.toContain("RabbitMqEventBus");
+  });
+
   it("does not overwrite existing files", async () => {
     await generateProject("HotelBooking", tmpDir, "in-memory");
 

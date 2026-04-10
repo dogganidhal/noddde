@@ -1,4 +1,5 @@
 import type { TemplateContext } from "../../utils/context.js";
+import type { EventBusAdapter } from "../../utils/event-bus.js";
 
 /** Template for domain/domain.ts — defineDomain() call. */
 export function domainDefinitionTemplate(ctx: TemplateContext): string {
@@ -33,9 +34,13 @@ export interface ${ctx.name}Infrastructure extends Infrastructure {
 `;
 }
 
-/** Template for main.ts — wireDomain() call with in-memory defaults. */
-export function domainMainTemplate(ctx: TemplateContext): string {
-  return `import {
+/** Template for main.ts — wireDomain() call with the selected event bus. */
+export function domainMainTemplate(
+  ctx: TemplateContext,
+  eventBus: EventBusAdapter = "event-emitter",
+): string {
+  if (eventBus === "event-emitter") {
+    return `import {
   wireDomain,
   InMemoryCommandBus,
   EventEmitterEventBus,
@@ -44,10 +49,6 @@ export function domainMainTemplate(ctx: TemplateContext): string {
 import { ${ctx.camelName}Domain } from "./domain/domain.js";
 
 const main = async () => {
-  // For production, use a persistence adapter:
-  //   import { DrizzleAdapter } from "@noddde/drizzle";
-  //   const adapter = new DrizzleAdapter(db);
-  //   ... then pass persistenceAdapter: adapter to wireDomain.
   const domain = await wireDomain(${ctx.camelName}Domain, {
     // persistenceAdapter: adapter,
     infrastructure: () => ({
@@ -57,6 +58,96 @@ const main = async () => {
       commandBus: new InMemoryCommandBus(),
       eventBus: new EventEmitterEventBus(),
       queryBus: new InMemoryQueryBus(),
+    }),
+  });
+
+  // TODO: dispatch commands
+  // await domain.dispatchCommand({
+  //   name: "Create${ctx.name}",
+  //   targetAggregateId: "some-id",
+  // });
+};
+
+main();
+`;
+  }
+
+  if (eventBus === "kafka") {
+    return `import { wireDomain } from "@noddde/engine";
+import { KafkaEventBus } from "@noddde/kafka";
+import { ${ctx.camelName}Domain } from "./domain/domain.js";
+
+const main = async () => {
+  const domain = await wireDomain(${ctx.camelName}Domain, {
+    // persistenceAdapter: adapter,
+    infrastructure: () => ({
+      // TODO: provide infrastructure implementations
+    }),
+    buses: () => ({
+      eventBus: new KafkaEventBus({
+        brokers: ["localhost:9092"],
+        clientId: "${ctx.kebabName}",
+        groupId: "${ctx.kebabName}-group",
+      }),
+    }),
+  });
+
+  // TODO: dispatch commands
+  // await domain.dispatchCommand({
+  //   name: "Create${ctx.name}",
+  //   targetAggregateId: "some-id",
+  // });
+};
+
+main();
+`;
+  }
+
+  if (eventBus === "nats") {
+    return `import { wireDomain } from "@noddde/engine";
+import { NatsEventBus } from "@noddde/nats";
+import { ${ctx.camelName}Domain } from "./domain/domain.js";
+
+const main = async () => {
+  const domain = await wireDomain(${ctx.camelName}Domain, {
+    // persistenceAdapter: adapter,
+    infrastructure: () => ({
+      // TODO: provide infrastructure implementations
+    }),
+    buses: () => ({
+      eventBus: new NatsEventBus({
+        servers: "localhost:4222",
+        streamName: "${ctx.kebabName}-events",
+      }),
+    }),
+  });
+
+  // TODO: dispatch commands
+  // await domain.dispatchCommand({
+  //   name: "Create${ctx.name}",
+  //   targetAggregateId: "some-id",
+  // });
+};
+
+main();
+`;
+  }
+
+  // rabbitmq
+  return `import { wireDomain } from "@noddde/engine";
+import { RabbitMqEventBus } from "@noddde/rabbitmq";
+import { ${ctx.camelName}Domain } from "./domain/domain.js";
+
+const main = async () => {
+  const domain = await wireDomain(${ctx.camelName}Domain, {
+    // persistenceAdapter: adapter,
+    infrastructure: () => ({
+      // TODO: provide infrastructure implementations
+    }),
+    buses: () => ({
+      eventBus: new RabbitMqEventBus({
+        url: "amqp://localhost:5672",
+      }),
     }),
   });
 

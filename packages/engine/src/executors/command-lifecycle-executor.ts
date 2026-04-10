@@ -163,8 +163,8 @@ export class CommandLifecycleExecutor {
         }
       }
 
-      for (const event of events) {
-        await eventBus.dispatch(event);
+      for (const e of events) {
+        await eventBus.dispatch(e);
       }
 
       // Best-effort post-dispatch callback (e.g., mark outbox entries published)

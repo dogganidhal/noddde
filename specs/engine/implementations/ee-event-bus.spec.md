@@ -4,7 +4,7 @@ module: engine/implementations/ee-event-bus
 source_file: packages/engine/src/implementations/ee-event-bus.ts
 status: implemented
 exports: [EventEmitterEventBus]
-depends_on: [edd/event-bus, edd/event]
+depends_on: [edd/event-bus, edd/event, infrastructure/closeable]
 docs:
   - infrastructure/in-memory-implementations.mdx
 ---
@@ -16,23 +16,23 @@ docs:
 ## Type Contract
 
 ```ts
-/** Async-capable event handler that receives the full event object. */
-type AsyncEventHandler = (event: Event) => void | Promise<void>;
+import type { EventBus, AsyncEventHandler } from "@noddde/core";
 
 class EventEmitterEventBus implements EventBus {
   /** Registers an async-capable event handler for a given event name. */
   on(eventName: string, handler: AsyncEventHandler): void;
   /** Dispatches an event to all registered handlers and awaits their completion. */
   dispatch<TEvent extends Event>(event: TEvent): Promise<void>;
-  /** Removes all registered handlers for all event names. Called during domain shutdown. */
-  removeAllListeners(): void;
+  /** Releases all resources: clears handlers. Idempotent. */
+  close(): Promise<void>;
 }
 ```
 
-- Implements the `EventBus` interface from `edd/event-bus`.
+- Implements the `EventBus` interface from `edd/event-bus` (which extends `Closeable`).
 - `dispatch` is async (returns `Promise<void>`) and awaits each registered handler sequentially before resolving. This guarantees that projections and sagas have finished processing before the dispatch call completes.
-- The `on` method registers handlers in an internal `Map<string, AsyncEventHandler[]>` keyed by event name. This replaces direct `EventEmitter.on` registration for consumer-facing use.
-- The `AsyncEventHandler` type takes a full `Event` object (not just the payload). This aligns with projection reducers and saga event handlers, which also receive the full event.
+- The `on` method registers handlers in an internal `Map<string, AsyncEventHandler[]>` keyed by event name.
+- `close()` clears all registered handlers (equivalent to the previous `removeAllListeners()`). Since this is an in-memory implementation, there are no connections to release. Idempotent: subsequent calls are no-ops.
+- The `AsyncEventHandler` type is imported from `@noddde/core` (no longer defined locally).
 - The generic `TEvent extends Event` on `dispatch` preserves event type narrowing at call sites.
 
 ## Behavioral Requirements
@@ -43,7 +43,7 @@ class EventEmitterEventBus implements EventBus {
 4. **Multiple handlers** -- Multiple handlers on the same event name all receive the event, in registration order.
 5. **No handlers** -- If no handler is registered for the event name, `dispatch` resolves successfully (no-op).
 6. **Internal handler registry** -- Handlers are tracked in a private `Map<string, AsyncEventHandler[]>`. The underlying `EventEmitter` instance is retained for backward compatibility but is not used for handler dispatch.
-7. **removeAllListeners clears the registry** -- `removeAllListeners()` clears all entries from the internal handler `Map`. After calling it, dispatching any event is a no-op (no handlers invoked). Used during domain shutdown to prevent stale event delivery.
+7. **close clears the handler registry** -- `close()` clears all entries from the internal handler `Map`. After calling it, dispatching any event is a no-op (no handlers invoked). Used during domain shutdown to prevent stale event delivery. Idempotent: subsequent calls are no-ops.
 
 ## Invariants
 
