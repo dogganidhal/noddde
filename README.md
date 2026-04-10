@@ -5,6 +5,8 @@
 
 [![CI](https://github.com/dogganidhal/noddde/actions/workflows/ci.yml/badge.svg)](https://github.com/dogganidhal/noddde/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/dogganidhal/noddde/graph/badge.svg)](https://codecov.io/gh/dogganidhal/noddde)
+[![npm](https://img.shields.io/npm/v/@noddde/core)](https://www.npmjs.com/package/@noddde/core)
+[![license](https://img.shields.io/npm/l/@noddde/core)](https://github.com/dogganidhal/noddde/blob/main/LICENSE)
 
 **Domain modeling that stays out of your way. Production guarantees that protect your data.**
 
@@ -65,10 +67,9 @@ const Wallet = defineAggregate<WalletDef>({
   // ...
 });
 
-// 3. Wire up the right persistence strategy for each aggregate
-const db = drizzle(sqlite);
-const { stateStoredPersistence, eventSourcedPersistence } =
-  createDrizzlePersistence(db, schema);
+// 3. Wire up with a single persistence adapter — it handles everything
+const db = drizzle(connectionString, { schema });
+const adapter = new DrizzleAdapter(db);
 
 const myDomain = defineDomain({
   writeModel: {
@@ -80,13 +81,10 @@ const myDomain = defineDomain({
 });
 
 const domain = await wireDomain(myDomain, {
+  persistenceAdapter: adapter,
   aggregates: {
-    UserProfile: {
-      persistence: () => stateStoredPersistence,
-    },
-    Wallet: {
-      persistence: () => eventSourcedPersistence,
-    },
+    UserProfile: { persistence: "state-stored" },
+    Wallet: { persistence: "event-sourced" },
   },
 });
 ```
@@ -181,6 +179,35 @@ const result = await testAggregate(BankAccount)
 expect(result.events[0].name).toBe("WithdrawalMade");
 expect(result.state.balance).toBe(800);
 ```
+
+## Packages
+
+### Core
+
+| Package                                                            | Description                                                               |
+| :----------------------------------------------------------------- | :------------------------------------------------------------------------ |
+| [`@noddde/core`](https://www.npmjs.com/package/@noddde/core)       | Types, interfaces, and definition functions — zero runtime deps           |
+| [`@noddde/engine`](https://www.npmjs.com/package/@noddde/engine)   | Runtime engine: domain orchestration and in-memory implementations        |
+| [`@noddde/cli`](https://www.npmjs.com/package/@noddde/cli)         | CLI for scaffolding aggregates, projections, sagas, domains, and projects |
+| [`@noddde/testing`](https://www.npmjs.com/package/@noddde/testing) | Type-safe Given/When/Then test harnesses                                  |
+
+### Persistence Adapters
+
+| Package                                                            | Peer Dependency         | Features                                                         |
+| :----------------------------------------------------------------- | :---------------------- | :--------------------------------------------------------------- |
+| [`@noddde/drizzle`](https://www.npmjs.com/package/@noddde/drizzle) | `drizzle-orm` >= 0.30   | PostgreSQL, MySQL, SQLite; advisory locking; convenience schemas |
+| [`@noddde/prisma`](https://www.npmjs.com/package/@noddde/prisma)   | `@prisma/client` >= 5.0 | Any Prisma-supported database; advisory locking; built-in models |
+| [`@noddde/typeorm`](https://www.npmjs.com/package/@noddde/typeorm) | `typeorm` >= 0.3        | PostgreSQL, MySQL, MariaDB, MSSQL, SQLite; built-in entities     |
+
+### Distributed Event Bus Adapters
+
+| Package                                                              | Peer Dependency   | Features                                                                 |
+| :------------------------------------------------------------------- | :---------------- | :----------------------------------------------------------------------- |
+| [`@noddde/rabbitmq`](https://www.npmjs.com/package/@noddde/rabbitmq) | `amqplib` >= 0.10 | Exchange-based routing, durable queues, exponential backoff reconnection |
+| [`@noddde/nats`](https://www.npmjs.com/package/@noddde/nats)         | `nats` >= 2.0     | JetStream durable consumers, subject-based routing, consumer groups      |
+| [`@noddde/kafka`](https://www.npmjs.com/package/@noddde/kafka)       | `kafkajs` >= 2.0  | Consumer group fan-out, partition key strategy, manual offset commits    |
+
+All event bus adapters provide at-least-once delivery with manual acknowledgment and configurable retry policies.
 
 ## Getting Started
 
