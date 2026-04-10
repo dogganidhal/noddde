@@ -12,7 +12,7 @@ import type { SagaTestResult } from "./types";
 function createNoopCQRSInfrastructure(): CQRSInfrastructure {
   return {
     commandBus: { dispatch: async () => {} },
-    eventBus: { dispatch: async () => {} },
+    eventBus: { dispatch: async () => {}, on: () => {}, close: async () => {} },
     queryBus: { dispatch: async () => undefined as any },
   };
 }
