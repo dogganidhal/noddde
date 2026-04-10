@@ -77,8 +77,8 @@ export class RabbitMqEventBus implements EventBus, Connectable {
 7. **Consumer setup** -- A consumer is started on the queue. Incoming messages are deserialized from JSON and passed to all registered handlers.
    7b. **Message deserialization with poison message protection** -- Deserialization is wrapped in try/catch. If `JSON.parse` throws (malformed message), the error is logged and the message is acknowledged (skipped). Poison messages must never block the queue via infinite nack/requeue loops.
 8. **Parallel handler invocation** -- Handlers for the same event are invoked concurrently via `Promise.all()`. If any handler rejects, the message is nacked for redelivery. Handlers that already completed will re-execute on redelivery — consumers must be idempotent. This differs from `EventEmitterEventBus` (which invokes sequentially) because broker adapters operate in distributed contexts where independent handlers should not block each other.
-   8b. **maxRetries delivery limit** -- If `resilience.maxRetries` is configured, track delivery attempts using the `x-death` header count or a custom `x-noddde-delivery-count` header. On each message receipt, check the delivery count against `maxRetries`. If the count exceeds `maxRetries`, log a warning and ack the message (discard it). This prevents handler-level poison messages from blocking the queue indefinitely via infinite nack/requeue.
-9. **Manual ack after handlers** -- The message is acknowledged (`channel.ack(msg)`) only after all handlers have completed successfully (all promises in the `Promise.all` resolved).
+   8b. **maxRetries delivery limit** -- If `resilience.maxRetries` is configured, track delivery attempts using an in-memory `Map<string, number>` keyed by a stable message identifier (e.g., `messageId` from properties, or a hash of the content). On each message receipt, increment the count and check against `maxRetries`. If the count exceeds `maxRetries`, log a warning and ack the message (discard it). This prevents handler-level poison messages from blocking the queue indefinitely via infinite nack/requeue. Note: the in-memory counter resets on consumer restart, which is acceptable since restarted consumers also reset their processing state. The previous `x-death` header approach does not work without a dead-letter exchange configured.
+9. **Manual ack after handlers** -- The message is acknowledged (`channel.ack(msg)`) only after all handlers have completed successfully (all promises in the `Promise.all` resolved). All `channel.ack()` and `channel.nack()` calls are wrapped in try/catch — if the channel closed during reconnection, the error is logged but does not crash the consumer callback.
 
 ### Backpressure
 
@@ -94,7 +94,7 @@ export class RabbitMqEventBus implements EventBus, Connectable {
 
 ### Error Handling
 
-15. **Handler errors cause nack** -- If any handler rejects during parallel invocation, the message is nacked (`channel.nack(msg, false, true)`) for redelivery.
+15. **Handler errors cause nack** -- If any handler rejects during parallel invocation, the message is nacked (`channel.nack(msg, false, true)`) for redelivery. The `nack()` call is wrapped in try/catch — if the channel is stale (closed during reconnection), the error is logged.
 16. **Serialization errors on dispatch** -- If event serialization fails, `dispatch` rejects with the serialization error.
 17. **Connection errors on dispatch** -- If the channel is closed or RabbitMQ is unreachable, `dispatch` rejects with a connection error.
 
