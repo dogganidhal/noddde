@@ -1,0 +1,57 @@
+{
+  "name": "@noddde/rabbitmq",
+  "version": "0.0.0",
+  "description": "RabbitMQ EventBus adapter for noddde",
+  "license": "MIT",
+  "author": "Nidhal Dogga",
+  "homepage": "https://noddde.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dogganidhal/noddde",
+    "directory": "packages/adapters/rabbitmq"
+  },
+  "bugs": {
+    "url": "https://github.com/dogganidhal/noddde/issues"
+  },
+  "keywords": [
+    "ddd",
+    "cqrs",
+    "event-sourcing",
+    "rabbitmq",
+    "amqp",
+    "event-bus",
+    "typescript"
+  ],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "lint": "eslint . --max-warnings 0",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@noddde/core": "0.0.0"
+  },
+  "peerDependencies": {
+    "amqplib": ">=0.10.0"
+  },
+  "devDependencies": {
+    "@noddde/typescript-config": "0.0.0",
+    "@types/amqplib": "^0.10.0",
+    "amqplib": "^0.10.0",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3",
+    "vitest": "^4.1.0"
+  }
+}

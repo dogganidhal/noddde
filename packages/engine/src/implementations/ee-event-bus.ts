@@ -1,9 +1,6 @@
 /* eslint-disable no-unused-vars */
-import type { Event, EventBus } from "@noddde/core";
+import type { AsyncEventHandler, Event, EventBus } from "@noddde/core";
 import { EventEmitter } from "node:events";
-
-/** Async-capable event handler that receives the full event object. */
-type AsyncEventHandler = (event: Event) => void | Promise<void>;
 
 /**
  * In-memory {@link EventBus} implementation backed by Node.js `EventEmitter`.
@@ -58,11 +55,21 @@ export class EventEmitterEventBus implements EventBus {
   }
 
   /**
-   * Removes all registered handlers for all event names.
-   * Called during domain shutdown to prevent event delivery
-   * to stale handlers after infrastructure is closed.
+   * Releases all resources: clears all registered handlers.
+   * After calling `close()`, dispatching any event is a no-op.
+   * Idempotent: subsequent calls resolve immediately.
    */
-  public removeAllListeners(): void {
+  public async close(): Promise<void> {
+    this.removeAllListeners();
+  }
+
+  /**
+   * Removes all registered handlers for all event names.
+   * Called internally by {@link close} during domain shutdown to prevent
+   * event delivery to stale handlers after infrastructure is closed.
+   */
+  private removeAllListeners(): void {
     this.handlers.clear();
+    this.underlying.removeAllListeners();
   }
 }

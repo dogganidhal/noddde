@@ -104,7 +104,7 @@ class SagaExecutor {
 
 ### Publish Deferred Events
 
-12. **Publish events after commit** -- After successful commit, iterate over the returned events and dispatch each via `infrastructure.eventBus.dispatch(event)`. This triggers downstream projections and sagas.
+12. **Publish events after commit** -- After successful commit, dispatch all returned events sequentially via `for (const e of events) { await infrastructure.eventBus.dispatch(e); }`. Sequential dispatch preserves causal ordering — events from a single saga reaction arrive at consumers in the order they were produced.
 
 12b. **Post-dispatch callback (best-effort)** -- After dispatching all events, if `onEventsDispatched` is provided, call `onEventsDispatched(events)`. Errors from this callback are silently swallowed. This enables the Domain to mark outbox entries as published.
 

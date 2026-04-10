@@ -1,10 +1,12 @@
 import type { TemplateContext } from "../../utils/context.js";
+import type { EventBusAdapter } from "../../utils/event-bus.js";
 import type { PersistenceAdapter } from "../../utils/persistence.js";
 
-/** Generates package.json content with correct deps for the chosen persistence adapter. */
+/** Generates package.json content with correct deps for the chosen adapters. */
 export function packageJsonTemplate(
   ctx: TemplateContext,
   adapter: PersistenceAdapter,
+  eventBus: EventBusAdapter = "event-emitter",
 ): string {
   const deps: Record<string, string> = {
     "@noddde/core": "^0.0.0",
@@ -32,6 +34,18 @@ export function packageJsonTemplate(
     devDeps["@types/better-sqlite3"] = "^7.6.13";
   } else if (adapter === "typeorm") {
     deps["@noddde/typeorm"] = "^0.0.0";
+  }
+
+  if (eventBus === "kafka") {
+    deps["@noddde/kafka"] = "^0.0.0";
+    deps["kafkajs"] = "^2.0.0";
+  } else if (eventBus === "nats") {
+    deps["@noddde/nats"] = "^0.0.0";
+    deps["nats"] = "^2.0.0";
+  } else if (eventBus === "rabbitmq") {
+    deps["@noddde/rabbitmq"] = "^0.0.0";
+    deps["amqplib"] = "^0.10.0";
+    devDeps["@types/amqplib"] = "^0.10.0";
   }
 
   const sortedDeps = Object.fromEntries(

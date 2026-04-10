@@ -5,6 +5,7 @@ import { generateSaga } from "../generators/saga.js";
 import { generateDomain } from "../generators/domain.js";
 import { generateProject } from "../generators/project.js";
 import { promptPersistenceAdapter } from "../utils/persistence.js";
+import { promptEventBusAdapter } from "../utils/event-bus.js";
 import { resolveProjectPath } from "../utils/project.js";
 
 /** Registers the `new` command and its subcommands. */
@@ -61,6 +62,7 @@ export function registerNewCommand(program: Command): void {
     )
     .action(async (name: string) => {
       const adapter = await promptPersistenceAdapter();
-      await generateProject(name, ".", adapter);
+      const eventBus = await promptEventBusAdapter();
+      await generateProject(name, ".", adapter, eventBus);
     });
 }
