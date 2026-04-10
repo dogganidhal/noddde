@@ -1,106 +1,109 @@
-# Audit Report: KafkaEventBus Distributed Systems Fixes v2
+---
+spec: specs/adapters/kafka/kafka-event-bus.spec.md
+source: packages/adapters/kafka/src/kafka-event-bus.ts
+tests: packages/adapters/kafka/src/__tests__/kafka-event-bus.test.ts
+auditor: opus
+cycle: 1
+date: 2026-04-10
+verdict: PASS
+---
 
-**Date**: 2026-04-10
+# Audit Report: KafkaEventBus (partition key strategy + framework logger)
+
+**Spec**: `specs/adapters/kafka/kafka-event-bus.spec.md`
 **Auditor**: Claude Opus 4.6
-**Cycle**: 3 (distributed systems correctness fixes v2)
-**Specs reviewed**:
-
-- `specs/adapters/kafka/kafka-event-bus.spec.md` (Reqs 7, 10, 13)
-
-**Build Reports reviewed**:
-
-- `specs/reports/kafka-event-bus.build-report.md`
+**Cycle**: 1
+**Date**: 2026-04-10
+**Verdict**: **PASS**
 
 ---
 
-## Verdict: PASS
+## Mechanical Checks
 
----
+| Check           | Result | Notes                                                           |
+| --------------- | ------ | --------------------------------------------------------------- |
+| Export coverage | PASS   | `KafkaEventBus` and `KafkaEventBusConfig` exported via index.ts |
+| Stub check      | PASS   | Only legitimate error throws (closed, not connected)            |
+| Console check   | PASS   | Zero `console.*` calls in source                                |
+| Type check      | PASS   | `tsc --noEmit` clean                                            |
+| Test execution  | PASS   | 21/21 tests pass                                                |
 
-## Fixes Verified
+## Behavioral Requirement Audit
 
-### Fix 1 (CRITICAL): `commitOffsets()` called after `_handleMessage` in `eachMessage`
+| Req | Description                            | Implemented | Tested |
+| --- | -------------------------------------- | ----------- | ------ |
+| 1   | Topic derivation                       | Yes         | Yes    |
+| 2   | JSON serialization                     | Yes         | Yes    |
+| 3   | Message key via partition key strategy | Yes         | Yes    |
+| 4   | Producer acknowledgment                | Yes         | Yes    |
+| 5   | Dispatch before connect throws         | Yes         | Yes    |
+| 6   | on registers handlers by event name    | Yes         | Yes    |
+| 7   | Consumer subscription + failure        | Yes         | Yes    |
+| 8   | Poison message protection              | Yes         | Yes    |
+| 9   | Parallel handler invocation            | Yes         | Yes    |
+| 9b  | maxRetries delivery limit              | Yes         | No\*   |
+| 10  | Explicit offset commit                 | Yes         | Yes    |
+| 11  | Session timeout and heartbeat          | Yes         | Yes    |
+| 12  | Connect establishes producer/consumer  | Yes         | Yes    |
+| 13  | Connect idempotent and concurrent-safe | Yes         | Yes    |
+| 14  | Close disconnects cleanly              | Yes         | Yes    |
+| 15  | Close idempotent                       | Yes         | Yes    |
+| 16  | Handler errors propagate               | Yes         | Yes    |
+| 17  | Serialization errors on dispatch       | Yes         | No\*   |
+| 18  | Connection errors on dispatch          | Yes         | No\*   |
+| 19  | Framework logger                       | Yes         | Yes    |
 
-**This was the #1 critical finding from the distributed audit v1. Verified with extreme thoroughness.**
-
-| Aspect         | Verification                                                                                                                                                 | Verdict |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- |
-| Source code    | Lines 148-154: `await this._consumer!.commitOffsets([{ topic, partition, offset: (BigInt(message.offset) + 1n).toString() }])` called after `_handleMessage` | PASS    |
-| autoCommit     | Line 131: `autoCommit: false` is set in `consumer.run()` options                                                                                             | PASS    |
-| Offset math    | `(BigInt(message.offset) + 1n).toString()` -- correct kafkajs convention (commit the NEXT offset)                                                            | PASS    |
-| Await ordering | `await _handleMessage(...)` on line 144 completes BEFORE `await commitOffsets(...)` on line 148                                                              | PASS    |
-| Test existence | Test "should explicitly commit offsets after handling" (line 353)                                                                                            | PASS    |
-| Test mechanism | Captures `eachMessage` callback via mock `run()`, simulates a message at offset "42", asserts `commitOffsets` called with offset "43"                        | PASS    |
-| Test assertion | `expect(commitOffsets).toHaveBeenCalledWith([{ topic: "AccountCreated", partition: 0, offset: "43" }])`                                                      | PASS    |
-| Spec alignment | Spec Req 10: "After all handlers completed successfully, the offset is committed explicitly via `consumer.commitOffsets()`"                                  | PASS    |
-
-**Conclusion**: Without `commitOffsets()`, offsets would never be persisted when `autoCommit: false` is set, and every consumer restart would reprocess all messages. The fix is correctly implemented and tested end-to-end through the `eachMessage` callback chain.
-
-### Fix 2: `_deliveryCounts.delete(offsetKey)` after commit (prune)
-
-| Aspect         | Verification                                                                                                             | Verdict |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------ | ------- |
-| Source code    | Line 157: `this._deliveryCounts.delete(offsetKey)` called immediately after `commitOffsets` succeeds                     | PASS    |
-| Ordering       | Sequential: `_handleMessage` -> `commitOffsets` -> `_deliveryCounts.delete`. Prune only happens after successful commit. | PASS    |
-| Memory safety  | Prevents unbounded `_deliveryCounts` Map growth in long-running consumer sessions                                        | PASS    |
-| Spec alignment | Spec Req 10: "After committing, the delivery count entry for this offset is pruned from the `_deliveryCounts` map"       | PASS    |
-
-**Conclusion**: The delivery count map is properly pruned after each successful offset commit, preventing memory leaks.
-
-### Fix 3: `_connecting` promise mutex on `connect()`
-
-| Aspect            | Verification                                                                                                          | Verdict |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------- | ------- |
-| Field declaration | Line 59: `private _connecting: Promise<void> \| null = null`                                                          | PASS    |
-| Mutex check       | Lines 104-106: `if (this._connecting != null) { return this._connecting; }` -- second caller returns the same promise | PASS    |
-| Assignment        | Line 167: `this._connecting = connecting` -- assigned before the async work begins                                    | PASS    |
-| Cleanup           | Lines 162-164: `finally { this._connecting = null; }` -- cleared on both success AND failure                          | PASS    |
-| Test              | Test "should deduplicate concurrent connect() calls" (line 403)                                                       | PASS    |
-| Test assertion    | Fires `Promise.all([bus.connect(), bus.connect()])`, asserts producer/consumer `connect` each called exactly once     | PASS    |
-| Spec alignment    | Spec Req 13: "Concurrent connect() calls are deduplicated via a connection promise mutex"                             | PASS    |
-
-**Conclusion**: The mutex correctly prevents parallel connection attempts. The `finally` block ensures cleanup even if connection fails.
-
-### Fix 4: `.catch()` on `on()` subscribe with topic removal from `_subscribedTopics`
-
-| Aspect             | Verification                                                                                                                                  | Verdict |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| Optimistic add     | Line 195: `this._subscribedTopics.add(topic)` -- added before async subscribe                                                                 | PASS    |
-| `.catch()` handler | Lines 198-204: `.catch((err) => { console.error(...); this._subscribedTopics.delete(topic); })` -- rolls back on failure                      | PASS    |
-| Error logging      | Line 199: `console.error('[KafkaEventBus] Failed to subscribe...')` -- error is NOT silently swallowed                                        | PASS    |
-| Retry support      | Line 203: `this._subscribedTopics.delete(topic)` -- removal from set allows a future `on()` call to retry the subscribe                       | PASS    |
-| Test               | Test "should log error and remove topic from subscribed set when subscribe fails after connect" (line 426)                                    | PASS    |
-| Test assertion     | Asserts `console.error` was called AND topic is removed from `_subscribedTopics`                                                              | PASS    |
-| Spec alignment     | Spec Req 7: "If on() is called after connect() and the subscribe fails, the error is logged and the topic is removed from the subscribed set" | PASS    |
-
-**Conclusion**: Subscribe failures are properly handled with logging and rollback, allowing retry on next `on()` call.
-
----
+\* Req 9b: maxRetries logic is implemented and straightforward; no dedicated test exists but behavior is clear from code inspection. Not a FAIL-worthy gap. \* Reqs 17-18: These are inherent JavaScript behaviors (JSON.stringify throwing, producer.send rejecting). Not a FAIL-worthy gap.
 
 ## Coherence Review
 
-1. **No regression**: All 17 tests pass, including pre-existing tests for dispatch, topic prefix, handler invocation, parallel execution, close, and idempotency.
-2. **Clean lifecycle**: `_connected`, `_closed`, `_connecting` flags are all properly managed. No race conditions.
-3. **Spec divergence note**: Spec Req 9b mentions `x-noddde-delivery-count` Kafka header, but implementation uses in-memory `_deliveryCounts` Map. This was noted as a minor concern in the v1 audit and remains acceptable -- the in-memory approach is simpler and the code comments acknowledge the limitation.
-4. **No stray changes**: Implementation is self-contained within `kafka-event-bus.ts` and its test file.
+### Requirement 3: Partition Key Strategy
 
----
+`_resolvePartitionKey()` correctly implements the spec:
 
-## Test Results
+- Default strategy `"aggregateId"`: reads `event.metadata?.aggregateId`, stringifies with `String()`, falls back to `null`.
+- Custom function: receives the full event, returns the key string or `null`.
+- `dispatch()` calls `_resolvePartitionKey()` to derive the key.
 
-17/17 tests passing. No failures, no skips.
+**Verdict**: Matches spec intent exactly.
 
----
+### Requirement 19: Framework Logger
 
-## Summary
+- `_logger` field initialized from `config.logger ?? new NodddeLogger("warn", "noddde:kafka")`.
+- All logging calls use `this._logger.warn(...)` or `this._logger.error(...)` with structured second parameter.
+- Zero `console.*` calls confirmed via grep.
 
-All four critical fixes verified:
+**Verdict**: Matches spec intent exactly.
 
-| Fix          | Description                                 | Lines            | Test                                              | Verdict |
-| ------------ | ------------------------------------------- | ---------------- | ------------------------------------------------- | ------- |
-| 1 (CRITICAL) | `commitOffsets()` after `_handleMessage`    | 148-154          | "should explicitly commit offsets after handling" | PASS    |
-| 2            | `_deliveryCounts.delete(offsetKey)` prune   | 157              | (covered by offset commit test flow)              | PASS    |
-| 3            | `_connecting` promise mutex                 | 104-107, 162-167 | "should deduplicate concurrent connect() calls"   | PASS    |
-| 4            | `.catch()` on subscribe with topic rollback | 195-204          | "should log error and remove topic"               | PASS    |
+## Invariant Verification
 
-**Overall verdict: PASS**. All fixes are correctly implemented, tested, and aligned with the spec.
+All seven spec invariants hold:
+
+1. Events serialized as JSON -- `JSON.stringify` in dispatch.
+2. Handlers receive full Event -- `JSON.parse` returns full object, passed to handlers.
+3. Offset commits after successful handler completion -- explicit `commitOffsets` in `eachMessage` after `_handleMessage`.
+4. No deduplication -- no dedup logic exists (correct).
+5. Topic names follow `${topicPrefix}${eventName}` -- `_topicName()` method.
+6. Message key defaults to aggregateId -- `_resolvePartitionKey()`.
+7. No `console.*` calls -- confirmed.
+
+## Documentation Updates Applied
+
+The Auditor updated `docs/content/docs/running/event-bus-adapters.mdx`:
+
+1. Added `partitionKeyStrategy` and `logger` rows to the Kafka config table.
+2. Updated the "Publishing" bullet: replaced incorrect `metadata.correlationId` reference with correct `partitionKeyStrategy` / `aggregateId` description.
+3. Added a "Logging" bullet to the Kafka "How It Works" section (matching NATS and RabbitMQ sections).
+4. Updated the example config snippet to show `partitionKeyStrategy` and `logger` options.
+
+## Files Reviewed
+
+- `specs/adapters/kafka/kafka-event-bus.spec.md`
+- `packages/adapters/kafka/src/kafka-event-bus.ts`
+- `packages/adapters/kafka/src/__tests__/kafka-event-bus.test.ts`
+- `packages/adapters/kafka/src/index.ts`
+- `specs/reports/kafka-event-bus.build-report.md`
+
+## Files Modified
+
+- `docs/content/docs/running/event-bus-adapters.mdx` (documentation updates)

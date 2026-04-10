@@ -3,8 +3,10 @@ import type {
   BrokerResilience,
   Connectable,
   EventBus,
+  Logger,
 } from "@noddde/core";
 import type { Event } from "@noddde/core";
+import { NodddeLogger } from "@noddde/engine";
 import type { ChannelModel, ConfirmChannel } from "amqplib";
 import amqplib from "amqplib";
 
@@ -36,6 +38,11 @@ export interface RabbitMqEventBusConfig {
    * amqplib has no built-in reconnection — retry is implemented manually with exponential backoff.
    */
   resilience?: BrokerResilience;
+  /**
+   * Framework logger instance.
+   * Defaults to `new NodddeLogger("warn", "noddde:rabbitmq")` from `@noddde/engine`.
+   */
+  logger?: Logger;
 }
 
 /**
@@ -61,6 +68,7 @@ export class RabbitMqEventBus implements EventBus, Connectable {
   private readonly _queuePrefix: string;
   private readonly _url: string;
   private readonly _prefetchCount: number;
+  private readonly _logger: Logger;
 
   /**
    * Full config stored for test inspection.
@@ -111,6 +119,7 @@ export class RabbitMqEventBus implements EventBus, Connectable {
     this._exchangeType = config.exchangeType ?? "topic";
     this._queuePrefix = config.queuePrefix ?? "noddde";
     this._prefetchCount = config.prefetchCount ?? 10;
+    this._logger = config.logger ?? new NodddeLogger("warn", "noddde:rabbitmq");
   }
 
   /**
@@ -151,7 +160,7 @@ export class RabbitMqEventBus implements EventBus, Connectable {
 
         // Register mid-session reconnection handlers
         this._connection.on("error", (err: Error) => {
-          console.warn("[RabbitMqEventBus] Connection error:", err.message);
+          this._logger.warn("Connection error", { error: String(err.message) });
         });
         this._connection.on("close", () => {
           if (!this._closed) {
@@ -190,7 +199,12 @@ export class RabbitMqEventBus implements EventBus, Connectable {
 
   /**
    * Handles an unexpected connection close (not triggered by close()).
-   * Attempts reconnection using the same resilience backoff logic.
+   * Starts an unbounded reconnection loop that retries indefinitely until
+   * `close()` is called. Uses jittered exponential backoff.
+   *
+   * Unlike `_connectWithRetry()`, this loop ignores `resilience.maxAttempts`
+   * — it will keep trying until `_closed` is set to true.
+   *
    * During reconnection, dispatch() will reject with a connection error.
    * Once reconnected, re-asserts the exchange and re-establishes all consumers.
    */
@@ -201,23 +215,89 @@ export class RabbitMqEventBus implements EventBus, Connectable {
     this._reconnecting = true;
     this._connected = false;
 
-    console.warn(
-      "[RabbitMqEventBus] Unexpected disconnection. Attempting reconnection...",
-    );
+    this._logger.warn("Unexpected disconnection. Attempting reconnection...", {
+      url: this._url,
+    });
 
-    this._connectWithRetry()
-      .then(() => {
-        console.warn("[RabbitMqEventBus] Successfully reconnected.");
-      })
-      .catch((err: Error) => {
-        console.error(
-          "[RabbitMqEventBus] Reconnection failed after all attempts:",
-          err.message,
+    this._reconnectPersistently().finally(() => {
+      this._reconnecting = false;
+    });
+  }
+
+  /**
+   * Indefinitely retries connecting to RabbitMQ with jittered exponential backoff.
+   * Stops when `_closed` becomes true (set by `close()`).
+   *
+   * Backoff formula:
+   *   baseDelay = min(initialDelayMs * 2^attempt, maxDelayMs)
+   *   jitteredDelay = baseDelay * (0.75 + Math.random() * 0.5)
+   *
+   * @internal
+   */
+  private async _reconnectPersistently(): Promise<void> {
+    const initialDelay = this._config.resilience?.initialDelayMs ?? 1000;
+    const maxDelay = this._config.resilience?.maxDelayMs ?? 30000;
+
+    let attempt = 0;
+
+    while (!this._closed) {
+      try {
+        this._connection = await amqplib.connect(this._url);
+
+        // Register mid-session reconnection handlers on the new connection
+        this._connection.on("error", (err: Error) => {
+          this._logger.warn("Connection error", { error: String(err.message) });
+        });
+        this._connection.on("close", () => {
+          if (!this._closed) {
+            this._handleUnexpectedClose();
+          }
+        });
+
+        this._channel = await this._connection.createConfirmChannel();
+
+        // Set prefetch for backpressure control
+        await this._channel.prefetch(this._prefetchCount);
+
+        await this._channel.assertExchange(
+          this._exchangeName,
+          this._exchangeType,
+          { durable: true },
         );
-      })
-      .finally(() => {
-        this._reconnecting = false;
-      });
+
+        // Re-establish consumers for all registered handlers
+        for (const [eventName] of this._handlers.entries()) {
+          await this._setupConsumer(eventName);
+        }
+
+        this._connected = true;
+        attempt = 0; // reset backoff on success
+        this._logger.warn("Successfully reconnected.", { url: this._url });
+        return;
+      } catch (err) {
+        if (this._closed) {
+          return;
+        }
+
+        const baseDelay = Math.min(
+          initialDelay * Math.pow(2, attempt),
+          maxDelay,
+        );
+        const jitteredDelay = baseDelay * (0.75 + Math.random() * 0.5);
+
+        this._logger.warn(
+          `Reconnect attempt ${attempt + 1} failed. Retrying in ${Math.round(jitteredDelay)}ms...`,
+          { error: String((err as Error).message), attempt: attempt + 1 },
+        );
+
+        await new Promise((r) => setTimeout(r, jitteredDelay));
+        attempt++;
+
+        if (this._closed) {
+          return;
+        }
+      }
+    }
   }
 
   /**
@@ -265,8 +345,11 @@ export class RabbitMqEventBus implements EventBus, Connectable {
     }
 
     const body = Buffer.from(JSON.stringify(event));
+    const messageId = (event as { metadata?: { eventId?: string } }).metadata
+      ?.eventId;
     this._channel.publish(this._exchangeName, event.name, body, {
       persistent: true,
+      ...(messageId !== undefined ? { messageId } : {}),
     });
     await this._channel.waitForConfirms();
   }
@@ -274,14 +357,17 @@ export class RabbitMqEventBus implements EventBus, Connectable {
   /**
    * Closes the channel and connection, clears handlers.
    * Idempotent: calling multiple times has no additional effect.
+   * If a mid-session reconnection is in progress, signals the loop to stop
+   * by setting `_closed = true` before returning.
    */
   async close(): Promise<void> {
-    if (!this._connected) {
+    if (this._closed) {
       return;
     }
 
-    this._connected = false;
+    // Mark closed first — this signals any in-progress reconnection loop to stop
     this._closed = true;
+    this._connected = false;
     this._handlers.clear();
 
     if (this._channel) {
@@ -323,9 +409,9 @@ export class RabbitMqEventBus implements EventBus, Connectable {
     try {
       event = JSON.parse(content.toString()) as Event;
     } catch (err) {
-      console.warn(
-        `[RabbitMqEventBus] Failed to deserialize message for event "${eventName}". Skipping (ack). Error:`,
-        err,
+      this._logger.warn(
+        `Failed to deserialize message for event "${eventName}". Skipping (ack).`,
+        { eventName, error: String(err) },
       );
       return { poisoned: true };
     }
@@ -374,8 +460,9 @@ export class RabbitMqEventBus implements EventBus, Connectable {
         const count = (this._deliveryCounts.get(resolvedId) ?? 0) + 1;
         this._deliveryCounts.set(resolvedId, count);
         if (count > maxRetries) {
-          console.warn(
-            `[RabbitMqEventBus] Message for "${eventName}" exceeded maxRetries (${maxRetries}). Discarding.`,
+          this._logger.warn(
+            `Message for "${eventName}" exceeded maxRetries (${maxRetries}). Discarding.`,
+            { eventName, maxRetries, count },
           );
           try {
             this._channel?.ack(msg);
@@ -392,10 +479,10 @@ export class RabbitMqEventBus implements EventBus, Connectable {
         try {
           this._channel?.ack(msg);
         } catch (err) {
-          console.error(
-            `[RabbitMqEventBus] Failed to ack message for "${eventName}":`,
-            err,
-          );
+          this._logger.error(`Failed to ack message for "${eventName}".`, {
+            eventName,
+            error: String(err),
+          });
         }
         // Prune the delivery count entry after successful ack
         if (msgId !== undefined) {
@@ -406,10 +493,10 @@ export class RabbitMqEventBus implements EventBus, Connectable {
         try {
           this._channel?.nack(msg, false, true);
         } catch (err) {
-          console.error(
-            `[RabbitMqEventBus] Failed to nack message for "${eventName}":`,
-            err,
-          );
+          this._logger.error(`Failed to nack message for "${eventName}".`, {
+            eventName,
+            error: String(err),
+          });
         }
       }
     });

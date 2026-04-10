@@ -10,13 +10,21 @@ import type {
   BrokerResilience,
   Connectable,
   EventBus,
+  Logger,
 } from "@noddde/core";
 import type { Event } from "@noddde/core";
+import { NodddeLogger } from "@noddde/engine";
 
 /** Configuration for the NatsEventBus. */
 export interface NatsEventBusConfig {
   /** NATS server URL(s) (e.g., "localhost:4222" or ["nats://host1:4222", "nats://host2:4222"]). */
   servers: string | string[];
+  /**
+   * Consumer group identity. Used as prefix for JetStream durable consumer names.
+   * Two services with different consumerGroup values independently consume the same stream
+   * without stealing each other's messages. Analogous to Kafka's groupId.
+   */
+  consumerGroup: string;
   /** JetStream stream name for durable subscriptions (e.g., "noddde-events"). */
   streamName?: string;
   /** Optional prefix prepended to event names to form subject names (e.g., "noddde." → "noddde.AccountCreated"). */
@@ -25,6 +33,8 @@ export interface NatsEventBusConfig {
   prefetchCount?: number;
   /** Connection resilience configuration (default: maxAttempts=-1/infinite, initialDelayMs=2000). NATS uses fixed intervals — maxDelayMs is ignored. */
   resilience?: BrokerResilience;
+  /** Framework logger instance. Defaults to NodddeLogger("warn", "noddde:nats") from @noddde/engine. */
+  logger?: Logger;
 }
 
 /**
@@ -36,7 +46,11 @@ export interface NatsEventBusConfig {
  *
  * @example
  * ```ts
- * const bus = new NatsEventBus({ servers: "localhost:4222", streamName: "noddde-events" });
+ * const bus = new NatsEventBus({
+ *   servers: "localhost:4222",
+ *   consumerGroup: "my-service",
+ *   streamName: "noddde-events",
+ * });
  * await bus.connect();
  * bus.on("AccountCreated", async (event) => { ... });
  * await bus.dispatch({ name: "AccountCreated", payload: { id: "acc-1" } });
@@ -45,6 +59,7 @@ export interface NatsEventBusConfig {
  */
 export class NatsEventBus implements EventBus, Connectable {
   private readonly _config: NatsEventBusConfig;
+  private readonly _logger: Logger;
   private _nc: NatsConnection | null = null;
   private _js: JetStreamClient | null = null;
   private _connected: boolean = false;
@@ -53,6 +68,7 @@ export class NatsEventBus implements EventBus, Connectable {
 
   constructor(config: NatsEventBusConfig) {
     this._config = config;
+    this._logger = config.logger ?? new NodddeLogger("warn", "noddde:nats");
   }
 
   /**
@@ -60,6 +76,8 @@ export class NatsEventBus implements EventBus, Connectable {
    * Must be called before `dispatch` or `on` (after calling `on` is also supported — handlers
    * registered before `connect()` are buffered and subscriptions are created when `connect()` is called).
    * Idempotent: subsequent calls when already connected are no-ops.
+   *
+   * @throws If any subscription activation fails during `_activateSubscriptions`.
    */
   async connect(): Promise<void> {
     if (this._connected) {
@@ -92,7 +110,7 @@ export class NatsEventBus implements EventBus, Connectable {
       }
     }
 
-    // Activate any buffered subscriptions
+    // Activate any buffered subscriptions — fail fast on any error
     await this._activateSubscriptions();
   }
 
@@ -112,9 +130,9 @@ export class NatsEventBus implements EventBus, Connectable {
     existing.push(handler);
     this._handlers.set(eventName, existing);
 
-    // If already connected, create a subscription immediately
+    // If already connected, create a subscription immediately (late registration — log errors, don't crash)
     if (this._connected && this._js) {
-      void this._createSubscriptionForEvent(eventName);
+      void this._createSubscriptionForEvent(eventName, false);
     }
   }
 
@@ -187,19 +205,34 @@ export class NatsEventBus implements EventBus, Connectable {
     return [`${prefix}>`];
   }
 
+  /**
+   * Activates subscriptions for all buffered handlers.
+   * Throws immediately if any subscription creation fails (fail-fast during connect).
+   */
   private async _activateSubscriptions(): Promise<void> {
     for (const eventName of this._handlers.keys()) {
-      await this._createSubscriptionForEvent(eventName);
+      await this._createSubscriptionForEvent(eventName, true);
     }
   }
 
-  private async _createSubscriptionForEvent(eventName: string): Promise<void> {
+  /**
+   * Creates a JetStream consumer subscription for the given event name.
+   *
+   * @param eventName - The event name to subscribe to.
+   * @param failFast - If true, re-throws subscription errors (used during connect). If false,
+   *   logs errors without throwing (used for late `on()` registrations after connect).
+   */
+  private async _createSubscriptionForEvent(
+    eventName: string,
+    failFast: boolean = false,
+  ): Promise<void> {
     if (!this._js) {
       return;
     }
 
     const subject = this._subjectFor(eventName);
-    const durableName = eventName.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const sanitized = eventName.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const durableName = `${this._config.consumerGroup}_${sanitized}`;
 
     const opts = consumerOpts();
     opts.durable(durableName);
@@ -215,17 +248,20 @@ export class NatsEventBus implements EventBus, Connectable {
     try {
       const sub = await this._js.subscribe(subject, opts);
       this._consumeSubscription(sub, eventName).catch((err) => {
-        console.error(
-          `[NatsEventBus] Consumer loop for "${eventName}" terminated:`,
-          err,
-        );
+        this._logger.error("Consumer loop terminated unexpectedly", {
+          eventName,
+          error: String(err),
+        });
       });
     } catch (err) {
-      // Subscription creation failed — caller should handle reconnect logic
-      console.error(
-        `[NatsEventBus] Failed to create subscription for "${eventName}":`,
-        err,
-      );
+      if (failFast) {
+        throw err;
+      }
+      // Late registration failure — log but don't crash
+      this._logger.error("Failed to create subscription for event", {
+        eventName,
+        error: String(err),
+      });
     }
   }
 
@@ -240,14 +276,17 @@ export class NatsEventBus implements EventBus, Connectable {
           new TextDecoder().decode(msg.data),
         ) as import("@noddde/core").Event;
       } catch (err) {
-        console.error(
-          `[NatsEventBus] Poison message for "${eventName}". Discarding.`,
-          err,
-        );
+        this._logger.error("Poison message received — discarding", {
+          eventName,
+          error: String(err),
+        });
         try {
           msg.term();
-        } catch {
-          // connection dropped between receipt and term
+        } catch (termErr) {
+          this._logger.warn(
+            "Failed to term poison message (connection dropped?)",
+            { eventName, error: String(termErr) },
+          );
         }
         continue;
       }
@@ -255,16 +294,25 @@ export class NatsEventBus implements EventBus, Connectable {
         await this._handleMessage(eventName, JSON.stringify(event));
         try {
           msg.ack();
-        } catch {
-          // connection dropped between handler completion and ack
+        } catch (ackErr) {
+          this._logger.warn("Failed to ack message (connection dropped?)", {
+            eventName,
+            error: String(ackErr),
+          });
         }
       } catch (err) {
         // Handler failure — request immediate redelivery via nak()
-        console.error(`[NatsEventBus] Handler error for "${eventName}".`, err);
+        this._logger.error("Handler error for event", {
+          eventName,
+          error: String(err),
+        });
         try {
           msg.nak();
-        } catch {
-          // connection dropped between handler failure and nak
+        } catch (nakErr) {
+          this._logger.warn("Failed to nak message (connection dropped?)", {
+            eventName,
+            error: String(nakErr),
+          });
         }
       }
     }

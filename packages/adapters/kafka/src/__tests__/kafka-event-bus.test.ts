@@ -434,11 +434,19 @@ describe("KafkaEventBus", () => {
       producer: () => mockProducer,
       consumer: () => mockConsumer,
     };
+    const mockLogger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      child: vi.fn().mockReturnThis(),
+    };
 
     const bus = new KafkaEventBus({
       brokers: ["localhost:9092"],
       clientId: "test",
       groupId: "test-group",
+      logger: mockLogger,
     });
     (bus as any)._kafka = mockKafka;
 
@@ -451,18 +459,117 @@ describe("KafkaEventBus", () => {
     // Force connect() to skip the subscribe loop (no pre-registered handlers)
     await bus.connect();
 
-    const consoleErrorSpy = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-
     bus.on("NewEvent", vi.fn());
 
     // Allow the async subscribe rejection to propagate
     await new Promise((r) => setTimeout(r, 0));
 
-    expect(consoleErrorSpy).toHaveBeenCalled();
+    expect(mockLogger.error).toHaveBeenCalled();
     expect((bus as any)._subscribedTopics.has("NewEvent")).toBe(false);
+  });
 
-    consoleErrorSpy.mockRestore();
+  it("should use aggregateId as message key by default", async () => {
+    const mockProducer = makeMockProducer();
+    const mockConsumer = makeMockConsumer();
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+    (bus as any)._kafka = mockKafka;
+
+    await bus.connect();
+    await bus.dispatch({
+      name: "OrderPlaced",
+      payload: {},
+      metadata: {
+        eventId: "evt-1",
+        correlationId: "corr-1",
+        timestamp: "2024-01-01T00:00:00.000Z",
+        causationId: "cmd-1",
+        aggregateId: "order-123",
+      },
+    } as any);
+
+    const sentKey = mockProducer.send.mock.calls[0]![0].messages[0].key;
+    expect(sentKey).toBe("order-123");
+  });
+
+  it("should use null key when event has no aggregateId", async () => {
+    const mockProducer = makeMockProducer();
+    const mockConsumer = makeMockConsumer();
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+    (bus as any)._kafka = mockKafka;
+
+    await bus.connect();
+    await bus.dispatch({ name: "TestEvent", payload: {} });
+
+    const sentKey = mockProducer.send.mock.calls[0]![0].messages[0].key;
+    expect(sentKey).toBeNull();
+  });
+
+  it("should use custom function for partition key when provided", async () => {
+    const mockProducer = makeMockProducer();
+    const mockConsumer = makeMockConsumer();
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+      partitionKeyStrategy: (event) => `custom-${event.name}`,
+    });
+    (bus as any)._kafka = mockKafka;
+
+    await bus.connect();
+    await bus.dispatch({ name: "OrderPlaced", payload: {} });
+
+    const sentKey = mockProducer.send.mock.calls[0]![0].messages[0].key;
+    expect(sentKey).toBe("custom-OrderPlaced");
+  });
+
+  it("should use provided logger for warn logging with structured data", async () => {
+    const mockLogger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      child: vi.fn().mockReturnThis(),
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+      logger: mockLogger,
+    });
+
+    const handler = vi.fn();
+    bus.on("TestEvent", handler);
+
+    // Trigger poison message logging via _handleMessage
+    await (bus as any)._handleMessage("TestEvent", "not valid json {{{");
+
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("deserialize"),
+      expect.objectContaining({ eventName: "TestEvent" }),
+    );
   });
 });

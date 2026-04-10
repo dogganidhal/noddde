@@ -5,6 +5,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@noddde/core": path.resolve(__dirname, "../../core/src/index.ts"),
+      "@noddde/engine": path.resolve(__dirname, "../../engine/src/index.ts"),
       "@noddde/rabbitmq": path.resolve(__dirname, "src/index.ts"),
     },
   },

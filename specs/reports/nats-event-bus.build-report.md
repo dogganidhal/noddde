@@ -1,81 +1,49 @@
-# Build Report: NatsEventBus (Distributed Audit v2 Fixes)
+## Build Report: NatsEventBus
 
-**Spec**: `specs/adapters/nats/nats-event-bus.spec.md`
-**Builder**: Claude Sonnet 4.6
-**Date**: 2026-04-10
-**Status**: GREEN — all 19 tests passing
+- **Spec**: specs/adapters/nats/nats-event-bus.spec.md
+- **Source**: packages/adapters/nats/src/nats-event-bus.ts
+- **Tests**: packages/adapters/nats/src/**tests**/nats-event-bus.test.ts
+- **Result**: GREEN
+- **Tests passing**: 23/23
+- **Loop count**: 1
 
----
+### Test Results
 
-## Changes Made
+| Test                                                                                        | Status |
+| ------------------------------------------------------------------------------------------- | ------ |
+| should publish event to subject derived from event name                                     | PASS   |
+| should prepend subjectPrefix to event name for subject                                      | PASS   |
+| should throw when dispatching before connect                                                | PASS   |
+| should invoke registered handler when event is consumed                                     | PASS   |
+| should invoke all handlers concurrently via Promise.all                                     | PASS   |
+| should reject if any handler throws during parallel invocation                              | PASS   |
+| should map BrokerResilience to nats reconnection options                                    | PASS   |
+| should configure prefetchCount as maxAckPending on JetStream consumer options               | PASS   |
+| should drain connection and clear handlers on close                                         | PASS   |
+| should not throw when close is called multiple times                                        | PASS   |
+| should serialize the full event object including metadata                                   | PASS   |
+| should set maxDeliver on consumer options when resilience.maxRetries is configured          | PASS   |
+| should term a poison message (malformed JSON) and continue                                  | PASS   |
+| should nak message when handler throws and not ack                                          | PASS   |
+| should ack message when all handlers succeed                                                | PASS   |
+| should not crash consumer loop when msg.term() throws (connection dropped)                  | PASS   |
+| should not crash consumer loop when msg.nak() throws (connection dropped)                   | PASS   |
+| should not crash consumer loop when msg.ack() throws (connection dropped)                   | PASS   |
+| should use .catch() on consumer loop to prevent unhandled promise rejections                | PASS   |
+| should use consumerGroup as prefix in durable consumer name                                 | PASS   |
+| should produce different durable names for different consumerGroup values on the same event | PASS   |
+| should reject connect() when subscription creation fails during \_activateSubscriptions     | PASS   |
+| should use provided logger for error and warn logging with structured data                  | PASS   |
 
-### Modified: `packages/adapters/nats/src/nats-event-bus.ts`
+### Implementation Notes
 
-**Fix 1: try/catch around msg.term(), msg.ack(), msg.nak() (Requirements 7, 8, 9)**
+- Added `@noddde/engine` as a runtime dependency to `packages/adapters/nats/package.json` (required for `NodddeLogger` default).
+- Updated `vitest.config.mts` to add `@noddde/engine` alias pointing to `packages/engine/src/index.ts`.
+- `_createSubscriptionForEvent` now accepts a `failFast: boolean` parameter (default `false`). During `connect()`, `_activateSubscriptions` passes `true` so subscription errors propagate and `connect()` rejects. Late `on()` calls use `false` (log only).
+- All `console.error`/`console.warn` replaced with `this._logger.error`/`this._logger.warn` with structured `{ eventName, error }` data objects. Zero `console.*` calls remain in the implementation.
+- Durable consumer name format changed from `sanitized(eventName)` to `${consumerGroup}_${sanitized(eventName)}`.
+- `NatsEventBusConfig` updated with required `consumerGroup: string` field and optional `logger?: Logger` field.
 
-Refactored `_consumeSubscription` to wrap all three NATS message acknowledgment methods in individual try/catch blocks. If the NATS connection drops between message receipt and the ack/nak/term call, the thrown error is silently swallowed and the consumer loop continues to the next message (rather than crashing).
+### Concerns
 
-- `msg.term()` on poison message (malformed JSON): wrapped in try/catch — error from dropped connection is caught silently.
-- `msg.ack()` after successful handlers: wrapped in try/catch — error from dropped connection is caught silently.
-- `msg.nak()` after handler failure: wrapped in try/catch — error from dropped connection is caught silently.
-
-The refactored `_consumeSubscription` now parses JSON into a typed `Event` variable first (for validation), then re-serializes via `JSON.stringify(event)` when calling `_handleMessage`. The double-parse approach is intentional to keep `_handleMessage`'s testable `(eventName: string, messageData: string)` signature unchanged.
-
-**Fix 2: Consumer loop .catch() instead of void (Requirement 15b)**
-
-In `_createSubscriptionForEvent`:
-
-- Replaced `void this._consumeSubscription(sub, eventName)` with `.catch()` that logs the termination error. If the async iterator throws (e.g., connection drop), the error is caught and logged rather than becoming an unhandled promise rejection.
-- Also added error logging to the subscription creation catch block (previously silently swallowed).
-
-### Modified: `packages/adapters/nats/src/__tests__/nats-event-bus.test.ts`
-
-Added 4 new test cases (15 existing tests retained unchanged):
-
-1. **`should not crash consumer loop when msg.term() throws (connection dropped)`** — throws from `msg.term()`, verifies `_consumeSubscription` resolves cleanly.
-2. **`should not crash consumer loop when msg.nak() throws (connection dropped)`** — throws from `msg.nak()`, verifies `_consumeSubscription` resolves cleanly.
-3. **`should not crash consumer loop when msg.ack() throws (connection dropped)`** — throws from `msg.ack()`, verifies `_consumeSubscription` resolves cleanly and handler was still invoked.
-4. **`should use .catch() on consumer loop to prevent unhandled promise rejections`** — async iterator that throws, verifies `.catch()` on `_consumeSubscription` catches and logs the error without becoming an unhandled rejection.
-
----
-
-## Test Results
-
-```
-Test Files  1 passed (1)
-Tests       19 passed (19)
-Duration    247ms
-```
-
-All 19 tests GREEN.
-
----
-
-## TypeScript Check
-
-3 pre-existing type errors remain (not introduced by this change, existed before this PR):
-
-- `AsyncEventHandler` not matching export name in `@noddde/core`
-- `BrokerResilience` not exported from `@noddde/core`
-- `Connectable` not exported from `@noddde/core`
-
-These are unrelated to the distributed audit fixes.
-
----
-
-## Requirements Coverage
-
-| Req        | Description                                                        | Status |
-| ---------- | ------------------------------------------------------------------ | ------ |
-| 7          | Poison message: msg.term() wrapped in try/catch                    | FIXED  |
-| 8          | Handler failure: msg.nak() wrapped in try/catch                    | FIXED  |
-| 9          | Success: msg.ack() wrapped in try/catch                            | FIXED  |
-| 15b        | Consumer loop has .catch() handler (not fire-and-forget with void) | FIXED  |
-| All others | Pre-existing requirements                                          | GREEN  |
-
----
-
-## Files Modified
-
-- `packages/adapters/nats/src/nats-event-bus.ts` — `_consumeSubscription()`, `_createSubscriptionForEvent()`
-- `packages/adapters/nats/src/__tests__/nats-event-bus.test.ts` — 4 new test cases added
+None.

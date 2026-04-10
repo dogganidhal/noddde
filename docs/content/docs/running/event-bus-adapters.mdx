@@ -66,26 +66,31 @@ const eventBus = new KafkaEventBus({
   sessionTimeout: 60000, // optional — increase for slow handlers
   heartbeatInterval: 5000, // optional — must be < sessionTimeout / 3
   resilience: { maxAttempts: 11, initialDelayMs: 500, maxRetries: 5 }, // optional — connection + delivery resilience
+  partitionKeyStrategy: "aggregateId", // optional — default uses aggregateId for per-aggregate ordering
+  // logger: myCustomLogger, // optional — defaults to NodddeLogger("warn", "noddde:kafka")
 });
 ```
 
-| Option              | Type               | Required | Default                                               | Description                                                                                                                                                                                                |
-| ------------------- | ------------------ | -------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `brokers`           | `string[]`         | Yes      | —                                                     | Kafka broker addresses                                                                                                                                                                                     |
-| `clientId`          | `string`           | Yes      | —                                                     | Client identifier                                                                                                                                                                                          |
-| `groupId`           | `string`           | Yes      | —                                                     | Consumer group ID. Events fan out across different group IDs                                                                                                                                               |
-| `topicPrefix`       | `string`           | No       | `""`                                                  | Prefix prepended to event names to form topic names                                                                                                                                                        |
-| `sessionTimeout`    | `number`           | No       | `30000`                                               | Consumer session timeout in ms. Increase if handlers are slow                                                                                                                                              |
-| `heartbeatInterval` | `number`           | No       | `3000`                                                | Consumer heartbeat interval in ms. Must be less than sessionTimeout/3                                                                                                                                      |
-| `resilience`        | `BrokerResilience` | No       | `maxAttempts=6, initialDelayMs=300, maxDelayMs=30000` | Connection resilience config. `maxAttempts` maps to kafkajs `retries` (minus 1), `initialDelayMs` to `initialRetryTime`, `maxDelayMs` to `maxRetryTime`. `maxRetries` limits per-message delivery attempts |
+| Option                 | Type                                                  | Required | Default                                               | Description                                                                                                                                                                                                                                                      |
+| ---------------------- | ----------------------------------------------------- | -------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `brokers`              | `string[]`                                            | Yes      | —                                                     | Kafka broker addresses                                                                                                                                                                                                                                           |
+| `clientId`             | `string`                                              | Yes      | —                                                     | Client identifier                                                                                                                                                                                                                                                |
+| `groupId`              | `string`                                              | Yes      | —                                                     | Consumer group ID. Events fan out across different group IDs                                                                                                                                                                                                     |
+| `topicPrefix`          | `string`                                              | No       | `""`                                                  | Prefix prepended to event names to form topic names                                                                                                                                                                                                              |
+| `sessionTimeout`       | `number`                                              | No       | `30000`                                               | Consumer session timeout in ms. Increase if handlers are slow                                                                                                                                                                                                    |
+| `heartbeatInterval`    | `number`                                              | No       | `3000`                                                | Consumer heartbeat interval in ms. Must be less than sessionTimeout/3                                                                                                                                                                                            |
+| `resilience`           | `BrokerResilience`                                    | No       | `maxAttempts=6, initialDelayMs=300, maxDelayMs=30000` | Connection resilience config. `maxAttempts` maps to kafkajs `retries` (minus 1), `initialDelayMs` to `initialRetryTime`, `maxDelayMs` to `maxRetryTime`. `maxRetries` limits per-message delivery attempts                                                       |
+| `partitionKeyStrategy` | `"aggregateId" \| ((event: Event) => string \| null)` | No       | `"aggregateId"`                                       | Strategy for deriving the Kafka message key. Default uses `event.metadata?.aggregateId` (stringified) for per-aggregate partition ordering, falling back to `null` (round-robin). A custom function receives the full event and returns the key string or `null` |
+| `logger`               | `Logger`                                              | No       | `NodddeLogger("warn", "noddde:kafka")`                | Framework logger instance from `@noddde/core`. All internal logging goes through this logger with structured context data                                                                                                                                        |
 
 ### How It Works
 
-- **Publishing**: Events are serialized as JSON and sent to a Kafka topic derived from the event name (`${topicPrefix}${event.name}`). If the event has a `metadata.correlationId`, it is used as the message key for partition-level ordering.
+- **Publishing**: Events are serialized as JSON and sent to a Kafka topic derived from the event name (`${topicPrefix}${event.name}`). The message key is determined by the `partitionKeyStrategy` option: by default (`"aggregateId"`), the key is `event.metadata?.aggregateId` (stringified), ensuring per-aggregate partition ordering. If no `aggregateId` is present, the key is `null` (round-robin). A custom function can be provided to derive the key from the full event.
 - **Subscribing**: Handlers registered via `on()` receive messages through a Kafka consumer. Handlers registered before `connect()` are buffered and subscriptions are created when the connection is established. Multiple handlers for the same event are invoked in parallel via `Promise.all()` — independent handlers (projections, sagas) do not block each other.
 - **Delivery**: At-least-once. The consumer runs with `autoCommit: false` — offsets are committed explicitly via `consumer.commitOffsets()` only after all handlers complete successfully. If any handler fails, the offset is not committed and the message will be redelivered. After a successful commit, the in-memory delivery count entry for the message is pruned to prevent unbounded memory growth. Consumers must be idempotent.
 - **Poison message protection**: Malformed messages that fail JSON deserialization are logged and skipped (offset committed), preventing corrupt data from blocking the partition. If `resilience.maxRetries` is configured, messages that exceed the delivery attempt limit are also skipped with a warning.
 - **Connection resilience**: The optional `resilience` config (`BrokerResilience` from `@noddde/core`) is mapped to kafkajs retry options for automatic reconnection on broker unavailability. `maxAttempts` maps to kafkajs `retries` (minus 1, since kafkajs counts retries after the first attempt), `initialDelayMs` to `initialRetryTime`, and `maxDelayMs` to `maxRetryTime`. The `sessionTimeout` and `heartbeatInterval` options tune consumer rebalance behavior for slow handlers. Concurrent `connect()` calls are deduplicated via a connection promise mutex to prevent parallel connection attempts.
+- **Logging**: All internal logging uses the framework `Logger` interface from `@noddde/core`. Pass a custom `logger` in the config or accept the default (`NodddeLogger("warn", "noddde:kafka")`). All log calls include structured context data (event name, error details).
 
 ### Wiring with Domain
 
@@ -121,6 +126,7 @@ import { NatsEventBus } from "@noddde/nats";
 
 const eventBus = new NatsEventBus({
   servers: "localhost:4222",
+  consumerGroup: "my-service", // required — scopes durable consumer names
   streamName: "noddde-events", // optional — enables JetStream durable subscriptions
   subjectPrefix: "noddde.", // optional — subjects become "noddde.AccountCreated"
   prefetchCount: 256, // optional — backpressure control
@@ -128,22 +134,25 @@ const eventBus = new NatsEventBus({
 });
 ```
 
-| Option          | Type                 | Required | Default | Description                                                                                                                                                                                                                                           |
-| --------------- | -------------------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `servers`       | `string \| string[]` | Yes      | —       | NATS server URL(s)                                                                                                                                                                                                                                    |
-| `streamName`    | `string`             | No       | —       | JetStream stream name for durable subscriptions                                                                                                                                                                                                       |
-| `subjectPrefix` | `string`             | No       | `""`    | Prefix prepended to event names to form subjects                                                                                                                                                                                                      |
-| `prefetchCount` | `number`             | No       | `256`   | Maximum unacknowledged messages per consumer. Maps to JetStream `maxAckPending`. Provides backpressure control                                                                                                                                        |
-| `resilience`    | `BrokerResilience`   | No       | —       | Connection resilience. `maxAttempts` maps to `maxReconnectAttempts` (-1 = infinite). `initialDelayMs` maps to `reconnectTimeWait` (default: 2000ms). `maxDelayMs` is ignored (NATS uses fixed intervals). `maxRetries` maps to JetStream `maxDeliver` |
+| Option          | Type                 | Required | Default                               | Description                                                                                                                                                                                                                                                     |
+| --------------- | -------------------- | -------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `servers`       | `string \| string[]` | Yes      | —                                     | NATS server URL(s)                                                                                                                                                                                                                                              |
+| `consumerGroup` | `string`             | Yes      | —                                     | Consumer group identity. Used as prefix for JetStream durable consumer names (`${consumerGroup}_${eventName}`). Two services with different values independently consume the same stream without stealing each other's messages. Analogous to Kafka's `groupId` |
+| `streamName`    | `string`             | No       | —                                     | JetStream stream name for durable subscriptions                                                                                                                                                                                                                 |
+| `subjectPrefix` | `string`             | No       | `""`                                  | Prefix prepended to event names to form subjects                                                                                                                                                                                                                |
+| `prefetchCount` | `number`             | No       | `256`                                 | Maximum unacknowledged messages per consumer. Maps to JetStream `maxAckPending`. Provides backpressure control                                                                                                                                                  |
+| `resilience`    | `BrokerResilience`   | No       | —                                     | Connection resilience. `maxAttempts` maps to `maxReconnectAttempts` (-1 = infinite). `initialDelayMs` maps to `reconnectTimeWait` (default: 2000ms). `maxDelayMs` is ignored (NATS uses fixed intervals). `maxRetries` maps to JetStream `maxDeliver`           |
+| `logger`        | `Logger`             | No       | `NodddeLogger("warn", "noddde:nats")` | Framework logger instance from `@noddde/core`. All internal logging (errors, warnings) goes through this logger with structured context data                                                                                                                    |
 
 ### How It Works
 
 - **Publishing**: Events are serialized as JSON, encoded as `Uint8Array`, and published to a NATS subject (`${subjectPrefix}${event.name}`). When a `streamName` is configured, JetStream publish acknowledgment is awaited.
-- **Subscribing**: JetStream consumers with durable subscriptions are created for each registered event name. Handlers registered before `connect()` are buffered. Multiple handlers for the same event are invoked in parallel via `Promise.all()` — independent handlers do not block each other.
+- **Subscribing**: JetStream consumers with durable subscriptions are created for each registered event name, using the durable name pattern `${consumerGroup}_${eventName}`. Two services with different `consumerGroup` values get independent consumers on the same stream. Handlers registered before `connect()` are buffered; subscriptions are activated during `connect()` — if any subscription fails, `connect()` rejects immediately (fail-fast). Handlers registered after `connect()` create subscriptions immediately (failures are logged, not thrown). Multiple handlers for the same event are invoked in parallel via `Promise.all()` — independent handlers do not block each other.
 - **Delivery**: At-least-once with JetStream. Messages are acknowledged only after all handlers complete successfully. If any handler fails, the message is explicitly nacked for immediate redelivery. Consumers must be idempotent.
 - **Poison message protection**: Malformed messages that fail JSON deserialization are permanently discarded via `msg.term()`, preventing corrupt data from blocking the subscription via infinite redelivery. If `resilience.maxRetries` is configured, it maps to the JetStream `maxDeliver` consumer option, limiting how many times NATS will redeliver a message before discarding it server-side.
 - **Backpressure**: The `prefetchCount` option controls how many unacknowledged messages the server delivers to each consumer (mapped to JetStream `maxAckPending`), providing natural backpressure when handlers are slow.
 - **Connection resilience**: NATS native reconnection is enabled by default. The optional `resilience` config maps `maxAttempts` to NATS `maxReconnectAttempts` and `initialDelayMs` to `reconnectTimeWait` for automatic recovery on connection loss. `maxDelayMs` is ignored because NATS uses fixed-interval reconnection (no exponential backoff).
+- **Logging**: All internal logging uses the framework `Logger` interface from `@noddde/core`. Pass a custom `logger` in the config or accept the default (`NodddeLogger("warn", "noddde:nats")`). All log calls include structured context data (event name, error details).
 - **Shutdown**: `close()` calls `nc.drain()` to process in-flight messages before disconnecting.
 
 ### Wiring with Domain
@@ -156,6 +165,7 @@ const domain = await wireDomain(myDomain, {
   buses: () => ({
     eventBus: new NatsEventBus({
       servers: "localhost:4222",
+      consumerGroup: "my-service",
       streamName: "noddde-events",
     }),
   }),
@@ -191,25 +201,27 @@ const eventBus = new RabbitMqEventBus({
 });
 ```
 
-| Option                      | Type                  | Required | Default           | Description                                                                 |
-| --------------------------- | --------------------- | -------- | ----------------- | --------------------------------------------------------------------------- |
-| `url`                       | `string`              | Yes      | ---               | AMQP connection URL                                                         |
-| `exchangeName`              | `string`              | No       | `"noddde.events"` | Exchange name for event publishing                                          |
-| `exchangeType`              | `"topic" \| "fanout"` | No       | `"topic"`         | Exchange type                                                               |
-| `queuePrefix`               | `string`              | No       | `"noddde"`        | Queue name prefix                                                           |
-| `prefetchCount`             | `number`              | No       | `10`              | Maximum unacknowledged messages per consumer. Provides backpressure control |
-| `resilience.maxAttempts`    | `number`              | No       | `3`               | Maximum number of connection attempts                                       |
-| `resilience.initialDelayMs` | `number`              | No       | `1000`            | Initial delay between retries in milliseconds. Doubles on each retry        |
-| `resilience.maxDelayMs`     | `number`              | No       | `30000`           | Maximum delay between retries in milliseconds                               |
+| Option                      | Type                  | Required | Default                                   | Description                                                                                                               |
+| --------------------------- | --------------------- | -------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `url`                       | `string`              | Yes      | ---                                       | AMQP connection URL                                                                                                       |
+| `exchangeName`              | `string`              | No       | `"noddde.events"`                         | Exchange name for event publishing                                                                                        |
+| `exchangeType`              | `"topic" \| "fanout"` | No       | `"topic"`                                 | Exchange type                                                                                                             |
+| `queuePrefix`               | `string`              | No       | `"noddde"`                                | Queue name prefix                                                                                                         |
+| `prefetchCount`             | `number`              | No       | `10`                                      | Maximum unacknowledged messages per consumer. Provides backpressure control                                               |
+| `resilience.maxAttempts`    | `number`              | No       | `3`                                       | Maximum number of initial connection attempts. Mid-session reconnection retries indefinitely until `close()` is called    |
+| `resilience.initialDelayMs` | `number`              | No       | `1000`                                    | Initial delay between retries in milliseconds. Doubles on each retry                                                      |
+| `resilience.maxDelayMs`     | `number`              | No       | `30000`                                   | Maximum delay between retries in milliseconds                                                                             |
+| `logger`                    | `Logger`              | No       | `NodddeLogger("warn", "noddde:rabbitmq")` | Framework logger instance from `@noddde/core`. All internal logging goes through this logger with structured context data |
 
 ### How It Works
 
-- **Publishing**: Events are serialized as JSON and published to the configured exchange with the event name as the routing key. Messages are marked `{ persistent: true }` for durability. The bus uses a **confirm channel** (`createConfirmChannel`) and awaits `waitForConfirms()` after each publish, guaranteeing the broker has accepted the message before `dispatch()` resolves.
+- **Publishing**: Events are serialized as JSON and published to the configured exchange with the event name as the routing key. Messages are marked `{ persistent: true }` for durability. When `event.metadata.eventId` is present, it is set as the AMQP `messageId` property, giving consumers a stable identifier for retry tracking. The bus uses a **confirm channel** (`createConfirmChannel`) and awaits `waitForConfirms()` after each publish, guaranteeing the broker has accepted the message before `dispatch()` resolves.
 - **Subscribing**: Each event name gets a dedicated durable queue (`${queuePrefix}.${eventName}`) bound to the exchange. Multiple handlers for the same event are invoked in parallel via `Promise.all()` -- independent handlers do not block each other. Consumers must be idempotent since handlers that completed before a failure will re-execute on redelivery.
 - **Delivery**: At-least-once with manual acknowledgment. On handler success, the message is acked. On handler failure, the message is nacked with requeue for redelivery.
 - **Poison message protection**: Malformed messages that fail JSON deserialization are acknowledged and skipped, preventing infinite nack/requeue loops. If `resilience.maxRetries` is configured, messages that exceed the delivery count limit (tracked via an in-memory counter per message) are also acknowledged and discarded. The in-memory approach is used instead of `x-death` headers because `x-death` requires a dead-letter exchange to be configured.
 - **Backpressure**: The `prefetchCount` option limits how many unacknowledged messages the broker sends to this consumer, providing natural backpressure when handlers are slow.
-- **Connection resilience**: The `resilience` option enables retry with exponential backoff on initial connection failure. Delay doubles on each attempt, capped at `maxDelayMs`. If all attempts fail, the last error is thrown. After a successful connection, `error` and `close` handlers are registered on the AMQP connection to detect unexpected disconnections. On unexpected close, the bus automatically attempts reconnection using the same backoff configuration, then re-establishes all consumers.
+- **Connection resilience**: The `resilience` option enables retry with exponential backoff on initial connection failure. Delay doubles on each attempt, capped at `maxDelayMs`. If all attempts fail, the last error is thrown. After a successful connection, `error` and `close` handlers are registered on the AMQP connection to detect unexpected disconnections. On unexpected close, the bus automatically attempts reconnection **indefinitely** using jittered exponential backoff (base delay doubles each attempt, capped at `maxDelayMs`, with +-25% random jitter to prevent thundering herd). Unlike the initial `connect()`, mid-session reconnection ignores `maxAttempts` and retries until either the broker recovers or `close()` is called. During reconnection, `dispatch()` rejects with a connection error. Once reconnected, the exchange and all consumers are re-established automatically.
+- **Logging**: All internal logging uses the framework `Logger` interface from `@noddde/core`. Pass a custom `logger` in the config or accept the default (`NodddeLogger("warn", "noddde:rabbitmq")`). All log calls include structured context data (event name, error details).
 
 ### Wiring with Domain
 
@@ -244,11 +256,11 @@ All three broker adapters accept an optional `resilience` field of type `BrokerR
 
 ### Connection Resilience
 
-| Field            | Kafka               | NATS                                   | RabbitMQ                         |
-| ---------------- | ------------------- | -------------------------------------- | -------------------------------- |
-| `maxAttempts`    | `retries` (minus 1) | `maxReconnectAttempts` (-1 = infinite) | Connection retry attempts        |
-| `initialDelayMs` | `initialRetryTime`  | `reconnectTimeWait` (fixed interval)   | Base delay (exponential backoff) |
-| `maxDelayMs`     | `maxRetryTime`      | Ignored (fixed intervals)              | Backoff cap                      |
+| Field            | Kafka               | NATS                                   | RabbitMQ                                                                |
+| ---------------- | ------------------- | -------------------------------------- | ----------------------------------------------------------------------- |
+| `maxAttempts`    | `retries` (minus 1) | `maxReconnectAttempts` (-1 = infinite) | Initial connect retry attempts (mid-session reconnection is indefinite) |
+| `initialDelayMs` | `initialRetryTime`  | `reconnectTimeWait` (fixed interval)   | Base delay (exponential backoff)                                        |
+| `maxDelayMs`     | `maxRetryTime`      | Ignored (fixed intervals)              | Backoff cap                                                             |
 
 ### Message Delivery Resilience
 
