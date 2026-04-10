@@ -69,6 +69,11 @@ export class RabbitMQEventBus implements EventBus {
     this.connection = null;
   }
 
+  /** Alias for disconnect() to satisfy the Closeable interface. */
+  async close(): Promise<void> {
+    await this.disconnect();
+  }
+
   /**
    * Registers an event handler. If already connected, immediately
    * creates a consumer queue. Otherwise, queued for when connect() is called.
