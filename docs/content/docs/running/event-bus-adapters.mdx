@@ -83,9 +83,9 @@ const eventBus = new KafkaEventBus({
 
 - **Publishing**: Events are serialized as JSON and sent to a Kafka topic derived from the event name (`${topicPrefix}${event.name}`). If the event has a `metadata.correlationId`, it is used as the message key for partition-level ordering.
 - **Subscribing**: Handlers registered via `on()` receive messages through a Kafka consumer. Handlers registered before `connect()` are buffered and subscriptions are created when the connection is established. Multiple handlers for the same event are invoked in parallel via `Promise.all()` — independent handlers (projections, sagas) do not block each other.
-- **Delivery**: At-least-once. The consumer runs with `autoCommit: false` — offsets are committed manually only after all handlers complete successfully. If any handler fails, the offset is not committed and the message will be redelivered. Consumers must be idempotent.
+- **Delivery**: At-least-once. The consumer runs with `autoCommit: false` — offsets are committed explicitly via `consumer.commitOffsets()` only after all handlers complete successfully. If any handler fails, the offset is not committed and the message will be redelivered. After a successful commit, the in-memory delivery count entry for the message is pruned to prevent unbounded memory growth. Consumers must be idempotent.
 - **Poison message protection**: Malformed messages that fail JSON deserialization are logged and skipped (offset committed), preventing corrupt data from blocking the partition. If `resilience.maxRetries` is configured, messages that exceed the delivery attempt limit are also skipped with a warning.
-- **Connection resilience**: The optional `resilience` config (`BrokerResilience` from `@noddde/core`) is mapped to kafkajs retry options for automatic reconnection on broker unavailability. `maxAttempts` maps to kafkajs `retries` (minus 1, since kafkajs counts retries after the first attempt), `initialDelayMs` to `initialRetryTime`, and `maxDelayMs` to `maxRetryTime`. The `sessionTimeout` and `heartbeatInterval` options tune consumer rebalance behavior for slow handlers.
+- **Connection resilience**: The optional `resilience` config (`BrokerResilience` from `@noddde/core`) is mapped to kafkajs retry options for automatic reconnection on broker unavailability. `maxAttempts` maps to kafkajs `retries` (minus 1, since kafkajs counts retries after the first attempt), `initialDelayMs` to `initialRetryTime`, and `maxDelayMs` to `maxRetryTime`. The `sessionTimeout` and `heartbeatInterval` options tune consumer rebalance behavior for slow handlers. Concurrent `connect()` calls are deduplicated via a connection promise mutex to prevent parallel connection attempts.
 
 ### Wiring with Domain
 
@@ -207,7 +207,7 @@ const eventBus = new RabbitMqEventBus({
 - **Publishing**: Events are serialized as JSON and published to the configured exchange with the event name as the routing key. Messages are marked `{ persistent: true }` for durability. The bus uses a **confirm channel** (`createConfirmChannel`) and awaits `waitForConfirms()` after each publish, guaranteeing the broker has accepted the message before `dispatch()` resolves.
 - **Subscribing**: Each event name gets a dedicated durable queue (`${queuePrefix}.${eventName}`) bound to the exchange. Multiple handlers for the same event are invoked in parallel via `Promise.all()` -- independent handlers do not block each other. Consumers must be idempotent since handlers that completed before a failure will re-execute on redelivery.
 - **Delivery**: At-least-once with manual acknowledgment. On handler success, the message is acked. On handler failure, the message is nacked with requeue for redelivery.
-- **Poison message protection**: Malformed messages that fail JSON deserialization are acknowledged and skipped, preventing infinite nack/requeue loops. If `resilience.maxRetries` is configured, messages that exceed the delivery count limit (tracked via the `x-death` header) are also acknowledged and discarded.
+- **Poison message protection**: Malformed messages that fail JSON deserialization are acknowledged and skipped, preventing infinite nack/requeue loops. If `resilience.maxRetries` is configured, messages that exceed the delivery count limit (tracked via an in-memory counter per message) are also acknowledged and discarded. The in-memory approach is used instead of `x-death` headers because `x-death` requires a dead-letter exchange to be configured.
 - **Backpressure**: The `prefetchCount` option limits how many unacknowledged messages the broker sends to this consumer, providing natural backpressure when handlers are slow.
 - **Connection resilience**: The `resilience` option enables retry with exponential backoff on initial connection failure. Delay doubles on each attempt, capped at `maxDelayMs`. If all attempts fail, the last error is thrown. After a successful connection, `error` and `close` handlers are registered on the AMQP connection to detect unexpected disconnections. On unexpected close, the bus automatically attempts reconnection using the same backoff configuration, then re-establishes all consumers.
 
@@ -258,7 +258,7 @@ The `maxRetries` field limits per-message delivery attempts, preventing poison m
 | -------- | -------------------------------------- | ------------------------------------- |
 | Kafka    | Consumer-side delivery count tracking  | Message offset committed (skipped)    |
 | NATS     | JetStream `maxDeliver` consumer option | NATS discards the message server-side |
-| RabbitMQ | Delivery count via `x-death` header    | Message acked (discarded)             |
+| RabbitMQ | In-memory delivery count tracking      | Message acked (discarded)             |
 
 All adapters also protect against deserialization failures (malformed JSON). Poison messages that cannot be parsed are logged and discarded without blocking the consumer.
 

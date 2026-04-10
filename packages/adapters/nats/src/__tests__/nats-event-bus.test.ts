@@ -300,4 +300,121 @@ describe("NatsEventBus", () => {
     expect(mockNak).not.toHaveBeenCalled();
     expect(handler).toHaveBeenCalledWith(event);
   });
+
+  it("should not crash consumer loop when msg.term() throws (connection dropped)", async () => {
+    const handler = vi.fn();
+    const bus = new NatsEventBus({ servers: "localhost:4222" });
+    bus.on("TestEvent", handler);
+
+    const malformedMsg = {
+      data: new TextEncoder().encode("not-valid-json{{{"),
+      term: vi.fn().mockImplementation(() => {
+        throw new Error("connection dropped");
+      }),
+      ack: vi.fn(),
+      nak: vi.fn(),
+    };
+
+    const sub = (async function* () {
+      yield malformedMsg;
+    })();
+
+    // Should resolve without throwing even though msg.term() throws
+    await expect(
+      (bus as any)._consumeSubscription(sub, "TestEvent"),
+    ).resolves.toBeUndefined();
+
+    expect(malformedMsg.term).toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("should not crash consumer loop when msg.nak() throws (connection dropped)", async () => {
+    const bus = new NatsEventBus({ servers: "localhost:4222" });
+    bus.on("TestEvent", async () => {
+      throw new Error("handler failed");
+    });
+
+    const event = { name: "TestEvent", payload: {} };
+    const msg = {
+      data: new TextEncoder().encode(JSON.stringify(event)),
+      nak: vi.fn().mockImplementation(() => {
+        throw new Error("connection dropped");
+      }),
+      ack: vi.fn(),
+      term: vi.fn(),
+    };
+
+    const sub = (async function* () {
+      yield msg;
+    })();
+
+    // Should resolve without throwing even though msg.nak() throws
+    await expect(
+      (bus as any)._consumeSubscription(sub, "TestEvent"),
+    ).resolves.toBeUndefined();
+
+    expect(msg.nak).toHaveBeenCalled();
+    expect(msg.ack).not.toHaveBeenCalled();
+  });
+
+  it("should not crash consumer loop when msg.ack() throws (connection dropped)", async () => {
+    const bus = new NatsEventBus({ servers: "localhost:4222" });
+    const handler = vi.fn().mockResolvedValue(undefined);
+    bus.on("TestEvent", handler);
+
+    const event = { name: "TestEvent", payload: {} };
+    const msg = {
+      data: new TextEncoder().encode(JSON.stringify(event)),
+      ack: vi.fn().mockImplementation(() => {
+        throw new Error("connection dropped");
+      }),
+      nak: vi.fn(),
+      term: vi.fn(),
+    };
+
+    const sub = (async function* () {
+      yield msg;
+    })();
+
+    // Should resolve without throwing even though msg.ack() throws
+    await expect(
+      (bus as any)._consumeSubscription(sub, "TestEvent"),
+    ).resolves.toBeUndefined();
+
+    expect(msg.ack).toHaveBeenCalled();
+    expect(handler).toHaveBeenCalledWith(event);
+  });
+
+  it("should use .catch() on consumer loop to prevent unhandled promise rejections", async () => {
+    const mockJs = {
+      subscribe: vi.fn().mockResolvedValue(
+        // eslint-disable-next-line require-yield
+        (async function* () {
+          throw new Error("async iterator error");
+        })(),
+      ),
+    };
+
+    const natsModule = await import("nats");
+    const mockOpts = {
+      durable: vi.fn(),
+      manualAck: vi.fn(),
+      filterSubject: vi.fn(),
+      maxAckPending: vi.fn(),
+    };
+    vi.spyOn(natsModule, "consumerOpts").mockReturnValue(mockOpts as any);
+
+    const bus = new NatsEventBus({ servers: "localhost:4222" });
+    (bus as any)._js = mockJs;
+    (bus as any)._connected = true;
+
+    bus.on("TestEvent", vi.fn());
+
+    // Wait for async subscription creation and consumer loop to start/fail
+    await new Promise((r) => setTimeout(r, 20));
+
+    // If .catch() is properly attached, no unhandled rejection is thrown
+    // and the test completes cleanly
+    vi.restoreAllMocks();
+  });
 });

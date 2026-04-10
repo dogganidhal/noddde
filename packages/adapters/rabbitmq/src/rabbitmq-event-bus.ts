@@ -96,6 +96,14 @@ export class RabbitMqEventBus implements EventBus, Connectable {
   /** Whether a reconnection attempt is currently in progress. */
   private _reconnecting: boolean = false;
 
+  /**
+   * In-memory delivery attempt counter keyed by stable message identifier.
+   * Used to enforce `resilience.maxRetries` without a dead-letter exchange.
+   * Entries are pruned after a successful ack.
+   * @internal
+   */
+  private readonly _deliveryCounts: Map<string, number> = new Map();
+
   constructor(config: RabbitMqEventBusConfig) {
     this._config = config;
     this._url = config.url;
@@ -332,8 +340,14 @@ export class RabbitMqEventBus implements EventBus, Connectable {
    * Binds the queue to the exchange with the event name as routing key.
    *
    * If `resilience.maxRetries` is configured, tracks delivery attempts
-   * using the `x-death` header count. Messages exceeding the limit are
-   * acknowledged and discarded to prevent poison message loops.
+   * using an in-memory `Map<string, number>` keyed by a stable message
+   * identifier (`messageId` from properties, or a base64 hash of the content).
+   * Messages exceeding the limit are acknowledged and discarded to prevent
+   * poison message loops. Note: the counter resets on consumer restart,
+   * which is acceptable since restarted consumers also reset their processing state.
+   *
+   * All `channel.ack()` and `channel.nack()` calls are wrapped in try/catch
+   * to handle stale channels during reconnection without crashing the consumer.
    */
   private async _setupConsumer(eventName: string): Promise<void> {
     if (!this._channel) {
@@ -349,22 +363,25 @@ export class RabbitMqEventBus implements EventBus, Connectable {
     await this._channel.consume(queueName, async (msg) => {
       if (!msg) return;
 
-      // Check delivery count against maxRetries if configured
+      // Track delivery count in-memory; x-death headers are only populated
+      // when a dead-letter exchange is configured, which is not the case here.
+      let msgId: string | undefined;
       if (maxRetries !== undefined) {
-        const xDeath = msg.properties.headers?.["x-death"];
-        const deliveryCount = Array.isArray(xDeath)
-          ? xDeath.reduce(
-              (sum: number, entry: { count?: number }) =>
-                sum + (entry.count ?? 0),
-              0,
-            )
-          : 0;
-
-        if (deliveryCount > maxRetries) {
+        const resolvedId: string =
+          (msg.properties.messageId as string | undefined) ??
+          msg.content.toString("base64").slice(0, 32);
+        msgId = resolvedId;
+        const count = (this._deliveryCounts.get(resolvedId) ?? 0) + 1;
+        this._deliveryCounts.set(resolvedId, count);
+        if (count > maxRetries) {
           console.warn(
             `[RabbitMqEventBus] Message for "${eventName}" exceeded maxRetries (${maxRetries}). Discarding.`,
           );
-          this._channel?.ack(msg);
+          try {
+            this._channel?.ack(msg);
+          } catch {
+            /* stale channel */
+          }
           return;
         }
       }
@@ -372,10 +389,28 @@ export class RabbitMqEventBus implements EventBus, Connectable {
       try {
         const result = await this._handleMessage(eventName, msg.content);
         // Always ack: either successful processing or poison message (deserialization failure)
-        this._channel?.ack(msg);
+        try {
+          this._channel?.ack(msg);
+        } catch (err) {
+          console.error(
+            `[RabbitMqEventBus] Failed to ack message for "${eventName}":`,
+            err,
+          );
+        }
+        // Prune the delivery count entry after successful ack
+        if (msgId !== undefined) {
+          this._deliveryCounts.delete(msgId);
+        }
         void result;
       } catch {
-        this._channel?.nack(msg, false, true);
+        try {
+          this._channel?.nack(msg, false, true);
+        } catch (err) {
+          console.error(
+            `[RabbitMqEventBus] Failed to nack message for "${eventName}":`,
+            err,
+          );
+        }
       }
     });
   }

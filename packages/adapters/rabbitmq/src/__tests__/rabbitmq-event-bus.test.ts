@@ -374,7 +374,7 @@ describe("RabbitMqEventBus", () => {
     expect(bus._connected).toBe(false);
   });
 
-  it("should discard messages exceeding maxRetries delivery count", async () => {
+  it("should track delivery count in memory and discard after maxRetries", async () => {
     const mockChannel = {
       assertExchange: vi.fn().mockResolvedValue(undefined),
       assertQueue: vi.fn().mockResolvedValue({ queue: "test" }),
@@ -402,21 +402,143 @@ describe("RabbitMqEventBus", () => {
     // Extract the consume callback
     const consumeCallback = mockChannel.consume.mock.calls[0]![1];
 
-    // Build a message with x-death count of 3 (exceeds maxRetries=2)
-    const msgWithExceededRetries = {
+    // Build a message with a stable messageId so delivery counting works
+    const msgContent = Buffer.from(
+      JSON.stringify({ name: "TestEvent", payload: {} }),
+    );
+    const makeMsg = () => ({
+      content: msgContent,
+      properties: { messageId: "msg-stable-id-1" },
+      fields: { deliveryTag: 1 },
+    });
+
+    // Delivery 1 — handler should be called
+    await consumeCallback(makeMsg());
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(mockChannel.ack).toHaveBeenCalledTimes(1);
+    // Delivery count was pruned on successful ack, so reset for next check
+
+    // Simulate handler failures to increment count without pruning
+    // We do this by making the handler throw on attempts 1 and 2
+    handler.mockReset();
+    mockChannel.ack.mockClear();
+    mockChannel.nack.mockClear();
+
+    // Use a new message id to simulate fresh delivery counting
+    const makeFailMsg = (id: string) => ({
       content: Buffer.from(JSON.stringify({ name: "TestEvent", payload: {} })),
-      properties: {
-        headers: {
-          "x-death": [{ count: 2 }, { count: 1 }],
-        },
-      },
+      properties: { messageId: id },
+      fields: { deliveryTag: 2 },
+    });
+
+    // Inject a failing handler
+    const failingBus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      resilience: { maxRetries: 2 },
+    });
+    (failingBus as any)._channel = mockChannel;
+    mockChannel.consume.mockClear();
+
+    const failHandler = vi.fn().mockRejectedValue(new Error("fail"));
+    failingBus.on("RetryEvent", failHandler);
+    await (failingBus as any)._setupConsumer("RetryEvent");
+
+    const retryCallback = mockChannel.consume.mock.calls[0]![1];
+    const retryMsgId = "retry-msg-unique-id";
+
+    // Delivery 1 — handler fails, nack called, count = 1
+    await retryCallback(makeFailMsg(retryMsgId));
+    expect(mockChannel.nack).toHaveBeenCalledTimes(1);
+
+    // Delivery 2 — handler fails, nack called, count = 2
+    mockChannel.nack.mockClear();
+    await retryCallback(makeFailMsg(retryMsgId));
+    expect(mockChannel.nack).toHaveBeenCalledTimes(1);
+
+    // Delivery 3 — exceeds maxRetries (2), should be discarded via ack
+    mockChannel.ack.mockClear();
+    mockChannel.nack.mockClear();
+    await retryCallback(makeFailMsg(retryMsgId));
+    expect(mockChannel.ack).toHaveBeenCalledTimes(1); // discarded
+    expect(mockChannel.nack).not.toHaveBeenCalled();
+    // Handler not called on discard
+    expect(failHandler).toHaveBeenCalledTimes(2); // only first two deliveries
+  });
+
+  it("should not crash when ack throws on stale channel after successful handler", async () => {
+    const mockChannel = {
+      assertExchange: vi.fn().mockResolvedValue(undefined),
+      assertQueue: vi.fn().mockResolvedValue({ queue: "test" }),
+      bindQueue: vi.fn().mockResolvedValue(undefined),
+      prefetch: vi.fn(),
+      waitForConfirms: vi.fn().mockResolvedValue(undefined),
+      ack: vi.fn().mockImplementation(() => {
+        throw new Error("Channel closed");
+      }),
+      nack: vi.fn(),
+      close: vi.fn().mockResolvedValue(undefined),
+      consume: vi.fn().mockResolvedValue({ consumerTag: "tag" }),
+    };
+
+    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    (bus as any)._channel = mockChannel;
+
+    const handler = vi.fn().mockResolvedValue(undefined);
+    bus.on("StaleAckEvent", handler);
+
+    await (bus as any)._setupConsumer("StaleAckEvent");
+    const consumeCallback = mockChannel.consume.mock.calls[0]![1];
+
+    const msg = {
+      content: Buffer.from(
+        JSON.stringify({ name: "StaleAckEvent", payload: {} }),
+      ),
+      properties: {},
       fields: { deliveryTag: 1 },
     };
 
-    await consumeCallback(msgWithExceededRetries);
+    // Should not throw even though ack() throws
+    await expect(consumeCallback(msg)).resolves.toBeUndefined();
+    expect(handler).toHaveBeenCalled();
+    expect(mockChannel.ack).toHaveBeenCalled();
+  });
 
-    expect(mockChannel.ack).toHaveBeenCalledWith(msgWithExceededRetries);
-    expect(handler).not.toHaveBeenCalled();
+  it("should not crash when nack throws on stale channel after handler failure", async () => {
+    const mockChannel = {
+      assertExchange: vi.fn().mockResolvedValue(undefined),
+      assertQueue: vi.fn().mockResolvedValue({ queue: "test" }),
+      bindQueue: vi.fn().mockResolvedValue(undefined),
+      prefetch: vi.fn(),
+      waitForConfirms: vi.fn().mockResolvedValue(undefined),
+      ack: vi.fn(),
+      nack: vi.fn().mockImplementation(() => {
+        throw new Error("Channel closed");
+      }),
+      close: vi.fn().mockResolvedValue(undefined),
+      consume: vi.fn().mockResolvedValue({ consumerTag: "tag" }),
+    };
+
+    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    (bus as any)._channel = mockChannel;
+
+    bus.on("StaleNackEvent", async () => {
+      throw new Error("handler failed");
+    });
+
+    await (bus as any)._setupConsumer("StaleNackEvent");
+    const consumeCallback = mockChannel.consume.mock.calls[0]![1];
+
+    const msg = {
+      content: Buffer.from(
+        JSON.stringify({ name: "StaleNackEvent", payload: {} }),
+      ),
+      properties: {},
+      fields: { deliveryTag: 1 },
+    };
+
+    // Should not throw even though nack() throws
+    await expect(consumeCallback(msg)).resolves.toBeUndefined();
+    expect(mockChannel.nack).toHaveBeenCalled();
   });
 
   it("should ack poison messages in _setupConsumer consumer", async () => {

@@ -1,20 +1,31 @@
 import { describe, it, expect, vi } from "vitest";
 import { KafkaEventBus } from "@noddde/kafka";
 
+/** Builds a minimal mock consumer with all required methods. */
+function makeMockConsumer() {
+  return {
+    connect: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn().mockResolvedValue(undefined),
+    subscribe: vi.fn().mockResolvedValue(undefined),
+    run: vi.fn().mockResolvedValue(undefined),
+    stop: vi.fn().mockResolvedValue(undefined),
+    commitOffsets: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
+/** Builds a minimal mock producer with all required methods. */
+function makeMockProducer() {
+  return {
+    send: vi.fn().mockResolvedValue(undefined),
+    connect: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
 describe("KafkaEventBus", () => {
   it("should publish event to topic derived from event name", async () => {
-    const mockProducer = {
-      send: vi.fn().mockResolvedValue(undefined),
-      connect: vi.fn().mockResolvedValue(undefined),
-      disconnect: vi.fn().mockResolvedValue(undefined),
-    };
-    const mockConsumer = {
-      connect: vi.fn().mockResolvedValue(undefined),
-      disconnect: vi.fn().mockResolvedValue(undefined),
-      subscribe: vi.fn().mockResolvedValue(undefined),
-      run: vi.fn().mockResolvedValue(undefined),
-      stop: vi.fn().mockResolvedValue(undefined),
-    };
+    const mockProducer = makeMockProducer();
+    const mockConsumer = makeMockConsumer();
     const mockKafka = {
       producer: () => mockProducer,
       consumer: () => mockConsumer,
@@ -44,18 +55,8 @@ describe("KafkaEventBus", () => {
   });
 
   it("should prepend topicPrefix to event name for topic", async () => {
-    const mockProducer = {
-      send: vi.fn().mockResolvedValue(undefined),
-      connect: vi.fn().mockResolvedValue(undefined),
-      disconnect: vi.fn().mockResolvedValue(undefined),
-    };
-    const mockConsumer = {
-      connect: vi.fn().mockResolvedValue(undefined),
-      disconnect: vi.fn().mockResolvedValue(undefined),
-      subscribe: vi.fn().mockResolvedValue(undefined),
-      run: vi.fn().mockResolvedValue(undefined),
-      stop: vi.fn().mockResolvedValue(undefined),
-    };
+    const mockProducer = makeMockProducer();
+    const mockConsumer = makeMockConsumer();
     const mockKafka = {
       producer: () => mockProducer,
       consumer: () => mockConsumer,
@@ -173,18 +174,8 @@ describe("KafkaEventBus", () => {
   });
 
   it("should configure consumer with sessionTimeout and heartbeatInterval", async () => {
-    const mockProducer = {
-      connect: vi.fn().mockResolvedValue(undefined),
-      disconnect: vi.fn().mockResolvedValue(undefined),
-      send: vi.fn(),
-    };
-    const mockConsumer = {
-      connect: vi.fn().mockResolvedValue(undefined),
-      disconnect: vi.fn().mockResolvedValue(undefined),
-      subscribe: vi.fn().mockResolvedValue(undefined),
-      run: vi.fn().mockResolvedValue(undefined),
-      stop: vi.fn().mockResolvedValue(undefined),
-    };
+    const mockProducer = makeMockProducer();
+    const mockConsumer = makeMockConsumer();
     const consumerFn = vi.fn().mockReturnValue(mockConsumer);
     const mockKafka = { producer: () => mockProducer, consumer: consumerFn };
 
@@ -209,18 +200,8 @@ describe("KafkaEventBus", () => {
   });
 
   it("should disconnect and clear handlers on close", async () => {
-    const mockProducer = {
-      send: vi.fn().mockResolvedValue(undefined),
-      connect: vi.fn().mockResolvedValue(undefined),
-      disconnect: vi.fn().mockResolvedValue(undefined),
-    };
-    const mockConsumer = {
-      connect: vi.fn().mockResolvedValue(undefined),
-      disconnect: vi.fn().mockResolvedValue(undefined),
-      subscribe: vi.fn().mockResolvedValue(undefined),
-      run: vi.fn().mockResolvedValue(undefined),
-      stop: vi.fn().mockResolvedValue(undefined),
-    };
+    const mockProducer = makeMockProducer();
+    const mockConsumer = makeMockConsumer();
     const mockKafka = {
       producer: () => mockProducer,
       consumer: () => mockConsumer,
@@ -247,18 +228,8 @@ describe("KafkaEventBus", () => {
   });
 
   it("should not throw when close is called multiple times", async () => {
-    const mockProducer = {
-      send: vi.fn(),
-      connect: vi.fn().mockResolvedValue(undefined),
-      disconnect: vi.fn().mockResolvedValue(undefined),
-    };
-    const mockConsumer = {
-      connect: vi.fn().mockResolvedValue(undefined),
-      disconnect: vi.fn().mockResolvedValue(undefined),
-      subscribe: vi.fn().mockResolvedValue(undefined),
-      run: vi.fn().mockResolvedValue(undefined),
-      stop: vi.fn().mockResolvedValue(undefined),
-    };
+    const mockProducer = makeMockProducer();
+    const mockConsumer = makeMockConsumer();
     const mockKafka = {
       producer: () => mockProducer,
       consumer: () => mockConsumer,
@@ -277,18 +248,11 @@ describe("KafkaEventBus", () => {
   });
 
   it("should pass autoCommit: false to consumer.run()", async () => {
-    const mockProducer = {
-      send: vi.fn().mockResolvedValue(undefined),
-      connect: vi.fn().mockResolvedValue(undefined),
-      disconnect: vi.fn().mockResolvedValue(undefined),
-    };
+    const mockProducer = makeMockProducer();
     const runFn = vi.fn().mockResolvedValue(undefined);
     const mockConsumer = {
-      connect: vi.fn().mockResolvedValue(undefined),
-      disconnect: vi.fn().mockResolvedValue(undefined),
-      subscribe: vi.fn().mockResolvedValue(undefined),
+      ...makeMockConsumer(),
       run: runFn,
-      stop: vi.fn().mockResolvedValue(undefined),
     };
     const mockKafka = {
       producer: () => mockProducer,
@@ -311,18 +275,12 @@ describe("KafkaEventBus", () => {
 
   it("should call consumer.stop() before consumer.disconnect() on close", async () => {
     const callOrder: string[] = [];
-    const mockProducer = {
-      send: vi.fn().mockResolvedValue(undefined),
-      connect: vi.fn().mockResolvedValue(undefined),
-      disconnect: vi.fn().mockResolvedValue(undefined),
-    };
+    const mockProducer = makeMockProducer();
     const mockConsumer = {
-      connect: vi.fn().mockResolvedValue(undefined),
+      ...makeMockConsumer(),
       disconnect: vi.fn().mockImplementation(async () => {
         callOrder.push("disconnect");
       }),
-      subscribe: vi.fn().mockResolvedValue(undefined),
-      run: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn().mockImplementation(async () => {
         callOrder.push("stop");
       }),
@@ -365,18 +323,8 @@ describe("KafkaEventBus", () => {
   });
 
   it("should serialize the full event object including metadata", async () => {
-    const mockProducer = {
-      send: vi.fn().mockResolvedValue(undefined),
-      connect: vi.fn().mockResolvedValue(undefined),
-      disconnect: vi.fn().mockResolvedValue(undefined),
-    };
-    const mockConsumer = {
-      connect: vi.fn().mockResolvedValue(undefined),
-      disconnect: vi.fn().mockResolvedValue(undefined),
-      subscribe: vi.fn().mockResolvedValue(undefined),
-      run: vi.fn().mockResolvedValue(undefined),
-      stop: vi.fn().mockResolvedValue(undefined),
-    };
+    const mockProducer = makeMockProducer();
+    const mockConsumer = makeMockConsumer();
     const mockKafka = {
       producer: () => mockProducer,
       consumer: () => mockConsumer,
@@ -400,5 +348,121 @@ describe("KafkaEventBus", () => {
     const sentValue = mockProducer.send.mock.calls[0]![0].messages[0].value;
     const parsed = JSON.parse(sentValue);
     expect(parsed).toEqual(event);
+  });
+
+  it("should explicitly commit offsets after handling", async () => {
+    const mockProducer = makeMockProducer();
+    const commitOffsets = vi.fn().mockResolvedValue(undefined);
+    let capturedEachMessage: ReturnType<typeof vi.fn> | undefined;
+
+    const mockConsumer = {
+      ...makeMockConsumer(),
+      commitOffsets,
+      run: vi.fn().mockImplementation(async ({ eachMessage }: any) => {
+        capturedEachMessage = eachMessage;
+      }),
+    };
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+    (bus as any)._kafka = mockKafka;
+
+    const handler = vi.fn().mockResolvedValue(undefined);
+    bus.on("AccountCreated", handler);
+
+    await bus.connect();
+
+    // Simulate kafkajs delivering a message via the eachMessage callback
+    const event = { name: "AccountCreated", payload: { id: "acc-1" } };
+    await capturedEachMessage!({
+      topic: "AccountCreated",
+      partition: 0,
+      message: {
+        offset: "42",
+        value: Buffer.from(JSON.stringify(event)),
+      },
+    });
+
+    expect(handler).toHaveBeenCalledWith(event);
+    expect(commitOffsets).toHaveBeenCalledWith([
+      {
+        topic: "AccountCreated",
+        partition: 0,
+        offset: "43",
+      },
+    ]);
+  });
+
+  it("should deduplicate concurrent connect() calls", async () => {
+    const mockProducer = makeMockProducer();
+    const mockConsumer = makeMockConsumer();
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+    (bus as any)._kafka = mockKafka;
+
+    // Fire two concurrent connect() calls
+    await Promise.all([bus.connect(), bus.connect()]);
+
+    // Producer and consumer connect should each be called exactly once
+    expect(mockProducer.connect).toHaveBeenCalledTimes(1);
+    expect(mockConsumer.connect).toHaveBeenCalledTimes(1);
+  });
+
+  it("should log error and remove topic from subscribed set when subscribe fails after connect", async () => {
+    const mockProducer = makeMockProducer();
+    const subscribeError = new Error("subscribe failed");
+    const mockConsumer = {
+      ...makeMockConsumer(),
+      subscribe: vi.fn().mockRejectedValue(subscribeError),
+    };
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+    (bus as any)._kafka = mockKafka;
+
+    // Re-configure subscribe to always reject (connect() has no pre-registered
+    // handlers so it won't call subscribe — only the on() call below will).
+    mockConsumer.subscribe.mockImplementation(async () => {
+      throw subscribeError;
+    });
+
+    // Force connect() to skip the subscribe loop (no pre-registered handlers)
+    await bus.connect();
+
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    bus.on("NewEvent", vi.fn());
+
+    // Allow the async subscribe rejection to propagate
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(consoleErrorSpy).toHaveBeenCalled();
+    expect((bus as any)._subscribedTopics.has("NewEvent")).toBe(false);
+
+    consoleErrorSpy.mockRestore();
   });
 });

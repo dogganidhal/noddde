@@ -1,52 +1,58 @@
-# Build Report: RabbitMqEventBus (distributed systems fixes)
+# Build Report: RabbitMqEventBus (distributed systems fixes - iteration 2)
 
 **Spec**: `specs/adapters/rabbitmq/rabbitmq-event-bus.spec.md`
 **Builder**: Claude Sonnet 4.6
 **Date**: 2026-04-10
-**Status**: GREEN — 19/19 tests passing
+**Status**: GREEN — 21/21 tests passing
 
 ---
 
 ## Changes Made (this iteration)
 
-Four distributed systems fixes implementing Requirements 3b, 7b, 8b, and 11b.
+Two targeted fixes from the distributed audit (Req 8b and Reqs 9/15).
 
-### Fix 1: Publisher Confirms (Requirements 3b, 11)
+### Fix 1: Replace x-death with in-memory delivery tracking (Requirement 8b)
 
-In `packages/adapters/rabbitmq/src/rabbitmq-event-bus.ts`:
+**File**: `packages/adapters/rabbitmq/src/rabbitmq-event-bus.ts`
 
-- Changed `_channel` type from `Channel` to `ConfirmChannel` (from `amqplib`)
-- Changed `connect()` to call `connection.createConfirmChannel()` instead of `connection.createChannel()`
-- In `dispatch()`, added `await this._channel.waitForConfirms()` after `channel.publish()`
-- Updated imports: replaced `Channel` with `ConfirmChannel`
+Added private field:
 
-### Fix 2: Mid-Session Reconnection (Requirement 11b)
+```ts
+private readonly _deliveryCounts: Map<string, number> = new Map();
+```
 
-- Added `_reconnecting: boolean` flag to prevent concurrent reconnection attempts
-- Extracted connection logic into private `_connectWithRetry()` method (shared between `connect()` and reconnection)
-- After establishing a connection, registers `this._connection.on('error', ...)` and `this._connection.on('close', ...)` handlers
-- On unexpected close (when `this._closed` is false), calls `_handleUnexpectedClose()` which:
-  - Sets `this._connected = false` (causing `dispatch()` to throw during reconnection)
-  - Sets `this._reconnecting = true` to prevent concurrent attempts
-  - Calls `_connectWithRetry()` using the same resilience backoff configuration
-  - On success: logs reconnect success; on failure: logs error
-  - Resets `this._reconnecting = false` in `finally`
+Replaced the `x-death` header approach in `_setupConsumer` with in-memory counting:
 
-### Fix 3: Deserialization Poison Protection (Requirement 7b)
+- Derives `msgId` from `msg.properties.messageId` (if present) or a 32-character base64 slice of the content.
+- Increments `_deliveryCounts` on each delivery.
+- If `count > maxRetries`, logs a warning and acks (discards) the message.
+- On successful ack, prunes the entry via `this._deliveryCounts.delete(msgId)`.
 
-- `_handleMessage()` now wraps `JSON.parse()` in try/catch
-- On parse failure: logs a warning and returns `{ poisoned: true }` instead of throwing
-- Returns `{ poisoned: boolean }` to allow callers to distinguish poison vs. handler errors
-- In `_setupConsumer`, after calling `_handleMessage`, always calls `channel.ack(msg)` (both for successful processing and poison messages)
-- Only calls `channel.nack(msg, false, true)` when the handler itself throws (non-deserialization errors)
+The `x-death` approach was inoperative because those headers are only populated when a dead-letter exchange (DLX) is configured, which `RabbitMqEventBus` does not configure.
 
-### Fix 4: maxRetries Delivery Limit (Requirement 8b)
+### Fix 2: try/catch around ack/nack calls (Requirements 9, 15)
 
-- In `_setupConsumer`, reads `this._config.resilience?.maxRetries`
-- On each message receipt, checks `msg.properties.headers?.['x-death']` (standard RabbitMQ dead-letter header)
-- Sums all `count` fields across `x-death` entries to get total delivery attempts
-- If delivery count exceeds `maxRetries`, logs a warning, acks the message, and returns early (discards it)
-- Uses ack (not nack) to prevent the discarded message from re-entering the queue
+Wrapped all `channel.ack(msg)` and `channel.nack(msg)` calls in `_setupConsumer` in try/catch blocks. During reconnection the channel becomes stale; throwing on a stale channel would crash the consumer callback.
+
+- `ack` on successful processing: logs error on failure and continues.
+- `ack` when discarding (maxRetries exceeded): silently swallows.
+- `nack` on handler failure: logs error on failure and continues.
+
+---
+
+## Test Changes
+
+### Updated test
+
+- **"should discard messages exceeding maxRetries delivery count"** renamed to **"should track delivery count in memory and discard after maxRetries"** — completely replaced. Old test injected `x-death` headers. New test invokes the consumer callback multiple times with the same `messageId` to exercise the in-memory counter, verifying:
+  - Successful delivery prunes the counter.
+  - Handler failures increment the counter without pruning (nack called).
+  - After `maxRetries + 1` deliveries, the message is discarded via ack and handler is NOT called.
+
+### New tests added
+
+- **"should not crash when ack throws on stale channel after successful handler"** — `ack` mock throws; verifies consumer callback resolves without throwing.
+- **"should not crash when nack throws on stale channel after handler failure"** — `nack` mock throws; verifies consumer callback resolves without throwing.
 
 ---
 
@@ -54,51 +60,38 @@ In `packages/adapters/rabbitmq/src/rabbitmq-event-bus.ts`:
 
 ```
 Test Files  1 passed (1)
-      Tests  19 passed (19)
-   Duration  208ms
+      Tests  21 passed (21)
+   Duration  ~190ms
 ```
 
-### New Tests Added
+## TypeScript Check
 
-- `should use createConfirmChannel instead of createChannel` — verifies `createConfirmChannel` is called and `createChannel` is NOT called
-- `should call waitForConfirms after publish in dispatch` — verifies `waitForConfirms` is called and its call order is after `publish`
-- `should ack and skip poison messages that fail deserialization` — verifies `_handleMessage` returns `{ poisoned: true }` and does not invoke handlers
-- `should register error and close handlers on connection after connect` — verifies `connection.on('error', ...)` and `connection.on('close', ...)` are registered
-- `should set _connected=false and attempt reconnect on unexpected close` — verifies `_connected` is set to false when close event fires unexpectedly
-- `should discard messages exceeding maxRetries delivery count` — verifies messages with `x-death` count > `maxRetries` are acked without invoking handlers
-- `should ack poison messages in _setupConsumer consumer` — verifies deserialization failures in the consumer callback result in ack (not nack)
-
-## TypeScript
-
-```
-cd packages/adapters/rabbitmq && npx tsc --noEmit
-(no output — clean)
-```
+3 pre-existing errors remain (missing exports `AsyncEventHandler`, `BrokerResilience`, `Connectable` from `@noddde/core`) — present before this change, out of scope. No new TypeScript errors introduced by this iteration.
 
 ---
 
 ## Requirements Coverage
 
-| Requirement                              | Status                                      |
-| ---------------------------------------- | ------------------------------------------- |
-| 1. Exchange routing                      | Covered (existing test)                     |
-| 2. JSON serialization                    | Covered (existing test)                     |
-| 3. Persistent messages                   | Covered (existing test)                     |
-| 3b. Publisher confirms                   | Covered (new test)                          |
-| 4. Dispatch before connect throws        | Covered (existing test)                     |
-| 5. on registers handlers                 | Covered (existing test)                     |
-| 6. Queue binding                         | Covered (existing test)                     |
-| 7. Consumer setup                        | Covered (existing test)                     |
-| 7b. Poison message protection            | Covered (new tests)                         |
-| 8. Parallel handler invocation           | Covered (existing test)                     |
-| 8b. maxRetries delivery limit            | Covered (new test)                          |
-| 9. Manual ack after handlers             | Covered (new test for \_setupConsumer)      |
-| 10. Prefetch configuration               | Covered (existing test)                     |
-| 11. connect with retry + confirm channel | Covered (new test for createConfirmChannel) |
-| 11b. Mid-session reconnection            | Covered (new tests)                         |
-| 12. connect is idempotent                | Covered (existing behavior)                 |
-| 13. close closes channel and connection  | Covered (existing test)                     |
-| 14. close is idempotent                  | Covered (existing test)                     |
-| 15. Handler errors cause nack            | Covered (existing test)                     |
-| 16. Serialization errors on dispatch     | Covered (via JSON invariant)                |
-| 17. Connection errors on dispatch        | Covered (dispatch-before-connect test)      |
+| Requirement                               | Status                            |
+| ----------------------------------------- | --------------------------------- |
+| 1. Exchange routing                       | Covered                           |
+| 2. JSON serialization                     | Covered                           |
+| 3. Persistent messages                    | Covered                           |
+| 3b. Publisher confirms                    | Covered                           |
+| 4. Dispatch before connect throws         | Covered                           |
+| 5. on registers handlers                  | Covered                           |
+| 6. Queue binding                          | Covered                           |
+| 7. Consumer setup                         | Covered                           |
+| 7b. Poison message protection             | Covered                           |
+| 8. Parallel handler invocation            | Covered                           |
+| 8b. maxRetries delivery limit (in-memory) | Covered (new test this iteration) |
+| 9. Manual ack after handlers (try/catch)  | Covered (new stale-channel tests) |
+| 10. Prefetch configuration                | Covered                           |
+| 11. connect with retry + confirm channel  | Covered                           |
+| 11b. Mid-session reconnection             | Covered                           |
+| 12. connect is idempotent                 | Covered                           |
+| 13. close closes channel and connection   | Covered                           |
+| 14. close is idempotent                   | Covered                           |
+| 15. Handler errors cause nack (try/catch) | Covered (new stale-channel tests) |
+| 16. Serialization errors on dispatch      | Covered                           |
+| 17. Connection errors on dispatch         | Covered                           |

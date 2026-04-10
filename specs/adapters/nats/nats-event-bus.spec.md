@@ -71,9 +71,9 @@ export class NatsEventBus implements EventBus, Connectable {
 
 5. **on registers handlers by event name** -- `on(eventName, handler)` stores the handler in an internal registry keyed by event name. Multiple handlers per event name are supported (fan-out within the same process).
 6. **JetStream consumer** -- When subscriptions are activated (after `connect()`), a JetStream consumer is created for each registered event name's subject. Uses a durable consumer name derived from the event name.
-7. **Message deserialization with poison message protection** -- Incoming NATS messages are deserialized from JSON. Deserialization is wrapped in try/catch. If `JSON.parse` throws (malformed message), the error is logged and the message is terminated (`msg.term()`) to permanently discard it. Poison messages must never block the subscription via infinite redelivery.
-8. **Parallel handler invocation** -- Handlers for the same event are invoked concurrently via `Promise.all()`. If any handler rejects, the message is explicitly nacked (`msg.nak()`) for immediate redelivery (instead of silently relying on the ack timeout). The error is logged with event name and error details. Handlers that already completed will re-execute on redelivery — consumers must be idempotent. This differs from `EventEmitterEventBus` (which invokes sequentially) because broker adapters operate in distributed contexts where independent handlers should not block each other.
-9. **Ack after handlers** -- The message is acknowledged (`msg.ack()`) only after all handlers have completed successfully (all promises in the `Promise.all` resolved).
+7. **Message deserialization with poison message protection** -- Incoming NATS messages are deserialized from JSON in `_consumeSubscription`. Deserialization is wrapped in try/catch. If `JSON.parse` throws (malformed message), the error is logged and `msg.term()` is called to permanently discard it. The `msg.term()` call is itself wrapped in try/catch — if the connection dropped between receipt and term, the error is logged but the consumer loop continues to the next message.
+8. **Parallel handler invocation** -- Handlers for the same event are invoked concurrently via `Promise.all()`. If any handler rejects, `msg.nak()` is called for immediate redelivery (instead of silently relying on the ack timeout). The error is logged with event name and error details. The `msg.nak()` call is itself wrapped in try/catch — if the connection dropped, the error is logged but the consumer loop continues. Handlers that already completed will re-execute on redelivery — consumers must be idempotent.
+9. **Ack after handlers** -- The message is acknowledged (`msg.ack()`) only after all handlers have completed successfully. The `msg.ack()` call is wrapped in try/catch for the same connection-drop resilience as nak/term.
 
 ### Backpressure
 
@@ -90,6 +90,7 @@ export class NatsEventBus implements EventBus, Connectable {
 ### Error Handling
 
 15. **Handler errors prevent ack** -- If any handler rejects during parallel invocation, the `Promise.all` rejection propagates and the message is not acknowledged (NATS will redeliver based on consumer config).
+    15b. **Consumer loop error propagation** -- The consumer loop promise (`_consumeSubscription`) must NOT be fire-and-forget (`void`). It must have a `.catch()` handler that logs the error. If the async iterator throws (e.g., connection drop), the error is caught and logged instead of becoming an unhandled promise rejection.
 16. **Serialization errors on dispatch** -- If event serialization fails, `dispatch` rejects with the serialization error.
 17. **Connection errors on dispatch** -- If the NATS server is unreachable, `dispatch` rejects with a connection error.
 

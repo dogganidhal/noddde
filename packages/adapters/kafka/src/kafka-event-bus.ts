@@ -52,6 +52,11 @@ export class KafkaEventBus implements EventBus, Connectable {
   private _consumer: Consumer | null = null;
   private _connected = false;
   private _closed = false;
+  /**
+   * In-flight connection promise used to deduplicate concurrent `connect()` calls.
+   * Set at the start of connection, cleared in a finally block when done.
+   */
+  private _connecting: Promise<void> | null = null;
   /** Internal handler registry keyed by event name. */
   private readonly _handlers: Map<string, AsyncEventHandler[]> = new Map();
   /** Topics that have already been subscribed to (avoids duplicate subscribes). */
@@ -94,45 +99,73 @@ export class KafkaEventBus implements EventBus, Connectable {
       return;
     }
 
-    this._producer = this._kafka.producer();
-    this._consumer = this._kafka.consumer({
-      groupId: this._config.groupId,
-      sessionTimeout: this._config.sessionTimeout ?? 30000,
-      heartbeatInterval: this._config.heartbeatInterval ?? 3000,
-    });
-
-    await this._producer.connect();
-    await this._consumer.connect();
-
-    // Subscribe to topics for all handlers registered before connect
-    for (const eventName of this._handlers.keys()) {
-      const topic = this._topicName(eventName);
-      if (!this._subscribedTopics.has(topic)) {
-        await this._consumer.subscribe({ topic, fromBeginning: false });
-        this._subscribedTopics.add(topic);
-      }
+    // Deduplicate concurrent connect() calls: if a connection is already in
+    // progress, await that promise rather than starting a parallel attempt.
+    if (this._connecting != null) {
+      return this._connecting;
     }
 
-    await this._consumer.run({
-      // Disable auto-commit so offsets are only committed after all handlers
-      // complete successfully (at-least-once delivery guarantee).
-      autoCommit: false,
-      eachMessage: async ({ topic, partition, message }) => {
-        const rawValue = message.value?.toString();
-        if (rawValue == null) {
-          return;
-        }
-        // Derive event name from topic by stripping the prefix
-        const prefix = this._config.topicPrefix ?? "";
-        const eventName = topic.startsWith(prefix)
-          ? topic.slice(prefix.length)
-          : topic;
-        const offsetKey = `${topic}:${partition}:${message.offset}`;
-        await this._handleMessage(eventName, rawValue, offsetKey);
-      },
-    });
+    const connecting = (async () => {
+      try {
+        this._producer = this._kafka.producer();
+        this._consumer = this._kafka.consumer({
+          groupId: this._config.groupId,
+          sessionTimeout: this._config.sessionTimeout ?? 30000,
+          heartbeatInterval: this._config.heartbeatInterval ?? 3000,
+        });
 
-    this._connected = true;
+        await this._producer.connect();
+        await this._consumer.connect();
+
+        // Subscribe to topics for all handlers registered before connect
+        for (const eventName of this._handlers.keys()) {
+          const topic = this._topicName(eventName);
+          if (!this._subscribedTopics.has(topic)) {
+            await this._consumer!.subscribe({ topic, fromBeginning: false });
+            this._subscribedTopics.add(topic);
+          }
+        }
+
+        await this._consumer.run({
+          // Disable auto-commit so offsets are only committed after all handlers
+          // complete successfully (at-least-once delivery guarantee).
+          autoCommit: false,
+          eachMessage: async ({ topic, partition, message }) => {
+            const rawValue = message.value?.toString();
+            if (rawValue == null) {
+              return;
+            }
+            // Derive event name from topic by stripping the prefix
+            const prefix = this._config.topicPrefix ?? "";
+            const eventName = topic.startsWith(prefix)
+              ? topic.slice(prefix.length)
+              : topic;
+            const offsetKey = `${topic}:${partition}:${message.offset}`;
+            await this._handleMessage(eventName, rawValue, offsetKey);
+
+            // Explicitly commit the offset after all handlers succeeded.
+            // Without this, kafkajs never persists offsets when autoCommit is false.
+            await this._consumer!.commitOffsets([
+              {
+                topic,
+                partition,
+                offset: (BigInt(message.offset) + 1n).toString(),
+              },
+            ]);
+
+            // Prune the delivery-count entry to prevent unbounded memory growth.
+            this._deliveryCounts.delete(offsetKey);
+          },
+        });
+
+        this._connected = true;
+      } finally {
+        this._connecting = null;
+      }
+    })();
+
+    this._connecting = connecting;
+    return connecting;
   }
 
   /**
@@ -157,10 +190,18 @@ export class KafkaEventBus implements EventBus, Connectable {
     if (this._connected && this._consumer != null) {
       const topic = this._topicName(eventName);
       if (!this._subscribedTopics.has(topic)) {
-        // Subscribe synchronously by kicking off the async subscribe.
-        // kafkajs supports calling subscribe after run() to add topics dynamically.
+        // Optimistically mark the topic as subscribed, then roll back on failure
+        // so that a future on() call can retry.
         this._subscribedTopics.add(topic);
-        void this._consumer.subscribe({ topic, fromBeginning: false });
+        this._consumer
+          .subscribe({ topic, fromBeginning: false })
+          .catch((err: unknown) => {
+            console.error(
+              `[KafkaEventBus] Failed to subscribe to topic "${topic}". It will be retried on the next on() call.`,
+              err,
+            );
+            this._subscribedTopics.delete(topic);
+          });
       }
     }
   }

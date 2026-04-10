@@ -214,9 +214,18 @@ export class NatsEventBus implements EventBus, Connectable {
 
     try {
       const sub = await this._js.subscribe(subject, opts);
-      void this._consumeSubscription(sub, eventName);
-    } catch {
+      this._consumeSubscription(sub, eventName).catch((err) => {
+        console.error(
+          `[NatsEventBus] Consumer loop for "${eventName}" terminated:`,
+          err,
+        );
+      });
+    } catch (err) {
       // Subscription creation failed — caller should handle reconnect logic
+      console.error(
+        `[NatsEventBus] Failed to create subscription for "${eventName}":`,
+        err,
+      );
     }
   }
 
@@ -225,29 +234,38 @@ export class NatsEventBus implements EventBus, Connectable {
     eventName: string,
   ): Promise<void> {
     for await (const msg of sub) {
-      const messageData = new TextDecoder().decode(msg.data);
-      // Validate the message is parseable JSON before invoking handlers.
-      // Poison messages (malformed JSON) are permanently discarded via term().
+      let event: import("@noddde/core").Event;
       try {
-        JSON.parse(messageData);
+        event = JSON.parse(
+          new TextDecoder().decode(msg.data),
+        ) as import("@noddde/core").Event;
       } catch (err) {
         console.error(
-          `[NatsEventBus] Failed to parse message for event "${eventName}". Discarding poison message.`,
+          `[NatsEventBus] Poison message for "${eventName}". Discarding.`,
           err,
         );
-        msg.term();
+        try {
+          msg.term();
+        } catch {
+          // connection dropped between receipt and term
+        }
         continue;
       }
       try {
-        await this._handleMessage(eventName, messageData);
-        msg.ack();
+        await this._handleMessage(eventName, JSON.stringify(event));
+        try {
+          msg.ack();
+        } catch {
+          // connection dropped between handler completion and ack
+        }
       } catch (err) {
         // Handler failure — request immediate redelivery via nak()
-        console.error(
-          `[NatsEventBus] Handler error for event "${eventName}". Requesting redelivery.`,
-          err,
-        );
-        msg.nak();
+        console.error(`[NatsEventBus] Handler error for "${eventName}".`, err);
+        try {
+          msg.nak();
+        } catch {
+          // connection dropped between handler failure and nak
+        }
       }
     }
   }
