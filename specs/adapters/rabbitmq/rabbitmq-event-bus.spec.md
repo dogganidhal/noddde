@@ -495,7 +495,12 @@ describe("RabbitMqEventBus", () => {
     const event = {
       name: "AccountCreated",
       payload: { id: "acc-1" },
-      metadata: { eventId: "evt-unique-123", correlationId: "corr-1", timestamp: "2024-01-01T00:00:00.000Z", causationId: "cmd-1" },
+      metadata: {
+        eventId: "evt-unique-123",
+        correlationId: "corr-1",
+        timestamp: "2024-01-01T00:00:00.000Z",
+        causationId: "cmd-1",
+      },
     };
     await bus.dispatch(event);
 

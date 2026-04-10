@@ -18,7 +18,8 @@ Two correctness fixes from the spec review (Requirements 3 and 18).
 In `dispatch()`, added `messageId` to the publish options when `event.metadata?.eventId` is present:
 
 ```ts
-const messageId = (event as { metadata?: { eventId?: string } }).metadata?.eventId;
+const messageId = (event as { metadata?: { eventId?: string } }).metadata
+  ?.eventId;
 this._channel.publish(this._exchangeName, event.name, body, {
   persistent: true,
   ...(messageId !== undefined ? { messageId } : {}),
@@ -27,7 +28,7 @@ this._channel.publish(this._exchangeName, event.name, body, {
 
 When metadata is absent, `messageId` is omitted (no crash). This gives consumers a stable, globally unique identifier for retry tracking via `msg.properties.messageId`.
 
-### Fix 2: Framework logger replaces console.* (Requirement 18)
+### Fix 2: Framework logger replaces console.\* (Requirement 18)
 
 **Files**: `packages/adapters/rabbitmq/src/rabbitmq-event-bus.ts`, `packages/adapters/rabbitmq/package.json`, `packages/adapters/rabbitmq/vitest.config.mts`
 
@@ -93,4 +94,4 @@ Test Files  1 passed (1)
 | 15. Handler errors cause nack (try/catch) | Covered                           |
 | 16. Serialization errors on dispatch      | Covered                           |
 | 17. Connection errors on dispatch         | Covered                           |
-| 18. Framework logger (no console.*)       | Covered (new test this iteration) |
+| 18. Framework logger (no console.\*)      | Covered (new test this iteration) |

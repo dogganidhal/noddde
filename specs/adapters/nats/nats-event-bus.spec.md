@@ -167,7 +167,10 @@ describe("NatsEventBus", () => {
       isClosed: vi.fn().mockReturnValue(false),
     };
 
-    const bus = new NatsEventBus({ servers: "localhost:4222", consumerGroup: "test-group" });
+    const bus = new NatsEventBus({
+      servers: "localhost:4222",
+      consumerGroup: "test-group",
+    });
     (bus as any)._nc = mockConnection;
     (bus as any)._js = mockJetstream;
     (bus as any)._connected = true;
@@ -221,7 +224,10 @@ import { NatsEventBus } from "@noddde/nats";
 
 describe("NatsEventBus", () => {
   it("should throw when dispatching before connect", async () => {
-    const bus = new NatsEventBus({ servers: "localhost:4222", consumerGroup: "test-group" });
+    const bus = new NatsEventBus({
+      servers: "localhost:4222",
+      consumerGroup: "test-group",
+    });
 
     await expect(
       bus.dispatch({ name: "TestEvent", payload: {} }),
@@ -239,7 +245,10 @@ import { NatsEventBus } from "@noddde/nats";
 describe("NatsEventBus", () => {
   it("should invoke registered handler when event is consumed", async () => {
     const handler = vi.fn();
-    const bus = new NatsEventBus({ servers: "localhost:4222", consumerGroup: "test-group" });
+    const bus = new NatsEventBus({
+      servers: "localhost:4222",
+      consumerGroup: "test-group",
+    });
 
     bus.on("AccountCreated", handler);
 
@@ -260,7 +269,10 @@ import { NatsEventBus } from "@noddde/nats";
 describe("NatsEventBus", () => {
   it("should invoke all handlers concurrently via Promise.all", async () => {
     const results: string[] = [];
-    const bus = new NatsEventBus({ servers: "localhost:4222", consumerGroup: "test-group" });
+    const bus = new NatsEventBus({
+      servers: "localhost:4222",
+      consumerGroup: "test-group",
+    });
 
     bus.on("TestEvent", async () => {
       await new Promise((r) => setTimeout(r, 50));
@@ -289,7 +301,10 @@ import { NatsEventBus } from "@noddde/nats";
 
 describe("NatsEventBus", () => {
   it("should reject if any handler throws during parallel invocation", async () => {
-    const bus = new NatsEventBus({ servers: "localhost:4222", consumerGroup: "test-group" });
+    const bus = new NatsEventBus({
+      servers: "localhost:4222",
+      consumerGroup: "test-group",
+    });
 
     const successHandler = vi.fn();
     bus.on("TestEvent", successHandler);
@@ -359,7 +374,10 @@ import { NatsEventBus } from "@noddde/nats";
 describe("NatsEventBus", () => {
   it("should drain connection and clear handlers on close", async () => {
     const mockDrain = vi.fn().mockResolvedValue(undefined);
-    const bus = new NatsEventBus({ servers: "localhost:4222", consumerGroup: "test-group" });
+    const bus = new NatsEventBus({
+      servers: "localhost:4222",
+      consumerGroup: "test-group",
+    });
     (bus as any)._nc = {
       drain: mockDrain,
       isClosed: vi.fn().mockReturnValue(false),
@@ -386,7 +404,10 @@ import { NatsEventBus } from "@noddde/nats";
 
 describe("NatsEventBus", () => {
   it("should not throw when close is called multiple times", async () => {
-    const bus = new NatsEventBus({ servers: "localhost:4222", consumerGroup: "test-group" });
+    const bus = new NatsEventBus({
+      servers: "localhost:4222",
+      consumerGroup: "test-group",
+    });
     (bus as any)._nc = {
       drain: vi.fn().mockResolvedValue(undefined),
       isClosed: vi.fn().mockReturnValue(false),
@@ -409,7 +430,10 @@ describe("NatsEventBus", () => {
   it("should serialize the full event object including metadata", async () => {
     const mockPublish = vi.fn().mockResolvedValue({ seq: 1, stream: "test" });
 
-    const bus = new NatsEventBus({ servers: "localhost:4222", consumerGroup: "test-group" });
+    const bus = new NatsEventBus({
+      servers: "localhost:4222",
+      consumerGroup: "test-group",
+    });
     (bus as any)._nc = {};
     (bus as any)._js = { publish: mockPublish };
     (bus as any)._connected = true;
@@ -463,7 +487,9 @@ describe("NatsEventBus", () => {
 
     await new Promise((r) => setTimeout(r, 10));
 
-    expect(mockOpts.durable).toHaveBeenCalledWith("order-service_AccountCreated");
+    expect(mockOpts.durable).toHaveBeenCalledWith(
+      "order-service_AccountCreated",
+    );
 
     vi.restoreAllMocks();
   });

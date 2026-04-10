@@ -54,6 +54,7 @@ This is a behavior change from the previous implementation: the old default was 
 **Updated existing test**: `"should log error and remove topic from subscribed set when subscribe fails after connect"` — changed from `vi.spyOn(console, "error")` to injecting a mock logger via `config.logger`. The implementation now routes errors through the framework logger, so `console.error` is never called. Test intent (error is logged, topic removed) is unchanged.
 
 **4 new tests added**:
+
 - `"should use aggregateId as message key by default"` — dispatches with `metadata.aggregateId: "order-123"`, asserts sent key is `"order-123"`.
 - `"should use null key when event has no aggregateId"` — dispatches without metadata, asserts sent key is `null`.
 - `"should use custom function for partition key when provided"` — configures `partitionKeyStrategy: (event) => \`custom-${event.name}\``, asserts sent key is `"custom-OrderPlaced"`.
