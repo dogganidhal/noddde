@@ -1,0 +1,10 @@
+{
+  "extends": "@noddde/typescript-config/base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
+  },
+  "include": ["src", "turbo"],
+  "exclude": ["node_modules", "dist"]
+}

@@ -1,0 +1,252 @@
+---
+title: NestJS
+description: Integrate noddde into existing NestJS applications with minimal boilerplate using the @noddde/nestjs module.
+---
+
+`@noddde/nestjs` provides a NestJS dynamic module that bridges noddde's functional domain model to NestJS's dependency injection and lifecycle system. It handles `wireDomain()` invocation, registers the `Domain` as a global injectable provider, and calls `shutdown()` automatically when the application closes.
+
+## Installation
+
+```bash
+yarn add @noddde/nestjs @noddde/core @noddde/engine
+```
+
+`@nestjs/common` and `@nestjs/core` are peer dependencies — they must already be installed in your NestJS application.
+
+## Quick Start
+
+### Static Configuration (forRoot)
+
+Use `forRoot` when your domain wiring has no NestJS-injected dependencies (e.g., all in-memory):
+
+```ts
+import { Module } from "@nestjs/common";
+import { NodddeModule } from "@noddde/nestjs";
+import { myDomainDefinition } from "./domain";
+
+@Module({
+  imports: [
+    NodddeModule.forRoot({
+      definition: myDomainDefinition,
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+### Async Configuration (forRootAsync)
+
+Use `forRootAsync` when your wiring depends on NestJS-managed services like `ConfigService`, database connections, or external clients:
+
+```ts
+import { Module } from "@nestjs/common";
+import { ConfigModule, ConfigService } from "@nestjs/config";
+import { NodddeModule } from "@noddde/nestjs";
+import { DrizzleAdapter } from "@noddde/drizzle";
+import { myDomainDefinition } from "./domain";
+
+@Module({
+  imports: [
+    ConfigModule.forRoot(),
+    NodddeModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        definition: myDomainDefinition,
+        wiring: {
+          persistenceAdapter: new DrizzleAdapter(
+            createDrizzleClient(config.get("DATABASE_URL")),
+          ),
+        },
+      }),
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+## Type-Safe Domain Injection
+
+The module is registered as `@Global()` — you can inject the `Domain` from any module without re-importing `NodddeModule`.
+
+### Defining your domain type
+
+Use `InferDomain` to derive a fully typed `Domain` from your definition. This gives you type-safe `dispatchCommand()` and `dispatchQuery()` — command names, payloads, and query results are all narrowed at compile time:
+
+```ts title="src/domain/index.ts"
+import { defineDomain } from "@noddde/engine";
+import type { InferDomain } from "@noddde/nestjs";
+import { Order, Inventory } from "./aggregates";
+import { OrderSummary } from "./projections";
+
+export const definition = defineDomain({
+  writeModel: { aggregates: { Order, Inventory } },
+  readModel: { projections: { OrderSummary } },
+});
+
+/** Fully typed Domain — dispatchCommand/dispatchQuery are narrowed. */
+export type AppDomain = InferDomain<typeof definition>;
+```
+
+### Using the convenience decorator
+
+```ts
+import { Controller, Post, Body } from "@nestjs/common";
+import { InjectDomain } from "@noddde/nestjs";
+import type { AppDomain } from "./domain";
+
+@Controller("orders")
+export class OrderController {
+  constructor(@InjectDomain() private readonly domain: AppDomain) {}
+
+  @Post()
+  async createOrder(@Body() dto: CreateOrderDto) {
+    // Fully typed — "CreateOrder" is autocompleted, payload shape is enforced
+    const id = await this.domain.dispatchCommand({
+      name: "CreateOrder",
+      targetAggregateId: dto.orderId,
+      payload: { items: dto.items },
+    });
+    return { id };
+  }
+
+  @Get(":id")
+  async getOrder(@Param("id") id: string) {
+    // Fully typed — result type is inferred from the projection query
+    return this.domain.dispatchQuery({
+      name: "GetOrderSummary",
+      payload: { orderId: id },
+    });
+  }
+}
+```
+
+### Using the injection token directly
+
+```ts
+import { Inject } from "@nestjs/common";
+import { NODDDE_DOMAIN } from "@noddde/nestjs";
+import type { AppDomain } from "./domain";
+
+@Injectable()
+export class OrderService {
+  constructor(@Inject(NODDDE_DOMAIN) private readonly domain: AppDomain) {}
+}
+```
+
+## Exposing Individual Buses
+
+By default, only the `Domain` instance is injectable. Set `exposeBuses: true` to also register the `CommandBus`, `QueryBus`, and `EventBus` as individual providers:
+
+```ts
+NodddeModule.forRoot({
+  definition: myDomainDefinition,
+  exposeBuses: true,
+});
+```
+
+Then inject them using convenience decorators or tokens:
+
+```ts
+import { InjectCommandBus, InjectQueryBus, InjectEventBus } from "@noddde/nestjs";
+import type { CommandBus, QueryBus, EventBus } from "@noddde/core";
+
+@Injectable()
+export class OrderService {
+  constructor(
+    @InjectCommandBus() private readonly commandBus: CommandBus,
+    @InjectQueryBus() private readonly queryBus: QueryBus,
+    @InjectEventBus() private readonly eventBus: EventBus,
+  ) {}
+}
+```
+
+These are the exact same bus instances used by the `Domain` internally.
+
+## Metadata Context Propagation
+
+`NodddeMetadataInterceptor` wraps handler execution inside `domain.withMetadataContext()`, propagating correlation IDs, user IDs, and causation IDs from the request context into every command dispatched within the handler.
+
+```ts
+import { Controller, UseInterceptors } from "@nestjs/common";
+import { NodddeMetadataInterceptor } from "@noddde/nestjs";
+
+@Controller("orders")
+@UseInterceptors(
+  new NodddeMetadataInterceptor((ctx) => {
+    const req = ctx.switchToHttp().getRequest();
+    return {
+      correlationId: req.headers["x-correlation-id"],
+      userId: req.user?.id,
+    };
+  }),
+)
+export class OrderController {
+  // All commands dispatched here inherit the metadata
+}
+```
+
+The interceptor accepts a `MetadataExtractor` function — you control how metadata is extracted from the request. This works with any NestJS transport (HTTP, gRPC, WebSocket).
+
+To apply globally:
+
+```ts
+import { APP_INTERCEPTOR } from "@nestjs/core";
+
+@Module({
+  providers: [
+    {
+      provide: APP_INTERCEPTOR,
+      useFactory: (domain) =>
+        new NodddeMetadataInterceptor((ctx) => {
+          const req = ctx.switchToHttp().getRequest();
+          return {
+            correlationId: req.headers["x-correlation-id"],
+            userId: req.user?.id,
+          };
+        }, domain),
+      inject: [NODDDE_DOMAIN],
+    },
+  ],
+})
+export class AppModule {}
+```
+
+## Lifecycle
+
+- **Initialization**: `wireDomain()` is called inside an async NestJS provider factory. It calls `domain.init()` internally, so the `Domain` is fully initialized before it becomes injectable.
+- **Shutdown**: The module implements `OnApplicationShutdown`. When `app.close()` is called (or on SIGTERM/SIGINT with `app.enableShutdownHooks()`), `domain.shutdown()` drains in-flight operations and closes all infrastructure (buses, persistence, etc.).
+
+No manual lifecycle management is needed.
+
+## API Reference
+
+### NodddeModuleOptions
+
+| Option       | Type                                       | Required | Default | Description                                              |
+| ------------ | ------------------------------------------ | -------- | ------- | -------------------------------------------------------- |
+| `definition` | `DomainDefinition`                         | Yes      | —       | The domain definition from `defineDomain()`              |
+| `wiring`     | `DomainWiring`                             | No       | `{}`    | Infrastructure wiring passed to `wireDomain()`           |
+| `exposeBuses`| `boolean`                                  | No       | `false` | Register CommandBus, QueryBus, EventBus as providers     |
+
+### NodddeModuleAsyncOptions
+
+| Option       | Type                                       | Required | Default | Description                                              |
+| ------------ | ------------------------------------------ | -------- | ------- | -------------------------------------------------------- |
+| `imports`    | `ModuleMetadata["imports"]`                | No       | `[]`    | Modules providing tokens for the factory                 |
+| `inject`     | `any[]`                                    | No       | `[]`    | Tokens to inject into `useFactory`                       |
+| `useFactory` | `(...args) => NodddeModuleOptions`         | Yes      | —       | Factory returning module options (can be async)          |
+| `exposeBuses`| `boolean`                                  | No       | `false` | Register CommandBus, QueryBus, EventBus as providers     |
+
+### Injection Tokens & Decorators
+
+| Token / Decorator      | Provides                 | Requires            |
+| ---------------------- | ------------------------ | ------------------- |
+| `NODDDE_DOMAIN` / `InjectDomain()`       | `Domain` instance       | `NodddeModule`      |
+| `NODDDE_COMMAND_BUS` / `InjectCommandBus()` | `CommandBus`          | `exposeBuses: true` |
+| `NODDDE_QUERY_BUS` / `InjectQueryBus()`   | `QueryBus`             | `exposeBuses: true` |
+| `NODDDE_EVENT_BUS` / `InjectEventBus()`   | `EventBus`             | `exposeBuses: true` |
+
+## Compatibility with @nestjs/cqrs
+
+`@noddde/nestjs` and `@nestjs/cqrs` use fundamentally different CQRS models — functional deciders vs. class-based command handlers. They operate on different injection tokens and do not conflict. Both can coexist in the same application for incremental migration, but bridging between them is not supported.
