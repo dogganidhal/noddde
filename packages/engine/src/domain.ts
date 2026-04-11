@@ -1622,6 +1622,33 @@ type ExtractStandaloneQuery<T> = T extends {
   ? Q
   : never;
 
+/**
+ * Infers the full {@link Domain} type from a domain definition value type.
+ *
+ * Use this to type-annotate a `Domain` instance without calling `wireDomain` —
+ * for example, when injecting the domain via a DI framework like NestJS:
+ *
+ * ```ts
+ * const definition = defineDomain({ writeModel: { aggregates: { Order } }, readModel: { projections: { OrderSummary } } });
+ * type AppDomain = InferDomain<typeof definition>;
+ *
+ * // In a NestJS controller:
+ * constructor(@InjectDomain() private readonly domain: AppDomain) {}
+ * // domain.dispatchCommand() and domain.dispatchQuery() are fully typed
+ * ```
+ *
+ * @typeParam TDef - The type of the domain definition (use `typeof myDefinition`).
+ */
+export type InferDomain<
+  TDef extends DomainDefinition<any, any, any, any, any, any>,
+> = Domain<
+  ExtractInfrastructure<TDef>,
+  ExtractStandaloneCommand<TDef>,
+  ExtractStandaloneQuery<TDef>,
+  InferAggregateMapCommands<ExtractAggregates<TDef>>,
+  InferProjectionMapQueries<ExtractProjections<TDef>>
+>;
+
 export const wireDomain = async <
   TDef extends DomainDefinition<any, any, any, any, any, any>,
   TInfrastructure extends Infrastructure = ExtractInfrastructure<TDef>,

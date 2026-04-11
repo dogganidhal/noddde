@@ -46,6 +46,10 @@
 - [Outbox Pattern](https://noddde.dev/docs/running/outbox-pattern): Guaranteeing at-least-once event delivery with the transactional outbox pattern
 - [ORM Adapters](https://noddde.dev/docs/running/orm-adapters): Production persistence with Drizzle, Prisma, or TypeORM
 
+## Integrations
+
+- [NestJS](https://noddde.dev/docs/integrations/nestjs): Integrate noddde into existing NestJS applications with the @noddde/nestjs module
+
 ## Testing
 
 - [Testing Overview](https://noddde.dev/docs/testing/overview): How functional design makes testing natural

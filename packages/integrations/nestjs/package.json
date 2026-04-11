@@ -1,0 +1,61 @@
+{
+  "name": "@noddde/nestjs",
+  "version": "0.0.0",
+  "description": "NestJS integration for noddde — DDD, CQRS, and Event Sourcing",
+  "license": "MIT",
+  "author": "Nidhal Dogga",
+  "homepage": "https://noddde.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dogganidhal/noddde",
+    "directory": "packages/integrations/nestjs"
+  },
+  "bugs": {
+    "url": "https://github.com/dogganidhal/noddde/issues"
+  },
+  "keywords": [
+    "ddd",
+    "cqrs",
+    "event-sourcing",
+    "nestjs",
+    "typescript"
+  ],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "lint": "eslint . --max-warnings 0",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@noddde/core": "0.0.0",
+    "@noddde/engine": "0.0.0",
+    "reflect-metadata": "^0.2.0",
+    "rxjs": "^7.8.0"
+  },
+  "peerDependencies": {
+    "@nestjs/common": ">=10.0.0",
+    "@nestjs/core": ">=10.0.0"
+  },
+  "devDependencies": {
+    "@nestjs/common": "^10.0.0",
+    "@nestjs/core": "^10.0.0",
+    "@nestjs/platform-express": "^10.0.0",
+    "@nestjs/testing": "^10.0.0",
+    "@noddde/typescript-config": "0.0.0",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3",
+    "vitest": "^4.1.0"
+  }
+}

@@ -45,7 +45,7 @@ jobs:
           echo "Publishing version: $VERSION"
 
           # Set own version for all publishable packages
-          for dir in packages/core packages/engine packages/cli packages/testing packages/adapters/drizzle packages/adapters/prisma packages/adapters/typeorm packages/adapters/rabbitmq packages/adapters/nats packages/adapters/kafka; do
+          for dir in packages/core packages/engine packages/cli packages/testing packages/adapters/drizzle packages/adapters/prisma packages/adapters/typeorm packages/adapters/rabbitmq packages/adapters/nats packages/adapters/kafka packages/integrations/nestjs; do
             cd "$dir"
             npm pkg set "version=$VERSION"
             cd "$GITHUB_WORKSPACE"
@@ -60,7 +60,7 @@ jobs:
           done
 
           # Tier 3: depends on core + engine
-          for dir in packages/testing packages/adapters/rabbitmq packages/adapters/nats packages/adapters/kafka; do
+          for dir in packages/testing packages/adapters/rabbitmq packages/adapters/nats packages/adapters/kafka packages/integrations/nestjs; do
             cd "$dir"
             npm pkg set "dependencies.@noddde/core=$VERSION"
             npm pkg set "dependencies.@noddde/engine=$VERSION"
@@ -127,5 +127,11 @@ jobs:
       - name: Publish @noddde/kafka
         run: npm publish --access public --provenance
         working-directory: packages/adapters/kafka
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @noddde/nestjs
+        run: npm publish --access public --provenance
+        working-directory: packages/integrations/nestjs
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
