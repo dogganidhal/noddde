@@ -2009,13 +2009,6 @@
   dependencies:
     testcontainers "^10.28.0"
 
-"@testcontainers/rabbitmq@^10.0.0":
-  version "10.28.0"
-  resolved "https://registry.yarnpkg.com/@testcontainers/rabbitmq/-/rabbitmq-10.28.0.tgz#6c98411bb5ca357615662b0cd6d041af538b50f1"
-  integrity sha512-Gl8/gAYfRCsjuhTfAIT7/0e49ozMRe05RDFr2CFQWcZDgB4A7qx2QaUqEIhcQnHqRjfEQTWoV1PovnGNZU+dGQ==
-  dependencies:
-    testcontainers "^10.28.0"
-
 "@tokenizer/inflate@^0.2.6":
   version "0.2.7"
   resolved "https://registry.yarnpkg.com/@tokenizer/inflate/-/inflate-0.2.7.tgz#32dd9dfc9abe457c89b3d9b760fc0690c85a103b"

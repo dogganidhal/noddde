@@ -2,18 +2,20 @@
 
 A reference project demonstrating production infrastructure patterns: optimistic and pessimistic concurrency strategies, snapshots, idempotency, and the outbox pattern — all under high contention.
 
-**Stack**: TypeORM + PostgreSQL | `@noddde/typeorm`
+**Stack**: TypeORM + PostgreSQL | `@noddde/typeorm` | `@noddde/nats`
 
 ## Quick Start
 
 ```bash
 yarn install
 npx vitest run                     # Run all tests (no Docker needed — tests use in-memory harnesses)
-npx tsx src/main-optimistic.ts     # Optimistic concurrency demo (requires Docker for PostgreSQL)
-npx tsx src/main-pessimistic.ts    # Pessimistic concurrency demo (requires Docker for PostgreSQL)
+npx tsx src/main-optimistic.ts     # Optimistic concurrency demo (requires Docker for PostgreSQL + NATS)
+npx tsx src/main-pessimistic.ts    # Pessimistic concurrency demo (requires Docker for PostgreSQL + NATS)
 ```
 
-Both entry points use [Testcontainers](https://testcontainers.com/) to spin up a PostgreSQL instance automatically — Docker must be running.
+Both entry points use [Testcontainers](https://testcontainers.com/) to spin up PostgreSQL and NATS (JetStream) instances automatically — Docker must be running.
+
+> **Tip:** Run with `EVENT_BUS=in-memory` to skip the NATS container and use the in-memory event bus instead.
 
 ## Domain Overview
 
@@ -109,6 +111,14 @@ const typeormInfra = createTypeORMPersistence(dataSource);
 
 TypeORM's `synchronize: true` auto-creates all tables — no manual DDL needed.
 
+## Distributed Event Bus — NATS JetStream
+
+This sample uses `@noddde/nats` (`NatsEventBus`) as its event bus, backed by a NATS container with JetStream enabled (started automatically via TestContainers).
+
+Events are published to a `flash-sale-events` JetStream stream with subject prefix `flash-sale.`. The consumer group `flash-sale` ensures durable, at-least-once delivery.
+
+Set `EVENT_BUS=in-memory` to fall back to `EventEmitterEventBus` for quick local dev without a broker.
+
 ## Framework Features Demonstrated
 
 | Feature                           | Where                                              |
@@ -117,6 +127,7 @@ TypeORM's `synchronize: true` auto-creates all tables — no manual DDL needed.
 | Optimistic concurrency            | `main-optimistic.ts` with `maxRetries: 5`          |
 | Pessimistic concurrency           | `main-pessimistic.ts` with `TypeORMAdvisoryLocker` |
 | Rejection events                  | PurchaseRejected (no-op apply)                     |
+| Distributed EventBus              | `@noddde/nats` adapter via TestContainers          |
 | TypeORM adapter                   | `createTypeORMPersistence` + PostgreSQL            |
 | CLI-conformant structure          | event-model/, write-model/                         |
 

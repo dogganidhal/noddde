@@ -610,7 +610,13 @@ The domain configuration uses `defineDomain` to capture the pure domain structur
 ```ts
 // src/main.ts
 import { DrizzleAdapter } from "@noddde/drizzle";
-import { defineDomain, wireDomain } from "@noddde/engine";
+import {
+  defineDomain,
+  wireDomain,
+  InMemoryCommandBus,
+  InMemoryQueryBus,
+} from "@noddde/engine";
+import { RabbitMqEventBus } from "@noddde/rabbitmq";
 
 const adapter = new DrizzleAdapter(db);
 
@@ -668,7 +674,11 @@ const domain = await wireDomain(hotelDomain, {
 
   buses: () => ({
     commandBus: new InMemoryCommandBus(),
-    eventBus: new EventEmitterEventBus(),
+    eventBus: new RabbitMqEventBus({
+      url: process.env.RABBITMQ_URL ?? "amqp://localhost:5672",
+      exchangeName: "hotel.events",
+      queuePrefix: "hotel",
+    }),
     queryBus: new InMemoryQueryBus(),
   }),
 
@@ -678,6 +688,8 @@ const domain = await wireDomain(hotelDomain, {
 ```
 
 The `persistenceAdapter` provides all persistence stores. Per-aggregate wiring uses string shorthands (`"event-sourced"`) instead of factory functions. `Inventory` defaults to state-stored from the adapter. Saga persistence, unit-of-work, and snapshot store are all inferred from the adapter automatically. Snapshots are only configured for `Room` since it is the longest-lived event-sourced aggregate.
+
+The event bus uses `@noddde/rabbitmq` (`RabbitMqEventBus`) backed by a RabbitMQ container in `docker-compose.yml`. The Domain auto-calls `connect()` during wiring and `close()` on shutdown — no manual lifecycle management needed. Set `EVENT_BUS=in-memory` to fall back to `EventEmitterEventBus` for quick local dev without a broker. See [Event Bus Adapters](/docs/running/event-bus-adapters) for the full adapter reference.
 
 ## Unit of Work
 

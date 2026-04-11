@@ -24,6 +24,7 @@ import {
   InMemoryViewStore,
 } from "@noddde/engine";
 import { everyNEvents } from "@noddde/core";
+import { RabbitMqEventBus } from "@noddde/rabbitmq";
 
 import { SystemClock } from "./infrastructure/services/clock";
 import { ConsoleEmailService } from "./infrastructure/services/email-service";
@@ -190,7 +191,14 @@ async function main() {
     // CQRS buses
     buses: () => ({
       commandBus: new InMemoryCommandBus(),
-      eventBus: new EventEmitterEventBus(),
+      eventBus:
+        process.env.EVENT_BUS === "in-memory"
+          ? new EventEmitterEventBus()
+          : new RabbitMqEventBus({
+              url: process.env.RABBITMQ_URL ?? "amqp://localhost:5672",
+              exchangeName: "hotel.events",
+              queuePrefix: "hotel",
+            }),
       queryBus: new InMemoryQueryBus(),
     }),
 
