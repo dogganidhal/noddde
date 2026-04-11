@@ -286,6 +286,11 @@ All adapters also protect against deserialization failures (malformed JSON). Poi
 
 All broker adapters provide at-least-once delivery. Choose based on your existing infrastructure and operational expertise rather than feature differences.
 
+### See It in Action
+
+- **RabbitMQ**: The [Hotel Booking](/docs/patterns/hotel-booking) sample uses `@noddde/rabbitmq` with a `docker-compose` RabbitMQ container.
+- **NATS**: The [Flash Sale](/docs/patterns/flash-sale) sample uses `@noddde/nats` with a TestContainers NATS JetStream container.
+
 ## Custom Event Bus
 
 You can implement the `EventBus` interface directly for any message transport. If your bus needs an async connection step, also implement `Connectable` — the Domain will auto-call `connect()` during wiring:

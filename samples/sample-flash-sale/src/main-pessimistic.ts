@@ -10,6 +10,7 @@
  */
 
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
+import { GenericContainer } from "testcontainers";
 import { DataSource } from "typeorm";
 import {
   createTypeORMAdapter,
@@ -27,6 +28,7 @@ import {
   InMemoryCommandBus,
   InMemoryQueryBus,
 } from "@noddde/engine";
+import { NatsEventBus } from "@noddde/nats";
 import { FlashSaleItem } from "./domain/write-model/aggregates/flash-sale-item";
 
 async function main() {
@@ -34,18 +36,31 @@ async function main() {
     "Flash Sale Sample -- Pessimistic Concurrency with TypeORM + PostgreSQL\n",
   );
 
-  // Step 1: Start PostgreSQL container
+  // Step 1: Start PostgreSQL and NATS containers
   console.log("Starting PostgreSQL container...");
-  const container = await new PostgreSqlContainer("postgres:16").start();
+  const pgContainer = await new PostgreSqlContainer("postgres:16").start();
   console.log(
-    `PostgreSQL running at ${container.getHost()}:${container.getMappedPort(5432)}\n`,
+    `PostgreSQL running at ${pgContainer.getHost()}:${pgContainer.getMappedPort(5432)}\n`,
   );
+
+  const useNats = process.env.EVENT_BUS !== "in-memory";
+  let natsContainer: Awaited<ReturnType<GenericContainer["start"]>> | undefined;
+  if (useNats) {
+    console.log("Starting NATS container (JetStream enabled)...");
+    natsContainer = await new GenericContainer("nats:latest")
+      .withCommand(["-js"])
+      .withExposedPorts(4222)
+      .start();
+    console.log(
+      `NATS running at ${natsContainer.getHost()}:${natsContainer.getMappedPort(4222)}\n`,
+    );
+  }
 
   try {
     // Step 2: Create TypeORM DataSource (synchronize: true auto-creates tables)
     const dataSource = new DataSource({
       type: "postgres",
-      url: container.getConnectionUri(),
+      url: pgContainer.getConnectionUri(),
       entities: [
         NodddeEventEntity,
         NodddeAggregateStateEntity,
@@ -82,7 +97,15 @@ async function main() {
       },
       buses: () => ({
         commandBus: new InMemoryCommandBus(),
-        eventBus: new EventEmitterEventBus(),
+        eventBus:
+          useNats && natsContainer
+            ? new NatsEventBus({
+                servers: `localhost:${natsContainer.getMappedPort(4222)}`,
+                consumerGroup: "flash-sale",
+                streamName: "flash-sale-events",
+                subjectPrefix: "flash-sale.",
+              })
+            : new EventEmitterEventBus(),
         queryBus: new InMemoryQueryBus(),
       }),
       unitOfWork: () => typeormInfra.unitOfWorkFactory,
@@ -165,8 +188,11 @@ async function main() {
     await dataSource.destroy();
   } finally {
     // Step 8: Cleanup
-    console.log("\nStopping PostgreSQL container...");
-    await container.stop();
+    console.log("\nStopping containers...");
+    if (natsContainer) {
+      await natsContainer.stop();
+    }
+    await pgContainer.stop();
     console.log("Done!");
   }
 }

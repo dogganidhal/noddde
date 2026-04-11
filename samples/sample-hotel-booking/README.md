@@ -2,16 +2,18 @@
 
 A comprehensive full-stack reference project demonstrating the noddde framework's DDD, CQRS, and Event Sourcing capabilities through a hotel booking domain.
 
-**Stack**: Drizzle + PostgreSQL | `@noddde/drizzle` | Fastify HTTP | RabbitMQ
+**Stack**: Drizzle + PostgreSQL | `@noddde/drizzle` | `@noddde/rabbitmq` | Fastify HTTP
 
 ## Quick Start
 
 ```bash
 yarn install
-docker compose up -d             # Start PostgreSQL (required for main.ts)
+docker compose up -d             # Start PostgreSQL + RabbitMQ (required for main.ts)
 npx vitest run                   # Run all tests (uses in-memory SQLite — no Docker needed)
-npx tsx src/main.ts              # Start Fastify server on :3000
+npx tsx src/main.ts              # Start Fastify server on :3000 (connects to RabbitMQ event bus)
 ```
+
+> **Tip:** Run with `EVENT_BUS=in-memory npx tsx src/main.ts` to skip RabbitMQ and use the in-memory event bus instead.
 
 ## Domain Overview
 
@@ -278,9 +280,14 @@ The error handler plugin maps domain errors to HTTP status codes:
 | `SmsService`     | `ConsoleSmsService`   | `InMemorySmsService`     |
 | `PaymentGateway` | `FakePaymentGateway`  | `InMemoryPaymentGateway` |
 
+### Distributed Event Bus
+
+This sample uses `@noddde/rabbitmq` (`RabbitMqEventBus`) as its event bus, backed by a RabbitMQ container in `docker-compose.yml`. Events are published to a `hotel.events` topic exchange with per-event queues prefixed `hotel.`.
+
+Set `EVENT_BUS=in-memory` to fall back to `EventEmitterEventBus` for quick local dev without a broker. Set `RABBITMQ_URL` to override the default connection (`amqp://localhost:5672`).
+
 ### Custom Implementations
 
-- **RabbitMQ EventBus** — `amqplib`-based event bus with topic exchange (requires Docker for tests)
 - **Drizzle ViewStore** — generic `ViewStore<T>` backed by a `hotel_views` PostgreSQL table with JSONB serialization
 
 ## Framework Features Demonstrated
@@ -303,7 +310,7 @@ The error handler plugin maps domain errors to HTTP status codes:
 | 14  | Standalone query handlers       | `SearchAvailableRooms`                                  |
 | 15  | Unit of Work                    | Group booking (`domain.withUnitOfWork()`)               |
 | 16  | MetadataProvider                | AsyncLocalStorage from Fastify HTTP headers             |
-| 17  | Custom EventBus                 | RabbitMQ implementation                                 |
+| 17  | Distributed EventBus            | `@noddde/rabbitmq` adapter                              |
 | 18  | Custom ViewStore                | Drizzle-backed view store                               |
 | 19  | Cross-aggregate saga            | BookingFulfillment dispatches to Booking + Room         |
 | 20  | Infrastructure-calling saga     | PaymentProcessing calls `paymentGateway`                |
@@ -346,7 +353,6 @@ __tests__/
     full-stack.test.ts                     # Persistence + metadata validation
     http-rooms.test.ts                     # Room CRUD via Fastify inject
     http-booking.test.ts                   # End-to-end saga flow via HTTP
-    rabbitmq-event-bus.test.ts             # (skipped, requires Docker)
 ```
 
 ## Project Structure
@@ -391,8 +397,7 @@ src/
     types.ts                               # HotelInfrastructure + service interfaces
     services/                              # Clock, email, SMS, payment implementations
     persistence/                           # Drizzle schema + custom ViewStore (PostgreSQL)
-    messaging/                             # RabbitMQ EventBus
     handlers/                              # Standalone event + command handlers
     http/                                  # Fastify app, plugins, routes
-docker-compose.yml                         # PostgreSQL 16 service
+docker-compose.yml                         # PostgreSQL 16 + RabbitMQ 4 services
 ```

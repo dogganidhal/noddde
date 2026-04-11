@@ -7,7 +7,7 @@ A flash sale where limited stock sells first-come-first-served. Multiple buyers 
 
 > **Full source**: [samples/sample-flash-sale](https://github.com/dogganidhal/noddde/tree/main/samples/sample-flash-sale) — clone and run locally with `npm start`.
 
-**Stack**: TypeORM + PostgreSQL (both optimistic and pessimistic entry points)
+**Stack**: TypeORM + PostgreSQL | `@noddde/nats` (both optimistic and pessimistic entry points)
 
 ## Why Optimistic
 
@@ -130,7 +130,13 @@ export const FlashSaleItem = defineAggregate<FlashSaleItemTypes>({
 ## Domain Configuration
 
 ```ts
-import { defineDomain, wireDomain } from "@noddde/engine";
+import {
+  defineDomain,
+  wireDomain,
+  InMemoryCommandBus,
+  InMemoryQueryBus,
+} from "@noddde/engine";
+import { NatsEventBus } from "@noddde/nats";
 
 const flashSaleDomain = defineDomain({
   writeModel: { aggregates: { FlashSaleItem } },
@@ -142,11 +148,23 @@ const domain = await wireDomain(flashSaleDomain, {
     persistence: () => drizzleInfra.eventSourcedPersistence,
     concurrency: { maxRetries: 5 },
   },
+  buses: () => ({
+    commandBus: new InMemoryCommandBus(),
+    eventBus: new NatsEventBus({
+      servers: `localhost:${natsContainer.getMappedPort(4222)}`,
+      consumerGroup: "flash-sale",
+      streamName: "flash-sale-events",
+      subjectPrefix: "flash-sale.",
+    }),
+    queryBus: new InMemoryQueryBus(),
+  }),
   unitOfWork: () => drizzleInfra.unitOfWorkFactory,
 });
 ```
 
 `maxRetries: 5` means the framework retries up to 5 times on `ConcurrencyError`. For 8 concurrent buyers competing for 5 items, this is sufficient to handle the contention.
+
+The event bus uses `@noddde/nats` (`NatsEventBus`) with JetStream enabled, started automatically via TestContainers alongside PostgreSQL. Set `EVENT_BUS=in-memory` to skip the NATS container and use `EventEmitterEventBus` instead. See [Event Bus Adapters](/docs/running/event-bus-adapters) for the full adapter reference.
 
 ## What Happens at Runtime
 
@@ -170,12 +188,13 @@ All 8 commands complete successfully. No errors are thrown to the caller. The fr
 cd samples/sample-flash-sale && yarn start
 ```
 
-Requires Docker running (Testcontainers spins up PostgreSQL automatically).
+Requires Docker running (Testcontainers spins up PostgreSQL and NATS automatically).
 
 ## Key Patterns Demonstrated
 
 - **Optimistic concurrency with `maxRetries`** — contention resolved via retry, not locking
 - **PostgreSQL unique constraint** — `(aggregate_name, aggregate_id, sequence_number)` catches concurrent inserts at the database level
 - **Rejection events** — `PurchaseRejected` is a domain event, not an exception. The aggregate records what happened.
-- **Testcontainers** — real PostgreSQL database, no external setup
+- **Distributed event bus** — `@noddde/nats` with JetStream durable subscriptions
+- **Testcontainers** — real PostgreSQL + NATS containers, no external setup
 - **Drizzle adapter** — `createDrizzlePersistence` with PostgreSQL schema
