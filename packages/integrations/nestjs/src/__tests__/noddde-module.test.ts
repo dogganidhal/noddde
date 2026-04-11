@@ -40,18 +40,24 @@ describe("NodddeModule", () => {
       readModel: { projections: {} },
     });
 
+    @Module({
+      providers: [
+        { provide: CONFIG_TOKEN, useValue: { dbUrl: "postgres://localhost" } },
+      ],
+      exports: [CONFIG_TOKEN],
+    })
+    class ConfigModule {}
+
     const moduleRef = await Test.createTestingModule({
       imports: [
         NodddeModule.forRootAsync({
+          imports: [ConfigModule],
           inject: [CONFIG_TOKEN],
           // eslint-disable-next-line no-unused-vars
           useFactory: (_config: { dbUrl: string }) => ({
             definition,
           }),
         }),
-      ],
-      providers: [
-        { provide: CONFIG_TOKEN, useValue: { dbUrl: "postgres://localhost" } },
       ],
     }).compile();
 
