@@ -1,9 +1,12 @@
 ---
 title: CLI
-description: Scaffold noddde projects, domains, aggregates, projections, and sagas from the command line
+description: Scaffold and extend noddde projects, domains, aggregates, projections, and sagas from the command line
 ---
 
-The `@noddde/cli` package provides generators that scaffold noddde modules with the correct folder structure, type definitions, and wiring code.
+The `@noddde/cli` package provides generators that scaffold noddde modules with the correct folder structure, type definitions, and wiring code. Two command groups are available:
+
+- **`noddde new`** — create new modules from scratch (projects, domains, aggregates, projections, sagas)
+- **`noddde add`** — extend existing aggregates and projections with new commands, queries, or event handlers
 
 ## Installation
 
@@ -149,6 +152,134 @@ Generates:
 </Files>
 
 On-entries are `{ id, handle }` objects typed with `InferSagaOnEntry<Def, "EventName">` once event types are wired. They are imported into the `defineSaga` `on` map. Each entry specifies how to extract the saga ID from the event and how to handle the state transition.
+
+## Extending Existing Modules
+
+After initial scaffolding, you rarely work with a single `Create` command or `Get` query — aggregates grow commands over time, and projections grow queries and event handlers. The `noddde add` command group (alias `noddde a`) generates the new handler files and wires them into the existing barrels and definition file, so you don't have to touch imports, `DefineCommands`/`DefineEvents`/`DefineQueries` unions, or the `decide`/`evolve`/`queryHandlers`/`on` maps by hand.
+
+All `add` subcommands are **idempotent** — running them twice leaves your files unchanged.
+
+### `noddde add command <name>`
+
+Adds a command (with decider and evolver) to an existing aggregate.
+
+```bash
+noddde add command PlaceBid --aggregate auction
+```
+
+If you omit `--aggregate`, the CLI lists the aggregates it finds under `src/domain/write-model/aggregates/` and prompts you to pick one.
+
+The CLI auto-derives the event name from the command name using the convention **verb + subject → subject + past-tense verb**:
+
+| Command         | Derived event    |
+| :-------------- | :--------------- |
+| `PlaceBid`      | `BidPlaced`      |
+| `CreateAuction` | `AuctionCreated` |
+| `CloseAuction`  | `AuctionClosed`  |
+| `Submit`        | `Submitted`      |
+
+You're shown the derived name and can confirm it or type a different one. Pass `--event <name>` to skip the prompt.
+
+The command creates three new files under the target aggregate:
+
+<Files>
+  <Folder name="auction">
+    <Folder name="commands">
+      <File name="place-bid.ts" />
+    </Folder>
+    <Folder name="deciders">
+      <File name="decide-place-bid.ts" />
+    </Folder>
+    <Folder name="evolvers">
+      <File name="evolve-bid-placed.ts" />
+    </Folder>
+  </Folder>
+</Files>
+
+And updates four existing files:
+
+- `commands/index.ts` — appends the payload re-export
+- `deciders/index.ts` — appends the decider re-export
+- `evolvers/index.ts` — appends the evolver re-export
+- `auction.ts` — adds imports, inserts into `DefineCommands`, `DefineEvents`, `decide`, and `evolve`
+
+You then fill in the payload fields, decider logic, and evolver state transition — everything else is wired for you.
+
+### `noddde add query <name>`
+
+Adds a query (with handler) to an existing projection.
+
+```bash
+noddde add query ListActiveAuctions --projection auction-summary
+```
+
+If you omit `--projection`, the CLI prompts you to pick from the projections under `src/domain/read-model/projections/`.
+
+Creates two new files under the projection:
+
+<Files>
+  <Folder name="auction-summary">
+    <Folder name="queries">
+      <File name="list-active-auctions.ts" />
+    </Folder>
+    <Folder name="query-handlers">
+      <File name="handle-list-active-auctions.ts" />
+    </Folder>
+  </Folder>
+</Files>
+
+And updates:
+
+- `queries/index.ts` — adds the payload import and a new entry in `DefineQueries<{...}>` (result type defaults to `<View> | null`)
+- `query-handlers/index.ts` — appends the handler re-export
+- `auction-summary.ts` — adds the handler import and the entry in `queryHandlers`
+
+The generated handler is typed with `InferProjectionQueryHandler<Def, "QueryName">` and defaults to `views.load(query.payload.id)`. Adjust the payload shape and the handler body to fit your query.
+
+### `noddde add event-handler <event-name>`
+
+Adds an event handler (on-entry / view reducer) to an existing projection.
+
+```bash
+noddde add event-handler BidPlaced --projection auction-summary
+```
+
+If you omit `--projection`, the CLI prompts you to pick.
+
+Creates one new file:
+
+<Files>
+  <Folder name="auction-summary">
+    <Folder name="on-entries">
+      <File name="on-bid-placed.ts" />
+    </Folder>
+  </Folder>
+</Files>
+
+And updates:
+
+- `on-entries/index.ts` — appends the reducer re-export
+- `auction-summary.ts` — adds the import and the entry in the `on` map
+
+The generated reducer takes the event and the current view and returns a new view. Once event types are wired in the projection's `events` union, replace the stub signature with `InferProjectionEventHandler<Def, "EventName">` for full type inference.
+
+### Aliases
+
+All `add` subcommands have short aliases:
+
+| Full                       | Alias         |
+| :------------------------- | :------------ |
+| `noddde add command`       | `noddde a c`  |
+| `noddde add query`         | `noddde a q`  |
+| `noddde add event-handler` | `noddde a eh` |
+
+### Flag reference
+
+| Flag           | Applies to                       | Purpose                                                |
+| :------------- | :------------------------------- | :----------------------------------------------------- |
+| `--aggregate`  | `add command`                    | Target aggregate name (interactive picker if omitted)  |
+| `--projection` | `add query`, `add event-handler` | Target projection name (interactive picker if omitted) |
+| `--event`      | `add command`                    | Override the auto-derived event name                   |
 
 ## Name Handling
 

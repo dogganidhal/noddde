@@ -5,6 +5,17 @@ description: Defining type-safe queries with DefineQueries, implementing query h
 
 Queries are read-only requests for data. They never modify state. In a CQRS architecture, queries are the counterpart to commands on the write side -- commands express intent to change, queries express a request to read. For background on the command/query separation, see [CQRS and Event Sourcing](/docs/core-concepts/cqrs-and-event-sourcing).
 
+<Callout type="info">
+  **Scaffold with the CLI.**
+
+- **Add a query:** `noddde add query ListBankAccountTransactions --projection bank-account-summary`
+
+The CLI creates the payload and handler and wires them into the projection's
+`DefineQueries` union and `queryHandlers` map. See the [CLI
+Reference](/docs/getting-started/cli#noddde-add-query-name) for details.
+
+</Callout>
+
 ## The Query Interface
 
 A query is defined by extending `Query<TResult>`:
