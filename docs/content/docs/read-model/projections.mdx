@@ -12,13 +12,16 @@ An aggregate's state is structured to enforce business rules -- not to serve que
 Projections solve this by building query-specific views from the event stream. Adding a new read model means writing a new projection. The write model is never touched.
 
 <Callout type="info">
-  You can scaffold a projection with the CLI: `noddde new projection
-  OrderSummary`. To extend an existing projection, use `noddde add query
-  ListOrders --projection order-summary` to add a new query (with handler) or
-  `noddde add event-handler OrderShipped --projection order-summary` to add a
-  new event reducer — both wire themselves into the projection definition. See
-  [CLI Reference](/docs/getting-started/cli#noddde-new-projection-name) for
-  details.
+  **Scaffold with the CLI.**
+
+- **New projection:** `noddde new projection OrderSummary`
+- **Add a query:** `noddde add query ListOrders --projection order-summary`
+- **Add an event reducer:** `noddde add event-handler OrderShipped --projection order-summary`
+
+The `add` commands wire themselves into the projection definition. See the
+[CLI Reference](/docs/getting-started/cli#noddde-new-projection-name) for
+details.
+
 </Callout>
 
 ## The Event Flow

@@ -14,11 +14,15 @@ An aggregate definition is a **blueprint**, not a singleton. You define the beha
 The rest of this page walks through building a complete aggregate from scratch using the banking domain as a running example.
 
 <Callout type="info">
-  You can scaffold this entire structure with the CLI: `noddde new aggregate
-  BankAccount`. Once the aggregate exists, add new commands (with their decider
-  and evolver, fully wired into the definition) with `noddde add command
-  AuthorizeTransaction --aggregate bank-account`. See [CLI
-  Reference](/docs/getting-started/cli#noddde-new-aggregate-name) for details.
+  **Scaffold with the CLI.**
+
+- **New aggregate:** `noddde new aggregate BankAccount`
+- **Add a command:** `noddde add command AuthorizeTransaction --aggregate bank-account`
+
+The `add` command creates the decider and evolver and wires them into the
+aggregate definition. See the [CLI
+Reference](/docs/getting-started/cli#noddde-new-aggregate-name) for details.
+
 </Callout>
 
 ## Step 1: Define Events

@@ -21,12 +21,15 @@ Every aggregate decide handler has this shape:
 The return value is always one or more events describing what happened. The framework narrows the `command` parameter per handler -- when you write the handler for `AuthorizeTransaction`, the `command` type is narrowed to `{ name: "AuthorizeTransaction"; payload: { amount: number; merchant: string }; targetAggregateId: string }`. You never need to check the command name or cast anything.
 
 <Callout type="info">
-  You can scaffold a new command with its decider and evolver -- and have them
-  wired into the aggregate definition automatically -- with `noddde add command
-  AuthorizeTransaction --aggregate bank-account`. The CLI derives the event name
-  (`AuthorizeTransaction` → `TransactionAuthorized`) and lets you confirm or
-  override it. See [CLI
-  Reference](/docs/getting-started/cli#noddde-add-command-name) for details.
+  **Scaffold with the CLI.**
+
+- **Add a command:** `noddde add command AuthorizeTransaction --aggregate bank-account`
+
+The CLI creates the decider and evolver, wires them into the aggregate
+definition, and derives the event name (`AuthorizeTransaction` →
+`TransactionAuthorized`) with an interactive confirm/override prompt. See the
+[CLI Reference](/docs/getting-started/cli#noddde-add-command-name) for details.
+
 </Callout>
 
 The recommended pattern is to define each decide handler as a standalone function in its own file, typed with `InferDecideHandler`. This gives you full type inference from the `AggregateTypes` bundle without manually reconstructing parameter types:
