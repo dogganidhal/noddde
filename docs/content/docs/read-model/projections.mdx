@@ -13,8 +13,12 @@ Projections solve this by building query-specific views from the event stream. A
 
 <Callout type="info">
   You can scaffold a projection with the CLI: `noddde new projection
-  OrderSummary`. See [CLI
-  Reference](/docs/getting-started/cli#noddde-new-projection-name) for details.
+  OrderSummary`. To extend an existing projection, use `noddde add query
+  ListOrders --projection order-summary` to add a new query (with handler) or
+  `noddde add event-handler OrderShipped --projection order-summary` to add a
+  new event reducer — both wire themselves into the projection definition. See
+  [CLI Reference](/docs/getting-started/cli#noddde-new-projection-name) for
+  details.
 </Callout>
 
 ## The Event Flow
