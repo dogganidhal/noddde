@@ -51,8 +51,9 @@ const eventBus = new KafkaEventBus({
   sessionTimeout: 30000,
   heartbeatInterval: 3000,
   resilience: {
-    maxRetries: 5,
-    retryDelay: 1000,
+    maxAttempts: 5,
+    initialDelayMs: 1000,
+    maxDelayMs: 30000,
   },
 });
 ```

@@ -29,22 +29,31 @@ Zero runtime dependencies. Strict TypeScript with full type inference.
 ## Usage
 
 ```typescript
-import { defineAggregate, type DefineAggregateTypes } from "@noddde/core";
+import {
+  defineAggregate,
+  type DefineCommands,
+  type DefineEvents,
+  type Infrastructure,
+} from "@noddde/core";
 
-type BankAccountTypes = DefineAggregateTypes<{
-  name: "BankAccount";
-  state: { balance: number };
-  events: {
-    DepositMade: { amount: number };
-    WithdrawalMade: { amount: number };
-  };
-  commands: {
-    Deposit: { amount: number };
-    Withdraw: { amount: number };
-  };
+type BankAccountEvent = DefineEvents<{
+  DepositMade: { amount: number };
+  WithdrawalMade: { amount: number };
 }>;
 
-const BankAccount = defineAggregate<BankAccountTypes>({
+type BankAccountCommand = DefineCommands<{
+  Deposit: { amount: number };
+  Withdraw: { amount: number };
+}>;
+
+type BankAccountDef = {
+  state: { balance: number };
+  events: BankAccountEvent;
+  commands: BankAccountCommand;
+  infrastructure: Infrastructure;
+};
+
+const BankAccount = defineAggregate<BankAccountDef>({
   initialState: { balance: 0 },
 
   decide: {

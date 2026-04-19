@@ -68,10 +68,15 @@ expect(result.state.status).toBe("awaiting_shipment");
 
 ```typescript
 import { testDomain } from "@noddde/testing";
+import { BankAccount } from "../aggregates/bank-account";
+import { BalanceProjection } from "../projections/balance";
 
-const { commandBus, queryBus, spy } = await testDomain(domainDefinition);
+const { domain, spy } = await testDomain({
+  aggregates: { BankAccount },
+  projections: { BalanceProjection },
+});
 
-await commandBus.dispatch({
+await domain.dispatchCommand({
   name: "Deposit",
   targetAggregateId: "acc-1",
   payload: { amount: 100 },
