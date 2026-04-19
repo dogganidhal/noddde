@@ -26,7 +26,7 @@ import { wireDomain } from "@noddde/engine";
 
 const eventBus = new RabbitMqEventBus({
   url: "amqp://localhost:5672",
-  exchange: "my-domain-events",
+  exchangeName: "my-domain-events",
 });
 
 await eventBus.connect();
@@ -44,12 +44,13 @@ await eventBus.close();
 ```typescript
 const eventBus = new RabbitMqEventBus({
   url: "amqp://localhost:5672",
-  exchange: "my-domain-events",
-  queue: "my-service", // Consumer queue name
-  prefetch: 10, // Backpressure control
+  exchangeName: "my-domain-events",
+  queuePrefix: "my-service", // Queues are named "${queuePrefix}.${eventName}"
+  prefetchCount: 10, // Backpressure control
   resilience: {
-    maxRetries: 5,
-    retryDelay: 1000, // Base delay in ms (exponential backoff)
+    maxAttempts: 5, // Retry the initial connection up to 5 times
+    initialDelayMs: 1000, // Base delay in ms (exponential backoff)
+    maxDelayMs: 30000,
   },
 });
 ```

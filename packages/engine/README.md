@@ -43,7 +43,7 @@ const definition = defineDomain({
 const domain = await wireDomain(definition);
 
 // Dispatch commands
-await domain.commandBus.dispatch({
+await domain.dispatchCommand({
   name: "Deposit",
   targetAggregateId: "acc-1",
   payload: { amount: 100 },
