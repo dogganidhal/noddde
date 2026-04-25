@@ -386,12 +386,18 @@ const bankingDomain = defineDomain({
   },
   readModel: {
     projections: {
-      // With view store — enables auto-persistence and { views } injection
+      // ORM-backed factory — enables transactional auto-persistence
+      // and { views } injection into query handlers.
       AccountBalance: {
         projection: AccountBalanceProjection,
-        viewStore: (infra) => infra.accountViewStore,
+        viewStore: new PrismaAccountBalanceViewStoreFactory(prisma),
       },
-      // Without view store — query-only or uses custom infra
+      // In-memory factory — suitable for development and tests.
+      Audit: {
+        projection: AuditProjection,
+        viewStore: new InMemoryViewStoreFactory<AuditView>(),
+      },
+      // Without view store — query-only or uses custom infra.
       TransactionHistory: TransactionHistoryProjection,
     },
   },

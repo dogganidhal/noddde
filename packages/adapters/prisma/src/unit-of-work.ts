@@ -20,11 +20,24 @@ export class PrismaUnitOfWork implements UnitOfWork {
   private operations: Array<() => Promise<void>> = [];
   private pendingEvents: Event[] = [];
   private completed = false;
+  private _context: unknown = undefined;
 
   constructor(
     private readonly prisma: PrismaClient,
     private readonly txStore: PrismaTransactionStore,
   ) {}
+
+  /**
+   * The Prisma {@link Prisma.TransactionClient} bound to this unit of
+   * work, while `commit()` is inside its `$transaction()` callback.
+   * Outside that window — before commit, after commit, after rollback —
+   * `context` is `undefined`. Cross-cutting consumers (e.g. a
+   * `ViewStoreFactory.getForContext`) read this to participate in the
+   * same transaction as aggregate persistence.
+   */
+  get context(): unknown {
+    return this._context;
+  }
 
   enlist(operation: () => Promise<void>): void {
     this.assertNotCompleted();
@@ -45,12 +58,14 @@ export class PrismaUnitOfWork implements UnitOfWork {
 
     await this.prisma.$transaction(async (tx) => {
       txStore.current = tx;
+      this._context = tx;
       try {
         for (const op of ops) {
           await op();
         }
       } finally {
         txStore.current = null;
+        this._context = undefined;
       }
     });
 

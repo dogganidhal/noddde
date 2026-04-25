@@ -6,6 +6,7 @@ import type {
   Infrastructure,
   Command,
   Event,
+  ViewStoreFactory,
 } from "@noddde/core";
 import {
   defineDomain,
@@ -33,11 +34,8 @@ export type TestDomainConfig<
   aggregates?: Record<string, Aggregate<any>>;
   /** Projection definitions keyed by name. */
   projections?: Record<string, Projection<any>>;
-  /** Optional per-projection view store factories. */
-  projectionViewStores?: Record<
-    string,
-    { viewStore: (infrastructure: any) => any }
-  >;
+  /** Optional per-projection {@link ViewStoreFactory} singletons. */
+  projectionViewStores?: Record<string, { viewStore: ViewStoreFactory }>;
   /** Saga definitions keyed by name. */
   sagas?: Record<string, Saga<any, any>>;
   /** Optional standalone query handlers keyed by query name. */

@@ -17,7 +17,11 @@ import type {
   Infrastructure,
   CQRSInfrastructure,
 } from "@noddde/core";
-import { defineDomain, wireDomain, InMemoryViewStore } from "@noddde/engine";
+import {
+  defineDomain,
+  wireDomain,
+  InMemoryViewStoreFactory,
+} from "@noddde/engine";
 import { detectOTel, Instrumentation } from "../../tracing";
 import { MetadataEnricher } from "../../executors/metadata-enricher";
 import type { MetadataContext } from "../../domain";
@@ -288,7 +292,7 @@ describe("Full pipeline tracing: command → projection", () => {
 
     const domain = await wireDomain(definition, {
       projections: {
-        CounterView: { viewStore: () => new InMemoryViewStore() },
+        CounterView: { viewStore: new InMemoryViewStoreFactory() },
       },
     });
 
@@ -337,7 +341,7 @@ describe("Full pipeline tracing: UoW commit span", () => {
 
     const domain = await wireDomain(definition, {
       projections: {
-        CounterView: { viewStore: () => new InMemoryViewStore() },
+        CounterView: { viewStore: new InMemoryViewStoreFactory() },
       },
     });
 

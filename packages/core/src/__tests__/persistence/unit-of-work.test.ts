@@ -37,3 +37,30 @@ describe("UnitOfWorkFactory", () => {
     expectTypeOf<UnitOfWorkFactory>().returns.toMatchTypeOf<UnitOfWork>();
   });
 });
+
+describe("UnitOfWork.context", () => {
+  it("should expose an optional unknown context", () => {
+    expectTypeOf<UnitOfWork["context"]>().toEqualTypeOf<unknown>();
+  });
+
+  it("should accept a UoW that omits context", () => {
+    const minimal: UnitOfWork = {
+      enlist: () => {},
+      deferPublish: () => {},
+      commit: async () => [],
+      rollback: async () => {},
+    };
+    expectTypeOf(minimal).toMatchTypeOf<UnitOfWork>();
+  });
+
+  it("should accept a UoW that exposes context", () => {
+    const withCtx: UnitOfWork = {
+      context: { tx: "fake" },
+      enlist: () => {},
+      deferPublish: () => {},
+      commit: async () => [],
+      rollback: async () => {},
+    };
+    expectTypeOf(withCtx).toMatchTypeOf<UnitOfWork>();
+  });
+});

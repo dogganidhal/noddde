@@ -16,6 +16,13 @@ export class InMemoryUnitOfWork implements UnitOfWork {
   private pendingEvents: Event[] = [];
   private completed = false;
 
+  /**
+   * The in-memory UoW has no real transaction handle, so `context` is
+   * always `undefined`. View store factories observing this value will
+   * fall back to their non-transactional client.
+   */
+  readonly context: undefined = undefined;
+
   /** @inheritdoc */
   enlist(operation: () => Promise<void>): void {
     this.assertNotCompleted();

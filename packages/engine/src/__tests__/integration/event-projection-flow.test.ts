@@ -1,7 +1,11 @@
 /* eslint-disable no-unused-vars */
 import { describe, expect, it } from "vitest";
 import type { DefineCommands, DefineEvents, DefineQueries } from "@noddde/core";
-import { defineAggregate, defineProjection } from "@noddde/core";
+import {
+  createViewStoreFactory,
+  defineAggregate,
+  defineProjection,
+} from "@noddde/core";
 import {
   defineDomain,
   wireDomain,
@@ -111,7 +115,9 @@ describe("Event-to-projection flow", () => {
     const domain = await wireDomain(definition, {
       aggregates: { persistence: () => persistence },
       projections: {
-        TodoProjection: { viewStore: () => todoViewStore },
+        TodoProjection: {
+          viewStore: createViewStoreFactory(() => todoViewStore),
+        },
       },
       buses: () => ({
         commandBus: new InMemoryCommandBus(),
@@ -254,8 +260,12 @@ describe("Multiple projections for same event", () => {
         persistence: () => new InMemoryEventSourcedAggregatePersistence(),
       },
       projections: {
-        CatalogProjection: { viewStore: () => catalogViewStore },
-        PriceIndexProjection: { viewStore: () => priceViewStore },
+        CatalogProjection: {
+          viewStore: createViewStoreFactory(() => catalogViewStore),
+        },
+        PriceIndexProjection: {
+          viewStore: createViewStoreFactory(() => priceViewStore),
+        },
       },
       buses: () => ({
         commandBus: new InMemoryCommandBus(),
@@ -344,7 +354,9 @@ describe("Async projection reducer", () => {
         persistence: () => new InMemoryEventSourcedAggregatePersistence(),
       },
       projections: {
-        AsyncLogProjection: { viewStore: () => asyncLogViewStore },
+        AsyncLogProjection: {
+          viewStore: createViewStoreFactory(() => asyncLogViewStore),
+        },
       },
       buses: () => ({
         commandBus: new InMemoryCommandBus(),
@@ -447,7 +459,9 @@ describe("Sequential events produce cumulative view", () => {
         persistence: () => new InMemoryEventSourcedAggregatePersistence(),
       },
       projections: {
-        BalanceProjection: { viewStore: () => balanceViewStore },
+        BalanceProjection: {
+          viewStore: createViewStoreFactory(() => balanceViewStore),
+        },
       },
       buses: () => ({
         commandBus: new InMemoryCommandBus(),

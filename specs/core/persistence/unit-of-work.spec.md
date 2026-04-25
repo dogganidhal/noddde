@@ -36,6 +36,21 @@ import type { Event } from "../edd";
  */
 interface UnitOfWork {
   /**
+   * The adapter-specific transaction handle for this unit of work, if any.
+   *
+   * - `undefined` outside the transactional region (before commit begins,
+   *   or for in-memory UoW that has no real transaction).
+   * - During `commit()`, adapter-backed implementations set this to the
+   *   live transaction client (e.g., a Prisma interactive tx, a Drizzle tx,
+   *   a TypeORM `EntityManager`).
+   *
+   * Typed as `unknown` because core has no knowledge of any adapter.
+   * Consumers (the engine, developer-supplied `ViewStoreFactory.getForContext`)
+   * pass it through opaquely or narrow it via an adapter-specific type.
+   */
+  readonly context?: unknown;
+
+  /**
    * Buffers a write operation for deferred execution.
    * Operations are executed in enlistment order when `commit()` is called.
    *
@@ -94,6 +109,7 @@ type UnitOfWorkFactory = () => UnitOfWork;
 - `commit()` returns `Event[]` rather than `void` so the UnitOfWork stays completely decoupled from the `EventBus`. The Domain is responsible for publishing events after commit succeeds.
 - `enlist()` accepts `() => Promise<void>` thunks rather than typed persistence calls. This keeps the interface generic — any storage backend (PostgreSQL, DynamoDB, EventStoreDB) can wrap its writes as thunks and enlist them.
 - `UnitOfWorkFactory` is a simple function type, not a class or interface. This follows the framework's functional-first style.
+- `context` is optional and `unknown`-typed so cross-cutting consumers (e.g., a `ViewStoreFactory.getForContext`) can read the active transaction handle without core depending on any adapter. Adapter-backed UoWs set it during `commit()`; in-memory UoW leaves it `undefined`.
 
 ## Behavioral Requirements
 
@@ -104,6 +120,8 @@ type UnitOfWorkFactory = () => UnitOfWork;
 5. **rollback discards everything without executing** — `rollback()` clears all enlisted operations and deferred events. No operations are executed.
 6. **Single-use lifecycle** — After `commit()` or `rollback()`, the UnitOfWork is sealed. Any subsequent call to `enlist`, `deferPublish`, `commit`, or `rollback` must throw an error.
 7. **UnitOfWorkFactory creates independent instances** — Each call to the factory must return a new, independent UnitOfWork instance with no shared state.
+8. **context is undefined outside the transactional region** — Before `commit()` begins, `context` is `undefined`. After `commit()` or `rollback()` completes, `context` is `undefined` again.
+9. **Adapter-backed UoWs publish context during commit** — Adapter implementations of `commit()` MUST set `context` to the live transaction handle before running enlisted operations and clear it (back to `undefined`) before `commit()` returns or throws. The in-memory implementation leaves `context` as `undefined` throughout its lifecycle.
 
 ## Invariants
 
@@ -112,6 +130,7 @@ type UnitOfWorkFactory = () => UnitOfWork;
 - `rollback()` never executes any enlisted operations, regardless of when it is called.
 - The order of operations is always preserved: first-enlisted executes first.
 - The order of deferred events is always preserved: first-deferred appears first in the returned array.
+- `context` is `undefined` whenever the UoW is observable from outside `commit()`. It is only non-`undefined` while enlisted operations are executing inside the adapter's transactional region. The in-memory UoW always reports `context === undefined`.
 
 ## Edge Cases
 
@@ -180,6 +199,40 @@ describe("UnitOfWorkFactory", () => {
   it("should be a function returning a UnitOfWork", () => {
     expectTypeOf<UnitOfWorkFactory>().toBeFunction();
     expectTypeOf<UnitOfWorkFactory>().returns.toMatchTypeOf<UnitOfWork>();
+  });
+});
+```
+
+### UnitOfWork has an optional readonly context member
+
+```ts
+import { describe, it, expectTypeOf } from "vitest";
+import type { UnitOfWork } from "@noddde/core";
+
+describe("UnitOfWork.context", () => {
+  it("should expose an optional unknown context", () => {
+    expectTypeOf<UnitOfWork["context"]>().toEqualTypeOf<unknown>();
+  });
+
+  it("should accept a UoW that omits context (legacy implementations)", () => {
+    const minimal: UnitOfWork = {
+      enlist: () => {},
+      deferPublish: () => {},
+      commit: async () => [],
+      rollback: async () => {},
+    };
+    expectTypeOf(minimal).toMatchTypeOf<UnitOfWork>();
+  });
+
+  it("should accept a UoW that exposes context", () => {
+    const withCtx: UnitOfWork = {
+      context: { tx: "fake" },
+      enlist: () => {},
+      deferPublish: () => {},
+      commit: async () => [],
+      rollback: async () => {},
+    };
+    expectTypeOf(withCtx).toMatchTypeOf<UnitOfWork>();
   });
 });
 ```

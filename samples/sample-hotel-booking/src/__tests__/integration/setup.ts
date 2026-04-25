@@ -21,7 +21,7 @@ import {
   InMemoryIdempotencyStore,
   InMemoryViewStore,
 } from "@noddde/engine";
-import { everyNEvents } from "@noddde/core";
+import { createViewStoreFactory, everyNEvents } from "@noddde/core";
 import type { HotelInfrastructure } from "../../infrastructure/types";
 import type {
   GuestHistoryView,
@@ -161,13 +161,13 @@ export async function createTestEnvironment() {
     },
     projections: {
       RoomAvailability: {
-        viewStore: () => roomAvailabilityViewStore,
+        viewStore: createViewStoreFactory(() => roomAvailabilityViewStore),
       },
       GuestHistory: {
-        viewStore: () => guestHistoryViewStore,
+        viewStore: createViewStoreFactory(() => guestHistoryViewStore),
       },
       Revenue: {
-        viewStore: () => revenueViewStore,
+        viewStore: createViewStoreFactory(() => revenueViewStore),
       },
     },
     sagas: {

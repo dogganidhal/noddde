@@ -1,6 +1,7 @@
 /* eslint-disable no-unused-vars */
-import { describe, it, expectTypeOf } from "vitest";
-import type { ViewStore, ID } from "@noddde/core";
+import { describe, it, expect, expectTypeOf } from "vitest";
+import type { ViewStore, ViewStoreFactory, ID } from "@noddde/core";
+import { createViewStoreFactory } from "@noddde/core";
 
 describe("ViewStore", () => {
   it("should accept a conforming object as ViewStore", () => {
@@ -61,6 +62,90 @@ describe("ViewStore load return type", () => {
     type LoadReturn = Awaited<ReturnType<ViewStore<{ id: string }>["load"]>>;
     expectTypeOf<LoadReturn>().toEqualTypeOf<
       { id: string } | undefined | null
+    >();
+  });
+});
+
+describe("ViewStoreFactory", () => {
+  interface Item {
+    id: string;
+    name: string;
+  }
+
+  it("should accept a class implementation", () => {
+    class MyFactory implements ViewStoreFactory<Item> {
+      getForContext(): ViewStore<Item> {
+        return {
+          save: async () => {},
+          load: async () => undefined,
+        };
+      }
+    }
+    const f: ViewStoreFactory<Item> = new MyFactory();
+    expectTypeOf(f.getForContext).toBeFunction();
+    expectTypeOf<ReturnType<typeof f.getForContext>>().toMatchTypeOf<
+      ViewStore<Item>
+    >();
+  });
+
+  it("should accept a plain-object implementation", () => {
+    const factory: ViewStoreFactory<Item> = {
+      getForContext: () => ({
+        save: async () => {},
+        load: async () => undefined,
+      }),
+    };
+    expectTypeOf(factory).toMatchTypeOf<ViewStoreFactory<Item>>();
+  });
+
+  it("should declare ctx as unknown so adapters can narrow it", () => {
+    type FakeTx = { id: string };
+    class TxFactory implements ViewStoreFactory<Item> {
+      getForContext(ctx?: unknown): ViewStore<Item> {
+        const _tx = (ctx as FakeTx | undefined) ?? null;
+        return {
+          save: async () => {},
+          load: async () => undefined,
+        };
+      }
+    }
+    const f: ViewStoreFactory<Item> = new TxFactory();
+    expectTypeOf(f.getForContext).parameter(0).toEqualTypeOf<unknown>();
+  });
+});
+
+describe("createViewStoreFactory", () => {
+  interface Item {
+    id: string;
+  }
+
+  it("should produce a factory whose getForContext delegates to the builder", () => {
+    let lastCtx: unknown = "untouched";
+    const seen: ViewStore<Item> = {
+      save: async () => {},
+      load: async () => undefined,
+    };
+    const factory = createViewStoreFactory<Item>((ctx) => {
+      lastCtx = ctx;
+      return seen;
+    });
+
+    expect(factory.getForContext()).toBe(seen);
+    expect(lastCtx).toBeUndefined();
+
+    const tx = { kind: "fake-tx" };
+    expect(factory.getForContext(tx)).toBe(seen);
+    expect(lastCtx).toBe(tx);
+  });
+
+  it("should return a typed ViewStoreFactory<TView>", () => {
+    const factory = createViewStoreFactory<Item>(() => ({
+      save: async () => {},
+      load: async () => undefined,
+    }));
+    expectTypeOf(factory.getForContext).toBeFunction();
+    expectTypeOf<ReturnType<typeof factory.getForContext>>().toMatchTypeOf<
+      ViewStore<Item>
     >();
   });
 });

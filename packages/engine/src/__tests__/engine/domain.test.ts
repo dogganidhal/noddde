@@ -27,7 +27,7 @@ import {
   InMemoryStateStoredAggregatePersistence,
   InMemoryViewStore,
 } from "@noddde/engine";
-import { everyNEvents } from "@noddde/core";
+import { createViewStoreFactory, everyNEvents } from "@noddde/core";
 
 // ============================================================
 // wireDomain creates and initializes a domain
@@ -1965,7 +1965,7 @@ describe("wireDomain projection wiring", () => {
     const domain = await wireDomain(definition, {
       projections: {
         ItemProjection: {
-          viewStore: () => viewStore,
+          viewStore: createViewStoreFactory(() => viewStore),
         },
       },
       buses: () => ({

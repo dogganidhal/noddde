@@ -135,3 +135,19 @@ describe("createInMemoryUnitOfWork", () => {
     expect(events2).toHaveLength(0);
   });
 });
+
+describe("InMemoryUnitOfWork.context", () => {
+  it("should always be undefined (no real transaction)", async () => {
+    const uow = new InMemoryUnitOfWork();
+    expect(uow.context).toBeUndefined();
+
+    let ctxDuringCommit: unknown = "untouched";
+    uow.enlist(async () => {
+      ctxDuringCommit = uow.context;
+    });
+
+    await uow.commit();
+    expect(ctxDuringCommit).toBeUndefined();
+    expect(uow.context).toBeUndefined();
+  });
+});

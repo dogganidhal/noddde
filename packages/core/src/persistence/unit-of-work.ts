@@ -18,6 +18,23 @@ import type { Event } from "../edd";
  */
 export interface UnitOfWork {
   /**
+   * The adapter-specific transaction handle for this unit of work, if any.
+   *
+   * - `undefined` outside the transactional region (before `commit()`
+   *   begins, after it completes, or for an in-memory UoW that has no
+   *   real transaction).
+   * - During `commit()`, adapter-backed implementations set this to the
+   *   live transaction client (e.g., a Prisma interactive tx, a Drizzle
+   *   tx, a TypeORM `EntityManager`).
+   *
+   * Typed as `unknown` because core has no knowledge of any adapter.
+   * Cross-cutting consumers — notably the engine when minting a
+   * transactionally-scoped view store via `ViewStoreFactory.getForContext` —
+   * pass it through opaquely or narrow it via an adapter-specific type.
+   */
+  readonly context?: unknown;
+
+  /**
    * Buffers a write operation for deferred execution.
    * Operations are executed in enlistment order when `commit()` is called.
    *

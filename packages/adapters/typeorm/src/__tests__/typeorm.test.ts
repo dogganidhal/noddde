@@ -295,6 +295,28 @@ describe("TypeORMUnitOfWork", () => {
     const events = await infra.eventSourcedPersistence.load("Account", "acc-1");
     expect(events).toEqual([]);
   });
+
+  it("should expose the transactional EntityManager via UnitOfWork.context", async () => {
+    const uow = infra.unitOfWorkFactory();
+
+    expect(uow.context).toBeUndefined();
+
+    let observedDuringCommit: unknown = null;
+    uow.enlist(async () => {
+      observedDuringCommit = uow.context;
+    });
+
+    await uow.commit();
+
+    // During the enlisted op, context must be the transactional
+    // EntityManager passed into dataSource.manager.transaction's callback.
+    expect(observedDuringCommit).toBeDefined();
+    expect(observedDuringCommit).not.toBeNull();
+    expect(typeof observedDuringCommit).toBe("object");
+
+    // After commit, context is cleared.
+    expect(uow.context).toBeUndefined();
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════

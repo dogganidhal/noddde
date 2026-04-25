@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "docs",
+      "runtimeExecutable": "yarn",
+      "runtimeArgs": ["workspace", "@noddde/docs", "dev", "--", "-p", "3001"],
+      "port": 3001
+    },
+    {
+      "name": "hotel-booking-api",
+      "runtimeExecutable": "yarn",
+      "runtimeArgs": ["workspace", "@noddde/sample-hotel-booking", "start"],
+      "port": 3000
+    }
+  ]
+}

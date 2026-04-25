@@ -32,6 +32,7 @@ import type {
   UnitOfWorkFactory,
   IdempotencyStore,
   ViewStore,
+  ViewStoreFactory,
   OutboxStore,
   OutboxEntry,
 } from "@noddde/core";
@@ -279,14 +280,19 @@ export type AggregateWiring = {
 };
 
 /**
- * Per-projection runtime configuration. Provides the view store factory
- * for a projection, extracted from the projection definition.
+ * Per-projection runtime configuration. Provides the {@link ViewStoreFactory}
+ * for a projection.
+ *
+ * The factory's `getForContext(uow.context)` is invoked per strong-consistency
+ * read-modify-write to obtain a transactionally-scoped view store, so the
+ * developer's view store (and any custom methods) participates in the
+ * active transaction. For query handlers and eventual-consistency reads,
+ * the engine calls `getForContext(undefined)` once at init and caches the
+ * returned store as the non-transactional base instance.
  */
-export type ProjectionWiring<
-  TInfrastructure extends Infrastructure = Infrastructure,
-> = {
-  /** Factory that resolves the view store. */
-  viewStore: (infrastructure: TInfrastructure) => ViewStore;
+export type ProjectionWiring = {
+  /** Singleton factory that resolves the view store. */
+  viewStore: ViewStoreFactory;
 };
 
 /**
@@ -368,7 +374,7 @@ export type DomainWiring<
     | AggregateWiring
     | Record<keyof TAggregates & string, AggregateWiring>;
   /** Projection runtime config — per-projection view store wiring. */
-  projections?: Record<string, ProjectionWiring<TInfrastructure>>;
+  projections?: Record<string, ProjectionWiring>;
   /** Saga runtime config. Required if processModel has sagas. */
   sagas?: {
     persistence?: () => SagaPersistence | Promise<SagaPersistence>;
@@ -844,8 +850,14 @@ export class Domain<
       this._instrumentation,
     );
 
-    // Step 5.9: Resolve view stores for projections
+    // Step 5.9: Resolve view stores for projections.
+    // Each wiring entry must supply a ViewStoreFactory. The engine caches
+    // getForContext(undefined) as the "base" non-transactional instance for
+    // query handlers and eventual-consistency reads, and re-invokes
+    // getForContext(uow.context) per strong-consistency operation to obtain
+    // a transactionally-scoped view store.
     const resolvedViewStores = new Map<string, ViewStore>();
+    const resolvedViewStoreFactories = new Map<string, ViewStoreFactory>();
     const resolvedProjections = new Map<string, Projection<any>>();
     for (const [name, projection] of Object.entries(
       definition.readModel.projections,
@@ -853,12 +865,13 @@ export class Domain<
       resolvedProjections.set(name, projection);
       const wiringViewStore = wiring.projections?.[name];
 
-      const viewStoreFactory = wiringViewStore
-        ? wiringViewStore.viewStore
-        : projection.viewStore;
-      if (viewStoreFactory) {
-        const storeInstance = viewStoreFactory(this._infrastructure);
-        resolvedViewStores.set(name, storeInstance);
+      const factory: ViewStoreFactory | undefined =
+        wiringViewStore?.viewStore ??
+        (projection.viewStore as ViewStoreFactory | undefined);
+      if (factory) {
+        const baseStore = factory.getForContext(undefined);
+        resolvedViewStoreFactories.set(name, factory);
+        resolvedViewStores.set(name, baseStore);
         // Default missing id extractors to event.metadata.aggregateId
         for (const [eventName, handler] of Object.entries(projection.on)) {
           if (handler && !(handler as any).id) {
@@ -892,7 +905,8 @@ export class Domain<
 
     // Step 5.10: Build strong-consistency callback for projections
     const strongProjections = [...resolvedProjections.entries()].filter(
-      ([name, p]) => p.consistency === "strong" && resolvedViewStores.has(name),
+      ([name, p]) =>
+        p.consistency === "strong" && resolvedViewStoreFactories.has(name),
     );
 
     // Compose onEventsProduced: strong-consistency projections + outbox writes
@@ -903,19 +917,30 @@ export class Domain<
       | undefined =
       hasStrongProjections || outboxStore
         ? async (events, uow) => {
-            // Strong-consistency projection updates
+            // Strong-consistency projection updates.
+            //
+            // The entire read-modify-write (load + reduce + save) is
+            // enlisted as a single thunk so it runs inside the adapter's
+            // transactional region. At thunk-execution time we read
+            // uow.context — which the adapter has set to the live
+            // transaction handle — and pass it to the projection's
+            // ViewStoreFactory.getForContext so that load and save
+            // (and any custom methods called by the reducer) participate
+            // in the same transaction as the aggregate writes.
             if (hasStrongProjections) {
               for (const [_projName, projection] of strongProjections) {
-                const viewStoreInstance = resolvedViewStores.get(_projName)!;
+                const factory = resolvedViewStoreFactories.get(_projName)!;
                 for (const event of events) {
                   const handler = (projection.on as any)[event.name];
                   if (handler?.id && handler?.reduce) {
                     const viewId = handler.id(event);
-                    const currentView =
-                      (await viewStoreInstance.load(viewId)) ??
-                      projection.initialView;
-                    const newView = await handler.reduce(event, currentView);
-                    uow.enlist(() => viewStoreInstance.save(viewId, newView));
+                    uow.enlist(async () => {
+                      const scoped = factory.getForContext(uow.context);
+                      const currentView =
+                        (await scoped.load(viewId)) ?? projection.initialView;
+                      const newView = await handler.reduce(event, currentView);
+                      await scoped.save(viewId, newView);
+                    });
                   }
                 }
               }

@@ -10,7 +10,7 @@ import {
   EventEmitterEventBus,
   InMemoryCommandBus,
   InMemoryQueryBus,
-  InMemoryViewStore,
+  InMemoryViewStoreFactory,
 } from "@noddde/engine";
 import { PrismaClient } from "@prisma/client";
 import { createPrismaAdapter } from "@noddde/prisma";
@@ -45,7 +45,7 @@ const main = async () => {
     }),
     projections: {
       AuctionSummary: {
-        viewStore: () => new InMemoryViewStore(),
+        viewStore: new InMemoryViewStoreFactory(),
       },
     },
     unitOfWork: () => prismaInfra.unitOfWorkFactory,

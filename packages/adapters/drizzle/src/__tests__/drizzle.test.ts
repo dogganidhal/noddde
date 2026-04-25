@@ -385,6 +385,34 @@ describe("Drizzle Multi-Dialect Persistence", () => {
     );
   });
 
+  it("exposes the active Drizzle transaction handle via UnitOfWork.context", async () => {
+    const db = createTestDb();
+    const infra = createDrizzlePersistence(db, {
+      events,
+      aggregateStates,
+      sagaStates,
+    });
+    const uow = infra.unitOfWorkFactory();
+
+    expect(uow.context).toBeUndefined();
+
+    let observedDuringCommit: unknown = null;
+    uow.enlist(async () => {
+      observedDuringCommit = uow.context;
+    });
+
+    await uow.commit();
+
+    // During the enlisted op, context must be set — for sync SQLite this
+    // is the db itself within BEGIN/COMMIT, for async dialects it's the
+    // tx callback parameter. Either way it is not undefined.
+    expect(observedDuringCommit).toBeDefined();
+    expect(observedDuringCommit).not.toBeNull();
+
+    // After commit, context is cleared.
+    expect(uow.context).toBeUndefined();
+  });
+
   it("snapshot store: save and load roundtrip", async () => {
     const db = createTestDb();
     const infra = createDrizzlePersistence(db, {
