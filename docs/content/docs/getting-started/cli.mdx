@@ -3,10 +3,11 @@ title: CLI
 description: Scaffold and extend noddde projects, domains, aggregates, projections, and sagas from the command line
 ---
 
-The `@noddde/cli` package provides generators that scaffold noddde modules with the correct folder structure, type definitions, and wiring code. Two command groups are available:
+The `@noddde/cli` package provides generators that scaffold noddde modules with the correct folder structure, type definitions, and wiring code. Three command groups are available:
 
 - **`noddde new`** — create new modules from scratch (projects, domains, aggregates, projections, sagas)
 - **`noddde add`** — extend existing aggregates and projections with new commands, queries, or event handlers
+- **`noddde diagram`** — generate a flow diagram of how commands, events, and queries traverse a domain
 
 ## Installation
 
@@ -280,6 +281,87 @@ All `add` subcommands have short aliases:
 | `--aggregate`  | `add command`                    | Target aggregate name (interactive picker if omitted)  |
 | `--projection` | `add query`, `add event-handler` | Target projection name (interactive picker if omitted) |
 | `--event`      | `add command`                    | Override the auto-derived event name                   |
+
+## Visualizing Domains
+
+The `noddde diagram` command (alias `noddde d`) reads a domain module and emits a flow diagram showing how commands, events, and queries move through the system. Five of the six edge types — command → aggregate, aggregate → event, event → projection, query → projection, event → saga — are derived directly from `Object.keys(...)` on the loaded definition. The sixth — saga → command — is resolved through the TypeScript compiler API by reading the `commands` field of each saga's type bundle.
+
+```bash
+noddde diagram                                # uses src/domain/domain.ts
+noddde diagram path/to/domain.ts              # explicit entry
+noddde diagram --out diagram.mmd              # write to file
+noddde diagram --format json                  # machine-readable graph
+noddde diagram --scope process                # process-model only
+```
+
+### Output formats
+
+| Format    | Use case                                                                           |
+| :-------- | :--------------------------------------------------------------------------------- |
+| `mermaid` | Default. Renders inline on GitHub, in Fumadocs, and in any Mermaid-aware previewer |
+| `dot`     | Graphviz DOT — pipe to `dot -Tsvg` for high-resolution SVG                         |
+| `json`    | Canonical `DomainGraph` shape for downstream tooling (docs sites, registries)      |
+
+### Diagram structure
+
+Commands, events, and queries are pill-shaped nodes; aggregates, projections, and sagas are box nodes. Three subgraphs group them by model (`Write Model`, `Read Model`, `Process Model`). Solid arrows mark edges derived at runtime; dashed arrows mark edges resolved through type analysis (currently only saga → command).
+
+For the `sample-auction` domain:
+
+```mermaid
+flowchart LR
+  subgraph WM["Write Model"]
+    cmdCreate(["CreateAuction"])
+    cmdBid(["PlaceBid"])
+    cmdClose(["CloseAuction"])
+    Auction[["Auction"]]
+    evCreated(["AuctionCreated"])
+    evBid(["BidPlaced"])
+    evRej(["BidRejected"])
+    evClosed(["AuctionClosed"])
+    cmdCreate --> Auction
+    cmdBid --> Auction
+    cmdClose --> Auction
+    Auction --> evCreated
+    Auction --> evBid
+    Auction --> evRej
+    Auction --> evClosed
+  end
+  subgraph RM["Read Model"]
+    Summary[["AuctionSummary"]]
+    qGet(["GetAuctionSummary"])
+    evCreated --> Summary
+    evBid --> Summary
+    evClosed --> Summary
+    qGet --> Summary
+  end
+```
+
+### Flag reference
+
+| Flag                | Default          | Purpose                                                         |
+| :------------------ | :--------------- | :-------------------------------------------------------------- |
+| `--out <path>`      | stdout           | Write the diagram to a file                                     |
+| `--format <format>` | `mermaid`        | One of `mermaid`, `dot`, `json`                                 |
+| `--scope <scope>`   | `all`            | One of `write`, `read`, `process`, `all` — limits the subgraphs |
+| `--hide-isolated`   | off              | Drop nodes with degree 0 after scope filtering                  |
+| `--tsconfig <path>` | nearest ancestor | Path to a tsconfig.json used by the saga static-analysis pass   |
+
+### What gets diagnosed
+
+The diagram doubles as a static check on the domain. Two diagnostics are surfaced as `warnings` on the JSON output and on stderr:
+
+- **External commands** — a saga dispatches a command name that no aggregate handles. The command node is rendered with an `external` style and the warning names both ends of the broken edge. This commonly catches typos in the saga's `commands` union or aggregates that haven't been wired in yet.
+- **Unresolvable saga commands** — a saga's `commands` field doesn't resolve to a finite union of literal-named members (e.g. it's typed as `Command` rather than a discriminated union). The saga still appears with its incoming event edges; the warning notes that no outgoing edges could be produced.
+
+### Loading the domain
+
+The CLI loads the entry file via [tsx](https://github.com/privatenumber/tsx)'s programmatic API — no prebuild required. The entry must export either:
+
+- `aggregates`, `projections`, and (optionally) `sagas` as named records, or
+- a `definition` object produced by `defineDomain(...)`.
+
+Both forms are supported by the same loader. Convention: `src/domain/domain.ts` carries the structural exports and has no top-level dependencies on infrastructure (DB connections, env vars). If your entry has top-level side effects, dynamic import will fail with a message pointing you to the structural module.
 
 ## Name Handling
 
