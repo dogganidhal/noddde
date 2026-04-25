@@ -107,3 +107,68 @@ describe("InMemoryViewStore", () => {
     expect(loaded).toEqual({ count: 9 });
   });
 });
+
+describe("InMemoryViewStore delete", () => {
+  it("should remove a previously stored view", async () => {
+    const store = new InMemoryViewStore<{ id: string }>();
+
+    await store.save("acc-1", { id: "acc-1" });
+    expect(await store.load("acc-1")).toEqual({ id: "acc-1" });
+
+    await store.delete("acc-1");
+
+    expect(await store.load("acc-1")).toBeUndefined();
+  });
+});
+
+describe("InMemoryViewStore delete idempotency", () => {
+  it("should not throw when deleting a non-existent key", async () => {
+    const store = new InMemoryViewStore<{ id: string }>();
+
+    await expect(store.delete("nope")).resolves.toBeUndefined();
+    await expect(store.delete("nope")).resolves.toBeUndefined();
+  });
+});
+
+describe("InMemoryViewStore delete coercion", () => {
+  it("should coerce numeric viewId to the same key as a string viewId", async () => {
+    const store = new InMemoryViewStore<{ value: number }>();
+
+    await store.save("42", { value: 1 });
+    await store.delete(42);
+
+    expect(await store.load("42")).toBeUndefined();
+    expect(await store.load(42)).toBeUndefined();
+  });
+});
+
+describe("InMemoryViewStore delete isolation", () => {
+  it("should only remove the targeted view", async () => {
+    const store = new InMemoryViewStore<{ id: string }>();
+
+    await store.save("a", { id: "a" });
+    await store.save("b", { id: "b" });
+    await store.save("c", { id: "c" });
+
+    await store.delete("b");
+
+    expect(await store.load("a")).toEqual({ id: "a" });
+    expect(await store.load("b")).toBeUndefined();
+    expect(await store.load("c")).toEqual({ id: "c" });
+    expect(
+      (await store.findAll()).sort((x, y) => x.id.localeCompare(y.id)),
+    ).toEqual([{ id: "a" }, { id: "c" }]);
+  });
+});
+
+describe("InMemoryViewStore save after delete", () => {
+  it("should store a new view after the previous one was deleted", async () => {
+    const store = new InMemoryViewStore<{ value: number }>();
+
+    await store.save("k", { value: 1 });
+    await store.delete("k");
+    await store.save("k", { value: 2 });
+
+    expect(await store.load("k")).toEqual({ value: 2 });
+  });
+});

@@ -41,6 +41,17 @@ export class InMemoryViewStore<TView> implements ViewStore<TView> {
   }
 
   /**
+   * Deletes a view instance by ID. Idempotent — resolves successfully
+   * whether or not the entry existed. A subsequent `load(viewId)` after
+   * `delete(viewId)` returns `undefined`.
+   *
+   * @param viewId - The unique identifier of the view instance to delete.
+   */
+  public async delete(viewId: ID): Promise<void> {
+    this.store.delete(String(viewId));
+  }
+
+  /**
    * Returns all stored views. Order is not guaranteed.
    * Convenience method for development and testing — not part of
    * the base `ViewStore` interface.

@@ -11,7 +11,7 @@ docs:
 
 # InMemoryViewStore
 
-> In-memory `ViewStore` implementation that stores projection views in a `Map`, keyed by `String(viewId)`. Data is lost when the process exits. Includes convenience methods `findAll()` and `find(predicate)` for development and testing. Suitable for development, testing, and prototyping. For production, use a durable store (TypeORM, Prisma, Drizzle adapters, or custom).
+> In-memory `ViewStore` implementation that stores projection views in a `Map`, keyed by `String(viewId)`. Data is lost when the process exits. Implements the full `ViewStore` contract — `save`, `load`, and `delete`. Includes convenience methods `findAll()` and `find(predicate)` for development and testing. Suitable for development, testing, and prototyping. For production, use a durable store (TypeORM, Prisma, Drizzle adapters, or custom).
 
 ## Type Contract
 
@@ -21,6 +21,7 @@ import type { ViewStore, ID } from "@noddde/core";
 export class InMemoryViewStore<TView> implements ViewStore<TView> {
   save(viewId: ID, view: TView): Promise<void>;
   load(viewId: ID): Promise<TView | undefined>;
+  delete(viewId: ID): Promise<void>;
 
   /** Returns all stored views. Convenience for testing. */
   findAll(): Promise<TView[]>;
@@ -33,6 +34,7 @@ export class InMemoryViewStore<TView> implements ViewStore<TView> {
 - Implements the `ViewStore<TView>` interface from `@noddde/core`.
 - `load` returns `undefined` (not `null`) when no view exists for the given key.
 - `save` overwrites the entire view for the given viewId.
+- `delete` removes the entry for the given viewId. Idempotent — never throws on missing keys.
 - `findAll` and `find` are convenience methods not on the base `ViewStore` interface.
 
 ## Behavioral Requirements
@@ -40,10 +42,12 @@ export class InMemoryViewStore<TView> implements ViewStore<TView> {
 1. **Save stores view by ID** -- `save(viewId, view)` persists the view object keyed by `String(viewId)`, replacing any previously stored view for that ID.
 2. **Load returns stored view** -- `load(viewId)` returns the most recently saved view for `String(viewId)`.
 3. **Load returns undefined for nonexistent view** -- If no view has been saved for the given `viewId`, `load` returns `undefined`.
-4. **String coercion of viewId** -- All `ID` types (`string`, `number`, `bigint`) are coerced to `string` via `String(viewId)` for map key consistency.
+4. **String coercion of viewId** -- All `ID` types (`string`, `number`, `bigint`) are coerced to `string` via `String(viewId)` for map key consistency. The same coercion applies to `delete`.
 5. **Overwrite semantics** -- Each `save` replaces the previous view entirely. There is no merge or diff.
 6. **findAll returns all views** -- `findAll()` returns an array of all stored view values (order not guaranteed).
 7. **find filters by predicate** -- `find(predicate)` returns all stored views for which `predicate(view)` returns `true`.
+8. **Delete removes the entry** -- `delete(viewId)` removes the entry from the internal `Map` keyed by `String(viewId)`. After `delete`, a subsequent `load(viewId)` returns `undefined`.
+9. **Delete is idempotent** -- `delete(viewId)` resolves successfully whether or not the entry existed; it never throws.
 
 ## Invariants
 
@@ -52,6 +56,7 @@ export class InMemoryViewStore<TView> implements ViewStore<TView> {
 - No validation on the stored view. The caller is responsible for providing well-formed views.
 - Single-process only. Not safe for sharing across worker threads.
 - Generic: `InMemoryViewStore<TView>` preserves the view type.
+- `delete` is total — it returns `Promise<void>` regardless of prior state.
 
 ## Edge Cases
 
@@ -63,12 +68,16 @@ export class InMemoryViewStore<TView> implements ViewStore<TView> {
 - **findAll on empty store** -- Returns an empty array.
 - **find with no matches** -- Returns an empty array.
 - **Numeric and bigint IDs** -- `save(42, view)` and `save("42", view)` target the same key after `String()` coercion.
+- **Delete on a non-existent key** -- Returns successfully without error. No side effects.
+- **Delete then load** -- `load(viewId)` returns `undefined` after `delete(viewId)` for a previously stored view.
+- **Delete then save** -- `save(viewId, view)` after `delete(viewId)` stores the new view fresh; subsequent `load(viewId)` returns the new view.
+- **Delete with numeric ID after save with string ID** -- `delete(42)` removes the entry stored via `save("42", ...)` thanks to `String()` coercion.
 
 ## Integration Points
 
 - **Domain.init()** -- View stores are resolved during domain initialization from projection `viewStore` factories.
-- **Projection event handling** -- When an event arrives for a projection with `identity`: (1) derive viewId via `identity[eventName](event)`, (2) `load(viewId)`, (3) if `undefined`, use `initialView`, (4) run reducer, (5) `save(viewId, newView)`.
-- **Query handler infrastructure** -- The resolved view store is injected as `{ views }` into query handler infrastructure.
+- **Projection event handling** -- When an event arrives for a projection with `identity`: (1) derive viewId via `identity[eventName](event)`, (2) `load(viewId)`, (3) if `undefined`, use `initialView`, (4) run reducer, (5) if reducer returned `DeleteView`, call `delete(viewId)`; otherwise call `save(viewId, newView)`.
+- **Query handler infrastructure** -- The resolved view store is injected as `{ views }` into query handler infrastructure. Query handlers may call `views.delete(viewId)` directly when needed.
 
 ## Test Scenarios
 
@@ -254,6 +263,106 @@ describe("InMemoryViewStore", () => {
     const loaded = await store.load("counter");
 
     expect(loaded).toEqual({ count: 9 });
+  });
+});
+```
+
+### delete removes a stored view
+
+```ts
+import { describe, it, expect } from "vitest";
+import { InMemoryViewStore } from "@noddde/engine";
+
+describe("InMemoryViewStore delete", () => {
+  it("should remove a previously stored view", async () => {
+    const store = new InMemoryViewStore<{ id: string }>();
+
+    await store.save("acc-1", { id: "acc-1" });
+    expect(await store.load("acc-1")).toEqual({ id: "acc-1" });
+
+    await store.delete("acc-1");
+
+    expect(await store.load("acc-1")).toBeUndefined();
+  });
+});
+```
+
+### delete is idempotent on a missing key
+
+```ts
+import { describe, it, expect } from "vitest";
+import { InMemoryViewStore } from "@noddde/engine";
+
+describe("InMemoryViewStore delete idempotency", () => {
+  it("should not throw when deleting a non-existent key", async () => {
+    const store = new InMemoryViewStore<{ id: string }>();
+
+    await expect(store.delete("nope")).resolves.toBeUndefined();
+    await expect(store.delete("nope")).resolves.toBeUndefined();
+  });
+});
+```
+
+### delete uses string coercion for viewId
+
+```ts
+import { describe, it, expect } from "vitest";
+import { InMemoryViewStore } from "@noddde/engine";
+
+describe("InMemoryViewStore delete coercion", () => {
+  it("should coerce numeric viewId to the same key as a string viewId", async () => {
+    const store = new InMemoryViewStore<{ value: number }>();
+
+    await store.save("42", { value: 1 });
+    await store.delete(42);
+
+    expect(await store.load("42")).toBeUndefined();
+    expect(await store.load(42)).toBeUndefined();
+  });
+});
+```
+
+### delete leaves other views untouched
+
+```ts
+import { describe, it, expect } from "vitest";
+import { InMemoryViewStore } from "@noddde/engine";
+
+describe("InMemoryViewStore delete isolation", () => {
+  it("should only remove the targeted view", async () => {
+    const store = new InMemoryViewStore<{ id: string }>();
+
+    await store.save("a", { id: "a" });
+    await store.save("b", { id: "b" });
+    await store.save("c", { id: "c" });
+
+    await store.delete("b");
+
+    expect(await store.load("a")).toEqual({ id: "a" });
+    expect(await store.load("b")).toBeUndefined();
+    expect(await store.load("c")).toEqual({ id: "c" });
+    expect(
+      (await store.findAll()).sort((x, y) => x.id.localeCompare(y.id)),
+    ).toEqual([{ id: "a" }, { id: "c" }]);
+  });
+});
+```
+
+### save after delete creates a fresh entry
+
+```ts
+import { describe, it, expect } from "vitest";
+import { InMemoryViewStore } from "@noddde/engine";
+
+describe("InMemoryViewStore save after delete", () => {
+  it("should store a new view after the previous one was deleted", async () => {
+    const store = new InMemoryViewStore<{ value: number }>();
+
+    await store.save("k", { value: 1 });
+    await store.delete("k");
+    await store.save("k", { value: 2 });
+
+    expect(await store.load("k")).toEqual({ value: 2 });
   });
 });
 ```
