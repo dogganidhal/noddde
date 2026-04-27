@@ -5,6 +5,30 @@ import { Event } from "../edd";
 import { Query, QueryHandler } from "../cqrs";
 import type { ViewStore, ViewStoreFactory } from "../persistence/view-store";
 
+/**
+ * Sentinel value a projection reducer may return to instruct the engine to
+ * delete the view at the resolved `viewId`. The engine routes this to
+ * `viewStore.delete(viewId)` instead of `viewStore.save(viewId, ...)`.
+ * Deletion is idempotent — returning `DeleteView` for a non-existent view
+ * is a no-op.
+ *
+ * @example
+ * ```ts
+ * import { DeleteView, defineProjection } from "@noddde/core";
+ *
+ * const projection = defineProjection<MyDef>({
+ *   on: {
+ *     ItemDeleted: {
+ *       id: (event) => event.payload.id,
+ *       reduce: () => DeleteView,
+ *     },
+ *   },
+ *   queryHandlers: {},
+ * });
+ * ```
+ */
+export const DeleteView: unique symbol = Symbol("DeleteView");
+
 // ---- Types bundle ----
 
 /**
@@ -61,11 +85,15 @@ export type ProjectionEventHandler<TEvent extends Event, TView> = {
   id?: (event: TEvent) => ID;
 
   /**
-   * Transforms the current view based on the event, returning the updated view.
-   * Receives the full event object (not just payload).
+   * Transforms the current view based on the event, returning the updated view
+   * or the {@link DeleteView} sentinel to instruct the engine to delete the view
+   * at the resolved `viewId`. Receives the full event object (not just payload).
    * May be sync or async.
    */
-  reduce: (event: TEvent, view: TView) => TView | Promise<TView>;
+  reduce: (
+    event: TEvent,
+    view: TView,
+  ) => TView | typeof DeleteView | Promise<TView | typeof DeleteView>;
 };
 
 /**

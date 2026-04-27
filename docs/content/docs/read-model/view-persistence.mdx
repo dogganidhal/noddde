@@ -15,16 +15,18 @@ import type { ID } from "@noddde/core";
 interface ViewStore<TView = any> {
   save(viewId: ID, view: TView): Promise<void>;
   load(viewId: ID): Promise<TView | undefined | null>;
+  delete(viewId: ID): Promise<void>;
 }
 ```
 
 - `save` persists a view instance, replacing any previously stored view for the given ID.
 - `load` retrieves a view by ID, returning `undefined` or `null` if not found.
+- `delete` removes a view by ID. **Idempotent** — deleting a non-existent view is a no-op and resolves successfully without throwing.
 - `viewId` uses the framework's `ID` type (`string | number | bigint`).
 
 ### Extending with Custom Query Methods
 
-The base interface provides only `save` and `load`. For advanced filtering, extend it:
+The base interface provides `save`, `load`, and `delete`. For advanced filtering, extend it:
 
 ```ts
 interface BankAccountViewStore extends ViewStore<BankAccountView> {
@@ -33,7 +35,27 @@ interface BankAccountViewStore extends ViewStore<BankAccountView> {
 }
 ```
 
-Custom methods are available in query handlers via the `{ views }` injection.
+Custom methods are available in query handlers via the `{ views }` injection. Extending `ViewStore` does not exempt the implementation from providing `save`, `load`, and `delete`.
+
+### Implementing a Custom ViewStore
+
+Any class or object that satisfies the three-method contract is a valid view store. A minimal stub:
+
+```ts
+import type { ID, ViewStore } from "@noddde/core";
+
+class MyViewStore<TView> implements ViewStore<TView> {
+  async save(viewId: ID, view: TView): Promise<void> {
+    /* ... */
+  }
+  async load(viewId: ID): Promise<TView | undefined> {
+    /* ... */
+  }
+  async delete(viewId: ID): Promise<void> {
+    /* Must NOT throw when the row is missing — treat absent rows as a no-op. */
+  }
+}
+```
 
 ## InMemoryViewStore
 
@@ -45,6 +67,8 @@ import { InMemoryViewStore } from "@noddde/engine";
 const store = new InMemoryViewStore<BankAccountView>();
 await store.save("acc-1", { id: "acc-1", balance: 100 });
 const view = await store.load("acc-1"); // { id: "acc-1", balance: 100 }
+await store.delete("acc-1");
+const after = await store.load("acc-1"); // undefined
 ```
 
 It also includes convenience methods not on the base interface:
@@ -192,6 +216,95 @@ const domain = await wireDomain(definition, {
 });
 ```
 
+## Deleting Views with `DeleteView`
+
+Sometimes a projection should remove a view in response to an event — a user is deleted, a booking is cancelled, an item is permanently archived. Returning a fresh view object would only update the row; you need a way to tell the engine "delete this view".
+
+noddde exports a unique-symbol sentinel `DeleteView` for exactly this purpose. Returning it from a reducer instructs the engine to call `viewStore.delete(viewId)` instead of `viewStore.save(viewId, ...)` for that event.
+
+```ts
+import { DeleteView, defineProjection } from "@noddde/core";
+
+const UserProjection = defineProjection<UserProjectionDef>({
+  on: {
+    UserCreated: {
+      id: (event) => event.payload.id,
+      reduce: (event) => ({ id: event.payload.id, name: event.payload.name }),
+    },
+    UserDeleted: {
+      id: (event) => event.payload.id,
+      reduce: () => DeleteView,
+    },
+  },
+  queryHandlers: {},
+});
+```
+
+The reducer's return type is automatically `TView | typeof DeleteView | Promise<TView | typeof DeleteView>` — the union is enforced at compile time, so a reducer that returns `DeleteView` for one event and a view for another is fully type-safe.
+
+### How the Engine Routes `DeleteView`
+
+When an event arrives for a projection with auto-persistence configured:
+
+1. The engine extracts the view ID via `on[eventName].id(event)`.
+2. It loads the current view (falling back to `initialView` if absent).
+3. It runs the reducer and **awaits** the return value.
+4. If the awaited value is `=== DeleteView`, it calls `viewStore.delete(viewId)`. Otherwise it calls `viewStore.save(viewId, newView)`.
+
+The check is on the awaited value, so async reducers are supported. Because TypeScript widens a unique-symbol return from an async arrow to plain `symbol` when the contextual type is a union, give the async arrow an explicit return type:
+
+```ts
+// Annotate the return type so TypeScript preserves `typeof DeleteView`.
+reduce: async (): Promise<typeof DeleteView> => DeleteView;
+```
+
+Sync arrows infer correctly without the annotation (`reduce: () => DeleteView`).
+
+### Conditional Deletion
+
+Because the reducer's return type is a union, a single reducer can decide between updating the view and deleting it based on event content:
+
+```ts
+const ItemProjection = defineProjection<ItemProjectionDef>({
+  on: {
+    ItemDeactivated: {
+      id: (event) => event.payload.id,
+      reduce: (event, view) =>
+        event.payload.permanent
+          ? DeleteView
+          : { ...view, status: "inactive" as const },
+    },
+  },
+  queryHandlers: {},
+});
+```
+
+When `event.payload.permanent` is `true` the engine deletes the view; otherwise it saves the updated `inactive` view. No special wiring is needed — the engine inspects the awaited return value at runtime.
+
+### Idempotency
+
+Deleting a view that does not exist is a no-op. The `ViewStore` contract requires `delete` to resolve successfully on missing IDs, so returning `DeleteView` for an event whose view was never created is safe. This makes `DeleteView` reducers safe to retry and safe under at-least-once event delivery.
+
+### Strong-Consistency Deletion
+
+For projections with `consistency: "strong"`, view deletion is enlisted in the same unit of work as the originating command. If the command fails, the deletion is rolled back atomically:
+
+```ts
+const UserProjection = defineProjection<UserProjectionDef>({
+  on: {
+    UserDeleted: {
+      id: (event) => event.payload.id,
+      reduce: () => DeleteView,
+    },
+    /* ... */
+  },
+  queryHandlers: {},
+  consistency: "strong",
+});
+```
+
+Behaviorally it works the same as strong-consistency `save` — only the routing target changes (`viewStore.delete` instead of `viewStore.save`).
+
 ## View Instance IDs
 
 The `id` function inside each `on` entry tells the engine how to derive the view instance ID from an event. It is optional at the type level, but required by the engine when a view store is configured.
@@ -225,8 +338,8 @@ Unlike the old exhaustive `identity` map, only events the projection cares about
 
 1. Calls `on[event.name].id(event)` to get the view ID
 2. Loads the current view from the view store (falling back to `initialView`)
-3. Runs `on[event.name].reduce(event, view)` to produce the new view
-4. Saves the new view to the view store
+3. Runs `on[event.name].reduce(event, view)` to produce the new view (or [`DeleteView`](#deleting-views-with-deleteview))
+4. If the awaited return value is `DeleteView`, calls `viewStore.delete(viewId)`; otherwise calls `viewStore.save(viewId, newView)`
 
 ### initialView
 
@@ -345,7 +458,7 @@ Projections support two consistency modes:
 Views are updated asynchronously after the command's unit of work is committed and events are dispatched via the event bus.
 
 ```
-Command -> Aggregate -> Events -> UoW commit -> Event Bus -> Projection reducer -> viewStore.save()
+Command -> Aggregate -> Events -> UoW commit -> Event Bus -> Projection reducer -> viewStore.save() / viewStore.delete()
                                       |                                                |
                                 atomic boundary                                  independent
 ```
@@ -354,10 +467,10 @@ If the view update fails, the aggregate state is already committed. This is the 
 
 ### Strong Consistency
 
-View updates are enlisted in the same unit of work as the originating command. Inside the enlisted thunk — i.e., inside your adapter's transactional region — the engine calls `factory.getForContext(uow.context)` to mint a transactionally-scoped view store, then runs `load` + `reduce` + `save` on that scoped store. If the command's UoW fails, both aggregate and view changes are rolled back atomically.
+View updates are enlisted in the same unit of work as the originating command. Inside the enlisted thunk — i.e., inside your adapter's transactional region — the engine calls `factory.getForContext(uow.context)` to mint a transactionally-scoped view store, then runs `load` + `reduce` + (`save` or `delete`, depending on whether the reducer returns [`DeleteView`](#deleting-views-with-deleteview)) on that scoped store. If the command's UoW fails, both aggregate and view changes are rolled back atomically.
 
 ```
-Command -> Aggregate -> Events -> [load + reduce + save inside UoW commit] -> UoW commit
+Command -> Aggregate -> Events -> [load + reduce + save/delete inside UoW commit] -> UoW commit
                                                 |
                                   factory.getForContext(uow.context)
                                                 |

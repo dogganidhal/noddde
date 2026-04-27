@@ -15,7 +15,7 @@ import type {
   Query,
   ViewStore,
 } from "@noddde/core";
-import { defineProjection } from "@noddde/core";
+import { DeleteView, defineProjection } from "@noddde/core";
 
 describe("defineProjection", () => {
   interface AccountView {
@@ -691,5 +691,121 @@ describe("InferProjectionQueryInfrastructure", () => {
     expectTypeOf<
       InferProjectionQueryInfrastructure<WithoutViewStore>
     >().toEqualTypeOf<MyInfra>();
+  });
+});
+
+describe("DeleteView sentinel", () => {
+  it("should be a symbol", () => {
+    expect(typeof DeleteView).toBe("symbol");
+  });
+
+  it("should equal itself by reference", () => {
+    expect(DeleteView).toBe(DeleteView);
+  });
+
+  it("should not equal a freshly created symbol with the same description", () => {
+    expect(DeleteView).not.toBe(Symbol("DeleteView"));
+  });
+
+  it("should be typed as a unique symbol", () => {
+    type T = typeof DeleteView;
+    expectTypeOf<T>().toMatchTypeOf<symbol>();
+  });
+});
+
+describe("Reducer return type with DeleteView", () => {
+  type Events = DefineEvents<{
+    Created: { id: string };
+    Deleted: { id: string };
+  }>;
+
+  interface View {
+    id: string;
+    status: "active" | "inactive";
+  }
+
+  type Def = {
+    events: Events;
+    queries: Query<any>;
+    view: View;
+    infrastructure: Infrastructure;
+  };
+
+  it("should accept reducers that return TView or DeleteView", () => {
+    const projection = defineProjection<Def>({
+      on: {
+        Created: {
+          id: (e) => e.payload.id,
+          reduce: (e, _v) => ({ id: e.payload.id, status: "active" as const }),
+        },
+        Deleted: {
+          id: (e) => e.payload.id,
+          reduce: () => DeleteView,
+        },
+      },
+      queryHandlers: {},
+    });
+
+    type ReduceCreated = NonNullable<typeof projection.on.Created>["reduce"];
+    type ReduceDeleted = NonNullable<typeof projection.on.Deleted>["reduce"];
+
+    expectTypeOf<ReturnType<ReduceCreated>>().toEqualTypeOf<
+      View | typeof DeleteView | Promise<View | typeof DeleteView>
+    >();
+    expectTypeOf<ReturnType<ReduceDeleted>>().toEqualTypeOf<
+      View | typeof DeleteView | Promise<View | typeof DeleteView>
+    >();
+  });
+
+  it("should accept reducers that conditionally return DeleteView", () => {
+    type CondEvents = DefineEvents<{
+      Deactivate: { id: string; permanent: boolean };
+    }>;
+    type CondDef = {
+      events: CondEvents;
+      queries: Query<any>;
+      view: View;
+      infrastructure: Infrastructure;
+    };
+
+    const projection = defineProjection<CondDef>({
+      on: {
+        Deactivate: {
+          id: (e) => e.payload.id,
+          reduce: (e, view) =>
+            e.payload.permanent
+              ? DeleteView
+              : { ...view, status: "inactive" as const },
+        },
+      },
+      queryHandlers: {},
+    });
+
+    expectTypeOf(projection.on.Deactivate).not.toBeUndefined();
+  });
+
+  it("should accept async reducers that return DeleteView", () => {
+    type AsyncEvents = DefineEvents<{ Purge: { id: string } }>;
+    type AsyncDef = {
+      events: AsyncEvents;
+      queries: Query<any>;
+      view: View;
+      infrastructure: Infrastructure;
+    };
+
+    const projection = defineProjection<AsyncDef>({
+      on: {
+        Purge: {
+          id: (e) => e.payload.id,
+          // Explicit return-type annotation needed because TypeScript widens
+          // a unique-symbol return from an async arrow to plain `symbol` when
+          // the contextual type is a union (`TView | typeof DeleteView | ...`).
+          reduce: async (): Promise<typeof DeleteView> => DeleteView,
+        },
+      },
+      queryHandlers: {},
+    });
+
+    expectTypeOf(projection.on.Purge).not.toBeUndefined();
   });
 });

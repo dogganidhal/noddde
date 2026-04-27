@@ -37,7 +37,7 @@ import type {
   OutboxEntry,
 } from "@noddde/core";
 import type { AggregateLocker, Closeable } from "@noddde/core";
-import { isCloseable, isConnectable } from "@noddde/core";
+import { isCloseable, isConnectable, DeleteView } from "@noddde/core";
 import { OutboxRelay } from "./outbox-relay";
 import type { OutboxRelayOptions } from "./outbox-relay";
 import { uuidv7 } from "./uuid";
@@ -939,7 +939,11 @@ export class Domain<
                       const currentView =
                         (await scoped.load(viewId)) ?? projection.initialView;
                       const newView = await handler.reduce(event, currentView);
-                      await scoped.save(viewId, newView);
+                      if (newView === DeleteView) {
+                        await scoped.delete(viewId);
+                      } else {
+                        await scoped.save(viewId, newView);
+                      }
                     });
                   }
                 }
@@ -1147,7 +1151,11 @@ export class Domain<
             const currentView =
               (await viewStoreInstance.load(viewId)) ?? projection.initialView;
             const newView = await handler.reduce(event, currentView);
-            await viewStoreInstance.save(viewId, newView);
+            if (newView === DeleteView) {
+              await viewStoreInstance.delete(viewId);
+            } else {
+              await viewStoreInstance.save(viewId, newView);
+            }
           };
 
           const traceCarrier = {

@@ -150,6 +150,7 @@ type StoreCallLog = Array<
   | { kind: "factory.getForContext"; ctx: unknown }
   | { kind: "store.load"; ctx: unknown; viewId: ID }
   | { kind: "store.save"; ctx: unknown; viewId: ID; view: AccountView }
+  | { kind: "store.delete"; ctx: unknown; viewId: ID }
 >;
 
 function makeRecordingFactory(
@@ -167,6 +168,10 @@ function makeRecordingFactory(
         async save(viewId: ID, view: AccountView) {
           log.push({ kind: "store.save", ctx, viewId, view });
           data.set(String(viewId), view);
+        },
+        async delete(viewId: ID) {
+          log.push({ kind: "store.delete", ctx, viewId });
+          data.delete(String(viewId));
         },
       };
     },

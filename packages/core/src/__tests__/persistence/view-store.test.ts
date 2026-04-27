@@ -11,9 +11,11 @@ describe("ViewStore", () => {
         ({ id: "1", balance: 100 }) as
           | { id: string; balance: number }
           | undefined,
+      delete: async (_viewId: ID) => {},
     };
     expectTypeOf(store.save).toBeFunction();
     expectTypeOf(store.load).toBeFunction();
+    expectTypeOf(store.delete).toBeFunction();
   });
 });
 
@@ -23,6 +25,7 @@ describe("ViewStore default type", () => {
     const store: DefaultStore = {
       save: async (_viewId: ID, _view: any) => {},
       load: async (_viewId: ID) => undefined,
+      delete: async (_viewId: ID) => {},
     };
     expectTypeOf(store).toMatchTypeOf<ViewStore<any>>();
   });
@@ -49,11 +52,13 @@ describe("ViewStore ID parameter", () => {
     const store: ViewStore<string> = {
       save: async (_viewId: ID, _view: string) => {},
       load: async (_viewId: ID) => undefined,
+      delete: async (_viewId: ID) => {},
     };
 
     // All ID types should be accepted
     expectTypeOf(store.save).parameter(0).toEqualTypeOf<ID>();
     expectTypeOf(store.load).parameter(0).toEqualTypeOf<ID>();
+    expectTypeOf(store.delete).parameter(0).toEqualTypeOf<ID>();
   });
 });
 
@@ -78,6 +83,7 @@ describe("ViewStoreFactory", () => {
         return {
           save: async () => {},
           load: async () => undefined,
+          delete: async () => {},
         };
       }
     }
@@ -93,6 +99,7 @@ describe("ViewStoreFactory", () => {
       getForContext: () => ({
         save: async () => {},
         load: async () => undefined,
+        delete: async () => {},
       }),
     };
     expectTypeOf(factory).toMatchTypeOf<ViewStoreFactory<Item>>();
@@ -106,6 +113,7 @@ describe("ViewStoreFactory", () => {
         return {
           save: async () => {},
           load: async () => undefined,
+          delete: async () => {},
         };
       }
     }
@@ -124,6 +132,7 @@ describe("createViewStoreFactory", () => {
     const seen: ViewStore<Item> = {
       save: async () => {},
       load: async () => undefined,
+      delete: async () => {},
     };
     const factory = createViewStoreFactory<Item>((ctx) => {
       lastCtx = ctx;
@@ -142,10 +151,36 @@ describe("createViewStoreFactory", () => {
     const factory = createViewStoreFactory<Item>(() => ({
       save: async () => {},
       load: async () => undefined,
+      delete: async () => {},
     }));
     expectTypeOf(factory.getForContext).toBeFunction();
     expectTypeOf<ReturnType<typeof factory.getForContext>>().toMatchTypeOf<
       ViewStore<Item>
+    >();
+  });
+});
+
+describe("ViewStore delete signature", () => {
+  it("should accept ID and return Promise<void>", () => {
+    type Delete = ViewStore<{ id: string }>["delete"];
+    expectTypeOf<Delete>().parameter(0).toEqualTypeOf<ID>();
+    expectTypeOf<ReturnType<Delete>>().toEqualTypeOf<Promise<void>>();
+  });
+});
+
+describe("ViewStore extension preserves delete", () => {
+  interface AccountView {
+    id: string;
+    balance: number;
+  }
+
+  interface AccountViewStore extends ViewStore<AccountView> {
+    findByBalanceRange(min: number, max: number): Promise<AccountView[]>;
+  }
+
+  it("should still require delete on extended stores", () => {
+    expectTypeOf<AccountViewStore["delete"]>().toEqualTypeOf<
+      ViewStore<AccountView>["delete"]
     >();
   });
 });
