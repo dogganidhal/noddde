@@ -3,6 +3,7 @@
 **Date**: 2026-04-25
 **Builder**: Claude Sonnet 4.6
 **Specs**:
+
 - `specs/core/persistence/view-store.spec.md`
 - `specs/core/ddd/projection.spec.md`
 - `specs/engine/implementations/in-memory-view-store.spec.md`
@@ -59,37 +60,37 @@ The spec's `## Test Scenarios` headings for these three integration tests are st
 
 ### view-store.test.ts
 
-| Scenario heading | Action | Test path |
-|---|---|---|
-| `ViewStore interface is assignable from a conforming object` | Updated (added `delete` field) | `packages/core/src/__tests__/persistence/view-store.test.ts` |
-| `ViewStore default type parameter is any` | Updated (added `delete` field) | same |
-| `ViewStore exposes a delete method` | Added new `it()` | same |
-| `ViewStore extension still satisfies the base interface with delete` | Added new `it()` | same |
+| Scenario heading                                                     | Action                         | Test path                                                    |
+| -------------------------------------------------------------------- | ------------------------------ | ------------------------------------------------------------ |
+| `ViewStore interface is assignable from a conforming object`         | Updated (added `delete` field) | `packages/core/src/__tests__/persistence/view-store.test.ts` |
+| `ViewStore default type parameter is any`                            | Updated (added `delete` field) | same                                                         |
+| `ViewStore exposes a delete method`                                  | Added new `it()`               | same                                                         |
+| `ViewStore extension still satisfies the base interface with delete` | Added new `it()`               | same                                                         |
 
 ### projection.test.ts (core)
 
-| Scenario heading | Action | Test path |
-|---|---|---|
-| `DeleteView is an exported unique-symbol sentinel` | Added new `describe` (4 its) | `packages/core/src/__tests__/ddd/projection.test.ts` |
-| `Reducer return type accepts both TView and DeleteView` | Added new `describe` (3 its) | same |
+| Scenario heading                                        | Action                       | Test path                                            |
+| ------------------------------------------------------- | ---------------------------- | ---------------------------------------------------- |
+| `DeleteView is an exported unique-symbol sentinel`      | Added new `describe` (4 its) | `packages/core/src/__tests__/ddd/projection.test.ts` |
+| `Reducer return type accepts both TView and DeleteView` | Added new `describe` (3 its) | same                                                 |
 
 ### projection-delete-view.test.ts (engine integration — boundary decision)
 
-| Scenario heading | Action | Test path |
-|---|---|---|
+| Scenario heading                                                                | Action                      | Test path                                                                  |
+| ------------------------------------------------------------------------------- | --------------------------- | -------------------------------------------------------------------------- |
 | `Reducer returning DeleteView triggers viewStore.delete (eventual consistency)` | Added new `describe` (1 it) | `packages/engine/src/__tests__/integration/projection-delete-view.test.ts` |
-| `DeleteView is idempotent on a non-existent view` | Added new `describe` (1 it) | same |
-| `Strong-consistency projection enlists DeleteView in the UoW` | Added new `describe` (1 it) | same |
+| `DeleteView is idempotent on a non-existent view`                               | Added new `describe` (1 it) | same                                                                       |
+| `Strong-consistency projection enlists DeleteView in the UoW`                   | Added new `describe` (1 it) | same                                                                       |
 
 ### in-memory-view-store.test.ts (engine)
 
-| Scenario heading | Action | Test path |
-|---|---|---|
-| `delete removes a stored view` | Added new `describe` (1 it) | `packages/engine/src/__tests__/engine/implementations/in-memory-view-store.test.ts` |
-| `delete is idempotent on a missing key` | Added new `describe` (1 it) | same |
-| `delete uses string coercion for viewId` | Added new `describe` (1 it) | same |
-| `delete leaves other views untouched` | Added new `describe` (1 it) | same |
-| `save after delete creates a fresh entry` | Added new `describe` (1 it) | same |
+| Scenario heading                          | Action                      | Test path                                                                           |
+| ----------------------------------------- | --------------------------- | ----------------------------------------------------------------------------------- |
+| `delete removes a stored view`            | Added new `describe` (1 it) | `packages/engine/src/__tests__/engine/implementations/in-memory-view-store.test.ts` |
+| `delete is idempotent on a missing key`   | Added new `describe` (1 it) | same                                                                                |
+| `delete uses string coercion for viewId`  | Added new `describe` (1 it) | same                                                                                |
+| `delete leaves other views untouched`     | Added new `describe` (1 it) | same                                                                                |
+| `save after delete creates a fresh entry` | Added new `describe` (1 it) | same                                                                                |
 
 ---
 
@@ -160,19 +161,19 @@ Ran `eslint --max-warnings 0` on all modified source and test files. No warnings
 
 ## Requirements Coverage
 
-| Requirement | Spec | Covered by |
-|---|---|---|
-| `ViewStore.delete` method added | view-store.spec.md BR 6, 7 | `ViewStore exposes a delete method`, integration tests |
-| Delete is idempotent | view-store.spec.md BR 6 | `delete is idempotent on a missing key`, `DeleteView is idempotent` |
-| Delete then load returns undefined | view-store.spec.md BR 7 | `delete removes a stored view` |
-| `DeleteView` is a unique symbol | projection.spec.md BR 16 | `DeleteView is an exported unique-symbol sentinel` |
-| Reducer return type includes `DeleteView` | projection.spec.md BR 17 | `Reducer return type accepts both TView and DeleteView` |
-| Engine routes `DeleteView` to `delete` (eventual) | projection.spec.md BR 18 | `Reducer returning DeleteView triggers viewStore.delete (eventual consistency)` |
-| Engine routes `DeleteView` to `delete` (strong) | projection.spec.md BR 21 | `Strong-consistency projection enlists DeleteView in the UoW` |
-| Deletion is idempotent at engine level | projection.spec.md BR 20 | `DeleteView is idempotent on a non-existent view` |
-| InMemoryViewStore.delete removes entry | in-memory-view-store.spec.md BR 8 | `delete removes a stored view` |
-| InMemoryViewStore.delete is idempotent | in-memory-view-store.spec.md BR 9 | `delete is idempotent on a missing key` |
-| InMemoryViewStore.delete uses String() coercion | in-memory-view-store.spec.md BR 4 | `delete uses string coercion for viewId` |
-| InMemoryViewStore.delete isolates other views | edge cases | `delete leaves other views untouched` |
-| Save after delete works | edge cases | `save after delete creates a fresh entry` |
-| DrizzleViewStore satisfies ViewStore | interface invariant | Added `delete` to `DrizzleViewStore` |
+| Requirement                                       | Spec                              | Covered by                                                                      |
+| ------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------- |
+| `ViewStore.delete` method added                   | view-store.spec.md BR 6, 7        | `ViewStore exposes a delete method`, integration tests                          |
+| Delete is idempotent                              | view-store.spec.md BR 6           | `delete is idempotent on a missing key`, `DeleteView is idempotent`             |
+| Delete then load returns undefined                | view-store.spec.md BR 7           | `delete removes a stored view`                                                  |
+| `DeleteView` is a unique symbol                   | projection.spec.md BR 16          | `DeleteView is an exported unique-symbol sentinel`                              |
+| Reducer return type includes `DeleteView`         | projection.spec.md BR 17          | `Reducer return type accepts both TView and DeleteView`                         |
+| Engine routes `DeleteView` to `delete` (eventual) | projection.spec.md BR 18          | `Reducer returning DeleteView triggers viewStore.delete (eventual consistency)` |
+| Engine routes `DeleteView` to `delete` (strong)   | projection.spec.md BR 21          | `Strong-consistency projection enlists DeleteView in the UoW`                   |
+| Deletion is idempotent at engine level            | projection.spec.md BR 20          | `DeleteView is idempotent on a non-existent view`                               |
+| InMemoryViewStore.delete removes entry            | in-memory-view-store.spec.md BR 8 | `delete removes a stored view`                                                  |
+| InMemoryViewStore.delete is idempotent            | in-memory-view-store.spec.md BR 9 | `delete is idempotent on a missing key`                                         |
+| InMemoryViewStore.delete uses String() coercion   | in-memory-view-store.spec.md BR 4 | `delete uses string coercion for viewId`                                        |
+| InMemoryViewStore.delete isolates other views     | edge cases                        | `delete leaves other views untouched`                                           |
+| Save after delete works                           | edge cases                        | `save after delete creates a fresh entry`                                       |
+| DrizzleViewStore satisfies ViewStore              | interface invariant               | Added `delete` to `DrizzleViewStore`                                            |
