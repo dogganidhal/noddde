@@ -16,7 +16,7 @@ npm install -g @noddde/cli
 
 ## Usage
 
-The CLI has two command groups:
+The CLI has three command groups:
 
 ### `noddde new` — scaffold new modules
 
@@ -41,6 +41,16 @@ noddde add event-handler <event-name> [--projection <name>]
 When adding a command, the event name is auto-derived (`PlaceBid` → `BidPlaced`) with interactive confirmation. Override via `--event`. If `--aggregate` or `--projection` is omitted, the CLI prompts you to pick from discovered modules.
 
 Generated files follow noddde conventions: pure functions, typed events and commands, and the Decider pattern.
+
+### `noddde diagram` — flow diagram from a domain
+
+```bash
+noddde diagram [domain-file] [--format mermaid|dot|json] [--scope write|read|process|all] [--out path] [--hide-isolated] [--tsconfig path]
+```
+
+Reads a domain (defaults to `src/domain/domain.ts`), introspects every aggregate / projection / saga, and emits a flow diagram showing how commands, events, and queries traverse the system. Five edge types come straight from runtime introspection (`Object.keys` on the `decide` / `evolve` / `on` / `queryHandlers` maps); saga-dispatched commands are resolved via the TypeScript compiler API from each saga's `commands` discriminated union.
+
+Output is Mermaid by default — paste into a Markdown preview or commit to GitHub for inline rendering. Solid arrows mark runtime-derived edges, dashed arrows mark statically-resolved (saga → command) edges. Commands a saga dispatches but no aggregate handles are flagged as `external` with a warning.
 
 ## Related Packages
 
