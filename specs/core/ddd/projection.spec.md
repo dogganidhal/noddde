@@ -77,7 +77,7 @@ docs:
   - `on: ProjectionOnMap<T>` -- partial map of event handlers. Each entry bundles an `id` function (extracts view instance ID) and a `reduce` function (transforms the view). Only events the projection cares about need entries.
   - `queryHandlers: QueryHandlerMap<T>` -- optional handler per query name.
   - `initialView?: T["view"]` -- optional default view state for new view instances.
-  - `viewStore?: ViewStoreFactory<T>` -- optional factory function that resolves a view store from infrastructure. When `T` has a typed `viewStore` field, returns that specific type; otherwise returns `ViewStore<T["view"]>`. Prefer using `ProjectionWiring` in `DomainWiring` for runtime view store configuration.
+  - `viewStore?: ViewStoreFactory<T["view"]>` -- optional view store factory. The factory's `getForContext(ctx)` mints a `ViewStore` scoped to the given transaction context (or the base, non-transactional client when `ctx` is `undefined`). Prefer wiring this in `ProjectionWiring` via `DomainWiring`; the field on the projection definition is a fallback for self-contained projections.
   - `consistency?: "eventual" | "strong"` -- optional consistency mode (defaults to `"eventual"`).
 
 - **`defineProjection<T>(config): Projection<T>`** -- identity function for type inference.
@@ -108,7 +108,17 @@ docs:
 7. When `T` does not have a `viewStore` field, `QueryHandlerMap` uses `T["infrastructure"]` as-is.
 8. The `id` function within each `on` entry is optional at the type level. When a view store is configured in the domain runtime, the engine validates that every `on` entry has an `id` function.
 9. `initialView` provides the default view state when the view store returns `undefined`/`null` for a new entity. Without it, reducers may receive `undefined` as the current view.
-10. `consistency` defaults to `"eventual"`. When `"strong"`, the engine enlists view persistence in the same UoW as the originating command. When `"eventual"`, views are updated asynchronously via the event bus.
+10. `consistency` defaults to `"eventual"`. When `"strong"`, the engine enlists view persistence in the same UoW as the originating command and reads `uow.context` at thunk-execution time to scope `load`+`reduce`+`save` to the active transaction. When `"eventual"`, views are updated asynchronously via the event bus.
+
+    **Strong-consistency execution semantics:** for each event matched by the projection's `on` map, the engine `enlist`s a single thunk that performs the entire read-modify-write inside the UoW commit boundary. Specifically:
+
+    1. The engine resolves the projection's `ViewStoreFactory` from `DomainWiring.projections[name].viewStore` (or from the projection definition's `viewStore` field as a fallback). The wired value MUST be a `ViewStoreFactory`; the legacy `(infra) => ViewStore` function form is no longer accepted.
+    2. Inside the enlisted thunk, the engine calls `factory.getForContext(uow.context)` to obtain a transactionally-scoped `ViewStore`.
+    3. The engine calls `scoped.load(viewId)`, then `handler.reduce(event, current)`, then `scoped.save(viewId, next)` — all on the same scoped store, all inside the active transaction.
+    4. If any step throws, the UoW rolls back; the aggregate's events and the projection's view writes are reverted atomically.
+
+    Reducers MUST therefore be pure with respect to external state — they run at commit time on the current transactional snapshot, not at command-dispatch time.
+
 11. `ProjectionEventHandler` is exported so users can reference it in utility types and generic helpers.
 12. `InferProjectionEventHandler<T, K>` resolves to a `{ id?, reduce }` object type with the event narrowed to variant `K` and the view type from `T`.
 13. `InferProjectionQueryInfrastructure<T>` conditionally injects `{ views: T["viewStore"] }` into `T["infrastructure"]` when `T` has a `viewStore` field, matching the internal `ProjectionQueryInfra<T>` logic.
@@ -163,8 +173,10 @@ docs:
 - View store configuration lives in the domain runtime (`DomainWiring.projections` via `wireDomain`), not in the projection definition.
 - When a view store is configured for a projection and `on` entries have `id`, the engine auto-persists views: `event → id → load → reduce → (save | delete)`. The branch is selected by checking whether the awaited reducer return value is the `DeleteView` sentinel.
 - When `T` has a `viewStore` type hint, query handlers receive `{ views: viewStoreInstance }` merged into their infrastructure.
-- Strong consistency projections: view persistence (save OR delete) is enlisted in the command's `UnitOfWork` via `onEventsProduced` callback.
-- Eventual consistency projections: view persistence (save OR delete) happens asynchronously via event bus subscription.
+- Strong consistency projections: view persistence (save OR delete) is enlisted in the command's `UnitOfWork` via `onEventsProduced` callback. Inside the enlisted thunk, the engine calls `factory.getForContext(uow.context)` to obtain a transactionally-scoped store before performing `load` + `reduce` + (`save` | `delete`).
+- Eventual consistency projections: view persistence (save OR delete) happens asynchronously via event bus subscription, using a cached `getForContext(undefined)` instance.
+- Query handlers receive `{ views }` typed as `T["viewStore"]` (or the inferred `ViewStore<T["view"]>` when no type hint is present). The instance is the cached `getForContext(undefined)` result and is therefore non-transactional — query handlers run outside the command UoW.
+- Wiring a projection requires a `ViewStoreFactory`. For in-memory development, use `InMemoryViewStoreFactory<TView>`. For ad-hoc cases (capturing a pre-built store), use `createViewStoreFactory(() => store)`. The legacy `(infra) => ViewStore` function form is no longer accepted.
 - `DeleteView` is exported from `@noddde/core` so user reducers can import and return it directly.
 
 ## Test Scenarios

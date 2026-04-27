@@ -6,7 +6,12 @@ import type {
   DefineQueries,
   ViewStore,
 } from "@noddde/core";
-import { defineAggregate, defineProjection, defineSaga } from "@noddde/core";
+import {
+  createViewStoreFactory,
+  defineAggregate,
+  defineProjection,
+  defineSaga,
+} from "@noddde/core";
 import { testDomain } from "@noddde/testing";
 import { InMemoryViewStore } from "@noddde/engine";
 
@@ -80,7 +85,7 @@ function createCounterProjection() {
         return view?.total ?? 0;
       },
     },
-    viewStore: () => viewStore,
+    viewStore: createViewStoreFactory(() => viewStore),
   });
 
   return { projection, viewStore };

@@ -181,11 +181,17 @@ type AggregateWiring = {
 /**
  * Per-projection runtime configuration. Extracts view store wiring from
  * the projection definition into the wiring layer.
+ *
+ * `viewStore` is a {@link ViewStoreFactory} singleton — its
+ * `getForContext(ctx?)` is invoked by the engine: once at init with
+ * `ctx = undefined` (the cached base instance for query handlers and
+ * eventual-consistency reads), and once per enlisted strong-consistency
+ * read-modify-write with `ctx = uow.context` (the active transaction
+ * handle from the configured persistence adapter).
  */
-type ProjectionWiring<TInfrastructure extends Infrastructure = Infrastructure> =
-  {
-    viewStore: (infrastructure: TInfrastructure) => ViewStore;
-  };
+type ProjectionWiring = {
+  viewStore: ViewStoreFactory;
+};
 
 /**
  * Runtime infrastructure wiring. Connects a DomainDefinition to persistence,
@@ -202,10 +208,7 @@ type DomainWiring<
     | AggregateWiring
     | Record<keyof TAggregates & string, AggregateWiring>;
   /** Projection runtime — per-projection view store wiring. */
-  projections?: Record<
-    keyof TProjections & string,
-    ProjectionWiring<TInfrastructure>
-  >;
+  projections?: Record<keyof TProjections & string, ProjectionWiring>;
   /** Saga runtime. Required if processModel has sagas. */
   sagas?: {
     persistence: () => SagaPersistence | Promise<SagaPersistence>;
@@ -308,7 +311,7 @@ class Domain<
 - `DomainDefinition` captures the pure domain structure: write model (aggregates + standalone command handlers), read model (projections + standalone query handlers), and process model (sagas). `TInfrastructure` is a type parameter only (handler signatures reference it) — no infrastructure value is present. `TProjections` captures the typed projections map (inferred from `readModel.projections`).
 - `defineDomain` is a sync identity function, consistent with `defineAggregate`, `defineProjection`, `defineSaga`. It returns the input with full type inference. `TAggregates` is inferred from `writeModel.aggregates`, `TProjections` from `readModel.projections`.
 - `AggregateWiring` groups per-aggregate runtime config: persistence, concurrency strategy, and snapshots. All fields optional.
-- `ProjectionWiring` provides per-projection view store wiring, extracted from the `Projection.viewStore` field (which is now deprecated in favor of this).
+- `ProjectionWiring` provides per-projection view store wiring. Its `viewStore` field is a {@link ViewStoreFactory} singleton — the only accepted form. The legacy `(infrastructure) => ViewStore` function shorthand has been removed.
 - `DomainWiring` separates user-provided infrastructure (`infrastructure`) from framework plumbing (`aggregates`, `projections`, `sagas`, `buses`, `unitOfWork`, `idempotency`, `outbox`).
 - `DomainWiring.aggregates` is a discriminated union: a single `AggregateWiring` (global — all aggregates share the same config) or a `Record<keyof TAggregates & string, AggregateWiring>` (per-aggregate — each aggregate configured independently). Runtime discrimination: `typeof aggregates.persistence === 'function'` or `typeof aggregates.concurrency !== 'undefined'` or `typeof aggregates.snapshots !== 'undefined'` → global; otherwise per-aggregate record.
 - `wireDomain` accepts a `DomainDefinition` and an optional `DomainWiring`. When `wiring` is omitted or `{}`, all infrastructure defaults to in-memory implementations and startup warnings are logged. Resolves all factories, creates a `Domain` instance, calls `init()`, and returns it. All type parameters are inferred from `TDef` (the narrow definition type) via conditional type extraction — the user does not need to specify any generics.
@@ -461,9 +464,10 @@ When outbox is configured, after the explicit UoW commits and events are dispatc
    - If `wiring.aggregates` has a `persistence`, `concurrency`, or `snapshots` key at the top level, it is **global mode** — apply the same config to all aggregates.
    - Otherwise, it is **per-aggregate mode** — each key is an aggregate name mapped to its `AggregateWiring`. Validate that every aggregate in `definition.writeModel.aggregates` has a corresponding entry and that no unknown aggregate names are present. Throw a descriptive error on mismatch.
 3. **Resolve projection wiring** — For each projection in `definition.readModel.projections`:
-   - If `wiring.projections[name]` exists, use its `viewStore` factory.
-   - Otherwise, fall back to the deprecated `Projection.viewStore` field if present.
+   - If `wiring.projections[name]` exists, use its `viewStore` (a `ViewStoreFactory`).
+   - Otherwise, fall back to the `Projection.viewStore` field on the definition (also a `ViewStoreFactory`) if present.
    - If neither is set and the projection has `identity`, throw an error (same as today).
+   - For each resolved factory, call `getForContext(undefined)` once to obtain the cached, non-transactional base instance used by query handlers and eventual-consistency reads.
 4. Map the resolved wiring into the internal `Domain` constructor format.
 5. Create a new `Domain` instance.
 6. Call `domain.init()`.
@@ -557,8 +561,9 @@ In global mode, the same snapshot config applies to all event-sourced aggregates
 - **wireDomain with per-aggregate config, unknown aggregate** -- If the per-aggregate record contains a key that does not match any registered aggregate, `wireDomain` (during `init()`) throws an error listing the unknown names.
 - **wireDomain with per-aggregate mixed concurrency** -- One aggregate optimistic, another pessimistic. Each uses its own strategy independently.
 - **wireDomain with per-aggregate snapshots on state-stored aggregate** -- Snapshots are silently ignored for state-stored aggregates (existing behavior, now per-aggregate).
-- **wireDomain projection viewStore overrides deprecated Projection.viewStore** -- If both `wiring.projections[name].viewStore` and `Projection.viewStore` are set, the wiring version takes priority.
+- **wireDomain projection viewStore overrides Projection.viewStore** -- If both `wiring.projections[name].viewStore` and `Projection.viewStore` are set, the wiring version takes priority. Both must be `ViewStoreFactory` instances.
 - **wireDomain projection viewStore not provided for projection with identity** -- Throws an error (same as today when `Projection.viewStore` is missing for a projection with `identity`).
+- **wireDomain projection viewStore as a function** -- Type error at compile time and rejected at runtime: only `ViewStoreFactory` instances (anything with a callable `getForContext` method) are accepted. The legacy `(infra) => ViewStore` shorthand has been removed.
 - **defineDomain called multiple times** -- Each call returns a fresh reference. No state is shared between calls.
 
 ## Integration Points
@@ -1097,6 +1102,7 @@ const ItemAggregate = defineAggregate<ItemAggregateTypes>({
 describe("wireDomain projection wiring", () => {
   it("should resolve viewStore from wiring.projections", async () => {
     const viewStore = new InMemoryViewStore<ItemView>();
+    const factory = createViewStoreFactory<ItemView>(() => viewStore);
 
     const definition = defineDomain<TestInfra>({
       writeModel: { aggregates: { Item: ItemAggregate } },
@@ -1107,7 +1113,7 @@ describe("wireDomain projection wiring", () => {
       infrastructure: () => ({ itemViewStore: viewStore }),
       projections: {
         ItemProjection: {
-          viewStore: () => viewStore,
+          viewStore: factory,
         },
       },
       buses: () => ({

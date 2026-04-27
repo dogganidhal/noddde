@@ -14,7 +14,8 @@ export type {
   PartialEventLoad,
 } from "./snapshot";
 export type { IdempotencyRecord, IdempotencyStore } from "./idempotency";
-export type { ViewStore } from "./view-store";
+export type { ViewStore, ViewStoreFactory } from "./view-store";
+export { createViewStoreFactory } from "./view-store";
 export type { OutboxEntry, OutboxStore } from "./outbox";
 export type { PersistenceAdapter } from "./adapter";
 export { isPersistenceAdapter } from "./adapter";

@@ -194,8 +194,9 @@ const AccountProjection = defineProjection<AccountProjectionDef>({
 ```
 
 ```ts title="domain.ts"
-// In domain wiring -- viewStore is provided here
+// In domain wiring -- a ViewStoreFactory is provided here
 import { defineDomain, wireDomain } from "@noddde/engine";
+import { PrismaAccountViewStoreFactory } from "./infrastructure/prisma-account-view-store-factory";
 
 const definition = defineDomain({
   writeModel: {
@@ -206,9 +207,11 @@ const definition = defineDomain({
   readModel: { projections: { Account: AccountProjection } },
 });
 
+const accountFactory = new PrismaAccountViewStoreFactory(prisma);
+
 const domain = await wireDomain(definition, {
   projections: {
-    Account: { viewStore: (infra) => infra.accountViewStore },
+    Account: { viewStore: accountFactory },
   },
 });
 ```
@@ -357,22 +360,94 @@ const projection = defineProjection<Def>({
 
 ## The viewStore in Domain Configuration
 
-The `viewStore` factory has moved from the projection definition to the domain configuration. It is now provided as part of the projection entry in `readModel.projections`:
+The `viewStore` value lives in the domain configuration, under `projections`. It must be a `ViewStoreFactory` — a singleton with a `getForContext(ctx?)` method:
 
 ```ts
-readModel: {
-  projections: {
-    Account: {
-      projection: AccountProjection,
-      viewStore: (infra) => infra.accountViewStore,
-    },
-  },
-},
+projections: {
+  // Class-based factory (typical for ORM-backed stores).
+  Account: { viewStore: new PrismaAccountViewStoreFactory(prisma) },
+
+  // In-memory factory (suitable for development and tests).
+  Audit: { viewStore: new InMemoryViewStoreFactory<AuditView>() },
+}
 ```
 
-The factory receives the resolved infrastructure and should return an **already-initialized** view store instance from it. This keeps the projection definition free of infrastructure concerns — the view store is created and configured when you set up your infrastructure, not inside domain code. Constructing a view store inline (e.g., `new InMemoryViewStore()`) defeats the purpose of separating domain from infrastructure.
+### `ViewStoreFactory` — when you need transactional participation
 
-The factory is **synchronous only**. The view store must be fully initialized before being provided via infrastructure — async initialization belongs in your infrastructure setup, not in a wiring factory. The factory is called during `wireDomain()` with the fully resolved infrastructure (custom + CQRS).
+`ViewStoreFactory<TView>` is a singleton with one method: `getForContext(ctx?)`. The framework calls it in two ways:
+
+1. **At init**, with `ctx === undefined`. The result is cached and used for query handlers and eventual-consistency reads.
+2. **Per strong-consistency read-modify-write**, with `ctx` set to `UnitOfWork.context` (the active transaction handle from your adapter — a Prisma `TransactionClient`, a Drizzle tx, a TypeORM `EntityManager`). The factory mints a fresh store bound to that transaction so `save`, `load`, and any custom methods on the returned store run inside it.
+
+Implementing one is small:
+
+```ts
+import type { Prisma, PrismaClient } from "@prisma/client";
+import type { ID, ViewStore, ViewStoreFactory } from "@noddde/core";
+
+type PrismaExec = PrismaClient | Prisma.TransactionClient;
+
+class PrismaAccountViewStore implements AccountViewStore {
+  constructor(private readonly exec: PrismaExec) {}
+  async save(id: ID, view: AccountView) {
+    await this.exec.account.upsert({
+      where: { id: String(id) },
+      update: { balance: view.balance },
+      create: { id: String(id), balance: view.balance },
+    });
+  }
+  async load(id: ID) {
+    return this.exec.account.findUnique({ where: { id: String(id) } });
+  }
+  // Custom methods automatically use `this.exec` — transactional when minted with a tx.
+  async findByBalanceRange(min: number, max: number) {
+    return this.exec.account.findMany({
+      where: { balance: { gte: min, lte: max } },
+    });
+  }
+}
+
+export class PrismaAccountViewStoreFactory
+  implements ViewStoreFactory<AccountView>
+{
+  constructor(private readonly prisma: PrismaClient) {}
+  getForContext(ctx?: unknown): AccountViewStore {
+    const exec = (ctx as Prisma.TransactionClient | undefined) ?? this.prisma;
+    return new PrismaAccountViewStore(exec);
+  }
+}
+```
+
+For simple cases, use the `createViewStoreFactory` helper:
+
+```ts
+import { createViewStoreFactory } from "@noddde/core";
+
+const factory = createViewStoreFactory<AccountView>(
+  (ctx) =>
+    new PrismaAccountViewStore(
+      (ctx as Prisma.TransactionClient | undefined) ?? prisma,
+    ),
+);
+```
+
+### Capturing a pre-built store with `createViewStoreFactory`
+
+When you already have a store instance in scope (typical in tests or lightweight setups), wrap it in a factory inline:
+
+```ts
+import { createViewStoreFactory } from "@noddde/core";
+
+const sharedStore = new InMemoryViewStore<AccountView>();
+
+projections: {
+  Account: {
+    viewStore: createViewStoreFactory(() => sharedStore),
+  },
+}
+```
+
+The builder is called with `ctx?: unknown` on every invocation, but for in-memory stores you can ignore it and return the same shared instance. The framework treats the result the same way it treats a class-based factory.
 
 ## Consistency Modes
 
@@ -392,12 +467,14 @@ If the view update fails, the aggregate state is already committed. This is the 
 
 ### Strong Consistency
 
-View updates are enlisted in the same unit of work as the originating command. The projection reducer runs and `viewStore.save()` (or `viewStore.delete()` if the reducer returns [`DeleteView`](#deleting-views-with-deleteview)) is deferred alongside aggregate persistence. If the command's UoW fails, both aggregate and view changes are rolled back atomically.
+View updates are enlisted in the same unit of work as the originating command. Inside the enlisted thunk — i.e., inside your adapter's transactional region — the engine calls `factory.getForContext(uow.context)` to mint a transactionally-scoped view store, then runs `load` + `reduce` + (`save` or `delete`, depending on whether the reducer returns [`DeleteView`](#deleting-views-with-deleteview)) on that scoped store. If the command's UoW fails, both aggregate and view changes are rolled back atomically.
 
 ```
-Command -> Aggregate -> Events -> [Projection reducer -> viewStore.save()/delete()] -> UoW commit
-                                                                                            |
-                                                                              single atomic boundary
+Command -> Aggregate -> Events -> [load + reduce + save/delete inside UoW commit] -> UoW commit
+                                                |
+                                  factory.getForContext(uow.context)
+                                                |
+                                       single atomic boundary
 ```
 
 Enable it with `consistency: "strong"`:
@@ -413,6 +490,10 @@ const projection = defineProjection<Def>({
 ```
 
 Strong-consistency projections do **not** subscribe to the event bus (to avoid double processing). They are processed inline during command execution.
+
+For the atomic guarantee to hold against a real database, the factory's `getForContext(ctx)` must return a store that uses `ctx` as its transactional executor (e.g. a Prisma `TransactionClient`, a TypeORM `EntityManager`, a Drizzle tx). The framework calls `getForContext(uow.context)` per enlisted read-modify-write so the store sees the live transaction.
+
+Reducers run at commit time on the current transactional snapshot, so they must be pure with respect to external state.
 
 ## Validation
 

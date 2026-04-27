@@ -3,7 +3,7 @@ import type { ID } from "../id";
 import { Infrastructure } from "../infrastructure";
 import { Event } from "../edd";
 import { Query, QueryHandler } from "../cqrs";
-import type { ViewStore } from "../persistence/view-store";
+import type { ViewStore, ViewStoreFactory } from "../persistence/view-store";
 
 /**
  * Sentinel value a projection reducer may return to instruct the engine to
@@ -132,17 +132,8 @@ type QueryHandlerMap<T extends ProjectionTypes> = {
   >;
 };
 
-/**
- * Factory function that resolves a view store from user infrastructure.
- * When `T` has a typed `viewStore` field in its `ProjectionTypes`, the
- * factory returns that specific view store type. Otherwise, it returns
- * a generic `ViewStore<T["view"]>`.
- */
-type ViewStoreFactory<T extends ProjectionTypes> = T extends {
-  viewStore: infer VS extends ViewStore;
-}
-  ? (infrastructure: T["infrastructure"]) => VS
-  : (infrastructure: T["infrastructure"]) => ViewStore<T["view"]>;
+// (Removed: ProjectionViewStoreSource union — the projection's `viewStore?`
+// field now accepts only `ViewStoreFactory<T["view"]>`. See `Projection.viewStore`.)
 
 // ---- Projection definition ----
 
@@ -213,11 +204,14 @@ export interface Projection<T extends ProjectionTypes = ProjectionTypes> {
   initialView?: T["view"];
 
   /**
-   * Optional factory that resolves the view store from user infrastructure.
-   * Can be provided here for convenience, or via `DomainWiring.projections`
-   * in {@link wireDomain} (which takes priority if both are set).
+   * Optional {@link ViewStoreFactory} for this projection. The factory's
+   * `getForContext(ctx?)` mints a `ViewStore` scoped to the given
+   * transactional context (or the base, non-transactional client when
+   * `ctx` is `undefined`). Can be provided here for convenience, or via
+   * `DomainWiring.projections` in {@link wireDomain} (which takes priority
+   * if both are set).
    */
-  viewStore?: ViewStoreFactory<T>;
+  viewStore?: ViewStoreFactory<T["view"]>;
 
   /**
    * Consistency mode for view persistence:

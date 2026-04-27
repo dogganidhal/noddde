@@ -20,11 +20,24 @@ export class TypeORMUnitOfWork implements UnitOfWork {
   private operations: Array<() => Promise<void>> = [];
   private pendingEvents: Event[] = [];
   private completed = false;
+  private _context: unknown = undefined;
 
   constructor(
     private readonly dataSource: DataSource,
     private readonly txStore: TypeORMTransactionStore,
   ) {}
+
+  /**
+   * The transactional `EntityManager` bound to this unit of work, while
+   * `commit()` is inside its `dataSource.manager.transaction()`
+   * callback. Outside that window, `context` is `undefined`.
+   * Cross-cutting consumers (e.g. a `ViewStoreFactory.getForContext`)
+   * read this to participate in the same transaction as aggregate
+   * persistence.
+   */
+  get context(): unknown {
+    return this._context;
+  }
 
   enlist(operation: () => Promise<void>): void {
     this.assertNotCompleted();
@@ -46,12 +59,14 @@ export class TypeORMUnitOfWork implements UnitOfWork {
     await this.dataSource.manager.transaction(
       async (transactionalEntityManager) => {
         txStore.current = transactionalEntityManager;
+        this._context = transactionalEntityManager;
         try {
           for (const op of ops) {
             await op();
           }
         } finally {
           txStore.current = null;
+          this._context = undefined;
         }
       },
     );

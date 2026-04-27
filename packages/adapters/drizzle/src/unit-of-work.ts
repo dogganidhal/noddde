@@ -28,6 +28,7 @@ export class DrizzleUnitOfWork implements UnitOfWork {
   private operations: Array<() => Promise<void>> = [];
   private pendingEvents: Event[] = [];
   private completed = false;
+  private _context: unknown = undefined;
   private readonly useSqlStatements: boolean;
 
   constructor(
@@ -35,6 +36,20 @@ export class DrizzleUnitOfWork implements UnitOfWork {
     private readonly txStore: DrizzleTransactionStore,
   ) {
     this.useSqlStatements = isSyncSQLite(db);
+  }
+
+  /**
+   * The Drizzle transaction handle bound to this unit of work, while
+   * `commit()` is inside its transactional region. For async dialects
+   * (PostgreSQL / MySQL), this is the `tx` object passed by
+   * `db.transaction(async tx => ...)`. For sync SQLite, this is the
+   * `db` instance during the `BEGIN` / `COMMIT` window. Outside that
+   * window, `context` is `undefined`. Cross-cutting consumers (e.g. a
+   * `ViewStoreFactory.getForContext`) read this to participate in the
+   * same transaction as aggregate persistence.
+   */
+  get context(): unknown {
+    return this._context;
   }
 
   enlist(operation: () => Promise<void>): void {
@@ -72,6 +87,7 @@ export class DrizzleUnitOfWork implements UnitOfWork {
   private async commitWithSqlStatements(): Promise<Event[]> {
     this.db.run(sql`BEGIN`);
     this.txStore.current = this.db;
+    this._context = this.db;
 
     try {
       for (const op of this.operations) {
@@ -87,6 +103,7 @@ export class DrizzleUnitOfWork implements UnitOfWork {
       throw error;
     } finally {
       this.txStore.current = null;
+      this._context = undefined;
     }
 
     return [...this.pendingEvents];
@@ -99,6 +116,7 @@ export class DrizzleUnitOfWork implements UnitOfWork {
   private async commitWithCallback(): Promise<Event[]> {
     await this.db.transaction(async (tx: any) => {
       this.txStore.current = tx;
+      this._context = tx;
 
       try {
         for (const op of this.operations) {
@@ -106,11 +124,13 @@ export class DrizzleUnitOfWork implements UnitOfWork {
         }
       } catch (error) {
         this.txStore.current = null;
+        this._context = undefined;
         throw error;
       }
     });
 
     this.txStore.current = null;
+    this._context = undefined;
     return [...this.pendingEvents];
   }
 

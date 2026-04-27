@@ -15,6 +15,7 @@ import {
   InMemoryEventSourcedAggregatePersistence,
   InMemoryQueryBus,
   InMemoryViewStore,
+  InMemoryViewStoreFactory,
   wireDomain,
 } from "@noddde/engine";
 
@@ -98,7 +99,7 @@ describe("Eventual-consistency DeleteView", () => {
         persistence: () => new InMemoryEventSourcedAggregatePersistence(),
       },
       projections: {
-        UserProjection: { viewStore: () => viewStore },
+        UserProjection: { viewStore: new InMemoryViewStoreFactory(viewStore) },
       },
       buses: () => ({
         commandBus: new InMemoryCommandBus(),
@@ -200,7 +201,7 @@ describe("Strong-consistency DeleteView", () => {
         persistence: () => new InMemoryEventSourcedAggregatePersistence(),
       },
       projections: {
-        UserProjection: { viewStore: () => viewStore },
+        UserProjection: { viewStore: new InMemoryViewStoreFactory(viewStore) },
       },
       buses: () => ({
         commandBus: new InMemoryCommandBus(),

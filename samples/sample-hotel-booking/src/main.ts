@@ -21,7 +21,7 @@ import {
   InMemoryCommandBus,
   InMemoryQueryBus,
   InMemoryIdempotencyStore,
-  InMemoryViewStore,
+  InMemoryViewStoreFactory,
 } from "@noddde/engine";
 import { everyNEvents } from "@noddde/core";
 import { RabbitMqEventBus } from "@noddde/rabbitmq";
@@ -52,7 +52,7 @@ import {
 
 import { requestMetadataStorage } from "./infrastructure/http/plugins/metadata";
 import { createApp } from "./infrastructure/http/app";
-import { DrizzleRoomAvailabilityViewStore } from "./infrastructure/persistence/drizzle-view-store";
+import { DrizzleRoomAvailabilityViewStoreFactory } from "./infrastructure/persistence/drizzle-view-store";
 
 import type {
   GuestHistoryView,
@@ -114,6 +114,19 @@ async function main() {
   const db = drizzle(pool);
   const adapter = new DrizzleAdapter(db);
 
+  // RoomAvailability uses strong consistency, so we go through a factory
+  // that mints transaction-scoped view stores per unit of work. The base
+  // (non-tx) instance is exposed via `infra.roomAvailabilityViewStore` for
+  // standalone query handlers that read outside any UoW.
+  const roomAvailabilityFactory = new DrizzleRoomAvailabilityViewStoreFactory(
+    db,
+  );
+  // GuestHistory and Revenue use eventual consistency (in-memory stores).
+  // We still need ViewStoreFactory wrappers — the base instance is exposed
+  // via infra for code paths that read the view directly.
+  const guestHistoryFactory = new InMemoryViewStoreFactory<GuestHistoryView>();
+  const revenueFactory = new InMemoryViewStoreFactory<RevenueView>();
+
   // -- Define the domain structure (pure, sync) --
   const hotelDomain = defineDomain({
     writeModel: {
@@ -154,9 +167,10 @@ async function main() {
       emailService: new ConsoleEmailService(),
       smsService: new ConsoleSmsService(),
       paymentGateway: new FakePaymentGateway(),
-      roomAvailabilityViewStore: new DrizzleRoomAvailabilityViewStore(db),
-      guestHistoryViewStore: new InMemoryViewStore<GuestHistoryView>(),
-      revenueViewStore: new InMemoryViewStore<RevenueView>(),
+      // Standalone query handlers see the non-transactional base instances.
+      roomAvailabilityViewStore: roomAvailabilityFactory.getForContext(),
+      guestHistoryViewStore: guestHistoryFactory.getForContext(),
+      revenueViewStore: revenueFactory.getForContext(),
     }),
 
     // Per-aggregate persistence and concurrency
@@ -177,14 +191,15 @@ async function main() {
 
     // Projection view stores
     projections: {
+      // Strong consistency: factory mints a tx-scoped store per UoW.
       RoomAvailability: {
-        viewStore: (infra) => infra.roomAvailabilityViewStore,
+        viewStore: roomAvailabilityFactory,
       },
       GuestHistory: {
-        viewStore: (infra) => infra.guestHistoryViewStore,
+        viewStore: guestHistoryFactory,
       },
       Revenue: {
-        viewStore: (infra) => infra.revenueViewStore,
+        viewStore: revenueFactory,
       },
     },
 

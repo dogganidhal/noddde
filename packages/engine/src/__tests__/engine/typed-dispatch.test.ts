@@ -2,7 +2,7 @@
 import { describe, it, expect } from "vitest";
 import { expectTypeOf } from "vitest";
 import { defineDomain, wireDomain, Domain } from "../../domain";
-import { InMemoryViewStore } from "../../implementations/in-memory-view-store";
+import { InMemoryViewStoreFactory } from "../../implementations/in-memory-view-store-factory";
 import {
   defineAggregate,
   defineProjection,
@@ -226,7 +226,7 @@ describe("typed dispatch - queries", () => {
 
     const domain = await wireDomain(definition, {
       projections: {
-        ItemProjection: { viewStore: () => new InMemoryViewStore() },
+        ItemProjection: { viewStore: new InMemoryViewStoreFactory() },
       },
     });
 
@@ -247,8 +247,8 @@ describe("typed dispatch - queries", () => {
 
     const domain = await wireDomain(definition, {
       projections: {
-        ItemProjection: { viewStore: () => new InMemoryViewStore() },
-        OrderProjection: { viewStore: () => new InMemoryViewStore() },
+        ItemProjection: { viewStore: new InMemoryViewStoreFactory() },
+        OrderProjection: { viewStore: new InMemoryViewStoreFactory() },
       },
     });
 
@@ -270,7 +270,7 @@ describe("typed dispatch - queries", () => {
 
     const domain = await wireDomain(definition, {
       projections: {
-        ItemProjection: { viewStore: () => new InMemoryViewStore() },
+        ItemProjection: { viewStore: new InMemoryViewStoreFactory() },
       },
     });
 

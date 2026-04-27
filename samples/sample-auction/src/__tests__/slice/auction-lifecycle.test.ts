@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createViewStoreFactory } from "@noddde/core";
 import { testDomain, stripMetadata } from "@noddde/testing";
 import { InMemoryViewStore } from "@noddde/engine";
 import { Auction } from "../../domain/write-model/aggregates/auction";
@@ -18,7 +19,7 @@ function createTestSetup() {
     infrastructure: { clock: { now: () => now } } as AuctionInfrastructure,
     projectionViewStores: {
       AuctionSummary: {
-        viewStore: () => viewStore,
+        viewStore: createViewStoreFactory(() => viewStore),
       },
     },
   };
