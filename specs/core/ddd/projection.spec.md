@@ -1,5 +1,5 @@
 ---
-title: "ProjectionTypes, Projection, ProjectionEventHandler, defineProjection & Infer Utilities"
+title: "ProjectionTypes, Projection, ProjectionEventHandler, DeleteView, defineProjection & Infer Utilities"
 module: ddd/projection
 source_file: packages/core/src/ddd/projection.ts
 status: implemented
@@ -8,6 +8,7 @@ exports:
     ProjectionTypes,
     ProjectionEventHandler,
     Projection,
+    DeleteView,
     defineProjection,
     InferProjectionView,
     InferProjectionEvents,
@@ -46,10 +47,15 @@ docs:
   - `infrastructure: Infrastructure` -- external dependencies for query handlers.
   - `viewStore?: ViewStore` -- (optional) type-level hint for the view store. When present, enables typed `{ views }` injection into query handlers via `ProjectionQueryInfra<T>`. Not used at runtime in the projection definition — the actual view store is provided in the domain configuration.
 
+- **`DeleteView`** (exported) is a unique-symbol sentinel a reducer may return to instruct the engine to delete the view at the resolved `viewId`:
+
+  - `export const DeleteView: unique symbol`
+  - The type `typeof DeleteView` is the only valid non-`TView` return value from a reducer. Returning it routes the engine to call `viewStore.delete(viewId)` instead of `viewStore.save(viewId, ...)`.
+
 - **`ProjectionEventHandler<TEvent, TView>`** (exported) bundles the identity extractor and reducer for one event type:
 
   - `id?: (event: TEvent) => ID` -- extracts the view instance ID from the event. Optional per-entry. Required by the engine when a view store is configured for auto-persistence.
-  - `reduce: (event: TEvent, view: TView) => TView | Promise<TView>` -- transforms the current view based on the event. Receives the full event object (not just payload). May be sync or async.
+  - `reduce: (event: TEvent, view: TView) => TView | typeof DeleteView | Promise<TView | typeof DeleteView>` -- transforms the current view based on the event, OR returns `DeleteView` to instruct deletion. Receives the full event object (not just payload). May be sync or async.
 
 - **`ProjectionOnMap<T>`** (internal) maps event names to their handlers. This map is **partial** — only events the projection cares about need entries:
 
@@ -94,11 +100,11 @@ docs:
 ## Behavioral Requirements
 
 1. Reducers receive the FULL event object (with narrowed type via `Extract`), not just the payload. This differs from `EvolveHandler` which receives only the payload.
-2. Reducers may be sync or async (`T["view"] | Promise<T["view"]>`).
+2. Reducers may be sync or async (`T["view"] | typeof DeleteView | Promise<T["view"] | typeof DeleteView>`).
 3. The `on` map is **partial** over the event union — only events the projection cares about need entries. Unhandled events are silently ignored. This replaces the old exhaustive `reducers` map.
 4. Query handlers are OPTIONAL per query name (the `?` modifier). A projection may handle events without directly serving queries.
 5. `defineProjection` is an identity function returning the same config object.
-6. When `T` has a `viewStore` field, `QueryHandlerMap` uses `ProjectionQueryInfra<T>` which merges `{ views: T["viewStore"] }` into the infrastructure type. Query handlers can access `views.load()`, `views.save()`, and any custom methods on the view store.
+6. When `T` has a `viewStore` field, `QueryHandlerMap` uses `ProjectionQueryInfra<T>` which merges `{ views: T["viewStore"] }` into the infrastructure type. Query handlers can access `views.load()`, `views.save()`, `views.delete()`, and any custom methods on the view store.
 7. When `T` does not have a `viewStore` field, `QueryHandlerMap` uses `T["infrastructure"]` as-is.
 8. The `id` function within each `on` entry is optional at the type level. When a view store is configured in the domain runtime, the engine validates that every `on` entry has an `id` function.
 9. `initialView` provides the default view state when the view store returns `undefined`/`null` for a new entity. Without it, reducers may receive `undefined` as the current view.
@@ -108,13 +114,19 @@ docs:
 13. `InferProjectionQueryInfrastructure<T>` conditionally injects `{ views: T["viewStore"] }` into `T["infrastructure"]` when `T` has a `viewStore` field, matching the internal `ProjectionQueryInfra<T>` logic.
 14. `InferProjectionQueryHandler<T, K>` resolves to a query handler function receiving the narrowed query payload and the conditional infrastructure (with or without `{ views }`).
 15. All three handler-level inference utilities operate on the `ProjectionTypes` bundle (not the `Projection` definition instance), enabling use before `defineProjection` is called.
+16. **`DeleteView` is a `unique symbol`** exported from `@noddde/core`. It is the only valid non-`TView` value a reducer may return, and is recognized by reference equality (`===`).
+17. **Reducers may return `DeleteView`** in place of a view to instruct the engine to delete the view at the resolved `viewId`. The type is `TView | typeof DeleteView | Promise<TView | typeof DeleteView>`.
+18. **Engine routes `DeleteView` to `viewStore.delete`** — when a reducer's resolved (awaited) return value is the `DeleteView` sentinel, the engine calls `viewStore.delete(viewId)` and does NOT call `viewStore.save` for that event.
+19. **Conditional deletion is supported** — a single reducer may return either `DeleteView` or a view based on event content. The engine checks the awaited return value at runtime; both branches are valid.
+20. **Deletion is idempotent** — returning `DeleteView` for a `viewId` whose view does not exist is a no-op. The engine still calls `viewStore.delete(viewId)`, which the `ViewStore` contract requires to resolve successfully.
+21. **Strong-consistency deletion enlists in the UoW** — for `consistency: "strong"` projections, the engine enlists `viewStore.delete(viewId)` in the same `UnitOfWork` as the originating command, alongside or in place of `save`.
 
 ## Invariants
 
 - The `on` map has at most one key per event name in `T["events"]`; keys are optional.
 - The `queryHandlers` map has at most one key per query name in `T["queries"]`; keys are optional.
 - Reducer first parameter is the full event (with `name` and `payload`), not just `payload`.
-- Reducer second parameter and return type are both `T["view"]`.
+- Reducer second parameter is `T["view"]`. Reducer return type is `T["view"] | typeof DeleteView` (or a `Promise` of that union).
 - Query handler infrastructure type is `ProjectionQueryInfra<T>` -- conditionally includes `{ views }`.
 - `defineProjection` returns the exact same object reference.
 - `id` functions (when present) return `ID` (`string | number | bigint`).
@@ -123,11 +135,14 @@ docs:
 - `InferProjectionEventHandler<T, K>` always produces the same type as `ProjectionOnMap<T>[K]`.
 - `InferProjectionQueryHandler<T, K>` always produces the same type as `QueryHandlerMap<T>[K]`.
 - `InferProjectionQueryInfrastructure<T>` always produces the same type as internal `ProjectionQueryInfra<T>`.
+- `DeleteView` is a `unique symbol` — every `=== DeleteView` check compares against the same exported singleton. Re-creating a symbol with the same description is NOT equal to `DeleteView`.
+- When a reducer's awaited return value is `DeleteView`, the engine MUST NOT call `viewStore.save`. It calls `viewStore.delete(viewId)` exactly once for that event.
 
 ## Edge Cases
 
 - **Projection with no query handlers**: `queryHandlers: {}` is valid since all entries are optional.
 - **Async reducers**: Returning `Promise<T["view"]>` is valid.
+- **Async deletion**: Returning `Promise<typeof DeleteView>` (e.g., from an `async` reducer) is valid; the engine awaits before checking the sentinel.
 - **Single event projection**: The `on` map has one key.
 - **View type is a primitive**: `view: number` is valid; reducers accept and return `number`.
 - **Empty on map**: `on: {}` is valid — the projection serves only as a query handler container.
@@ -135,6 +150,9 @@ docs:
 - **on entry without id**: Valid at the type level. The engine validates that `id` is present when a view store is configured.
 - **initialView is undefined**: Reducers may receive `undefined` as the current view when processing the first event for a new entity.
 - **Projection with viewStore type hint but no id on entries**: Valid at the type level. Query handlers still receive `{ views }` typing. The engine validates `id` presence at init.
+- **Reducer returns `DeleteView` for a missing view**: Engine still calls `viewStore.delete(viewId)`; the call is a no-op per the `ViewStore` contract.
+- **Reducer conditionally returns `DeleteView` or a view**: Same event variant, branching on payload — the engine inspects the awaited return value and routes per call.
+- **Strong-consistency `DeleteView`**: The `delete(viewId)` call is enlisted in the same `UnitOfWork` as the originating command, alongside other UoW operations.
 
 ## Integration Points
 
@@ -143,10 +161,11 @@ docs:
 - `InferProjection*` utilities are used downstream for type-safe view access and query building.
 - Projections complement aggregates: aggregates handle the write side, projections handle the read side.
 - View store configuration lives in the domain runtime (`DomainWiring.projections` via `wireDomain`), not in the projection definition.
-- When a view store is configured for a projection and `on` entries have `id`, the engine auto-persists views: `event → id → load → reduce → save`.
+- When a view store is configured for a projection and `on` entries have `id`, the engine auto-persists views: `event → id → load → reduce → (save | delete)`. The branch is selected by checking whether the awaited reducer return value is the `DeleteView` sentinel.
 - When `T` has a `viewStore` type hint, query handlers receive `{ views: viewStoreInstance }` merged into their infrastructure.
-- Strong consistency projections: view persistence is enlisted in the command's `UnitOfWork` via `onEventsProduced` callback.
-- Eventual consistency projections: view persistence happens asynchronously via event bus subscription.
+- Strong consistency projections: view persistence (save OR delete) is enlisted in the command's `UnitOfWork` via `onEventsProduced` callback.
+- Eventual consistency projections: view persistence (save OR delete) happens asynchronously via event bus subscription.
+- `DeleteView` is exported from `@noddde/core` so user reducers can import and return it directly.
 
 ## Test Scenarios
 
@@ -991,6 +1010,426 @@ describe("InferProjectionQueryInfrastructure", () => {
     expectTypeOf<
       InferProjectionQueryInfrastructure<WithoutViewStore>
     >().toEqualTypeOf<MyInfra>();
+  });
+});
+```
+
+### DeleteView is an exported unique-symbol sentinel
+
+```ts
+import { describe, it, expect, expectTypeOf } from "vitest";
+import { DeleteView } from "@noddde/core";
+
+describe("DeleteView sentinel", () => {
+  it("should be a symbol", () => {
+    expect(typeof DeleteView).toBe("symbol");
+  });
+
+  it("should equal itself by reference", () => {
+    expect(DeleteView).toBe(DeleteView);
+  });
+
+  it("should not equal a freshly created symbol with the same description", () => {
+    expect(DeleteView).not.toBe(Symbol("DeleteView"));
+  });
+
+  it("should be typed as a unique symbol", () => {
+    type T = typeof DeleteView;
+    expectTypeOf<T>().toMatchTypeOf<symbol>();
+  });
+});
+```
+
+### Reducer return type accepts both TView and DeleteView
+
+```ts
+import { describe, it, expectTypeOf } from "vitest";
+import type { DefineEvents, Infrastructure, Query } from "@noddde/core";
+import { DeleteView, defineProjection } from "@noddde/core";
+
+describe("Reducer return type with DeleteView", () => {
+  type Events = DefineEvents<{
+    Created: { id: string };
+    Deleted: { id: string };
+  }>;
+
+  interface View {
+    id: string;
+    status: "active" | "inactive";
+  }
+
+  type Def = {
+    events: Events;
+    queries: Query<any>;
+    view: View;
+    infrastructure: Infrastructure;
+  };
+
+  it("should accept reducers that return TView or DeleteView", () => {
+    const projection = defineProjection<Def>({
+      on: {
+        Created: {
+          id: (e) => e.payload.id,
+          reduce: (e, _v) => ({ id: e.payload.id, status: "active" as const }),
+        },
+        Deleted: {
+          id: (e) => e.payload.id,
+          reduce: () => DeleteView,
+        },
+      },
+      queryHandlers: {},
+    });
+
+    type ReduceCreated = NonNullable<typeof projection.on.Created>["reduce"];
+    type ReduceDeleted = NonNullable<typeof projection.on.Deleted>["reduce"];
+
+    expectTypeOf<ReturnType<ReduceCreated>>().toEqualTypeOf<
+      View | typeof DeleteView | Promise<View | typeof DeleteView>
+    >();
+    expectTypeOf<ReturnType<ReduceDeleted>>().toEqualTypeOf<
+      View | typeof DeleteView | Promise<View | typeof DeleteView>
+    >();
+  });
+
+  it("should accept reducers that conditionally return DeleteView", () => {
+    type CondEvents = DefineEvents<{
+      Deactivate: { id: string; permanent: boolean };
+    }>;
+    type CondDef = {
+      events: CondEvents;
+      queries: Query<any>;
+      view: View;
+      infrastructure: Infrastructure;
+    };
+
+    const projection = defineProjection<CondDef>({
+      on: {
+        Deactivate: {
+          id: (e) => e.payload.id,
+          reduce: (e, view) =>
+            e.payload.permanent
+              ? DeleteView
+              : { ...view, status: "inactive" as const },
+        },
+      },
+      queryHandlers: {},
+    });
+
+    expectTypeOf(projection.on.Deactivate).not.toBeUndefined();
+  });
+
+  it("should accept async reducers that return DeleteView", () => {
+    type AsyncEvents = DefineEvents<{ Purge: { id: string } }>;
+    type AsyncDef = {
+      events: AsyncEvents;
+      queries: Query<any>;
+      view: View;
+      infrastructure: Infrastructure;
+    };
+
+    const projection = defineProjection<AsyncDef>({
+      on: {
+        Purge: {
+          id: (e) => e.payload.id,
+          // Explicit return-type annotation needed because TypeScript widens
+          // a unique-symbol return from an async arrow to plain `symbol` when
+          // the contextual type is a union (`TView | typeof DeleteView | ...`).
+          reduce: async (): Promise<typeof DeleteView> => DeleteView,
+        },
+      },
+      queryHandlers: {},
+    });
+
+    expectTypeOf(projection.on.Purge).not.toBeUndefined();
+  });
+});
+```
+
+### Reducer returning DeleteView triggers viewStore.delete (eventual consistency)
+
+> Integration scenario — full engine wiring. Mirrors the structure in `packages/engine/src/__tests__/integration/event-projection-flow.test.ts`.
+
+```ts
+import { describe, expect, it, vi } from "vitest";
+import type { DefineCommands, DefineEvents, DefineQueries } from "@noddde/core";
+import { DeleteView, defineAggregate, defineProjection } from "@noddde/core";
+import {
+  defineDomain,
+  EventEmitterEventBus,
+  InMemoryCommandBus,
+  InMemoryEventSourcedAggregatePersistence,
+  InMemoryQueryBus,
+  InMemoryViewStore,
+  wireDomain,
+} from "@noddde/engine";
+
+describe("Eventual-consistency DeleteView", () => {
+  type UserEvent = DefineEvents<{
+    UserCreated: { id: string; name: string };
+    UserDeleted: { id: string };
+  }>;
+  type UserCommand = DefineCommands<{
+    CreateUser: { name: string };
+    DeleteUser: void;
+  }>;
+  type UserTypes = {
+    state: { name: string } | null;
+    events: UserEvent;
+    commands: UserCommand;
+    infrastructure: {};
+  };
+  type UserView = { id: string; name: string };
+  type UserQuery = DefineQueries<{
+    GetUser: { payload: { id: string }; result: UserView | undefined | null };
+  }>;
+  type UserProjectionTypes = {
+    events: UserEvent;
+    queries: UserQuery;
+    view: UserView;
+    infrastructure: {};
+  };
+
+  const User = defineAggregate<UserTypes>({
+    initialState: null,
+    decide: {
+      CreateUser: (cmd) => ({
+        name: "UserCreated",
+        payload: { id: cmd.targetAggregateId, name: cmd.payload.name },
+      }),
+      DeleteUser: (cmd) => ({
+        name: "UserDeleted",
+        payload: { id: cmd.targetAggregateId },
+      }),
+    },
+    evolve: {
+      UserCreated: (payload) => ({ name: payload.name }),
+      UserDeleted: () => null,
+    },
+  });
+
+  const UserProjection = defineProjection<UserProjectionTypes>({
+    on: {
+      UserCreated: {
+        id: (event) => event.payload.id,
+        reduce: (event) => ({
+          id: event.payload.id,
+          name: event.payload.name,
+        }),
+      },
+      UserDeleted: {
+        id: (event) => event.payload.id,
+        reduce: () => DeleteView,
+      },
+    },
+    queryHandlers: {},
+  });
+
+  it("should call viewStore.delete when reducer returns DeleteView", async () => {
+    const viewStore = new InMemoryViewStore<UserView>();
+    const deleteSpy = vi.spyOn(viewStore, "delete");
+    const saveSpy = vi.spyOn(viewStore, "save");
+
+    const definition = defineDomain({
+      writeModel: { aggregates: { User } },
+      readModel: { projections: { UserProjection } },
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => new InMemoryEventSourcedAggregatePersistence(),
+      },
+      projections: {
+        UserProjection: { viewStore: () => viewStore },
+      },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    await domain.commandBus.dispatch({
+      name: "CreateUser",
+      targetAggregateId: "u-1",
+      payload: { name: "Alice" },
+    });
+    await domain.commandBus.dispatch({
+      name: "DeleteUser",
+      targetAggregateId: "u-1",
+      payload: undefined,
+    });
+
+    // Eventual consistency: allow the event bus to drain.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(saveSpy).toHaveBeenCalledWith("u-1", { id: "u-1", name: "Alice" });
+    expect(deleteSpy).toHaveBeenCalledWith("u-1");
+    expect(await viewStore.load("u-1")).toBeUndefined();
+  });
+});
+```
+
+### DeleteView is idempotent on a non-existent view
+
+```ts
+import { describe, it, expect } from "vitest";
+import type { DefineEvents, Infrastructure, Query } from "@noddde/core";
+import { DeleteView, defineProjection } from "@noddde/core";
+import { InMemoryViewStore } from "@noddde/engine";
+
+describe("DeleteView idempotency", () => {
+  interface View {
+    id: string;
+  }
+
+  type Events = DefineEvents<{ Removed: { id: string } }>;
+
+  it("should not throw when reducer returns DeleteView for missing view", async () => {
+    const projection = defineProjection<{
+      events: Events;
+      queries: Query<any>;
+      view: View;
+      infrastructure: Infrastructure;
+    }>({
+      on: {
+        Removed: {
+          id: (e) => e.payload.id,
+          reduce: () => DeleteView,
+        },
+      },
+      queryHandlers: {},
+    });
+
+    const viewStore = new InMemoryViewStore<View>();
+    const handler = projection.on.Removed!;
+    const event = { name: "Removed" as const, payload: { id: "x" } };
+
+    const result = await handler.reduce(event, undefined as unknown as View);
+    expect(result).toBe(DeleteView);
+
+    // Simulating the engine's branching twice — both calls succeed.
+    await expect(viewStore.delete("x")).resolves.toBeUndefined();
+    await expect(viewStore.delete("x")).resolves.toBeUndefined();
+    expect(await viewStore.load("x")).toBeUndefined();
+  });
+});
+```
+
+### Strong-consistency projection enlists DeleteView in the UoW
+
+```ts
+import { describe, expect, it, vi } from "vitest";
+import type { DefineCommands, DefineEvents, DefineQueries } from "@noddde/core";
+import { DeleteView, defineAggregate, defineProjection } from "@noddde/core";
+import {
+  defineDomain,
+  EventEmitterEventBus,
+  InMemoryCommandBus,
+  InMemoryEventSourcedAggregatePersistence,
+  InMemoryQueryBus,
+  InMemoryViewStore,
+  wireDomain,
+} from "@noddde/engine";
+
+describe("Strong-consistency DeleteView", () => {
+  type UserEvent = DefineEvents<{
+    UserCreated: { id: string; name: string };
+    UserDeleted: { id: string };
+  }>;
+  type UserCommand = DefineCommands<{
+    CreateUser: { name: string };
+    DeleteUser: void;
+  }>;
+  type UserTypes = {
+    state: { name: string } | null;
+    events: UserEvent;
+    commands: UserCommand;
+    infrastructure: {};
+  };
+  type UserView = { id: string; name: string };
+  type UserQuery = DefineQueries<{
+    GetUser: { payload: { id: string }; result: UserView | undefined | null };
+  }>;
+  type UserProjectionTypes = {
+    events: UserEvent;
+    queries: UserQuery;
+    view: UserView;
+    infrastructure: {};
+  };
+
+  const User = defineAggregate<UserTypes>({
+    initialState: null,
+    decide: {
+      CreateUser: (cmd) => ({
+        name: "UserCreated",
+        payload: { id: cmd.targetAggregateId, name: cmd.payload.name },
+      }),
+      DeleteUser: (cmd) => ({
+        name: "UserDeleted",
+        payload: { id: cmd.targetAggregateId },
+      }),
+    },
+    evolve: {
+      UserCreated: (payload) => ({ name: payload.name }),
+      UserDeleted: () => null,
+    },
+  });
+
+  const UserProjection = defineProjection<UserProjectionTypes>({
+    on: {
+      UserCreated: {
+        id: (event) => event.payload.id,
+        reduce: (event) => ({
+          id: event.payload.id,
+          name: event.payload.name,
+        }),
+      },
+      UserDeleted: {
+        id: (event) => event.payload.id,
+        reduce: () => DeleteView,
+      },
+    },
+    queryHandlers: {},
+    consistency: "strong",
+  });
+
+  it("should delete the view atomically with the originating command", async () => {
+    const viewStore = new InMemoryViewStore<UserView>();
+    const deleteSpy = vi.spyOn(viewStore, "delete");
+
+    const definition = defineDomain({
+      writeModel: { aggregates: { User } },
+      readModel: { projections: { UserProjection } },
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => new InMemoryEventSourcedAggregatePersistence(),
+      },
+      projections: {
+        UserProjection: { viewStore: () => viewStore },
+      },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    await domain.commandBus.dispatch({
+      name: "CreateUser",
+      targetAggregateId: "u-1",
+      payload: { name: "Alice" },
+    });
+    // Strong consistency: deletion happens synchronously with the command.
+    await domain.commandBus.dispatch({
+      name: "DeleteUser",
+      targetAggregateId: "u-1",
+      payload: undefined,
+    });
+
+    expect(deleteSpy).toHaveBeenCalledWith("u-1");
+    expect(await viewStore.load("u-1")).toBeUndefined();
   });
 });
 ```

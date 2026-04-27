@@ -78,6 +78,24 @@ export class DrizzleViewStore<TView> implements ViewStore<TView> {
     if (!row) return undefined;
     return JSON.parse(row.data as string) as TView;
   }
+
+  /**
+   * Deletes a view instance by ID. Idempotent — if no row matches, the
+   * Drizzle delete is a no-op and resolves successfully without error.
+   *
+   * @param viewId - The unique identifier of the view instance to delete.
+   */
+  async delete(viewId: ID): Promise<void> {
+    await this.db
+      .delete(hotelViews)
+      .where(
+        and(
+          eq(hotelViews.viewType, this.viewType),
+          eq(hotelViews.viewId, String(viewId)),
+        ),
+      )
+      .execute();
+  }
 }
 
 /**

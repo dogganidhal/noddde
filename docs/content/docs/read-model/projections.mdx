@@ -243,6 +243,7 @@ Key properties of event handlers:
 - **Partial event mapping** -- Only include events the projection cares about. Unhandled events are silently ignored. No more noop pass-throughs.
 - **Can be async** -- `reduce` may return `Promise<View>` when it needs to perform asynchronous work.
 - **Receive full events** -- Unlike aggregate evolve handlers that receive just the payload, projection reducers receive the complete event object (with `name` and `payload`).
+- **Can delete the view** -- Reducers may return the [`DeleteView`](/docs/read-model/view-persistence#deleting-views-with-deleteview) sentinel from `@noddde/core` to instruct the engine to call `viewStore.delete(viewId)` instead of `viewStore.save`. The full reducer return type is `TView | typeof DeleteView | Promise<TView | typeof DeleteView>`.
 
 ### Why an `on` Map?
 
@@ -257,6 +258,29 @@ The `on` map pattern mirrors the evolve handler pattern used in aggregates. Both
 
 - **Evolve handlers** rebuild the aggregate's internal state for command processing
 - **Projection reducers** build a query-optimized view for the read model
+
+### Deleting Views Conditionally
+
+Because the reducer return type is `TView | typeof DeleteView | Promise<TView | typeof DeleteView>`, a single handler can choose between updating and deleting based on event content:
+
+```ts title="on-entries/on-item-deactivated.ts"
+import { DeleteView } from "@noddde/core";
+import type { InferProjectionEventHandler } from "@noddde/core";
+import type { ItemProjectionDef } from "../types";
+
+export const onItemDeactivated: InferProjectionEventHandler<
+  ItemProjectionDef,
+  "ItemDeactivated"
+> = {
+  id: (event) => event.payload.id,
+  reduce: (event, view) =>
+    event.payload.permanent
+      ? DeleteView
+      : { ...view, status: "inactive" as const },
+};
+```
+
+The engine awaits the return value and routes `DeleteView` to `viewStore.delete` and any view object to `viewStore.save`. Deletion is idempotent — see [View Persistence: Deleting Views](/docs/read-model/view-persistence#deleting-views-with-deleteview) for the full contract.
 
 ## Query Handlers
 
@@ -504,8 +528,8 @@ The view store itself is provided in the domain configuration (not in the projec
 
 1. Extracts the view ID from `on[eventName].id(event)`
 2. Loads the current view from the view store (falling back to `initialView` if not found)
-3. Runs `on[eventName].reduce(event, view)` to produce the new view
-4. Saves the new view to the view store
+3. Runs `on[eventName].reduce(event, view)` to produce the new view (or [`DeleteView`](/docs/read-model/view-persistence#deleting-views-with-deleteview))
+4. If the awaited return value is `DeleteView`, calls `viewStore.delete(viewId)`; otherwise calls `viewStore.save(viewId, newView)`
 
 ### Query Handler Views Injection
 

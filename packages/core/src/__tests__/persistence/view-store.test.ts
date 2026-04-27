@@ -10,9 +10,11 @@ describe("ViewStore", () => {
         ({ id: "1", balance: 100 }) as
           | { id: string; balance: number }
           | undefined,
+      delete: async (_viewId: ID) => {},
     };
     expectTypeOf(store.save).toBeFunction();
     expectTypeOf(store.load).toBeFunction();
+    expectTypeOf(store.delete).toBeFunction();
   });
 });
 
@@ -22,6 +24,7 @@ describe("ViewStore default type", () => {
     const store: DefaultStore = {
       save: async (_viewId: ID, _view: any) => {},
       load: async (_viewId: ID) => undefined,
+      delete: async (_viewId: ID) => {},
     };
     expectTypeOf(store).toMatchTypeOf<ViewStore<any>>();
   });
@@ -48,11 +51,13 @@ describe("ViewStore ID parameter", () => {
     const store: ViewStore<string> = {
       save: async (_viewId: ID, _view: string) => {},
       load: async (_viewId: ID) => undefined,
+      delete: async (_viewId: ID) => {},
     };
 
     // All ID types should be accepted
     expectTypeOf(store.save).parameter(0).toEqualTypeOf<ID>();
     expectTypeOf(store.load).parameter(0).toEqualTypeOf<ID>();
+    expectTypeOf(store.delete).parameter(0).toEqualTypeOf<ID>();
   });
 });
 
@@ -61,6 +66,31 @@ describe("ViewStore load return type", () => {
     type LoadReturn = Awaited<ReturnType<ViewStore<{ id: string }>["load"]>>;
     expectTypeOf<LoadReturn>().toEqualTypeOf<
       { id: string } | undefined | null
+    >();
+  });
+});
+
+describe("ViewStore delete signature", () => {
+  it("should accept ID and return Promise<void>", () => {
+    type Delete = ViewStore<{ id: string }>["delete"];
+    expectTypeOf<Delete>().parameter(0).toEqualTypeOf<ID>();
+    expectTypeOf<ReturnType<Delete>>().toEqualTypeOf<Promise<void>>();
+  });
+});
+
+describe("ViewStore extension preserves delete", () => {
+  interface AccountView {
+    id: string;
+    balance: number;
+  }
+
+  interface AccountViewStore extends ViewStore<AccountView> {
+    findByBalanceRange(min: number, max: number): Promise<AccountView[]>;
+  }
+
+  it("should still require delete on extended stores", () => {
+    expectTypeOf<AccountViewStore["delete"]>().toEqualTypeOf<
+      ViewStore<AccountView>["delete"]
     >();
   });
 });
