@@ -39,9 +39,33 @@ Differences in approach:
 | Testing             | Bootstrap a Nest module            | Call functions directly                |
 | Runtime requirement | Nest application + DI container    | None. Engine is opt-in.                |
 
-**Pick noddde over NestJS CQRS when** you want the discipline of pure functions, prefer inference to manual generics, and do not already live inside a Nest application.
+You do not have to leave NestJS to use noddde. [`@noddde/nestjs`](/docs/integrations/nestjs) registers the noddde `Domain` as a global Nest provider, so controllers and services inject and dispatch through standard Nest DI. The choice is between NestJS CQRS's class+decorator shape and noddde's functional shape **inside the same Nest app**, not between Nest and noddde.
 
-**Stay on NestJS CQRS when** the rest of your service is Nest. Mixing two frameworks is not worth the win.
+**Pick noddde over NestJS CQRS when** you want the discipline of pure functions, prefer inference to manual generics, and would rather express domain logic as data than as decorated classes.
+
+**Stay on NestJS CQRS when** the team is fluent in its patterns and the cost of introducing a new abstraction outweighs the gains.
+
+### Emmett
+
+The closest active functional prior art. Like noddde, models commands and events as pure data and decisions as pure functions for TypeScript. Backed by Oskar Dudycz, who has been writing about event sourcing for years.
+
+Differences in practice:
+
+|                      | Emmett                                                     | noddde                                                                    |
+| -------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Persistence          | Event-sourcing first; EventStoreDB and PostgreSQL adapters | Event-sourced and state-stored aggregates as first-class peers            |
+| Type model           | Commands, events, state declared as separate generics      | One `Def` bundle drives every handler's inference                         |
+| Composition          | À-la-carte: assemble the pieces you need                   | `defineDomain` + `wireDomain` as a unified orchestrator                   |
+| Sagas / projections  | First-class but wired up externally                        | Defined in the same `Def` ecosystem; saga reactions return commands       |
+| Adapters             | EventStoreDB, PostgreSQL, in-memory                        | Drizzle, Prisma, TypeORM, in-memory; pluggable event bus                  |
+| Tracing              | Application-level                                          | Native OpenTelemetry; W3C Trace Context propagated through event metadata |
+| Transactional outbox | Application-level                                          | Built into the engine: outbox store + relay loop                          |
+| Command idempotency  | Application-level                                          | Built-in `IdempotencyStore` keyed on `commandId`                          |
+| CLI                  | —                                                          | `@noddde/cli` scaffolds aggregates, projections, sagas, and full domains  |
+
+**Pick noddde over Emmett when** you want one domain definition that wires aggregates, projections, sagas, and infrastructure together, and when state-stored aggregates need to coexist with event-sourced ones in the same domain.
+
+**Pick Emmett when** you prefer a more proven event-sourcing-first library backed by an established author and EventStoreDB community.
 
 ### Effect / a general-purpose effect library
 
@@ -58,7 +82,6 @@ The most direct prior art for "functional CQRS+ES in TypeScript." Wolkenkit pion
 ## When noddde is the wrong choice
 
 - **You need a CRUD app.** DDD/CQRS/ES is overkill for forms-over-data. Use Drizzle and a router.
-- **You are deep in NestJS.** Use NestJS CQRS. Mixing frameworks is more pain than win.
 - **You need a polyglot event store with cross-language consumers.** noddde's event types are TypeScript-shaped. Cross-language consumers can read events, but the schema discipline lives outside the framework.
 - **You want Java-style DDD with rich domain objects.** noddde is functional. Aggregates are state + handler maps, not objects with methods. If `account.deposit(100)` reads more naturally to your team than `decide.Deposit(command, state)`, that is a real preference and noddde will fight you.
 
