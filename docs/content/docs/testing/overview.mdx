@@ -3,7 +3,7 @@ title: Testing Overview
 description: How noddde's functional design and @noddde/testing toolkit make testing natural and straightforward.
 ---
 
-noddde's functional architecture is built for testability. Decide handlers are functions. evolve handlers are pure functions. Projection reducers are pure functions. Saga handlers return data. There is no framework to boot, no container to configure, and no decorators to mock.
+noddde's functional architecture is built for testability. Decide handlers are functions. Evolve handlers are pure functions. Projection reducers are pure functions. Saga handlers return data. Tests call the handlers directly with sample inputs and assert on the events or state they return.
 
 The `@noddde/testing` package provides type-safe test harnesses that eliminate boilerplate and express tests in the natural **Given-When-Then** pattern of the Decider.
 

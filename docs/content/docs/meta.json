@@ -1,7 +1,7 @@
 {
   "title": "Documentation",
   "pages": [
-    "---Getting Started---",
+    "---Start Here---",
     "...getting-started",
     "---Core Concepts---",
     "...core-concepts",
@@ -13,12 +13,12 @@
     "...process-managers",
     "---Running Your Domain---",
     "...running",
-    "---Integrations---",
-    "...integrations",
     "---Testing---",
     "...testing",
     "---Patterns & Examples---",
     "...patterns",
+    "---Integrations---",
+    "...integrations",
     "---Design Decisions---",
     "...design-decisions"
   ]

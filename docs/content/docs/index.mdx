@@ -3,48 +3,29 @@ title: noDDDe
 description: A TypeScript framework for Domain-Driven Design, CQRS, and Event Sourcing
 ---
 
-**noDDDe** is a TypeScript framework for building business applications using Domain-Driven Design (DDD), Command Query Responsibility Segregation (CQRS), and Event Sourcing patterns.
+**noDDDe** is a TypeScript framework for Domain-Driven Design, CQRS, and Event Sourcing. Aggregates, projections, and sagas are expressed as typed bundles paired with pure functions for state transitions.
 
-It provides a declarative, type-safe way to express domain aggregates using the functional **Decider pattern** — no base classes, no decorators, just typed objects and pure functions.
+The shape: every domain concept is an object with handler maps. State transitions are pure functions of an event and a previous state. Infrastructure is passed to handlers as a parameter. Types flow from a single `Def` bundle, end to end.
 
-## Key Principles
+## Start here
 
-- **Pure functions over class hierarchies** — Aggregates are objects with handler maps, not classes with methods
-- **Type safety via mapped types** — `DefineCommands` and `DefineEvents` build discriminated unions from simple payload maps
-- **The Decider pattern** — `initialState` + `commands` (decide) + `apply` (evolve)
-- **Infrastructure injection** — Dependencies are function parameters, not imports; testable by default
+The fastest path to understanding noddde is to read in this order:
 
-## Choose Your Path
+1. [Why noddde](/docs/getting-started/why-noddde) — 90 seconds. Compares to NestJS CQRS, hand-rolled, Effect, Wolkenkit. Tells you when noddde is the wrong choice.
+2. [Quick Start](/docs/getting-started/quick-start) — a complete bank-account aggregate, working end-to-end. Copy, run, see it work.
+3. [Core Concepts](/docs/core-concepts/messages-and-types) — the four ideas the rest of the docs assume.
 
-### New to DDD / CQRS / Event Sourcing?
+That is the whole on-ramp. Everything else in the sidebar is reference.
 
-Start with the foundational concepts:
+## Already familiar with the patterns?
 
-- [Messaging](/docs/core-concepts/messages-and-types) — How typed messages drive the architecture
-- [The Decider Pattern](/docs/core-concepts/decider-pattern) — The functional foundation
-- [CQRS](/docs/core-concepts/cqrs-and-event-sourcing) — Separating reads from writes
-- [Event Sourcing](/docs/core-concepts/cqrs-and-event-sourcing) — Storing events, not state
+If you have shipped CQRS+ES in TypeScript before, jump straight to:
 
-### Want to build something?
+- [Defining Aggregates](/docs/modeling/defining-aggregates) — the `defineAggregate` function and the `AggregateTypes` bundle
+- [Domain Configuration](/docs/running/domain-configuration) — `defineDomain` + `wireDomain`
+- [Persistence Adapters](/docs/running/persistence-adapters) — Drizzle, Prisma, TypeORM
+- [Design Decisions](/docs/design-decisions/why-decider) — the tradeoffs, one page each
 
-Jump into the hands-on guides:
+## Looking for a real-shaped example?
 
-- [Installation](/docs/getting-started/installation) — Get `@noddde/core` installed
-- [Quick Start](/docs/getting-started/quick-start) — Build a bank account aggregate step by step
-
-### Know the patterns?
-
-Go directly to the reference:
-
-- [Defining Aggregates](/docs/modeling/defining-aggregates) — The `defineAggregate` function
-- [Defining Commands](/docs/modeling/defining-aggregates) — The `DefineCommands` utility type
-- [Defining Events](/docs/modeling/defining-aggregates) — The `DefineEvents` utility type
-- [Domain Configuration](/docs/running/domain-configuration) — Wiring everything together
-
-### Understand the design
-
-Learn why noddde is built the way it is:
-
-- [Why the Decider Pattern?](/docs/design-decisions/why-decider) — Pure functions vs. OOP
-- [Why DefineCommands/Events?](/docs/design-decisions/why-define-commands-events) — Mapped types vs. enums
-- [Why Injectable Infrastructure?](/docs/design-decisions/why-injectable-infrastructure) — Testability by design
+The [hotel booking sample](https://github.com/dogganidhal/noddde/tree/main/samples/sample-hotel-booking) exercises more than 90% of the framework: 3 aggregates, 3 sagas, 3 projections, Fastify HTTP, Drizzle/SQLite persistence. It is the closest reference to a production codebase.

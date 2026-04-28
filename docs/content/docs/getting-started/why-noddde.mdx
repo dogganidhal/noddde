@@ -1,0 +1,79 @@
+---
+title: Why noddde
+description: A 90-second read for senior engineers evaluating a TypeScript DDD framework
+---
+
+This page is for engineers evaluating noddde against the alternatives. It is short, opinionated, and does not try to win every argument.
+
+## The 60-second pitch
+
+- **One `Def` type drives everything.** Commands, events, decide handlers, evolve handlers, projection reducers, query handlers, saga reactions — all inferred from a single `AggregateTypes` bundle. No duplicate type declarations to keep in sync.
+- **Pure functions, infrastructure as parameters.** `decide(command, state, infra) => events`, `evolve(event, state) => state`. Handlers are unit-testable as plain functions; tests call them directly without bootstrapping a runtime.
+- **The runtime is a separate package.** `@noddde/core` is types and identity functions, zero deps. `@noddde/engine` plugs in buses, persistence, and OpenTelemetry. You can adopt the patterns without buying the runtime.
+
+## Compared to the obvious alternatives
+
+### Hand-rolled TypeScript DDD
+
+What most teams actually do. You write your own `Command`/`Event` discriminated unions, your own `Aggregate` base class or factory, your own command/event registries, your own persistence interface, your own outbox.
+
+The aggregate file looks roughly the same length as a noddde aggregate. The problem is everything around it: the registries you maintain by hand, the type plumbing between the command bus and the aggregate, the state-stored vs. event-sourced abstraction, the snapshot store, the saga state machine, the projection rebuild, the OTel spans. That is the code noddde replaces — not the aggregate itself.
+
+**Pick noddde over hand-rolling when** you are building more than one aggregate and you do not want to be in the framework-maintenance business.
+
+**Stay hand-rolled when** you have one aggregate, exotic persistence requirements, or you genuinely want full control of the wiring.
+
+### NestJS CQRS
+
+The dominant TypeScript DDD framework. Class-based, decorator-based, DI container, `reflect-metadata`. `@CommandHandler(MyCommand)`, `@EventsHandler(MyEvent)`, classes extending `AggregateRoot`, manual `apply()` calls inside command handlers.
+
+Differences in approach:
+
+|                     | NestJS CQRS                        | noddde                                 |
+| ------------------- | ---------------------------------- | -------------------------------------- |
+| Aggregate           | `class extends AggregateRoot`      | object via `defineAggregate`           |
+| Command handler     | Decorated method on a class        | Entry in a typed `decide` map          |
+| Event application   | `this.apply(event)` mutates `this` | `evolve(event, state) => state` (pure) |
+| State changes       | In-place mutation                  | Immutable new state                    |
+| Type safety         | Manual generics on every class     | Inferred from one `Def` type           |
+| Testing             | Bootstrap a Nest module            | Call functions directly                |
+| Runtime requirement | Nest application + DI container    | None. Engine is opt-in.                |
+
+**Pick noddde over NestJS CQRS when** you want the discipline of pure functions, prefer inference to manual generics, and do not already live inside a Nest application.
+
+**Stay on NestJS CQRS when** the rest of your service is Nest. Mixing two frameworks is not worth the win.
+
+### Effect / a general-purpose effect library
+
+Effect is excellent for typed errors and effect composition. It is not a DDD framework. You can build DDD on top of Effect, but you write the aggregate patterns, the command bus, the projection runtime, the saga state machine, etc. yourself.
+
+**Pick noddde over Effect when** the value you want is the DDD shape (decide/evolve, projections, sagas), not effect composition.
+
+**Use both when** you want noddde's domain shape and Effect's error/effect ergonomics inside your handlers. They compose — `decide` and `evolve` are just functions.
+
+### Wolkenkit
+
+The most direct prior art for "functional CQRS+ES in TypeScript." Wolkenkit pioneered a lot of these ideas. It is largely dormant in 2026 and its runtime is heavier than noddde's. If you liked Wolkenkit's shape, noddde is a smaller, actively-maintained version of the same idea.
+
+## When noddde is the wrong choice
+
+- **You need a CRUD app.** DDD/CQRS/ES is overkill for forms-over-data. Use Drizzle and a router.
+- **You are deep in NestJS.** Use NestJS CQRS. Mixing frameworks is more pain than win.
+- **You need a polyglot event store with cross-language consumers.** noddde's event types are TypeScript-shaped. Cross-language consumers can read events, but the schema discipline lives outside the framework.
+- **You want Java-style DDD with rich domain objects.** noddde is functional. Aggregates are state + handler maps, not objects with methods. If `account.deposit(100)` reads more naturally to your team than `decide.Deposit(command, state)`, that is a real preference and noddde will fight you.
+
+## Why these design decisions
+
+The shape of noddde is the result of specific tradeoffs, each documented:
+
+- [Why the Decider pattern](/docs/design-decisions/why-decider) — pure functions over `this.apply()` mutation
+- [Why a single `AggregateTypes` bundle](/docs/design-decisions/why-aggregate-types) — one `Def` instead of five generic parameters
+- [Why infrastructure is a function parameter](/docs/design-decisions/why-injectable-infrastructure) — handlers receive what they need; tests pass the rest
+- [Why commands return events](/docs/design-decisions/why-commands-return-events) — pushing persistence and publishing out of business logic
+- [Why two persistence strategies](/docs/design-decisions/why-two-persistence-strategies) — event-sourced and state-stored, both first-class
+
+## Next steps
+
+- [Quick Start](/docs/getting-started/quick-start) — see a complete aggregate end-to-end
+- [Core Concepts](/docs/core-concepts/messages-and-types) — the foundational patterns
+- [Hotel booking sample](https://github.com/dogganidhal/noddde/tree/main/samples/sample-hotel-booking) — a real-shaped domain that exercises >90% of the framework

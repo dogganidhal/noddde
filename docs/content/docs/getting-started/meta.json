@@ -1,4 +1,10 @@
 {
   "title": "Getting Started",
-  "pages": ["introduction", "quick-start", "cli", "project-structure"]
+  "pages": [
+    "why-noddde",
+    "quick-start",
+    "introduction",
+    "cli",
+    "project-structure"
+  ]
 }
