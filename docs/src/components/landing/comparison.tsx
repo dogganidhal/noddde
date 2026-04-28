@@ -27,8 +27,8 @@ const STEPS: StepDef[] = [
   },
   {
     step: 2,
-    name: "Decide",
-    description: "Run business rules and produce events.",
+    name: "Enforce invariants",
+    description: "Check business rules and produce the resulting events.",
     without: {
       code: `deposit(amount: number) {
   if (amount <= 0) {
@@ -114,8 +114,8 @@ export async function Comparison() {
           </h2>
           <p className="mx-auto mt-4 max-w-2xl text-fd-muted-foreground">
             Both sides handle the same four-step lifecycle &mdash; hydrate the
-            aggregate, decide what events to produce, update state, publish. The
-            difference is who writes which step.
+            aggregate, enforce invariants, update state, publish. The difference
+            is who writes which step.
           </p>
         </div>
 
