@@ -1,15 +1,18 @@
 ---
 title: Why noddde
-description: A 90-second read for senior engineers evaluating a TypeScript DDD framework
+description: A 90-second read for engineers evaluating a TypeScript DDD framework
 ---
 
 This page is for engineers evaluating noddde against the alternatives. It is short, opinionated, and does not try to win every argument.
 
-## The 60-second pitch
+## The pitch
 
-- **One `Def` type drives everything.** Commands, events, decide handlers, evolve handlers, projection reducers, query handlers, saga reactions — all inferred from a single `AggregateTypes` bundle. No duplicate type declarations to keep in sync.
-- **Pure functions, infrastructure as parameters.** `decide(command, state, infra) => events`, `evolve(event, state) => state`. Handlers are unit-testable as plain functions; tests call them directly without bootstrapping a runtime.
-- **The runtime is a separate package.** `@noddde/core` is types and identity functions, zero deps. `@noddde/engine` plugs in buses, persistence, and OpenTelemetry. You can adopt the patterns without buying the runtime.
+- **Type safety.** A single typed bundle drives every handler signature — commands, events, evolve, projections, queries, saga reactions — and the discriminated unions reach `dispatchCommand` and `dispatchQuery` without a single manual generic.
+- **Pure `decide` and `evolve`.** `decide(command, state, infra) => events`, `evolve(event, state) => state`. Infrastructure is a parameter; tests call handlers directly, no runtime to bootstrap.
+- **CQRS and process management as first-class citizens.** Aggregates, projections (views + queries), and sagas (event-driven process managers) are peers — same definition pattern, same wiring. Event-sourced and state-stored aggregates coexist in one domain.
+- **Production runtime, included.** Kafka / NATS / RabbitMQ buses with broker resilience. Drizzle / Prisma / TypeORM persistence. Transactional outbox with at-least-once delivery, command idempotency, snapshot stores, optimistic or pessimistic concurrency, and typed upcaster chains for event versioning.
+- **Audit and tracing, native.** Every event ships with `eventId`, `correlationId`, `causationId`, `userId`, `aggregateId`, and `sequenceNumber`. OpenTelemetry is dynamically detected — install `@opentelemetry/api` and W3C Trace Context propagates through event metadata; without it, every span call is a zero-cost no-op.
+- **Adopt as much as you want.** `@noddde/core` is types and identity functions, zero dependencies. `@noddde/engine` is the runtime. `@noddde/nestjs` exposes the `Domain` as a global Nest provider. `@noddde/cli` scaffolds aggregates, projections, sagas — and emits Mermaid / DOT / JSON diagrams of your domain's command / event / query graph.
 
 ## Compared to the obvious alternatives
 
