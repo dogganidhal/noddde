@@ -16,31 +16,33 @@ export function Hero() {
           </span>
 
           <h1 className="mt-6 text-4xl font-bold tracking-tight text-fd-foreground lg:text-5xl">
-            Build business logic with{" "}
-            <span className="text-fd-primary">pure functions</span>
+            Domain logic as{" "}
+            <span className="text-fd-primary">types and pure functions</span>
           </h1>
 
           <p className="mt-4 text-lg leading-relaxed text-fd-muted-foreground">
-            Define aggregates, projections, and sagas using the Decider
-            pattern&nbsp;&mdash; typed objects and plain functions, no magic.
+            Aggregates, projections, and sagas as typed bundles paired with pure
+            functions for state transitions. Inference flows end to end from a
+            single <code className="font-mono text-base">Def</code> per
+            aggregate.
           </p>
 
           <div className="mt-8">
             <InstallCommand />
           </div>
 
-          <div className="mt-6 flex gap-4">
+          <div className="mt-6 flex flex-wrap gap-3">
             <Link
-              href="/docs/getting-started/introduction"
+              href="/docs/getting-started/quick-start"
               className="rounded-lg bg-fd-primary px-6 py-3 text-sm font-medium text-fd-primary-foreground transition-colors hover:bg-fd-primary/90"
             >
-              Get Started
+              Quick Start
             </Link>
             <Link
-              href="/docs"
+              href="/docs/getting-started/why-noddde"
               className="rounded-lg border border-fd-border px-6 py-3 text-sm font-medium text-fd-foreground transition-colors hover:bg-fd-card"
             >
-              Documentation
+              Why noddde?
             </Link>
           </div>
         </div>

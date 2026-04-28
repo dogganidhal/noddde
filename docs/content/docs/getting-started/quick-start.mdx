@@ -1,11 +1,13 @@
 ---
 title: Quick Start
-description: Install noddde and build your first aggregate — a bank account with commands, events, and domain configuration
+description: A complete noddde program in one file — copy, run, then read the walkthrough
 ---
 
-## Installation
+This page shows a complete noddde program first, then unpacks it. If you only have five minutes, copy the file, run it, and come back later for the walkthrough.
 
-Want to skip manual setup? Use the [CLI](/docs/getting-started/cli) to scaffold a complete project:
+## Install
+
+Use the CLI to scaffold a complete project:
 
 ```bash
 npx @noddde/cli new project my-app
@@ -17,9 +19,9 @@ Or install the packages manually:
 npm install @noddde/core @noddde/engine
 ```
 
-`@noddde/core` provides the type definitions, identity functions, and interfaces for defining your domain. `@noddde/engine` provides the runtime — `defineDomain`, `wireDomain`, in-memory buses, and persistence.
+`@noddde/core` provides types and identity functions (zero deps). `@noddde/engine` provides the runtime — `defineDomain`, `wireDomain`, in-memory buses and persistence.
 
-**Requirements**: Node.js >= 18, TypeScript >= 5.3 with strict mode enabled:
+**Requirements**: Node.js >= 18, TypeScript >= 5.3 with strict mode:
 
 ```json
 {
@@ -32,24 +34,17 @@ npm install @noddde/core @noddde/engine
 }
 ```
 
-For production persistence with a real database, see [Persistence Adapters](/docs/running/persistence-adapters).
+## The complete program
 
-## What We Will Build
+A bank account that supports creating an account and authorizing transactions, with two outcomes: authorized or declined. Copy this into `account.ts`:
 
-A bank account that supports:
+```ts title="account.ts"
+import { defineAggregate, DefineCommands, DefineEvents } from "@noddde/core";
+import { defineDomain, wireDomain } from "@noddde/engine";
+import { randomUUID } from "crypto";
 
-- **Creating** a new account
-- **Authorizing transactions** (with balance validation)
-- Two possible outcomes: authorized or declined
-
-## Step 1: Define Events
-
-Events are immutable facts about what happened. Use `DefineEvents` to declare them:
-
-```ts
-import { DefineEvents } from "@noddde/core";
-
-export type BankAccountEvent = DefineEvents<{
+// 1. Events — past-tense facts
+type BankAccountEvent = DefineEvents<{
   BankAccountCreated: { id: string };
   TransactionAuthorized: {
     id: string;
@@ -64,31 +59,15 @@ export type BankAccountEvent = DefineEvents<{
     merchant: string;
   };
 }>;
-```
 
-Each key becomes the event's `name` discriminant. The value becomes the `payload` type. `DefineEvents` builds a discriminated union from this map.
-
-## Step 2: Define Commands
-
-Commands express intent. Use `DefineCommands`:
-
-```ts
-import { DefineCommands } from "@noddde/core";
-
-export type BankAccountCommand = DefineCommands<{
+// 2. Commands — imperatives
+type BankAccountCommand = DefineCommands<{
   CreateBankAccount: void;
   AuthorizeTransaction: { amount: number; merchant: string };
 }>;
-```
 
-`void` means `CreateBankAccount` has no payload — just a name and a `targetAggregateId`.
-
-## Step 3: Define State
-
-The aggregate state holds everything needed for business decisions:
-
-```ts
-export interface BankAccountState {
+// 3. State — what decide handlers read from
+interface BankAccountState {
   balance: number;
   availableBalance: number;
   transactions: Array<{
@@ -99,41 +78,19 @@ export interface BankAccountState {
     status: "pending" | "processed" | "declined";
   }>;
 }
-```
 
-Note: the aggregate ID is **not** part of state. It lives on the command as `targetAggregateId`. See [Why ID Not in State](/docs/design-decisions/why-id-not-in-state).
-
-## Step 4: Bundle Types
-
-Create an `AggregateTypes` bundle that ties everything together:
-
-```ts
+// 4. The Def bundle — drives all type inference
 type BankAccountDef = {
   state: BankAccountState;
   events: BankAccountEvent;
   commands: BankAccountCommand;
-  infrastructure: {}; // No custom infrastructure for this example
+  infrastructure: {};
 };
-```
 
-This single type replaces five positional generic parameters. Learn more in [Why AggregateTypes Bundle](/docs/design-decisions/why-aggregate-types).
+// 5. The aggregate — initialState + decide + evolve
+const BankAccount = defineAggregate<BankAccountDef>({
+  initialState: { balance: 0, availableBalance: 0, transactions: [] },
 
-## Step 5: Define the Aggregate
-
-Use `defineAggregate` to create the aggregate definition:
-
-```ts
-import { defineAggregate } from "@noddde/core";
-
-export const BankAccount = defineAggregate<BankAccountDef>({
-  // The state before any events
-  initialState: {
-    balance: 0,
-    availableBalance: 0,
-    transactions: [],
-  },
-
-  // Decide handlers — decide what events to produce
   decide: {
     CreateBankAccount: (command) => ({
       name: "BankAccountCreated",
@@ -167,7 +124,6 @@ export const BankAccount = defineAggregate<BankAccountDef>({
     },
   },
 
-  // Evolve handlers — evolve state from events (pure functions)
   evolve: {
     BankAccountCreated: () => ({
       balance: 0,
@@ -193,45 +149,23 @@ export const BankAccount = defineAggregate<BankAccountDef>({
     }),
   },
 });
-```
 
-## Step 6: Define and Wire the Domain
-
-Define the domain structure, then wire it with in-memory infrastructure:
-
-```ts
-import { defineDomain, wireDomain } from "@noddde/engine";
-
-// Define the domain structure (pure, sync)
-const bankingDomain = defineDomain({
-  writeModel: {
-    aggregates: { BankAccount },
-  },
-  readModel: {
-    projections: {},
-  },
+// 6. The domain — wire it with in-memory defaults
+const banking = defineDomain({
+  writeModel: { aggregates: { BankAccount } },
+  readModel: { projections: {} },
 });
 
-// Wire with infrastructure and get a running Domain instance
-const domain = await wireDomain(bankingDomain);
-```
+const domain = await wireDomain(banking);
 
-That is it -- `wireDomain` with no second argument uses in-memory defaults for everything: persistence, buses, and infrastructure. This is the fastest path to a working domain.
-
-## Step 7: Dispatch Commands
-
-```ts
-import { randomUUID } from "crypto";
-
+// 7. Dispatch commands
 const accountId = randomUUID();
 
-// Create the bank account
 await domain.dispatchCommand({
   name: "CreateBankAccount",
   targetAggregateId: accountId,
 });
 
-// Authorize a transaction
 await domain.dispatchCommand({
   name: "AuthorizeTransaction",
   targetAggregateId: accountId,
@@ -239,28 +173,144 @@ await domain.dispatchCommand({
 });
 ```
 
-## What Just Happened?
+Run it:
 
-The full flow for each `dispatchCommand` call:
+```bash
+npx tsx account.ts
+```
 
-1. **Command dispatched** — `{ name: "AuthorizeTransaction", targetAggregateId: "...", payload: { amount: 100, merchant: "Amazon" } }`
-2. **State loaded** — Framework loads the aggregate's event history and replays through evolve handlers
-3. **Decide handler called** — `decide.AuthorizeTransaction(command, currentState, infrastructure)`
-4. **Event returned** — Handler decides: `TransactionAuthorized` or `TransactionDeclined`
-5. **Event persisted** — Saved to the event store
-6. **State updated** — Evolve handler called: `evolve.TransactionAuthorized(event, state)` returns new state
-7. **Event published** — Sent to EventBus for projections to consume
+The first command creates the account; the second is declined (zero available balance) and recorded as a `TransactionDeclined` event. Change `amount: 100` to `amount: 0` to see it authorized instead.
 
-This example uses optimistic concurrency with no retries (the default). For high-contention aggregates, you can configure automatic retries or pessimistic locking — see [Concurrency Strategies](/docs/running/persistence#concurrency-control).
+That is the full shape: one Def per aggregate, `decide` produces events from state, `evolve` folds events back into state.
 
-## Next Steps
+## What just happened
 
-- [Core Concepts](/docs/core-concepts/messages-and-types) — Understand the foundational patterns
-- [Modeling Your Domain](/docs/modeling/defining-aggregates) — Deep dive into aggregate definitions
-- [Projections](/docs/read-model/projections) — Building read models
-- [Running Your Domain](/docs/running/domain-configuration) — Complete wiring reference
+For each `dispatchCommand` call, the framework:
 
-Ready to explore a full working example? The [hotel booking sample](https://github.com/dogganidhal/noddde/tree/main/samples/sample-hotel-booking) exercises >90% of framework features — 3 aggregates, 3 sagas, 3 projections, Fastify HTTP, and Drizzle/SQLite persistence. Clone the repo and run its tests:
+1. **Receives the command** — `{ name, targetAggregateId, payload }`
+2. **Loads the aggregate** — replays its event history through `evolve` to rebuild current state
+3. **Calls `decide`** — `decide.AuthorizeTransaction(command, state, infrastructure)` returns one or more events
+4. **Persists the events** — appended to the event store under `BankAccount:<id>`
+5. **Updates state** — `evolve` is called once per new event to produce the next state
+6. **Publishes the events** — sent to the event bus where projections and sagas consume them
+
+This example uses optimistic concurrency with no retries. For high-contention aggregates, configure retries or pessimistic locking — see [Concurrency Strategies](/docs/running/persistence#concurrency-control).
+
+## Walkthrough
+
+Now that you have seen the whole file, here is each part on its own.
+
+### 1. Events — `DefineEvents`
+
+Events are immutable facts. `DefineEvents` turns a name → payload map into a discriminated union:
+
+```ts
+type BankAccountEvent = DefineEvents<{
+  BankAccountCreated: { id: string };
+  TransactionAuthorized: {
+    id: string;
+    timestamp: Date;
+    amount: number;
+    merchant: string;
+  };
+}>;
+```
+
+Each key becomes the event's `name` discriminant; the value becomes its `payload`.
+
+### 2. Commands — `DefineCommands`
+
+Commands express intent. `void` means no payload — just a name and a `targetAggregateId`:
+
+```ts
+type BankAccountCommand = DefineCommands<{
+  CreateBankAccount: void;
+  AuthorizeTransaction: { amount: number; merchant: string };
+}>;
+```
+
+### 3. State
+
+State holds everything `decide` reads to make decisions. The aggregate ID is **not** part of state — it lives on the command as `targetAggregateId`. See [Why ID Not in State](/docs/design-decisions/why-id-not-in-state).
+
+```ts
+interface BankAccountState {
+  balance: number;
+  availableBalance: number;
+  transactions: Array<{
+    /* ... */
+  }>;
+}
+```
+
+### 4. The `Def` bundle
+
+One type that ties state, events, commands, and any custom infrastructure together. This single type replaces five positional generic parameters elsewhere in the framework. See [Why AggregateTypes Bundle](/docs/design-decisions/why-aggregate-types).
+
+```ts
+type BankAccountDef = {
+  state: BankAccountState;
+  events: BankAccountEvent;
+  commands: BankAccountCommand;
+  infrastructure: {};
+};
+```
+
+### 5. The aggregate — `defineAggregate`
+
+Three things: `initialState`, a `decide` map (command name → handler returning events), and an `evolve` map (event name → pure state transition).
+
+```ts
+const BankAccount = defineAggregate<BankAccountDef>({
+  initialState: {
+    /* ... */
+  },
+  decide: {
+    /* command handlers */
+  },
+  evolve: {
+    /* event reducers */
+  },
+});
+```
+
+`decide` is where business rules live — it can call infrastructure and return one or many events. `evolve` is pure: same event + state always produces the same next state. The two are different because event sourcing replays `evolve` against historical events to rebuild state on load.
+
+### 6. The domain — `defineDomain` + `wireDomain`
+
+`defineDomain` captures the static structure (which aggregates, projections, sagas exist). `wireDomain` connects it to infrastructure. With no second argument, you get in-memory defaults for everything:
+
+```ts
+const banking = defineDomain({
+  writeModel: { aggregates: { BankAccount } },
+  readModel: { projections: {} },
+});
+
+const domain = await wireDomain(banking);
+```
+
+Swap to a real database with [persistence adapters](/docs/running/persistence-adapters).
+
+### 7. Dispatching commands
+
+`dispatchCommand` is fully typed against the domain — `name`, `targetAggregateId`, and `payload` are inferred per command:
+
+```ts
+await domain.dispatchCommand({
+  name: "AuthorizeTransaction",
+  targetAggregateId: accountId,
+  payload: { amount: 100, merchant: "Amazon" },
+});
+```
+
+## Next steps
+
+- [Core Concepts](/docs/core-concepts/messages-and-types) — the foundational patterns
+- [Modeling Your Domain](/docs/modeling/defining-aggregates) — deep dive into aggregate definitions
+- [Projections](/docs/read-model/projections) — building read models
+- [Running Your Domain](/docs/running/domain-configuration) — complete wiring reference
+
+The [hotel booking sample](https://github.com/dogganidhal/noddde/tree/main/samples/sample-hotel-booking) exercises more than 90% of the framework — 3 aggregates, 3 sagas, 3 projections, Fastify HTTP, Drizzle/SQLite persistence:
 
 ```bash
 git clone https://github.com/dogganidhal/noddde.git

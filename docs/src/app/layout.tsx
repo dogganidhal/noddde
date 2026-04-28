@@ -15,14 +15,16 @@ const jetbrainsMono = JetBrains_Mono({
   variable: "--font-mono",
 });
 
+const SITE_DESCRIPTION =
+  "A TypeScript framework for Domain-Driven Design, CQRS, and Event Sourcing. Aggregates, projections, and sagas modeled as typed bundles and pure functions, with end-to-end inference.";
+
 export const metadata: Metadata = {
   metadataBase: new URL("https://noddde.dev"),
   title: {
     default: "noddde — Functional DDD Framework for TypeScript",
     template: "%s | noddde",
   },
-  description:
-    "Build business applications with aggregates, projections, and sagas using the Decider pattern. No base classes. No decorators. No DI container.",
+  description: SITE_DESCRIPTION,
   openGraph: {
     type: "website",
     siteName: "noddde",
@@ -30,8 +32,7 @@ export const metadata: Metadata = {
       default: "noddde — Functional DDD Framework for TypeScript",
       template: "%s | noddde",
     },
-    description:
-      "Build business applications with aggregates, projections, and sagas using the Decider pattern. No base classes. No decorators. No DI container.",
+    description: SITE_DESCRIPTION,
     url: "https://noddde.dev",
     images: [
       {
@@ -45,8 +46,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "noddde — Functional DDD Framework for TypeScript",
-    description:
-      "Build business applications with aggregates, projections, and sagas using the Decider pattern. No base classes. No decorators. No DI container.",
+    description: SITE_DESCRIPTION,
     images: ["https://noddde.dev/og-image.png"],
   },
   verification: {
@@ -69,8 +69,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               "@context": "https://schema.org",
               "@type": "SoftwareSourceCode",
               name: "noddde",
-              description:
-                "Build business applications with aggregates, projections, and sagas using the Decider pattern. No base classes. No decorators. No DI container.",
+              description: SITE_DESCRIPTION,
               url: "https://noddde.dev",
               codeRepository: "https://github.com/dogganidhal/noddde",
               programmingLanguage: "TypeScript",

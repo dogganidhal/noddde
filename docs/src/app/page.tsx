@@ -2,6 +2,7 @@ import { HomeLayout } from "fumadocs-ui/layouts/home";
 import Image from "next/image";
 import type { Metadata } from "next";
 import { Hero } from "@/components/landing/hero";
+import { Comparison } from "@/components/landing/comparison";
 import { Features } from "@/components/landing/features";
 import { Footer } from "@/components/landing/footer";
 
@@ -47,6 +48,7 @@ export default function HomePage() {
       githubUrl="https://github.com/dogganidhal/noddde"
     >
       <Hero />
+      <Comparison />
       <Features />
       <Footer />
     </HomeLayout>

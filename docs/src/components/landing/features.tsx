@@ -43,7 +43,7 @@ const features = [
     icon: <ShieldCheck className="size-5" />,
     title: "Type-Safe",
     description:
-      "Full TypeScript inference from end to end. Zero decorators. Zero runtime magic.",
+      "Inference flows from a single Def bundle through commands, events, handlers, and the dispatch API.",
   },
 ];
 
@@ -55,8 +55,8 @@ export function Features() {
           Everything you need to model your domain
         </h2>
         <p className="mx-auto mt-4 max-w-2xl text-fd-muted-foreground">
-          Aggregates, projections, and sagas — using plain objects and pure
-          functions. No base classes. No decorators. No DI container.
+          Aggregates, projections, and sagas — typed objects with handler maps
+          and pure functions for every state transition.
         </p>
         <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {features.map((feature) => (
