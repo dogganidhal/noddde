@@ -17,8 +17,9 @@ export {
   type PrismaAdapterConfig,
   type PrismaAdapterResult,
   type PrismaAggregateStateTableConfig,
-  type PrismaStateTableColumnMap,
+  type PrismaStateMapper,
 } from "./builder";
+export { jsonStateMapper } from "./json-state-mapper";
 import type { PrismaClient } from "@prisma/client";
 import type {
   UnitOfWorkFactory,

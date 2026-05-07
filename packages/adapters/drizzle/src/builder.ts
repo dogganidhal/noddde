@@ -6,7 +6,9 @@ import type {
   SnapshotStore,
   OutboxStore,
   UnitOfWorkFactory,
+  AggregateStateMapper,
 } from "@noddde/core";
+import type { AnyColumn, Table } from "drizzle-orm";
 import type { DrizzleTransactionStore } from "./index";
 import {
   DrizzleEventSourcedAggregatePersistence,
@@ -17,32 +19,53 @@ import {
 } from "./persistence";
 import { DrizzleDedicatedStateStoredPersistence } from "./dedicated-state-persistence";
 import { createDrizzleUnitOfWorkFactory } from "./unit-of-work";
-import { resolveColumns } from "./column-resolver";
 
 /**
- * Column mapping for a custom state-stored aggregate table.
- * Maps logical noddde columns to actual Drizzle column references.
- * If omitted from {@link AggregateStateTableConfig}, columns are
- * resolved by convention (looks for columns named `aggregate_id`,
- * `state`, `version`).
+ * Drizzle-specific bi-directional mapper between an aggregate's state and
+ * the state portion of a row in a dedicated table. Extends the core
+ * {@link AggregateStateMapper} with Drizzle column references the adapter needs
+ * to construct WHERE clauses for SELECT and UPDATE queries.
+ *
+ * The mapper's `toRow` / `fromRow` handle only the state portion of the row;
+ * the adapter writes the aggregate id and version columns itself using the
+ * keys derived from `aggregateIdColumn` and `versionColumn`.
+ *
+ * @typeParam TState  - The aggregate's state type.
+ * @typeParam TTable  - The Drizzle table definition.
+ *
+ * @example
+ * ```ts
+ * const mapper: DrizzleStateMapper<OrderState, typeof ordersTable> = {
+ *   aggregateIdColumn: ordersTable.aggregateId,
+ *   versionColumn: ordersTable.version,
+ *   toRow: (s) => ({ customerId: s.customerId, total: s.total }),
+ *   fromRow: (r) => ({ customerId: r.customerId!, total: r.total! }),
+ * };
+ * ```
  */
-export interface StateTableColumnMap {
-  /** Column holding the aggregate instance ID (string PK). */
-  aggregateId: any;
-  /** Column holding the serialized aggregate state (text/jsonb). */
-  state: any;
-  /** Column holding the version number (integer). */
-  version: any;
+export interface DrizzleStateMapper<TState, TTable extends Table>
+  extends AggregateStateMapper<TState, Partial<TTable["$inferInsert"]>> {
+  /** Drizzle column reference for the aggregate-id column. */
+  readonly aggregateIdColumn: AnyColumn;
+  /** Drizzle column reference for the version column. */
+  readonly versionColumn: AnyColumn;
 }
 
 /**
- * Configuration for a per-aggregate state table.
+ * Configuration for a per-aggregate dedicated state table. The `mapper`
+ * field is required and is the single source of truth for the row schema.
+ *
+ * @typeParam TState - The aggregate's state type.
+ * @typeParam TTable - The Drizzle table definition type.
  */
-export interface AggregateStateTableConfig {
+export interface AggregateStateTableConfig<TState = unknown, TTable = any> {
   /** The Drizzle table definition. */
-  table: any;
-  /** Column mappings. If omitted, uses convention-based defaults. */
-  columns?: Partial<StateTableColumnMap>;
+  table: TTable;
+  /**
+   * The bi-directional state mapper for this aggregate's table. Required.
+   * Use {@link jsonStateMapper} for opaque-JSON parity with the legacy behavior.
+   */
+  mapper: DrizzleStateMapper<TState, TTable extends Table ? TTable : Table>;
 }
 
 /**
@@ -62,7 +85,7 @@ export interface DrizzleAdapterConfig {
   snapshotStore?: any;
   /** Drizzle table definition for the outbox store. Optional. */
   outboxStore?: any;
-  /** Per-aggregate dedicated state tables with custom column mappings. Optional. */
+  /** Per-aggregate dedicated state tables with mapper configurations. Optional. */
   aggregateStates?: Record<string, AggregateStateTableConfig>;
 }
 
@@ -118,7 +141,7 @@ export type DrizzleAdapterResult<C extends DrizzleAdapterConfig> = {
  *
  * @example
  * ```ts
- * import { createDrizzleAdapter } from "@noddde/drizzle";
+ * import { createDrizzleAdapter, jsonStateMapper } from "@noddde/drizzle";
  * import { events, sagaStates, snapshots } from "@noddde/drizzle/pg";
  * import { orders } from "./schema";
  *
@@ -127,7 +150,7 @@ export type DrizzleAdapterResult<C extends DrizzleAdapterConfig> = {
  *   sagaStore: sagaStates,
  *   snapshotStore: snapshots,
  *   aggregateStates: {
- *     Order: { table: orders },
+ *     Order: { table: orders, mapper: jsonStateMapper(orders) },
  *   },
  * });
  *
@@ -181,14 +204,13 @@ export function createDrizzleAdapter<const C extends DrizzleAdapterConfig>(
     const dedicatedStores = new Map<string, StateStoredAggregatePersistence>();
 
     for (const [name, aggConfig] of Object.entries(config.aggregateStates)) {
-      const columns = resolveColumns(aggConfig.table, name, aggConfig.columns);
       dedicatedStores.set(
         name,
         new DrizzleDedicatedStateStoredPersistence(
           db,
           txStore,
           aggConfig.table,
-          columns,
+          aggConfig.mapper,
         ),
       );
     }

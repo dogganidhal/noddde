@@ -9,8 +9,9 @@ import type {
   OutboxStore,
   AggregateLocker,
 } from "@noddde/core";
+import type { Table } from "drizzle-orm";
 import type { DrizzleTransactionStore } from "./index";
-import type { StateTableColumnMap } from "./builder";
+import type { DrizzleStateMapper } from "./builder";
 import {
   DrizzleEventSourcedAggregatePersistence,
   DrizzleStateStoredAggregatePersistence,
@@ -20,7 +21,6 @@ import {
 } from "./persistence";
 import { DrizzleDedicatedStateStoredPersistence } from "./dedicated-state-persistence";
 import { createDrizzleUnitOfWorkFactory } from "./unit-of-work";
-import { resolveColumns } from "./column-resolver";
 import { DrizzleAdvisoryLocker } from "./advisory-locker";
 import type { DrizzleDialect } from "./advisory-locker";
 
@@ -50,7 +50,10 @@ export interface DrizzleAdapterOptions {
  * @internal
  */
 function inferDialect(db: any): DrizzleDialect {
-  const dialectName = db?._.dialect?.constructor?.name ?? db?.dialect?.name;
+  const dialectName =
+    db?._?.dialect?.constructor?.name ??
+    db?.dialect?.constructor?.name ??
+    db?.dialect?.name;
   if (!dialectName) {
     throw new Error(
       "Could not infer dialect from Drizzle db instance. " +
@@ -161,20 +164,33 @@ export class DrizzleAdapter implements PersistenceAdapter {
    * Drizzle table. Use this when an aggregate needs its own state table
    * instead of the shared one.
    *
-   * @param table - A Drizzle table definition.
-   * @param columns - Optional column mapping overrides.
-   * @returns A persistence implementation bound to the given table.
+   * The `mapper` option is required and is the single source of truth for
+   * the row schema. Use {@link jsonStateMapper} for opaque-JSON parity with
+   * the legacy behavior.
+   *
+   * @param table   - A Drizzle table definition.
+   * @param options - Options object containing the required `mapper`.
+   * @returns A persistence implementation bound to the given table, sharing
+   *   this adapter's transaction context.
+   *
+   * @example
+   * ```ts
+   * import { jsonStateMapper } from "@noddde/drizzle";
+   *
+   * const orderPersistence = adapter.stateStored(ordersTable, {
+   *   mapper: jsonStateMapper(ordersTable),
+   * });
+   * ```
    */
-  stateStored(
-    table: any,
-    columns?: Partial<StateTableColumnMap>,
+  stateStored<TState, TTable extends Table>(
+    table: TTable,
+    options: { mapper: DrizzleStateMapper<TState, TTable> },
   ): StateStoredAggregatePersistence {
-    const resolvedColumns = resolveColumns(table, "(dedicated)", columns);
     return new DrizzleDedicatedStateStoredPersistence(
       this.db,
       this.txStore,
       table,
-      resolvedColumns,
+      options.mapper,
     );
   }
 

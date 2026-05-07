@@ -5,7 +5,7 @@ import {
   type StateStoredAggregatePersistence,
 } from "@noddde/core";
 import type { DrizzleTransactionStore } from "./index";
-import type { StateTableColumnMap } from "./builder";
+import type { DrizzleStateMapper } from "./builder";
 
 /**
  * Drizzle-backed state-stored aggregate persistence bound to a
@@ -13,28 +13,27 @@ import type { StateTableColumnMap } from "./builder";
  * this class ignores the `aggregateName` parameter — the table
  * itself is the namespace.
  *
- * Supports custom column mappings for tables where column names
- * differ from the noddde convention.
+ * State encoding and decoding is fully delegated to the provided
+ * {@link DrizzleStateMapper}. The adapter writes the aggregate-id
+ * and version columns itself using the keys resolved from the mapper's
+ * column references at construction time.
  */
 export class DrizzleDedicatedStateStoredPersistence
   implements StateStoredAggregatePersistence
 {
   private readonly idKey: string;
-  private readonly stateKey: string;
   private readonly versionKey: string;
 
   constructor(
     private readonly db: any,
     private readonly txStore: DrizzleTransactionStore,
     private readonly table: any,
-    private readonly columns: StateTableColumnMap,
+    private readonly mapper: DrizzleStateMapper<any, any>,
   ) {
-    // Resolve the JS property key for each column by matching the column
-    // reference against the table definition entries. Drizzle's values()
-    // and result rows use JS property keys, not DB column names.
-    this.idKey = findKeyForColumn(table, columns.aggregateId);
-    this.stateKey = findKeyForColumn(table, columns.state);
-    this.versionKey = findKeyForColumn(table, columns.version);
+    // Resolve JS property keys from column references once at construction
+    // time so individual save/load calls don't repeat the scan.
+    this.idKey = findKeyForColumn(table, mapper.aggregateIdColumn);
+    this.versionKey = findKeyForColumn(table, mapper.versionColumn);
   }
 
   private getExecutor() {
@@ -48,14 +47,16 @@ export class DrizzleDedicatedStateStoredPersistence
     expectedVersion: number,
   ): Promise<void> {
     const executor = this.getExecutor();
-    const serialized = JSON.stringify(state);
+
+    // Delegate state serialization to the mapper
+    const stateRow = this.mapper.toRow(state);
 
     if (expectedVersion === 0) {
       // Insert path: new aggregate
       try {
         await executor.insert(this.table).values({
+          ...stateRow,
           [this.idKey]: aggregateId,
-          [this.stateKey]: serialized,
           [this.versionKey]: 1,
         });
       } catch (error: any) {
@@ -80,13 +81,13 @@ export class DrizzleDedicatedStateStoredPersistence
       const result = await executor
         .update(this.table)
         .set({
-          [this.stateKey]: serialized,
+          ...stateRow,
           [this.versionKey]: expectedVersion + 1,
         })
         .where(
           and(
-            eq(this.columns.aggregateId, aggregateId),
-            eq(this.columns.version, expectedVersion),
+            eq(this.mapper.aggregateIdColumn, aggregateId),
+            eq(this.mapper.versionColumn, expectedVersion),
           ),
         );
 
@@ -112,29 +113,41 @@ export class DrizzleDedicatedStateStoredPersistence
     const rows = await executor
       .select()
       .from(this.table)
-      .where(eq(this.columns.aggregateId, aggregateId));
+      .where(eq(this.mapper.aggregateIdColumn, aggregateId));
 
     if (rows.length === 0) return null;
     const row = rows[0]!;
 
-    const stateValue = row[this.stateKey];
     const versionValue = row[this.versionKey];
 
+    // Strip the aggregate-id and version columns; pass the remainder to the mapper
+    const stateRow = { ...row };
+    delete stateRow[this.idKey];
+    delete stateRow[this.versionKey];
+
     return {
-      state:
-        typeof stateValue === "string" ? JSON.parse(stateValue) : stateValue,
+      state: this.mapper.fromRow(stateRow),
       version: versionValue,
     };
   }
 }
 
 /**
- * Finds the JS property key in a Drizzle table definition for a given column reference.
+ * Finds the JS property key in a Drizzle table definition for a given
+ * column reference. Throws if the column is not found among the table's
+ * own properties — this catches mappers that point at a column from a
+ * different table.
+ * @internal
  */
 function findKeyForColumn(table: any, column: any): string {
   for (const [key, value] of Object.entries(table)) {
     if (value === column) return key;
   }
-  // Fallback to column.name (DB column name) — shouldn't happen if column came from the table
-  return column.name;
+  const columnName = (column as { name?: string } | null | undefined)?.name;
+  throw new Error(
+    `Column reference${columnName ? ` "${columnName}"` : ""} not found ` +
+      `among the table's properties. The mapper's aggregateIdColumn / ` +
+      `versionColumn must be columns from the same Drizzle table passed ` +
+      `to stateStored() / aggregateStates.`,
+  );
 }

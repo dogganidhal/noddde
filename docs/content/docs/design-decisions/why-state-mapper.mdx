@@ -1,0 +1,55 @@
+---
+title: "Why an Aggregate State Mapper?"
+description: Why noddde uses a bi-directional mapper to bridge aggregate state and dedicated persistence tables, instead of forcing an opaque JSON column.
+---
+
+## The Decision
+
+When an aggregate uses a dedicated state table, noddde requires a `mapper` (`DrizzleStateMapper`, `PrismaStateMapper`, or `TypeORMStateMapper`) that defines how aggregate state translates to and from rows. The framework writes the `aggregateId` and `version` columns; the mapper owns everything else.
+
+```ts
+const orderMapper: DrizzleStateMapper<OrderState, typeof orders> = {
+  aggregateIdColumn: orders.aggregateId,
+  versionColumn: orders.version,
+  toRow: (s) => ({ customerId: s.customerId, total: s.total, status: s.status }),
+  fromRow: (r) => ({ customerId: r.customerId!, total: r.total!, status: r.status! }),
+};
+
+adapter.stateStored(orders, { mapper: orderMapper });
+```
+
+## The Problem
+
+Earlier versions of noddde stored dedicated-table state as an opaque JSON blob in a single `state` column. That works for a quick start, but it breaks down as soon as adopters want to:
+
+- Run analytics or reporting queries against domain fields (`SELECT status, COUNT(*) FROM orders`).
+- Add database-level constraints (`CHECK status IN (...)`, `NOT NULL` on important fields).
+- Index individual columns for read patterns the aggregate doesn't drive.
+- Share the same physical table with other read paths that don't go through the framework.
+
+Adopters who picked noddde because they already owned their schema were stuck — the framework dictated the row shape.
+
+## Alternatives Considered
+
+- **Opaque JSON only** — Original behavior. Simple, but adopters lose schema control.
+- **Reflective decoders** — Infer columns from a class or schema. Couples the framework to ORM internals and makes the contract less explicit.
+- **Inheritance-based row classes** — Adopters extend a `BaseAggregateRow`. Reintroduces the base classes noddde explicitly avoids.
+
+## Why This Approach
+
+The mapper is a small, structural interface. Adopters supply two pure functions and the column references the framework needs:
+
+- **The framework owns identity and concurrency** — `aggregateId` and `version` columns are written by the adapter, never by the mapper. Optimistic concurrency stays a framework concern.
+- **The adopter owns the row shape** — Per-state-field columns, custom names, generated columns, computed columns, JSON for some fields and typed columns for others — all decisions the adopter makes without framework cooperation.
+- **Opt-out is one function call away** — `jsonStateMapper(table)` (Drizzle) or `jsonStateMapper()` (Prisma, TypeORM) reproduces the legacy opaque-JSON behavior, so existing tables don't need to migrate.
+- **No new mental model** — The mapper is the same shape across all three adapters: a `toRow` / `fromRow` pair plus the column or field references the adapter needs at query construction time.
+
+The split — framework owns id/version, adopter owns row shape — mirrors how libraries like `better-auth` let you customize their `users` table without giving up the auth flow.
+
+## Trade-offs
+
+- **A pair of functions per dedicated table** — Slightly more boilerplate than `{ table: orders }`. The payoff is full schema control.
+- **Round-trip discipline** — `fromRow(toRow(state))` must equal `state`. Mappers using JSON serialization need to handle `undefined` and dates explicitly.
+- **No automatic migrations** — Adding a state field still requires a database migration. The mapper makes the field visible; it does not move data.
+
+The cost is small and lands once per aggregate. The win is that noddde no longer dictates how your rows look — your data, your schema.

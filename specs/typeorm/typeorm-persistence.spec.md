@@ -5,11 +5,12 @@ source_file: packages/adapters/typeorm/src/index.ts
 status: implemented
 exports:
   - TypeORMAdapter
+  - TypeORMStateMapper
+  - jsonStateMapper
   - createTypeORMAdapter (deprecated)
   - TypeORMAdapterConfig (deprecated)
   - TypeORMAdapterResult (deprecated)
   - TypeORMAggregateStateTableConfig
-  - TypeORMStateTableColumnMap
   - createTypeORMPersistence (deprecated)
   - TypeORMPersistenceInfrastructure
   - TypeORMEventSourcedAggregatePersistence
@@ -27,12 +28,14 @@ exports:
   - NodddeOutboxEntryEntity
 depends_on:
   - core/persistence/persistence
+  - core/persistence/aggregate-state-mapper
   - core/persistence/unit-of-work
   - core/persistence/snapshot
   - core/persistence/outbox
   - core/persistence/adapter
 docs:
   - running/persistence-adapters.mdx
+  - design-decisions/why-state-mapper.mdx
 ---
 
 # TypeORM Persistence
@@ -53,6 +56,7 @@ import type {
   SagaPersistence,
   UnitOfWorkFactory,
   AggregateLocker,
+  AggregateStateMapper,
 } from "@noddde/core";
 
 /**
@@ -64,23 +68,49 @@ export interface TypeORMTransactionStore {
 }
 
 /**
- * Column mapping for a custom state-stored aggregate table in TypeORM.
- * Maps logical noddde columns to TypeORM entity property names.
- * Defaults: `{ aggregateId: "aggregateId", state: "state", version: "version" }`.
+ * TypeORM-specific bi-directional mapper between an aggregate's state and
+ * the state portion of a row on a TypeORM entity. Extends the core
+ * AggregateStateMapper with the entity property names the adapter needs
+ * at query-construction time.
+ *
+ * The mapper's toRow / fromRow handle only the state portion of the row;
+ * the adapter writes the aggregate id and version itself using the
+ * property names provided by aggregateIdField and versionField.
+ *
+ * @typeParam TState  - The aggregate's state type.
+ * @typeParam TEntity - The TypeORM entity instance type.
  */
-export interface TypeORMStateTableColumnMap {
-  aggregateId: string;
-  state: string;
-  version: string;
+export interface TypeORMStateMapper<TState, TEntity>
+  extends AggregateStateMapper<TState, Partial<TEntity>> {
+  readonly aggregateIdField: keyof TEntity & string;
+  readonly versionField: keyof TEntity & string;
 }
 
 /**
- * Configuration for a per-aggregate state table in TypeORM.
+ * Configuration for a per-aggregate state table in TypeORM. The mapper is
+ * required and is the single source of truth for the row schema.
  */
-export interface TypeORMAggregateStateTableConfig {
-  entity: Function;
-  columns?: Partial<TypeORMStateTableColumnMap>;
+export interface TypeORMAggregateStateTableConfig<
+  TState = unknown,
+  TEntity = any,
+> {
+  entity: new () => TEntity;
+  mapper: TypeORMStateMapper<TState, TEntity>;
 }
+
+/**
+ * Convenience helper that builds a TypeORMStateMapper which serializes
+ * state to a single property as JSON. Equivalent to the legacy opaque
+ * dedicated-state behavior. Defaults to the conventional property names
+ * `{ aggregateIdField: "aggregateId", versionField: "version", stateField: "state" }`.
+ *
+ * @param options - Optional property-name overrides.
+ */
+export function jsonStateMapper<TEntity>(options?: {
+  aggregateIdField?: string;
+  versionField?: string;
+  stateField?: string;
+}): TypeORMStateMapper<unknown, TEntity>;
 
 /**
  * Configuration for createTypeORMAdapter.
@@ -456,19 +486,31 @@ export class NodddeOutboxEntryEntity {
 45. `createTypeORMAdapter(dataSource)` with no config always creates event store, state store, saga store, and UoW factory using built-in entity classes.
 46. `{ snapshotStore: true }` in config creates a `TypeORMSnapshotStore` and includes it in the result.
 47. `{ outboxStore: true }` in config creates a `TypeORMOutboxStore` and includes it in the result.
-48. `{ aggregateStates: { Name: { entity, columns? } } }` in config creates dedicated state persistence instances and exposes `stateStoreFor()` on the result.
+48. `{ aggregateStates: { Name: { entity, mapper } } }` in config creates dedicated state persistence instances and exposes `stateStoreFor()` on the result.
 49. The return type `TypeORMAdapterResult<C>` uses TypeScript conditional types to narrow: `snapshotStore` only appears when `C extends { snapshotStore: true }`, `outboxStore` only appears when `C extends { outboxStore: true }`, and `stateStoreFor()` only appears when `C extends { aggregateStates: Record<string, any> }`.
 
-### Per-Aggregate State Persistence
+### Per-Aggregate State Persistence (Mapper-Based)
 
-50. `stateStoreFor(aggregateName)` returns a `StateStoredAggregatePersistence` bound to that aggregate's dedicated TypeORM entity.
+50. `stateStoreFor(aggregateName)` returns a `StateStoredAggregatePersistence` bound to that aggregate's dedicated TypeORM entity via its `TypeORMStateMapper`.
 51. `stateStoreFor(aggregateName)` throws if no dedicated table was configured for that aggregate in `config.aggregateStates`.
 52. The dedicated state persistence ignores the `aggregateName` parameter passed to `save()`/`load()` — the entity table itself is the namespace.
-53. The dedicated state persistence uses the column mapping to read/write the correct properties on the TypeORM entity.
-54. When `columns` is omitted from `TypeORMAggregateStateTableConfig`, defaults to `{ aggregateId: "aggregateId", state: "state", version: "version" }`.
-55. Dedicated state persistence participates in the same UoW transaction as shared persistence via the shared `TypeORMTransactionStore`.
-56. `save()` uses `findOne` + version check: if entity exists and version doesn't match, throws `ConcurrencyError`; if entity doesn't exist and `expectedVersion !== 0`, throws `ConcurrencyError`.
-57. `load()` uses `findOne` and returns `{ state: JSON.parse(stateValue), version }` or `null`.
+53. **Mapper-driven save**: the adapter loads the existing row by `mapper.aggregateIdField`. If found and `row[mapper.versionField] !== expectedVersion`, throws `ConcurrencyError`. Otherwise it merges `mapper.toRow(state)` into the entity, sets `[mapper.aggregateIdField] = aggregateId` and `[mapper.versionField] = expectedVersion + 1`, and persists via the repository.
+54. **Mapper-driven load**: the adapter calls `findOne({ where: { [mapper.aggregateIdField]: aggregateId } })`, strips the id and version properties from the row, and calls `mapper.fromRow(stateRow)`. Returns `{ state, version }` or `null`.
+55. `mapper` is required in `TypeORMAggregateStateTableConfig` — omitting it is a TypeScript compile error.
+56. Dedicated state persistence participates in the same UoW transaction as shared persistence via the shared `TypeORMTransactionStore`.
+
+### `jsonStateMapper` Convenience Helper
+
+57. `jsonStateMapper<TEntity>()` returns a `TypeORMStateMapper<unknown, TEntity>` whose `toRow(state)` returns `{ [stateField]: JSON.stringify(state) }` and `fromRow(row)` returns `JSON.parse(row[stateField])`.
+58. With no options argument, `jsonStateMapper()` uses the conventional defaults: `aggregateIdField: "aggregateId"`, `versionField: "version"`, `stateField: "state"`.
+59. With an options argument, the helper uses the provided property-name overrides; unspecified fields fall back to the defaults.
+60. The helper is exported from `@noddde/typeorm`.
+
+### `TypeORMAdapter.stateStored()` Mapper API
+
+61. `TypeORMAdapter.stateStored(entity, options)` accepts an options object containing `mapper: TypeORMStateMapper<TState, TEntity>`.
+62. The legacy two-argument form `stateStored(entity, columns?)` is removed — adopters supply a mapper (or call `jsonStateMapper()` for opaque-JSON parity).
+63. The returned `StateStoredAggregatePersistence` shares the adapter's `TypeORMTransactionStore`.
 
 ### Backwards Compatibility
 
@@ -490,6 +532,8 @@ export class NodddeOutboxEntryEntity {
 - [ ] Dedicated state persistence instances share the same txStore as shared persistence.
 - [ ] `stateStoreFor()` fails fast if aggregate name was not configured in `aggregateStates`.
 - [ ] Event store, state store, saga store, and UoW are always present regardless of config.
+- [ ] `mapper.toRow(state)` is called once per save; `mapper.fromRow(row)` is called once per loaded row.
+- [ ] The adapter never serializes state itself when a mapper is in use — all state encoding/decoding is the mapper's responsibility.
 
 ## Edge Cases
 
@@ -1155,6 +1199,247 @@ it("should save outbox entries within a UoW transaction", async () => {
 });
 ```
 
+### Per-aggregate state entity: jsonStateMapper roundtrip
+
+```ts
+import { jsonStateMapper } from "@noddde/typeorm";
+
+@Entity({ name: "orders" })
+class OrderStateEntity {
+  @PrimaryColumn() aggregateId!: string;
+  @Column() state!: string;
+  @Column() version!: number;
+}
+
+it("per-aggregate state entity: jsonStateMapper save and load roundtrip", async () => {
+  const adapter = createTypeORMAdapter(dataSource, {
+    aggregateStates: {
+      Order: {
+        entity: OrderStateEntity,
+        mapper: jsonStateMapper<OrderStateEntity>(),
+      },
+    },
+  });
+
+  const persistence = adapter.stateStoreFor("Order");
+  await persistence.save("Order", "o-1", { status: "placed", total: 100 }, 0);
+
+  const loaded = await persistence.load("Order", "o-1");
+  expect(loaded).not.toBeNull();
+  expect(loaded!.state).toEqual({ status: "placed", total: 100 });
+  expect(loaded!.version).toBe(1);
+});
+```
+
+### Per-aggregate state entity: typed-column mapper roundtrip
+
+```ts
+import type { TypeORMStateMapper } from "@noddde/typeorm";
+
+type OrderState = {
+  customerId: string;
+  total: number;
+  status: "open" | "paid" | "cancelled";
+};
+
+@Entity({ name: "typed_orders" })
+class OrderTypedEntity {
+  @PrimaryColumn() aggregateId!: string;
+  @Column({ name: "customer_id" }) customerId!: string;
+  @Column({ name: "total_cents" }) total!: number;
+  @Column() status!: OrderState["status"];
+  @Column() version!: number;
+}
+
+const orderMapper: TypeORMStateMapper<OrderState, OrderTypedEntity> = {
+  aggregateIdField: "aggregateId",
+  versionField: "version",
+  toRow: (state) => ({
+    customerId: state.customerId,
+    total: state.total,
+    status: state.status,
+  }),
+  fromRow: (row) => ({
+    customerId: row.customerId!,
+    total: row.total!,
+    status: row.status!,
+  }),
+};
+
+it("per-aggregate state entity: typed-column mapper writes typed rows", async () => {
+  const adapter = createTypeORMAdapter(dataSource, {
+    aggregateStates: {
+      Order: { entity: OrderTypedEntity, mapper: orderMapper },
+    },
+  });
+
+  const persistence = adapter.stateStoreFor("Order");
+  await persistence.save(
+    "Order",
+    "o-1",
+    { customerId: "c-7", total: 4200, status: "open" },
+    0,
+  );
+
+  const repo = dataSource.getRepository(OrderTypedEntity);
+  const raw = await repo.findOne({ where: { aggregateId: "o-1" } });
+  expect(raw!.customerId).toBe("c-7");
+  expect(raw!.total).toBe(4200);
+  expect(raw!.status).toBe("open");
+  expect(raw!.version).toBe(1);
+
+  const loaded = await persistence.load("Order", "o-1");
+  expect(loaded!.state).toEqual({
+    customerId: "c-7",
+    total: 4200,
+    status: "open",
+  });
+  expect(loaded!.version).toBe(1);
+});
+```
+
+### Per-aggregate state entity: typed-column mapper concurrency
+
+```ts
+it("typed-column mapper: throws ConcurrencyError on version mismatch", async () => {
+  const adapter = createTypeORMAdapter(dataSource, {
+    aggregateStates: {
+      Order: { entity: OrderTypedEntity, mapper: orderMapper },
+    },
+  });
+  const persistence = adapter.stateStoreFor("Order");
+
+  await persistence.save(
+    "Order",
+    "o-1",
+    { customerId: "c-7", total: 1000, status: "open" },
+    0,
+  );
+
+  await expect(
+    persistence.save(
+      "Order",
+      "o-1",
+      { customerId: "c-7", total: 2000, status: "paid" },
+      0,
+    ),
+  ).rejects.toThrow(ConcurrencyError);
+});
+```
+
+### Per-aggregate state entity: typed-column mapper type safety
+
+```ts
+import { expectTypeOf } from "vitest";
+
+it("typed-column mapper: TS rejects configs missing the mapper", () => {
+  // @ts-expect-error — `mapper` is required in TypeORMAggregateStateTableConfig.
+  const _bad: TypeORMAggregateStateTableConfig<OrderState, OrderTypedEntity> = {
+    entity: OrderTypedEntity,
+  };
+
+  expectTypeOf(orderMapper.toRow).returns.toMatchTypeOf<
+    Partial<OrderTypedEntity>
+  >();
+});
+```
+
+---
+
+## Migration
+
+This release removes `TypeORMStateTableColumnMap` and the `columns?: Partial<TypeORMStateTableColumnMap>` field from `TypeORMAggregateStateTableConfig`. Per-aggregate dedicated state entities now require a `TypeORMStateMapper` (the `mapper` field is mandatory). This is a breaking change.
+
+**Before**
+
+```ts
+createTypeORMAdapter(dataSource, {
+  aggregateStates: {
+    Order: { entity: OrderStateEntity },
+  },
+});
+
+createTypeORMAdapter(dataSource, {
+  aggregateStates: {
+    Order: {
+      entity: CustomOrderEntity,
+      columns: { aggregateId: "id", state: "data", version: "rev" },
+    },
+  },
+});
+
+// TypeORMAdapter class
+adapter.stateStored(CustomEntity);
+adapter.stateStored(CustomEntity, {
+  aggregateId: "id",
+  state: "data",
+  version: "rev",
+});
+```
+
+**After (opaque-JSON parity via `jsonStateMapper`)**
+
+```ts
+import { jsonStateMapper } from "@noddde/typeorm";
+
+createTypeORMAdapter(dataSource, {
+  aggregateStates: {
+    Order: {
+      entity: OrderStateEntity,
+      mapper: jsonStateMapper<OrderStateEntity>(),
+    },
+  },
+});
+
+createTypeORMAdapter(dataSource, {
+  aggregateStates: {
+    Order: {
+      entity: CustomOrderEntity,
+      mapper: jsonStateMapper<CustomOrderEntity>({
+        aggregateIdField: "id",
+        stateField: "data",
+        versionField: "rev",
+      }),
+    },
+  },
+});
+
+// TypeORMAdapter class
+adapter.stateStored(CustomEntity, { mapper: jsonStateMapper<CustomEntity>() });
+adapter.stateStored(CustomEntity, {
+  mapper: jsonStateMapper<CustomEntity>({
+    aggregateIdField: "id",
+    stateField: "data",
+    versionField: "rev",
+  }),
+});
+```
+
+**After (typed columns via custom `TypeORMStateMapper`)**
+
+```ts
+import type { TypeORMStateMapper } from "@noddde/typeorm";
+
+const orderMapper: TypeORMStateMapper<OrderState, OrderTypedEntity> = {
+  aggregateIdField: "aggregateId",
+  versionField: "version",
+  toRow: (s) => ({
+    customerId: s.customerId,
+    total: s.total,
+    status: s.status,
+  }),
+  fromRow: (r) => ({
+    customerId: r.customerId!,
+    total: r.total!,
+    status: r.status!,
+  }),
+};
+
+adapter.stateStored(OrderTypedEntity, { mapper: orderMapper });
+```
+
+The opaque `state` JSON column is no longer required when a typed-column mapper is in use — adopters can persist state directly into typed entity properties and query them with the regular TypeORM repository / query builder.
+
 ---
 
 ## TypeORMAdapter (Class-Based API)
@@ -1210,12 +1495,14 @@ export class TypeORMAdapter implements PersistenceAdapter {
   /**
    * Returns a StateStoredAggregatePersistence bound to a dedicated TypeORM entity.
    *
-   * @param entity - A TypeORM entity class.
-   * @param columns - Optional column mapping overrides.
+   * @param entity  - A TypeORM entity class.
+   * @param options - Required options object containing the mapper. Pass
+   *                  `jsonStateMapper<TEntity>()` for opaque-JSON parity, or
+   *                  a user-defined `TypeORMStateMapper` for typed columns.
    */
-  stateStored(
-    entity: Function,
-    columns?: Partial<TypeORMStateTableColumnMap>,
+  stateStored<TState, TEntity>(
+    entity: new () => TEntity,
+    options: { mapper: TypeORMStateMapper<TState, TEntity> },
   ): StateStoredAggregatePersistence;
 
   /**
@@ -1231,7 +1518,7 @@ export class TypeORMAdapter implements PersistenceAdapter {
 30. All persistence stores are created eagerly in the constructor.
 31. All persistence instances share a single `TypeORMTransactionStore`, ensuring UoW atomicity.
 32. `aggregateLocker` is provided for databases that support advisory locks (PostgreSQL, MySQL, MariaDB, MSSQL). It is `undefined` for SQLite/better-sqlite3.
-33. `stateStored(entity, columns?)` returns a `StateStoredAggregatePersistence` bound to the given entity class. The returned persistence shares the same transaction store.
+33. `stateStored(entity, { mapper })` returns a `StateStoredAggregatePersistence` bound to the given entity class via the supplied `TypeORMStateMapper`. The returned persistence shares the same transaction store. The legacy two-argument form (`stateStored(entity, columns?)`) has been removed — adopters supply a mapper (or call `jsonStateMapper<TEntity>()` for opaque-JSON parity).
 34. `close()` calls `dataSource.destroy()` to clean up the connection pool.
 35. `isPersistenceAdapter(new TypeORMAdapter(dataSource))` returns `true`.
 36. The existing `createTypeORMAdapter` function is marked `@deprecated` and delegates to `TypeORMAdapter` internally.
@@ -1276,8 +1563,12 @@ expect(adapter.outboxStore).toBeDefined();
 ### TypeORMAdapter.stateStored returns dedicated persistence
 
 ```ts
+import { jsonStateMapper } from "@noddde/typeorm";
+
 const adapter = new TypeORMAdapter(dataSource);
-const dedicated = adapter.stateStored(CustomEntity);
+const dedicated = adapter.stateStored(CustomEntity, {
+  mapper: jsonStateMapper<CustomEntity>(),
+});
 
 expect(dedicated).toBeDefined();
 expect(dedicated.save).toBeTypeOf("function");

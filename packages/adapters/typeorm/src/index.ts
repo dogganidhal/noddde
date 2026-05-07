@@ -24,8 +24,9 @@ export {
   type TypeORMAdapterConfig,
   type TypeORMAdapterResult,
   type TypeORMAggregateStateTableConfig,
-  type TypeORMStateTableColumnMap,
+  type TypeORMStateMapper,
 } from "./builder";
+export { jsonStateMapper } from "./json-state-mapper";
 import type { DataSource } from "typeorm";
 import type { UnitOfWorkFactory } from "@noddde/core";
 import type {

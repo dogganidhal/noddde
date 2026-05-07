@@ -5,11 +5,12 @@ source_file: packages/adapters/prisma/src/index.ts
 status: implemented
 exports:
   - PrismaAdapter
+  - PrismaStateMapper
+  - jsonStateMapper
   - createPrismaAdapter (deprecated)
   - PrismaAdapterConfig (deprecated)
   - PrismaAdapterResult (deprecated)
   - PrismaAggregateStateTableConfig
-  - PrismaStateTableColumnMap
   - createPrismaPersistence
   - PrismaPersistenceInfrastructure
   - PrismaEventSourcedAggregatePersistence
@@ -23,12 +24,14 @@ exports:
   - createPrismaUnitOfWorkFactory
 depends_on:
   - core/persistence/persistence
+  - core/persistence/aggregate-state-mapper
   - core/persistence/unit-of-work
   - core/persistence/snapshot
   - core/persistence/outbox
   - core/persistence/adapter
 docs:
   - running/persistence-adapters.mdx
+  - design-decisions/why-state-mapper.mdx
 ---
 
 # Prisma Persistence
@@ -50,6 +53,7 @@ import type {
   PartialEventLoad,
   OutboxStore,
   OutboxEntry,
+  AggregateStateMapper,
 } from "@noddde/core";
 
 /**
@@ -61,25 +65,51 @@ export interface PrismaTransactionStore {
 }
 
 /**
- * Column mapping for a custom state-stored aggregate table in Prisma.
- * Maps logical noddde columns to Prisma model property names.
- * Defaults: `{ aggregateId: "aggregateId", state: "state", version: "version" }`.
+ * Prisma-specific bi-directional mapper between an aggregate's state and
+ * the state portion of a row on a Prisma model. Extends the core
+ * AggregateStateMapper with the Prisma model property names the adapter
+ * needs at query-construction time.
+ *
+ * The mapper's toRow / fromRow handle only the state portion of the row;
+ * the adapter writes the aggregate id and version itself using the
+ * property names provided by aggregateIdField and versionField.
+ *
+ * @typeParam TState - The aggregate's state type.
+ * @typeParam TRow   - The Prisma row shape (typically `Prisma.<Model>UncheckedCreateInput`).
  */
-export interface PrismaStateTableColumnMap {
-  aggregateId: string;
-  state: string;
-  version: string;
+export interface PrismaStateMapper<TState, TRow extends Record<string, unknown>>
+  extends AggregateStateMapper<TState, Partial<TRow>> {
+  readonly aggregateIdField: keyof TRow & string;
+  readonly versionField: keyof TRow & string;
 }
 
 /**
- * Configuration for a per-aggregate state table in Prisma.
+ * Configuration for a per-aggregate state table in Prisma. The mapper is
+ * required and is the single source of truth for the row schema.
  */
-export interface PrismaAggregateStateTableConfig {
+export interface PrismaAggregateStateTableConfig<
+  TState = unknown,
+  TRow extends Record<string, unknown> = Record<string, unknown>,
+> {
   /** Prisma model name (camelCase as used in PrismaClient, e.g., "order"). */
   model: string;
-  /** Column mappings. If omitted, uses defaults: aggregateId, state, version. */
-  columns?: Partial<PrismaStateTableColumnMap>;
+  /** The bi-directional state mapper for this aggregate's model. */
+  mapper: PrismaStateMapper<TState, TRow>;
 }
+
+/**
+ * Convenience helper that builds a PrismaStateMapper which serializes
+ * state to a single property as JSON. Equivalent to the legacy opaque
+ * dedicated-state behavior. Defaults to the conventional property names
+ * `{ aggregateIdField: "aggregateId", versionField: "version", stateField: "state" }`.
+ *
+ * @param options - Optional property-name overrides.
+ */
+export function jsonStateMapper(options?: {
+  aggregateIdField?: string;
+  versionField?: string;
+  stateField?: string;
+}): PrismaStateMapper<unknown, Record<string, unknown>>;
 
 /**
  * Configuration for createPrismaAdapter.
@@ -340,21 +370,34 @@ export class PrismaOutboxStore implements OutboxStore {
 40. `createPrismaAdapter(prisma, { outboxStore: true })` includes `outboxStore` in the result.
 41. `createPrismaAdapter(prisma, { aggregateStates: { ... } })` includes `stateStoreFor()` in the result.
 42. The config shape `PrismaAdapterConfig` has optional fields: `snapshotStore?: true`, `outboxStore?: true`, `aggregateStates?: Record<string, PrismaAggregateStateTableConfig>`.
-43. `PrismaAggregateStateTableConfig` has `model` (required) and `columns?: Partial<PrismaStateTableColumnMap>`.
+43. `PrismaAggregateStateTableConfig<TState, TRow>` has `model: string` (required) and `mapper: PrismaStateMapper<TState, TRow>` (required). Omitting `mapper` is a TypeScript compile error.
 44. `createPrismaAdapter` validates that each configured aggregate state model delegate exists on the PrismaClient instance at creation time. Throws if not found.
 45. The return type `PrismaAdapterResult<C>` uses TypeScript conditional types to narrow based on config — configured optional stores appear as non-optional properties.
 46. All persistence instances from a single `createPrismaAdapter` call share the same `PrismaTransactionStore` so that operations inside a UoW participate in the same transaction.
 
-### Per-Aggregate State Persistence
+### Per-Aggregate State Persistence (Mapper-Based)
 
-48. `stateStoreFor(aggregateName)` returns a `StateStoredAggregatePersistence` bound to that aggregate's dedicated Prisma model.
+48. `stateStoreFor(aggregateName)` returns a `StateStoredAggregatePersistence` bound to that aggregate's dedicated Prisma model via its `PrismaStateMapper`.
 49. `stateStoreFor(aggregateName)` throws if no dedicated table was configured for that aggregate in the `aggregateStates` config.
 50. The dedicated state persistence ignores the `aggregateName` parameter passed to `save()`/`load()` — the model itself is the namespace.
-51. The dedicated state persistence uses the column mapping to read/write the correct properties on the Prisma model.
-52. When `columns` is omitted from `PrismaAggregateStateTableConfig`, defaults to `{ aggregateId: "aggregateId", state: "state", version: "version" }`.
-53. Dedicated state persistence participates in the same UoW transaction as shared persistence via the shared `PrismaTransactionStore`.
-54. `save()` with `expectedVersion === 0` uses `create()`; catches Prisma `P2002` (unique constraint violation) and rethrows as `ConcurrencyError`.
-55. `save()` with `expectedVersion > 0` uses `updateMany()` with version match; throws `ConcurrencyError` if `count === 0`.
+51. **Mapper-driven save (`expectedVersion === 0`)**: the adapter calls `mapper.toRow(state)`, then merges in `{ [mapper.aggregateIdField]: aggregateId, [mapper.versionField]: 1 }` and calls Prisma `create()`. Catches `P2002` and throws `ConcurrencyError`.
+52. **Mapper-driven save (`expectedVersion > 0`)**: the adapter calls `mapper.toRow(state)`, then issues `updateMany({ where: { [mapper.aggregateIdField]: aggregateId, [mapper.versionField]: expectedVersion }, data: { ...mapper.toRow(state), [mapper.versionField]: expectedVersion + 1 } })`. Zero rows affected throws `ConcurrencyError`.
+53. **Mapper-driven load**: the adapter issues `findFirst({ where: { [mapper.aggregateIdField]: aggregateId } })`, strips the id and version properties from the row, and calls `mapper.fromRow(stateRow)`. Returns `{ state, version }` or `null`.
+54. `mapper` is required in `PrismaAggregateStateTableConfig` — omitting it is a TypeScript compile error.
+55. Dedicated state persistence participates in the same UoW transaction as shared persistence via the shared `PrismaTransactionStore`.
+
+### `jsonStateMapper` Convenience Helper
+
+56. `jsonStateMapper()` returns a `PrismaStateMapper<unknown, Record<string, unknown>>` whose `toRow(state)` returns `{ [stateField]: JSON.stringify(state) }` and `fromRow(row)` returns `JSON.parse(row[stateField])`.
+57. With no options argument, `jsonStateMapper()` uses the conventional defaults: `aggregateIdField: "aggregateId"`, `versionField: "version"`, `stateField: "state"`.
+58. With an options argument, the helper uses the provided property-name overrides; unspecified fields fall back to the defaults.
+59. The helper is exported from `@noddde/prisma`.
+
+### `PrismaAdapter.stateStored()` Mapper API
+
+60. `PrismaAdapter.stateStored(model, options)` accepts an options object containing `mapper: PrismaStateMapper<TState, TRow>`.
+61. The legacy two-argument form `stateStored(model, columns?)` is removed — adopters supply a mapper (or call `jsonStateMapper()` for opaque-JSON parity).
+62. The returned `StateStoredAggregatePersistence` shares the adapter's `PrismaTransactionStore`.
 
 ### Backwards Compatibility
 
@@ -375,6 +418,8 @@ export class PrismaOutboxStore implements OutboxStore {
 - [ ] Dedicated state persistence instances share the same txStore as shared persistence.
 - [ ] `createPrismaAdapter` validates configured aggregate state model delegates at creation time.
 - [ ] `stateStoreFor()` fails fast if aggregate name was not registered in the config.
+- [ ] `mapper.toRow(state)` is called once per save; `mapper.fromRow(row)` is called once per loaded row.
+- [ ] The adapter never serializes state itself when a mapper is in use — all state encoding/decoding is the mapper's responsibility.
 
 ## Edge Cases
 
@@ -1038,6 +1083,235 @@ it("should save outbox entries within a UoW transaction", async () => {
 });
 ```
 
+### Per-aggregate state model: jsonStateMapper roundtrip
+
+```ts
+import { jsonStateMapper } from "@noddde/prisma";
+
+it("per-aggregate state model: jsonStateMapper save and load roundtrip", async () => {
+  // Assumes a Prisma model `Order` with conventional aggregateId/state/version fields
+  const adapter = createPrismaAdapter(prisma, {
+    aggregateStates: {
+      Order: { model: "order", mapper: jsonStateMapper() },
+    },
+  });
+
+  const persistence = adapter.stateStoreFor("Order");
+  await persistence.save("Order", "o-1", { status: "placed", total: 100 }, 0);
+
+  const loaded = await persistence.load("Order", "o-1");
+  expect(loaded).not.toBeNull();
+  expect(loaded!.state).toEqual({ status: "placed", total: 100 });
+  expect(loaded!.version).toBe(1);
+});
+```
+
+### Per-aggregate state model: typed-column mapper roundtrip
+
+```ts
+import type { PrismaStateMapper } from "@noddde/prisma";
+import type { Prisma } from "@prisma/client";
+
+type OrderState = {
+  customerId: string;
+  total: number;
+  status: "open" | "paid" | "cancelled";
+};
+
+const orderMapper: PrismaStateMapper<
+  OrderState,
+  Prisma.OrderUncheckedCreateInput
+> = {
+  aggregateIdField: "aggregateId",
+  versionField: "version",
+  toRow: (state) => ({
+    customerId: state.customerId,
+    total: state.total,
+    status: state.status,
+  }),
+  fromRow: (row) => ({
+    customerId: row.customerId!,
+    total: row.total!,
+    status: row.status as OrderState["status"],
+  }),
+};
+
+it("per-aggregate state model: typed-column mapper writes typed rows", async () => {
+  const adapter = createPrismaAdapter(prisma, {
+    aggregateStates: {
+      Order: { model: "order", mapper: orderMapper },
+    },
+  });
+
+  const persistence = adapter.stateStoreFor("Order");
+  await persistence.save(
+    "Order",
+    "o-1",
+    { customerId: "c-7", total: 4200, status: "open" },
+    0,
+  );
+
+  // Typed columns landed directly, no JSON blob
+  const raw = await prisma.order.findUnique({ where: { aggregateId: "o-1" } });
+  expect(raw!.customerId).toBe("c-7");
+  expect(raw!.total).toBe(4200);
+  expect(raw!.status).toBe("open");
+  expect(raw!.version).toBe(1);
+
+  const loaded = await persistence.load("Order", "o-1");
+  expect(loaded!.state).toEqual({
+    customerId: "c-7",
+    total: 4200,
+    status: "open",
+  });
+  expect(loaded!.version).toBe(1);
+});
+```
+
+### Per-aggregate state model: typed-column mapper concurrency
+
+```ts
+it("typed-column mapper: throws ConcurrencyError on version mismatch", async () => {
+  const adapter = createPrismaAdapter(prisma, {
+    aggregateStates: {
+      Order: { model: "order", mapper: orderMapper },
+    },
+  });
+  const persistence = adapter.stateStoreFor("Order");
+
+  await persistence.save(
+    "Order",
+    "o-1",
+    { customerId: "c-7", total: 1000, status: "open" },
+    0,
+  );
+
+  await expect(
+    persistence.save(
+      "Order",
+      "o-1",
+      { customerId: "c-7", total: 2000, status: "paid" },
+      0,
+    ),
+  ).rejects.toThrow(ConcurrencyError);
+});
+```
+
+### Per-aggregate state model: typed-column mapper type safety
+
+```ts
+import { expectTypeOf } from "vitest";
+
+it("typed-column mapper: TS rejects configs missing the mapper", () => {
+  // @ts-expect-error — `mapper` is required in PrismaAggregateStateTableConfig.
+  const _bad: PrismaAggregateStateTableConfig<OrderState> = {
+    model: "order",
+  };
+
+  // mapper.toRow returns Partial<TRow> minus aggregateId/version conceptually.
+  expectTypeOf(orderMapper.toRow).returns.toMatchTypeOf<
+    Partial<Prisma.OrderUncheckedCreateInput>
+  >();
+});
+```
+
+---
+
+## Migration
+
+This release removes `PrismaStateTableColumnMap` and the `columns?: Partial<PrismaStateTableColumnMap>` field from `PrismaAggregateStateTableConfig`. Per-aggregate dedicated state models now require a `PrismaStateMapper` (the `mapper` field is mandatory). This is a breaking change.
+
+**Before**
+
+```ts
+createPrismaAdapter(prisma, {
+  aggregateStates: {
+    Order: { model: "order" },
+  },
+});
+
+createPrismaAdapter(prisma, {
+  aggregateStates: {
+    Order: {
+      model: "order",
+      columns: { aggregateId: "id", state: "data", version: "rev" },
+    },
+  },
+});
+
+// PrismaAdapter class
+adapter.stateStored("order");
+adapter.stateStored("order", {
+  aggregateId: "id",
+  state: "data",
+  version: "rev",
+});
+```
+
+**After (opaque-JSON parity via `jsonStateMapper`)**
+
+```ts
+import { jsonStateMapper } from "@noddde/prisma";
+
+createPrismaAdapter(prisma, {
+  aggregateStates: {
+    Order: { model: "order", mapper: jsonStateMapper() },
+  },
+});
+
+createPrismaAdapter(prisma, {
+  aggregateStates: {
+    Order: {
+      model: "order",
+      mapper: jsonStateMapper({
+        aggregateIdField: "id",
+        stateField: "data",
+        versionField: "rev",
+      }),
+    },
+  },
+});
+
+// PrismaAdapter class
+adapter.stateStored("order", { mapper: jsonStateMapper() });
+adapter.stateStored("order", {
+  mapper: jsonStateMapper({
+    aggregateIdField: "id",
+    stateField: "data",
+    versionField: "rev",
+  }),
+});
+```
+
+**After (typed columns via custom `PrismaStateMapper`)**
+
+```ts
+import type { PrismaStateMapper } from "@noddde/prisma";
+import type { Prisma } from "@prisma/client";
+
+const orderMapper: PrismaStateMapper<
+  OrderState,
+  Prisma.OrderUncheckedCreateInput
+> = {
+  aggregateIdField: "aggregateId",
+  versionField: "version",
+  toRow: (s) => ({
+    customerId: s.customerId,
+    total: s.total,
+    status: s.status,
+  }),
+  fromRow: (r) => ({
+    customerId: r.customerId!,
+    total: r.total!,
+    status: r.status as OrderState["status"],
+  }),
+};
+
+adapter.stateStored("order", { mapper: orderMapper });
+```
+
+The opaque `state` JSON column is no longer required when a typed-column mapper is in use — adopters can persist state directly into typed Prisma model fields and query them with the regular Prisma client.
+
 ---
 
 ## PrismaAdapter (Class-Based API)
@@ -1093,12 +1367,14 @@ export class PrismaAdapter implements PersistenceAdapter {
   /**
    * Returns a StateStoredAggregatePersistence bound to a dedicated Prisma model.
    *
-   * @param model - The Prisma model name (e.g., "order").
-   * @param columns - Optional column mapping overrides.
+   * @param model   - The Prisma model name (e.g., "order").
+   * @param options - Required options object containing the mapper. Pass
+   *                  `jsonStateMapper()` for opaque-JSON parity, or a
+   *                  user-defined `PrismaStateMapper` for typed columns.
    */
-  stateStored(
+  stateStored<TState, TRow extends Record<string, unknown>>(
     model: string,
-    columns?: Partial<PrismaStateTableColumnMap>,
+    options: { mapper: PrismaStateMapper<TState, TRow> },
   ): StateStoredAggregatePersistence;
 
   /**
@@ -1114,7 +1390,7 @@ export class PrismaAdapter implements PersistenceAdapter {
 30. All persistence stores are created eagerly in the constructor.
 31. All persistence instances share a single `PrismaTransactionStore`, ensuring UoW atomicity.
 32. `aggregateLocker` is provided for databases that support advisory locks (PostgreSQL, MySQL, MariaDB). It is `undefined` for SQLite.
-33. `stateStored(model, columns?)` returns a `StateStoredAggregatePersistence` bound to the given Prisma model. The returned persistence shares the same transaction store.
+33. `stateStored(model, { mapper })` returns a `StateStoredAggregatePersistence` bound to the given Prisma model via the supplied `PrismaStateMapper`. The returned persistence shares the same transaction store. The legacy two-argument form (`stateStored(model, columns?)`) has been removed — adopters supply a mapper (or call `jsonStateMapper()` for opaque-JSON parity).
 34. `close()` calls `prisma.$disconnect()` to clean up the connection pool.
 35. `isPersistenceAdapter(new PrismaAdapter(prisma))` returns `true`.
 36. The existing `createPrismaAdapter` function is marked `@deprecated` and delegates to `PrismaAdapter` internally.
@@ -1159,8 +1435,10 @@ expect(adapter.outboxStore).toBeDefined();
 ### PrismaAdapter.stateStored returns dedicated persistence
 
 ```ts
+import { jsonStateMapper } from "@noddde/prisma";
+
 const adapter = new PrismaAdapter(prisma);
-const dedicated = adapter.stateStored("order");
+const dedicated = adapter.stateStored("order", { mapper: jsonStateMapper() });
 
 expect(dedicated).toBeDefined();
 expect(dedicated.save).toBeTypeOf("function");

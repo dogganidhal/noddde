@@ -45,6 +45,7 @@ Detailed rationale lives in `docs/content/docs/design-decisions/`:
 | Why Pure Evolve Handlers       | Deterministic replay guarantee                                           |
 | Why Sagas Return Commands      | State machines, not orchestrators                                        |
 | Why Two Persistence Strategies | Event sourcing vs state snapshots, swappable                             |
+| Why an Aggregate State Mapper  | Bi-directional mapper for adopter-owned dedicated tables                 |
 
 ## Competitive Context
 
@@ -61,7 +62,7 @@ See `ROADMAP.md` for the full roadmap. Current state:
 
 - API surface: complete
 - In-memory runtime: complete
-- Persistence adapters: complete (Drizzle, Prisma, TypeORM with transaction support)
+- Persistence adapters: complete (Drizzle, Prisma, TypeORM with transaction support; bi-directional `AggregateStateMapper` is the primary extension point for binding aggregates to adopter-owned dedicated tables with typed columns)
 - Concurrency control: complete (optimistic with retries, pessimistic with advisory locks)
 - Event metadata: complete (auto-enrichment, correlation propagation through sagas)
 - Snapshotting: complete (configurable strategies, partial event loading)

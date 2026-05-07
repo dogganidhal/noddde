@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { expectTypeOf } from "vitest";
 import "reflect-metadata";
 import { DataSource, Entity, PrimaryColumn, Column } from "typeorm";
 import { ConcurrencyError } from "@noddde/core";
@@ -10,23 +11,54 @@ import {
   NodddeSagaStateEntity,
   NodddeSnapshotEntity,
   NodddeOutboxEntryEntity,
+  jsonStateMapper,
+  type TypeORMAggregateStateTableConfig,
+  type TypeORMStateMapper,
 } from "../index";
 
-// Custom entity for per-aggregate state table testing
+// ─── Entities ────────────────────────────────────────────────────────────────
+
+/** Entity for opaque JSON tests (jsonStateMapper default column names). */
 @Entity("orders")
-class OrderEntity {
+class OrderStateEntity {
   @PrimaryColumn() aggregateId!: string;
   @Column({ type: "text" }) state!: string;
   @Column({ type: "int", default: 0 }) version!: number;
 }
 
-// Custom entity with non-standard column names
-@Entity("custom_orders")
-class CustomOrderEntity {
-  @PrimaryColumn() orderId!: string;
-  @Column({ type: "text" }) orderData!: string;
-  @Column({ type: "int", default: 0 }) rev!: number;
+/** Entity for typed-column mapper tests. */
+type OrderState = {
+  customerId: string;
+  total: number;
+  status: "open" | "paid" | "cancelled";
+};
+
+@Entity("typed_orders")
+class OrderTypedEntity {
+  @PrimaryColumn({ type: "text" }) aggregateId!: string;
+  @Column({ type: "text", name: "customer_id" }) customerId!: string;
+  @Column({ type: "int", name: "total_cents" }) total!: number;
+  @Column({ type: "text" }) status!: OrderState["status"];
+  @Column({ type: "int", default: 0 }) version!: number;
 }
+
+/** Typed-column mapper for {@link OrderTypedEntity}. */
+const orderMapper: TypeORMStateMapper<OrderState, OrderTypedEntity> = {
+  aggregateIdField: "aggregateId",
+  versionField: "version",
+  toRow: (state) => ({
+    customerId: state.customerId,
+    total: state.total,
+    status: state.status,
+  }),
+  fromRow: (row) => ({
+    customerId: row.customerId!,
+    total: row.total!,
+    status: row.status!,
+  }),
+};
+
+// ─── Database setup ───────────────────────────────────────────────────────────
 
 let dataSource: DataSource;
 
@@ -40,8 +72,8 @@ async function setupDb() {
       NodddeSagaStateEntity,
       NodddeSnapshotEntity,
       NodddeOutboxEntryEntity,
-      OrderEntity,
-      CustomOrderEntity,
+      OrderStateEntity,
+      OrderTypedEntity,
     ],
     synchronize: true,
   });
@@ -53,6 +85,8 @@ async function teardownDb() {
     await dataSource.destroy();
   }
 }
+
+// ─── createTypeORMAdapter factory ─────────────────────────────────────────────
 
 describe("createTypeORMAdapter", () => {
   beforeEach(setupDb);
@@ -94,65 +128,201 @@ describe("createTypeORMAdapter", () => {
     expect(infra.unitOfWorkFactory).toBeDefined();
   });
 
-  it("stateStoreFor returns dedicated persistence for configured aggregate", async () => {
+  it("stateStoreFor throws for unconfigured aggregate", () => {
     const result = createTypeORMAdapter(dataSource, {
       aggregateStates: {
-        Order: { entity: OrderEntity },
+        Order: {
+          entity: OrderStateEntity,
+          mapper: jsonStateMapper<OrderStateEntity>(),
+        },
       },
     });
 
-    const orderStore = result.stateStoreFor("Order");
-    await orderStore.save("Order", "order-1", { total: 100 }, 0);
-    const loaded = await orderStore.load("Order", "order-1");
+    expect(() => result.stateStoreFor("Foo" as any)).toThrow(
+      /No dedicated state table configured for aggregate "Foo"/,
+    );
+  });
+});
 
-    expect(loaded).toEqual({ state: { total: 100 }, version: 1 });
+// ─── Per-aggregate state entity: jsonStateMapper roundtrip ───────────────────
+
+describe("Per-aggregate state entity: jsonStateMapper", () => {
+  beforeEach(setupDb);
+  afterEach(teardownDb);
+
+  it("per-aggregate state entity: jsonStateMapper save and load roundtrip", async () => {
+    const adapter = createTypeORMAdapter(dataSource, {
+      aggregateStates: {
+        Order: {
+          entity: OrderStateEntity,
+          mapper: jsonStateMapper<OrderStateEntity>(),
+        },
+      },
+    });
+
+    const persistence = adapter.stateStoreFor("Order");
+    await persistence.save("Order", "o-1", { status: "placed", total: 100 }, 0);
+
+    const loaded = await persistence.load("Order", "o-1");
+    expect(loaded).not.toBeNull();
+    expect(loaded!.state).toEqual({ status: "placed", total: 100 });
+    expect(loaded!.version).toBe(1);
   });
 
   it("returns null for nonexistent aggregate", async () => {
-    const result = createTypeORMAdapter(dataSource, {
+    const adapter = createTypeORMAdapter(dataSource, {
       aggregateStates: {
-        Order: { entity: OrderEntity },
+        Order: {
+          entity: OrderStateEntity,
+          mapper: jsonStateMapper<OrderStateEntity>(),
+        },
       },
     });
 
-    const loaded = await result
+    const loaded = await adapter
       .stateStoreFor("Order")
       .load("Order", "nonexistent");
     expect(loaded).toBeNull();
   });
 
   it("throws ConcurrencyError on version mismatch", async () => {
-    const result = createTypeORMAdapter(dataSource, {
-      aggregateStates: {
-        Order: { entity: OrderEntity },
-      },
-    });
-
-    const orderStore = result.stateStoreFor("Order");
-    await orderStore.save("Order", "order-1", { total: 100 }, 0);
-    await expect(
-      orderStore.save("Order", "order-1", { total: 200 }, 0),
-    ).rejects.toThrow(ConcurrencyError);
-  });
-
-  it("supports custom column mapping", async () => {
-    const result = createTypeORMAdapter(dataSource, {
+    const adapter = createTypeORMAdapter(dataSource, {
       aggregateStates: {
         Order: {
-          entity: CustomOrderEntity,
-          columns: {
-            aggregateId: "orderId",
-            state: "orderData",
-            version: "rev",
-          },
+          entity: OrderStateEntity,
+          mapper: jsonStateMapper<OrderStateEntity>(),
         },
       },
     });
 
-    const orderStore = result.stateStoreFor("Order");
-    await orderStore.save("Order", "order-1", { total: 100 }, 0);
-    const loaded = await orderStore.load("Order", "order-1");
+    const persistence = adapter.stateStoreFor("Order");
+    await persistence.save("Order", "o-1", { total: 100 }, 0);
+    await expect(
+      persistence.save("Order", "o-1", { total: 200 }, 0),
+    ).rejects.toThrow(ConcurrencyError);
+  });
 
-    expect(loaded).toEqual({ state: { total: 100 }, version: 1 });
+  it("jsonStateMapper with custom field names", async () => {
+    @Entity("custom_orders")
+    class CustomOrderEntity {
+      @PrimaryColumn() id!: string;
+      @Column({ type: "text" }) data!: string;
+      @Column({ type: "int", default: 0 }) rev!: number;
+    }
+
+    const localDs = new DataSource({
+      type: "better-sqlite3",
+      database: ":memory:",
+      entities: [
+        NodddeEventEntity,
+        NodddeAggregateStateEntity,
+        NodddeSagaStateEntity,
+        NodddeSnapshotEntity,
+        NodddeOutboxEntryEntity,
+        CustomOrderEntity,
+      ],
+      synchronize: true,
+    });
+    await localDs.initialize();
+
+    try {
+      const adapter = createTypeORMAdapter(localDs, {
+        aggregateStates: {
+          Order: {
+            entity: CustomOrderEntity,
+            mapper: jsonStateMapper<CustomOrderEntity>({
+              aggregateIdField: "id",
+              stateField: "data",
+              versionField: "rev",
+            }),
+          },
+        },
+      });
+
+      const persistence = adapter.stateStoreFor("Order");
+      await persistence.save("Order", "order-1", { total: 100 }, 0);
+      const loaded = await persistence.load("Order", "order-1");
+
+      expect(loaded).toEqual({ state: { total: 100 }, version: 1 });
+    } finally {
+      await localDs.destroy();
+    }
+  });
+});
+
+// ─── Per-aggregate state entity: typed-column mapper ─────────────────────────
+
+describe("Per-aggregate state entity: typed-column mapper", () => {
+  beforeEach(setupDb);
+  afterEach(teardownDb);
+
+  it("per-aggregate state entity: typed-column mapper writes typed rows", async () => {
+    const adapter = createTypeORMAdapter(dataSource, {
+      aggregateStates: {
+        Order: { entity: OrderTypedEntity, mapper: orderMapper },
+      },
+    });
+
+    const persistence = adapter.stateStoreFor("Order");
+    await persistence.save(
+      "Order",
+      "o-1",
+      { customerId: "c-7", total: 4200, status: "open" },
+      0,
+    );
+
+    const repo = dataSource.getRepository(OrderTypedEntity);
+    const raw = await repo.findOne({ where: { aggregateId: "o-1" } });
+    expect(raw!.customerId).toBe("c-7");
+    expect(raw!.total).toBe(4200);
+    expect(raw!.status).toBe("open");
+    expect(raw!.version).toBe(1);
+
+    const loaded = await persistence.load("Order", "o-1");
+    expect(loaded!.state).toEqual({
+      customerId: "c-7",
+      total: 4200,
+      status: "open",
+    });
+    expect(loaded!.version).toBe(1);
+  });
+
+  it("typed-column mapper: throws ConcurrencyError on version mismatch", async () => {
+    const adapter = createTypeORMAdapter(dataSource, {
+      aggregateStates: {
+        Order: { entity: OrderTypedEntity, mapper: orderMapper },
+      },
+    });
+    const persistence = adapter.stateStoreFor("Order");
+
+    await persistence.save(
+      "Order",
+      "o-1",
+      { customerId: "c-7", total: 1000, status: "open" },
+      0,
+    );
+
+    await expect(
+      persistence.save(
+        "Order",
+        "o-1",
+        { customerId: "c-7", total: 2000, status: "paid" },
+        0,
+      ),
+    ).rejects.toThrow(ConcurrencyError);
+  });
+
+  it("typed-column mapper: TS rejects configs missing the mapper", () => {
+    // @ts-expect-error — `mapper` is required in TypeORMAggregateStateTableConfig.
+    // eslint-disable-next-line no-unused-vars
+    const _bad: TypeORMAggregateStateTableConfig<OrderState, OrderTypedEntity> =
+      {
+        entity: OrderTypedEntity,
+      };
+    void _bad;
+
+    expectTypeOf(orderMapper.toRow).returns.toMatchTypeOf<
+      Partial<OrderTypedEntity>
+    >();
   });
 });

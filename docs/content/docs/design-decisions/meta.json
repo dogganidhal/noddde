@@ -8,6 +8,7 @@
     "why-id-not-in-state",
     "why-pure-apply-handlers",
     "why-two-persistence-strategies",
+    "why-state-mapper",
     "why-injectable-infrastructure",
     "why-sagas-return-commands",
     "why-extracted-handlers"

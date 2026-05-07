@@ -52,6 +52,8 @@ interface StateStoredAggregatePersistence {
 - **`save`** overwrites the current state snapshot. The `expectedVersion` must match the stored version -- if it does not, a `ConcurrencyError` is thrown.
 - **`load`** returns the last saved state and version as `{ state, version }`, or `null` for new aggregates (version 0).
 
+For state-stored aggregates that need a domain-shaped table instead of an opaque JSON column, all three ORM adapters expose `stateStored(table, { mapper })` — the mapper owns the row shape, the framework owns id and version. See [Per-Aggregate Dedicated State Tables](/docs/running/persistence-adapters#per-aggregate-dedicated-state-tables) and [Why an Aggregate State Mapper?](/docs/design-decisions/why-state-mapper).
+
 ### State Snapshotting (Event-Sourced Optimization)
 
 For long-lived aggregates with large event streams, replaying every event on each command dispatch becomes expensive. **State snapshotting** periodically caches the aggregate state at a known event stream version. On subsequent loads, the engine starts from the snapshot and replays only the events that occurred after it.

@@ -8,7 +8,12 @@ import type {
   PartialEventLoad,
   EventSourcedAggregatePersistence,
 } from "@noddde/core";
-import { createPrismaPersistence, PrismaAdvisoryLocker } from "../index";
+import {
+  createPrismaPersistence,
+  createPrismaAdapter,
+  PrismaAdvisoryLocker,
+  jsonStateMapper,
+} from "../index";
 import type { OutboxEntry } from "@noddde/core";
 
 const TEST_DB = path.resolve(__dirname, "../../prisma/test.db");
@@ -598,5 +603,279 @@ describe("PrismaOutboxStore", () => {
 
     const events = await infra.eventSourcedPersistence.load("Account", "acc-1");
     expect(events).toHaveLength(1);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Per-Aggregate Dedicated State Persistence (mapper-based)
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Unit-style per-aggregate mapper tests use a mock PrismaClient so we can
+ * run them without a real per-aggregate model in the schema.
+ * Integration tests that need real typed columns would require a separate
+ * schema with a custom model (e.g. `Order`) and are left as noted in the spec.
+ */
+describe("Per-aggregate state persistence — jsonStateMapper (unit)", () => {
+  function createMockDelegate() {
+    const store = new Map<string, Record<string, unknown>>();
+    return {
+      create: vi.fn(async ({ data }: any) => {
+        if (store.has(data.aggregateId)) {
+          const error: any = new Error("Unique constraint failed");
+          error.code = "P2002";
+          throw error;
+        }
+        store.set(data.aggregateId, { ...data });
+        return data;
+      }),
+      findFirst: vi.fn(async ({ where }: any) => {
+        return store.get(where.aggregateId) ?? null;
+      }),
+      updateMany: vi.fn(async ({ where, data }: any) => {
+        const existing = store.get(where.aggregateId);
+        if (!existing || existing.version !== where.version) {
+          return { count: 0 };
+        }
+        Object.assign(existing, data);
+        return { count: 1 };
+      }),
+    };
+  }
+
+  it("per-aggregate state model: jsonStateMapper save and load roundtrip", async () => {
+    const delegate = createMockDelegate();
+    const mockPrismaInst: any = { order: delegate };
+
+    const adapter = createPrismaAdapter(mockPrismaInst as any, {
+      aggregateStates: {
+        Order: { model: "order", mapper: jsonStateMapper() },
+      },
+    });
+
+    const persistence = adapter.stateStoreFor("Order");
+    await persistence.save("Order", "o-1", { status: "placed", total: 100 }, 0);
+
+    const loaded = await persistence.load("Order", "o-1");
+    expect(loaded).not.toBeNull();
+    expect(loaded!.state).toEqual({ status: "placed", total: 100 });
+    expect(loaded!.version).toBe(1);
+  });
+
+  it("stateStoreFor: throws when aggregate name not configured", () => {
+    const mockPrismaInst: any = { order: createMockDelegate() };
+
+    const adapter = createPrismaAdapter(mockPrismaInst as any, {
+      aggregateStates: {
+        Order: { model: "order", mapper: jsonStateMapper() },
+      },
+    });
+
+    expect(() => adapter.stateStoreFor("Unknown" as any)).toThrow(
+      /No dedicated state table configured for aggregate "Unknown"/,
+    );
+  });
+
+  it("typed-column mapper: throws ConcurrencyError on version mismatch", async () => {
+    const delegate = createMockDelegate();
+    const mockPrismaInst: any = { order: delegate };
+
+    const adapter = createPrismaAdapter(mockPrismaInst as any, {
+      aggregateStates: {
+        Order: { model: "order", mapper: jsonStateMapper() },
+      },
+    });
+
+    const persistence = adapter.stateStoreFor("Order");
+    await persistence.save("Order", "o-1", { total: 1000 }, 0);
+
+    await expect(
+      persistence.save("Order", "o-1", { total: 2000 }, 0),
+    ).rejects.toThrow(ConcurrencyError);
+  });
+
+  it("dedicated persistence participates in UoW transaction via shared txStore", async () => {
+    const delegate = createMockDelegate();
+    const eventDelegate = {
+      createMany: vi.fn(async () => ({})),
+      findMany: vi.fn(async () => []),
+    };
+    const stateDelegate = {
+      findUnique: vi.fn(async () => null),
+      create: vi.fn(async () => ({})),
+      updateMany: vi.fn(async () => ({ count: 0 })),
+    };
+    const sagaDelegate = {
+      findUnique: vi.fn(async () => null),
+      create: vi.fn(async () => ({})),
+    };
+
+    // Minimal mock that exercises shared txStore routing
+    const mockPrismaInst: any = {
+      order: delegate,
+      nodddeEvent: eventDelegate,
+      nodddeAggregateState: stateDelegate,
+      nodddeSagaState: sagaDelegate,
+      $transaction: vi.fn(async (fn: any) => {
+        const tx: any = {
+          order: delegate,
+          nodddeEvent: eventDelegate,
+          nodddeAggregateState: stateDelegate,
+          nodddeSagaState: sagaDelegate,
+        };
+        return fn(tx);
+      }),
+    };
+
+    const adapter = createPrismaAdapter(mockPrismaInst as any, {
+      aggregateStates: {
+        Order: { model: "order", mapper: jsonStateMapper() },
+      },
+    });
+
+    const uow = adapter.unitOfWorkFactory();
+    const dedicated = adapter.stateStoreFor("Order");
+
+    uow.enlist(() => dedicated.save("Order", "o-1", { total: 500 }, 0));
+    await uow.commit();
+
+    // The $transaction callback should have been called
+    expect(mockPrismaInst.$transaction).toHaveBeenCalledOnce();
+    // The dedicated delegate should have received the create call
+    expect(delegate.create).toHaveBeenCalledOnce();
+  });
+
+  it("createPrismaAdapter throws when configured model not on PrismaClient", () => {
+    const mockPrismaInst: any = {};
+
+    expect(() =>
+      createPrismaAdapter(mockPrismaInst as any, {
+        aggregateStates: {
+          Foo: { model: "nonexistent", mapper: jsonStateMapper() },
+        },
+      }),
+    ).toThrow(/Prisma model "nonexistent" not found on PrismaClient/);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Per-Aggregate Dedicated State Persistence — typed-column mapper (real DB)
+// ═══════════════════════════════════════════════════════════════════
+
+import type { PrismaStateMapper } from "../index";
+import type { Prisma } from "@prisma/client";
+
+type OrderState = {
+  customerId: string;
+  total: number;
+  status: "open" | "paid" | "cancelled";
+};
+
+const orderTypedMapper: PrismaStateMapper<
+  OrderState,
+  Prisma.OrderUncheckedCreateInput
+> = {
+  aggregateIdField: "aggregateId",
+  versionField: "version",
+  toRow: (state) => ({
+    customerId: state.customerId,
+    total: state.total,
+    status: state.status,
+  }),
+  fromRow: (row) => ({
+    customerId: row.customerId!,
+    total: row.total!,
+    status: row.status as OrderState["status"],
+  }),
+};
+
+describe("Per-aggregate state persistence — typed-column mapper (real DB)", () => {
+  beforeEach(setupDb);
+  afterEach(teardownDb);
+
+  it("typed-column mapper: writes and reads typed rows", async () => {
+    const adapter = createPrismaAdapter(prisma, {
+      aggregateStates: {
+        Order: { model: "order", mapper: orderTypedMapper },
+      },
+    });
+
+    const persistence = adapter.stateStoreFor("Order");
+    await persistence.save(
+      "Order",
+      "o-1",
+      { customerId: "c-7", total: 4200, status: "open" },
+      0,
+    );
+
+    // Verify typed columns landed directly, no JSON blob
+    const raw = await prisma.order.findUnique({
+      where: { aggregateId: "o-1" },
+    });
+    expect(raw).not.toBeNull();
+    expect(raw!.customerId).toBe("c-7");
+    expect(raw!.total).toBe(4200);
+    expect(raw!.status).toBe("open");
+    expect(raw!.version).toBe(1);
+
+    const loaded = await persistence.load("Order", "o-1");
+    expect(loaded).not.toBeNull();
+    expect(loaded!.state).toEqual({
+      customerId: "c-7",
+      total: 4200,
+      status: "open",
+    });
+    expect(loaded!.version).toBe(1);
+  });
+
+  it("typed-column mapper: throws ConcurrencyError on version mismatch", async () => {
+    const adapter = createPrismaAdapter(prisma, {
+      aggregateStates: {
+        Order: { model: "order", mapper: orderTypedMapper },
+      },
+    });
+
+    const persistence = adapter.stateStoreFor("Order");
+    await persistence.save(
+      "Order",
+      "o-1",
+      { customerId: "c-7", total: 1000, status: "open" },
+      0,
+    );
+
+    await expect(
+      persistence.save(
+        "Order",
+        "o-1",
+        { customerId: "c-7", total: 2000, status: "paid" },
+        0,
+      ),
+    ).rejects.toThrow(ConcurrencyError);
+  });
+
+  it("typed-column mapper: increments version on update", async () => {
+    const adapter = createPrismaAdapter(prisma, {
+      aggregateStates: {
+        Order: { model: "order", mapper: orderTypedMapper },
+      },
+    });
+
+    const persistence = adapter.stateStoreFor("Order");
+    await persistence.save(
+      "Order",
+      "o-1",
+      { customerId: "c-7", total: 1000, status: "open" },
+      0,
+    );
+    await persistence.save(
+      "Order",
+      "o-1",
+      { customerId: "c-7", total: 1000, status: "paid" },
+      1,
+    );
+
+    const loaded = await persistence.load("Order", "o-1");
+    expect(loaded!.state.status).toBe("paid");
+    expect(loaded!.version).toBe(2);
   });
 });

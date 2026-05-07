@@ -71,9 +71,9 @@ Everything after `POST /bookings` happens automatically. No manual HTTP calls ne
 
 ## Write Model — Aggregates
 
-### Room (Event-Sourced)
+### Room (State-Stored, Typed Table)
 
-Manages physical room lifecycle. Snapshots every 50 events via `everyNEvents(50)` to optimize replay for high-traffic rooms.
+Manages physical room lifecycle. Persisted into a custom `rooms` table with one typed column per state field via a `DrizzleStateMapper` — no opaque JSON blob. See the persistence section below.
 
 **State transitions:**
 
@@ -263,13 +263,45 @@ The error handler plugin maps domain errors to HTTP status codes:
 
 ### Persistence Configuration
 
-| Aggregate | Strategy      | Backing Store                            |
-| --------- | ------------- | ---------------------------------------- |
-| Room      | Event-sourced | Drizzle + PostgreSQL                     |
-| Booking   | Event-sourced | Drizzle + PostgreSQL                     |
-| Inventory | State-stored  | Drizzle + PostgreSQL                     |
-| Sagas     | State-stored  | Drizzle + PostgreSQL                     |
-| Snapshots | Room only     | Drizzle + PostgreSQL, `everyNEvents(50)` |
+| Aggregate | Strategy      | Backing Store                                        |
+| --------- | ------------- | ---------------------------------------------------- |
+| Room      | State-stored  | Drizzle + PostgreSQL — dedicated typed `rooms` table |
+| Booking   | Event-sourced | Drizzle + PostgreSQL                                 |
+| Inventory | State-stored  | Drizzle + PostgreSQL                                 |
+| Sagas     | State-stored  | Drizzle + PostgreSQL                                 |
+
+#### Typed-column state table for Room (`DrizzleStateMapper`)
+
+The Room aggregate uses a **dedicated typed table** (`rooms`) instead of the shared
+opaque `noddde_aggregate_states` table. Each `RoomState` field maps to its own
+strongly-typed PostgreSQL column (`status TEXT`, `floor INTEGER`,
+`price_per_night REAL`, etc.), making the state directly queryable without JSON parsing.
+
+This is wired via the `DrizzleStateMapper` feature:
+
+```ts
+// infrastructure/persistence/room-state-mapper.ts
+export const roomStateMapper: DrizzleStateMapper<RoomState, typeof roomsTable> = {
+  aggregateIdColumn: roomsTable.aggregateId,
+  versionColumn: roomsTable.version,
+  toRow: (state) => ({ roomNumber: state.roomNumber, type: state.type, ... }),
+  fromRow: (row) => ({ roomNumber: row.roomNumber ?? null, type: row.type ?? null, ... }),
+};
+
+// Wired with:
+createDrizzleAdapter(db, {
+  eventStore: events,
+  stateStore: aggregateStates, // still used for Inventory
+  sagaStore: sagaStates,
+  aggregateStates: {
+    Room: { table: roomsTable, mapper: roomStateMapper },
+  },
+});
+```
+
+The `Booking` and `Inventory` aggregates continue to use the shared
+`noddde_aggregate_states` table unchanged. `Inventory` uses the shared
+`stateStoredPersistence`; `Booking` uses `eventSourcedPersistence`.
 
 ### Service Implementations
 
@@ -292,34 +324,34 @@ Set `EVENT_BUS=in-memory` to fall back to `EventEmitterEventBus` for quick local
 
 ## Framework Features Demonstrated
 
-| #   | Feature                         | Where                                                   |
-| --- | ------------------------------- | ------------------------------------------------------- |
-| 1   | `defineAggregate`               | Room, Booking, Inventory                                |
-| 2   | `defineProjection`              | RoomAvailability, GuestHistory, Revenue                 |
-| 3   | `defineSaga`                    | BookingFulfillment, PaymentProcessing, CheckoutReminder |
-| 4   | Event-sourced persistence       | Room, Booking (via Drizzle)                             |
-| 5   | State-stored persistence        | Inventory (via Drizzle)                                 |
-| 6   | Per-aggregate persistence       | Mixed strategies in same domain                         |
-| 7   | Snapshots                       | Room aggregate, `everyNEvents(50)`                      |
-| 8   | Idempotency                     | `InMemoryIdempotencyStore` for payment commands         |
-| 9   | Optimistic concurrency          | `{ maxRetries: 3 }`                                     |
-| 10  | Strong consistency projection   | RoomAvailability (updated in same UoW)                  |
-| 11  | Eventual consistency projection | GuestHistory, Revenue                                   |
-| 12  | Standalone event handlers       | `SendBookingConfirmation`, `SendCheckInNotification`    |
-| 13  | Standalone command handlers     | `RunNightlyAudit`                                       |
-| 14  | Standalone query handlers       | `SearchAvailableRooms`                                  |
-| 15  | Unit of Work                    | Group booking (`domain.withUnitOfWork()`)               |
-| 16  | MetadataProvider                | AsyncLocalStorage from Fastify HTTP headers             |
-| 17  | Distributed EventBus            | `@noddde/rabbitmq` adapter                              |
-| 18  | Custom ViewStore                | Drizzle-backed view store                               |
-| 19  | Cross-aggregate saga            | BookingFulfillment dispatches to Booking + Room         |
-| 20  | Infrastructure-calling saga     | PaymentProcessing calls `paymentGateway`                |
-| 21  | Side-effect saga                | CheckoutReminder calls `smsService`                     |
-| 22  | HTTP layer                      | Fastify REST API                                        |
-| 23  | `testAggregate` harness         | Unit tests                                              |
-| 24  | `testProjection` harness        | Unit tests                                              |
-| 25  | `testSaga` harness              | Unit tests                                              |
-| 26  | `testDomain` + DomainSpy        | Slice tests                                             |
+| #   | Feature                          | Where                                                   |
+| --- | -------------------------------- | ------------------------------------------------------- |
+| 1   | `defineAggregate`                | Room, Booking, Inventory                                |
+| 2   | `defineProjection`               | RoomAvailability, GuestHistory, Revenue                 |
+| 3   | `defineSaga`                     | BookingFulfillment, PaymentProcessing, CheckoutReminder |
+| 4   | Event-sourced persistence        | Booking (via Drizzle)                                   |
+| 5   | State-stored persistence         | Room (typed table), Inventory (shared opaque table)     |
+| 6   | Per-aggregate persistence        | Mixed strategies in same domain                         |
+| 7   | `DrizzleStateMapper` typed table | Room aggregate — dedicated `rooms` table, typed columns |
+| 8   | Idempotency                      | `InMemoryIdempotencyStore` for payment commands         |
+| 9   | Optimistic concurrency           | `{ maxRetries: 3 }`                                     |
+| 10  | Strong consistency projection    | RoomAvailability (updated in same UoW)                  |
+| 11  | Eventual consistency projection  | GuestHistory, Revenue                                   |
+| 12  | Standalone event handlers        | `SendBookingConfirmation`, `SendCheckInNotification`    |
+| 13  | Standalone command handlers      | `RunNightlyAudit`                                       |
+| 14  | Standalone query handlers        | `SearchAvailableRooms`                                  |
+| 15  | Unit of Work                     | Group booking (`domain.withUnitOfWork()`)               |
+| 16  | MetadataProvider                 | AsyncLocalStorage from Fastify HTTP headers             |
+| 17  | Distributed EventBus             | `@noddde/rabbitmq` adapter                              |
+| 18  | Custom ViewStore                 | Drizzle-backed view store                               |
+| 19  | Cross-aggregate saga             | BookingFulfillment dispatches to Booking + Room         |
+| 20  | Infrastructure-calling saga      | PaymentProcessing calls `paymentGateway`                |
+| 21  | Side-effect saga                 | CheckoutReminder calls `smsService`                     |
+| 22  | HTTP layer                       | Fastify REST API                                        |
+| 23  | `testAggregate` harness          | Unit tests                                              |
+| 24  | `testProjection` harness         | Unit tests                                              |
+| 25  | `testSaga` harness               | Unit tests                                              |
+| 26  | `testDomain` + DomainSpy         | Slice tests                                             |
 
 ## Tests
 

@@ -5,6 +5,7 @@
  */
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
+import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
 import { createDrizzleAdapter } from "@noddde/drizzle";
 import {
   events,
@@ -12,6 +13,7 @@ import {
   sagaStates,
   snapshots,
 } from "@noddde/drizzle/sqlite";
+import { createRoomStateMapper } from "../../infrastructure/persistence/room-state-mapper";
 import {
   defineDomain,
   wireDomain,
@@ -21,7 +23,7 @@ import {
   InMemoryIdempotencyStore,
   InMemoryViewStore,
 } from "@noddde/engine";
-import { createViewStoreFactory, everyNEvents } from "@noddde/core";
+import { createViewStoreFactory } from "@noddde/core";
 import type { HotelInfrastructure } from "../../infrastructure/types";
 import type {
   GuestHistoryView,
@@ -43,6 +45,28 @@ import { BookingFulfillmentSaga } from "../../domain/process-model/booking-fulfi
 import { CheckoutReminderSaga } from "../../domain/process-model/checkout-reminder";
 import { PaymentProcessingSaga } from "../../domain/process-model/payment-processing";
 import { createApp } from "../../infrastructure/http/app";
+
+/**
+ * SQLite equivalent of the production `roomsTable` (PostgreSQL). Same JS
+ * key shape, so {@link createRoomStateMapper} accepts both — see
+ * `infrastructure/persistence/room-state-mapper.ts`.
+ */
+const sqliteRoomsTable = sqliteTable("rooms", {
+  aggregateId: text("aggregate_id").primaryKey(),
+  version: integer("version").notNull().default(0),
+  roomNumber: text("room_number"),
+  type: text("type").$type<"single" | "double" | "suite">(),
+  floor: integer("floor").notNull().default(0),
+  pricePerNight: real("price_per_night").notNull().default(0),
+  status: text("status")
+    .$type<"created" | "available" | "reserved" | "occupied" | "maintenance">()
+    .notNull()
+    .default("created"),
+  currentBookingId: text("current_booking_id"),
+  currentGuestId: text("current_guest_id"),
+});
+
+const sqliteRoomStateMapper = createRoomStateMapper(sqliteRoomsTable);
 
 /**
  * Creates a fully wired test environment with in-memory SQLite,
@@ -90,6 +114,17 @@ export async function createTestEnvironment() {
       data TEXT NOT NULL,
       PRIMARY KEY (view_type, view_id)
     );
+    CREATE TABLE rooms (
+      aggregate_id TEXT NOT NULL PRIMARY KEY,
+      version INTEGER NOT NULL DEFAULT 0,
+      room_number TEXT,
+      type TEXT,
+      floor INTEGER NOT NULL DEFAULT 0,
+      price_per_night REAL NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'created',
+      current_booking_id TEXT,
+      current_guest_id TEXT
+    );
   `);
 
   const db = drizzle(sqlite);
@@ -98,6 +133,9 @@ export async function createTestEnvironment() {
     stateStore: aggregateStates,
     sagaStore: sagaStates,
     snapshotStore: snapshots,
+    aggregateStates: {
+      Room: { table: sqliteRoomsTable, mapper: sqliteRoomStateMapper },
+    },
   });
 
   const emailService = new InMemoryEmailService();
@@ -144,12 +182,11 @@ export async function createTestEnvironment() {
     }),
     aggregates: {
       Room: {
-        persistence: () => drizzleInfra.eventSourcedPersistence,
+        // Switched to a dedicated typed-column state table via DrizzleStateMapper.
+        // The shared opaque `noddde_aggregate_states` table is no longer used for Room;
+        // state is stored in the `rooms` table with one typed column per RoomState field.
+        persistence: () => drizzleInfra.stateStoreFor("Room"),
         concurrency: { maxRetries: 3 },
-        snapshots: {
-          store: () => drizzleInfra.snapshotStore,
-          strategy: everyNEvents(50),
-        },
       },
       Booking: {
         persistence: () => drizzleInfra.eventSourcedPersistence,

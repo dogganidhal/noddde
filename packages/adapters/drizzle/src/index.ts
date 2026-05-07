@@ -17,8 +17,10 @@ export {
   type DrizzleAdapterConfig,
   type DrizzleAdapterResult,
   type AggregateStateTableConfig,
-  type StateTableColumnMap,
+  type DrizzleStateMapper,
 } from "./builder";
+export { jsonStateMapper } from "./json-state-mapper";
+
 /**
  * Schema tables the developer passes to the factory.
  * Each field is a Drizzle table definition (any dialect).

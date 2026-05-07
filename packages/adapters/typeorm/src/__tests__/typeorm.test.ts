@@ -1,9 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import "reflect-metadata";
-import { DataSource } from "typeorm";
-import { ConcurrencyError, LockTimeoutError } from "@noddde/core";
+import { DataSource, Entity, PrimaryColumn, Column } from "typeorm";
+import {
+  ConcurrencyError,
+  LockTimeoutError,
+  isPersistenceAdapter,
+} from "@noddde/core";
 import type { OutboxEntry } from "@noddde/core";
-import { createTypeORMPersistence, TypeORMAdvisoryLocker } from "../index";
+import {
+  createTypeORMPersistence,
+  TypeORMAdvisoryLocker,
+  TypeORMAdapter,
+  jsonStateMapper,
+} from "../index";
 import {
   NodddeEventEntity,
   NodddeAggregateStateEntity,
@@ -669,5 +678,91 @@ describe("TypeORMOutboxStore", () => {
     const loaded = await infra.outboxStore.loadUnpublished();
     expect(loaded).toHaveLength(1);
     expect(loaded[0]!.id).toBe("entry-uow");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// TypeORMAdapter (class-based API)
+// ═══════════════════════════════════════════════════════════════════
+
+/** Custom entity used in TypeORMAdapter.stateStored tests. */
+@Entity("adapter_orders")
+class AdapterOrderEntity {
+  @PrimaryColumn() aggregateId!: string;
+  @Column({ type: "text" }) state!: string;
+  @Column({ type: "int", default: 0 }) version!: number;
+}
+
+describe("TypeORMAdapter", () => {
+  let adapterDataSource: DataSource;
+  let adapter: TypeORMAdapter;
+
+  beforeEach(async () => {
+    adapterDataSource = new DataSource({
+      type: "better-sqlite3",
+      database: ":memory:",
+      entities: [
+        NodddeEventEntity,
+        NodddeAggregateStateEntity,
+        NodddeSagaStateEntity,
+        NodddeSnapshotEntity,
+        NodddeOutboxEntryEntity,
+        AdapterOrderEntity,
+      ],
+      synchronize: true,
+    });
+    await adapterDataSource.initialize();
+    adapter = new TypeORMAdapter(adapterDataSource);
+  });
+
+  afterEach(async () => {
+    if (adapterDataSource?.isInitialized) {
+      await adapterDataSource.destroy();
+    }
+  });
+
+  it("TypeORMAdapter implements PersistenceAdapter", () => {
+    expect(isPersistenceAdapter(adapter)).toBe(true);
+  });
+
+  it("TypeORMAdapter provides all stores", () => {
+    expect(adapter.unitOfWorkFactory).toBeDefined();
+    expect(adapter.eventSourcedPersistence).toBeDefined();
+    expect(adapter.stateStoredPersistence).toBeDefined();
+    expect(adapter.sagaPersistence).toBeDefined();
+    expect(adapter.snapshotStore).toBeDefined();
+    expect(adapter.outboxStore).toBeDefined();
+  });
+
+  it("TypeORMAdapter.stateStored returns dedicated persistence", () => {
+    const dedicated = adapter.stateStored(AdapterOrderEntity, {
+      mapper: jsonStateMapper<AdapterOrderEntity>(),
+    });
+
+    expect(dedicated).toBeDefined();
+    expect(dedicated.save).toBeTypeOf("function");
+    expect(dedicated.load).toBeTypeOf("function");
+  });
+
+  it("TypeORMAdapter.stateStored: save and load roundtrip", async () => {
+    const dedicated = adapter.stateStored(AdapterOrderEntity, {
+      mapper: jsonStateMapper<AdapterOrderEntity>(),
+    });
+
+    await dedicated.save("Order", "o-1", { total: 99 }, 0);
+    const loaded = await dedicated.load("Order", "o-1");
+
+    expect(loaded).not.toBeNull();
+    expect(loaded!.state).toEqual({ total: 99 });
+    expect(loaded!.version).toBe(1);
+  });
+
+  it("TypeORMAdapter close destroys data source", async () => {
+    const destroySpy = vi
+      .spyOn(adapterDataSource, "destroy")
+      .mockResolvedValue(undefined);
+    await adapter.close();
+
+    expect(destroySpy).toHaveBeenCalledOnce();
   });
 });

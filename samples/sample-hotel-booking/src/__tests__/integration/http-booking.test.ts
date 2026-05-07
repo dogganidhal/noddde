@@ -115,15 +115,15 @@ describe("HTTP Bookings (integration)", () => {
     expect(bookingEventNames).toContain("PaymentCompleted");
     expect(bookingEventNames).toContain("BookingConfirmed");
 
-    // Verify room was auto-reserved
-    const roomEvents = sqlite
+    // Verify room was auto-reserved (Room is state-stored in the typed `rooms` table)
+    const roomRow: any = sqlite
       .prepare(
-        "SELECT event_name FROM noddde_events WHERE aggregate_name = 'Room' AND aggregate_id = ? ORDER BY sequence_number",
+        "SELECT status, current_booking_id FROM rooms WHERE aggregate_id = ?",
       )
-      .all(roomId);
-    const roomEventNames = roomEvents.map((e: any) => e.event_name);
+      .get(roomId);
 
-    expect(roomEventNames).toContain("RoomReserved");
+    expect(roomRow?.status).toBe("reserved");
+    expect(roomRow?.current_booking_id).toBe(bookingId);
 
     // Verify payment gateway was called
     expect(

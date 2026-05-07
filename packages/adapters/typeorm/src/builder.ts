@@ -1,5 +1,5 @@
 /* eslint-disable no-unused-vars */
-import type { DataSource, EntityManager } from "typeorm";
+import type { DataSource } from "typeorm";
 import type {
   EventSourcedAggregatePersistence,
   StateStoredAggregatePersistence,
@@ -7,6 +7,7 @@ import type {
   SnapshotStore,
   OutboxStore,
   UnitOfWorkFactory,
+  AggregateStateMapper,
 } from "@noddde/core";
 import type { TypeORMTransactionStore } from "./unit-of-work";
 import {
@@ -20,34 +21,42 @@ import { TypeORMDedicatedStateStoredPersistence } from "./dedicated-state-persis
 import { createTypeORMUnitOfWorkFactory } from "./unit-of-work";
 
 /**
- * Column mapping for a custom state-stored aggregate table in TypeORM.
- * Maps logical noddde columns to TypeORM entity property names.
- * Defaults: `{ aggregateId: "aggregateId", state: "state", version: "version" }`.
+ * TypeORM-specific bi-directional mapper between an aggregate's state and
+ * the state portion of a row on a TypeORM entity. Extends the core
+ * AggregateStateMapper with the entity property names the adapter needs
+ * at query-construction time.
+ *
+ * The mapper's toRow / fromRow handle only the state portion of the row;
+ * the adapter writes the aggregate id and version itself using the
+ * property names provided by aggregateIdField and versionField.
+ *
+ * @typeParam TState  - The aggregate's state type.
+ * @typeParam TEntity - The TypeORM entity instance type.
  */
-export interface TypeORMStateTableColumnMap {
-  /** Property name holding the aggregate instance ID (string PK). */
-  aggregateId: string;
-  /** Property name holding the serialized aggregate state (text). */
-  state: string;
-  /** Property name holding the version number (integer). */
-  version: string;
+export interface TypeORMStateMapper<TState, TEntity>
+  extends AggregateStateMapper<TState, Partial<TEntity>> {
+  /** The entity property name that holds the aggregate instance ID (string PK). */
+  readonly aggregateIdField: keyof TEntity & string;
+  /** The entity property name that holds the version number (integer). */
+  readonly versionField: keyof TEntity & string;
 }
 
 /**
- * Configuration for a per-aggregate state table in TypeORM.
+ * Configuration for a per-aggregate state table in TypeORM. The mapper is
+ * required and is the single source of truth for the row schema.
+ *
+ * @typeParam TState  - The aggregate's state type.
+ * @typeParam TEntity - The TypeORM entity instance type.
  */
-export interface TypeORMAggregateStateTableConfig {
+export interface TypeORMAggregateStateTableConfig<
+  TState = unknown,
+  TEntity = any,
+> {
   /** The TypeORM entity class for this aggregate's state table. */
-  entity: Function;
-  /** Column mappings. If omitted, uses defaults: aggregateId, state, version. */
-  columns?: Partial<TypeORMStateTableColumnMap>;
+  entity: new () => TEntity;
+  /** The state mapper. Required — determines how state is read/written to entity columns. */
+  mapper: TypeORMStateMapper<TState, TEntity>;
 }
-
-const DEFAULT_COLUMNS: TypeORMStateTableColumnMap = {
-  aggregateId: "aggregateId",
-  state: "state",
-  version: "version",
-};
 
 /**
  * Configuration for {@link createTypeORMAdapter}.
@@ -60,7 +69,7 @@ export interface TypeORMAdapterConfig {
   snapshotStore?: true;
   /** Enable the outbox store (NodddeOutboxEntryEntity). Optional. */
   outboxStore?: true;
-  /** Per-aggregate dedicated state tables with custom entity mappings. Optional. */
+  /** Per-aggregate dedicated state tables with mapper-driven entity mappings. Optional. */
   aggregateStates?: Record<string, TypeORMAggregateStateTableConfig>;
 }
 
@@ -104,7 +113,7 @@ export type TypeORMAdapterResult<C extends TypeORMAdapterConfig> = {
  *
  * Event store, state store, saga store, and UoW are always created (built-in
  * entities). The config controls optional stores and per-aggregate tables
- * with custom entity class mappings.
+ * with mapper-driven entity class mappings.
  *
  * The return type narrows based on the config: only configured optional stores
  * appear in the result, eliminating the need for `!` non-null assertions.
@@ -115,7 +124,7 @@ export type TypeORMAdapterResult<C extends TypeORMAdapterConfig> = {
  *
  * @example
  * ```ts
- * import { createTypeORMAdapter } from "@noddde/typeorm";
+ * import { createTypeORMAdapter, jsonStateMapper } from "@noddde/typeorm";
  * import { OrderEntity } from "./entities";
  *
  * // Minimal — just event store, state store, saga store, UoW
@@ -125,7 +134,7 @@ export type TypeORMAdapterResult<C extends TypeORMAdapterConfig> = {
  * const adapter = createTypeORMAdapter(dataSource, {
  *   snapshotStore: true,
  *   aggregateStates: {
- *     Order: { entity: OrderEntity },
+ *     Order: { entity: OrderEntity, mapper: jsonStateMapper<OrderEntity>() },
  *   },
  * });
  *
@@ -175,18 +184,13 @@ export function createTypeORMAdapter(
     const dedicatedStores = new Map<string, StateStoredAggregatePersistence>();
 
     for (const [name, aggConfig] of Object.entries(config.aggregateStates)) {
-      const columns: TypeORMStateTableColumnMap = {
-        ...DEFAULT_COLUMNS,
-        ...aggConfig.columns,
-      };
-
       dedicatedStores.set(
         name,
         new TypeORMDedicatedStateStoredPersistence(
           dataSource,
           txStore,
           aggConfig.entity,
-          columns,
+          aggConfig.mapper,
         ),
       );
     }
