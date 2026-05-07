@@ -11,7 +11,7 @@ import type {
   AggregateLocker,
 } from "@noddde/core";
 import type { PrismaTransactionStore } from "./unit-of-work";
-import type { PrismaStateTableColumnMap } from "./builder";
+import type { PrismaStateMapper } from "./builder";
 import {
   PrismaEventSourcedAggregatePersistence,
   PrismaStateStoredAggregatePersistence,
@@ -23,12 +23,6 @@ import { PrismaDedicatedStateStoredPersistence } from "./dedicated-state-persist
 import { createPrismaUnitOfWorkFactory } from "./unit-of-work";
 import { PrismaAdvisoryLocker } from "./advisory-locker";
 import type { PrismaDialect } from "./advisory-locker";
-
-const DEFAULT_COLUMNS: PrismaStateTableColumnMap = {
-  aggregateId: "aggregateId",
-  state: "state",
-  version: "version",
-};
 
 /**
  * Prisma-backed persistence adapter implementing {@link PersistenceAdapter}.
@@ -91,19 +85,18 @@ export class PrismaAdapter implements PersistenceAdapter {
    * Prisma model. Use this when an aggregate needs its own state table
    * instead of the shared one.
    *
-   * @param model - The Prisma model name (camelCase, e.g., "order").
-   * @param columns - Optional column mapping overrides.
+   * Pass `{ mapper: jsonStateMapper() }` for opaque-JSON parity with the
+   * legacy behaviour, or supply a custom {@link PrismaStateMapper} for
+   * typed-column persistence.
+   *
+   * @param model   - The Prisma model name (camelCase, e.g., "order").
+   * @param options - Options object. `mapper` is required.
    * @returns A persistence implementation bound to the given model.
    */
-  stateStored(
+  stateStored<TState, TRow extends Record<string, unknown>>(
     model: string,
-    columns?: Partial<PrismaStateTableColumnMap>,
+    options: { mapper: PrismaStateMapper<TState, TRow> },
   ): StateStoredAggregatePersistence {
-    const resolvedColumns: PrismaStateTableColumnMap = {
-      ...DEFAULT_COLUMNS,
-      ...columns,
-    };
-
     // Validate the model delegate exists on the Prisma client
     const delegate = (this.prisma as any)[model];
     if (!delegate) {
@@ -117,7 +110,7 @@ export class PrismaAdapter implements PersistenceAdapter {
       this.prisma,
       this.txStore,
       model,
-      resolvedColumns,
+      options.mapper as PrismaStateMapper<unknown, Record<string, unknown>>,
     );
   }
 

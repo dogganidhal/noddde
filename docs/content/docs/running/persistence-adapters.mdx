@@ -153,40 +153,92 @@ Custom tables override the auto-resolved ones for that specific store. Tables yo
 
 ### Per-Aggregate State Tables
 
-By default, all state-stored aggregates share a single `noddde_aggregate_states` table, discriminated by an `aggregate_name` column. For production workloads, you may want each aggregate to have its own dedicated table with a domain-specific schema.
+By default, all state-stored aggregates share a single `noddde_aggregate_states` table, discriminated by an `aggregate_name` column. For production workloads, you may want each aggregate to have its own dedicated table — either to query domain fields directly, add database-level constraints, or fit an existing schema.
 
-Use the `stateStored()` helper method to bind an aggregate to a dedicated Drizzle table:
+The `stateStored()` helper takes a Drizzle table and a required `DrizzleStateMapper`. The framework writes the `aggregateId` and `version` columns itself; the mapper owns the rest of the row.
+
+#### Typed columns (recommended)
+
+Define a `DrizzleStateMapper` with one column per state field, then wire it via `stateStored()`:
 
 ```ts
+import type { DrizzleStateMapper } from "@noddde/drizzle";
+import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+
+type OrderState = {
+  customerId: string;
+  total: number;
+  status: "open" | "paid" | "cancelled";
+};
+
+const orders = sqliteTable("orders", {
+  aggregateId: text("aggregate_id").primaryKey(),
+  version: integer("version").notNull().default(0),
+  customerId: text("customer_id").notNull(),
+  total: integer("total_cents").notNull(),
+  status: text("status").$type<OrderState["status"]>().notNull(),
+});
+
+const orderMapper: DrizzleStateMapper<OrderState, typeof orders> = {
+  aggregateIdColumn: orders.aggregateId,
+  versionColumn: orders.version,
+  toRow: (s) => ({
+    customerId: s.customerId,
+    total: s.total,
+    status: s.status,
+  }),
+  fromRow: (r) => ({
+    customerId: r.customerId!,
+    total: r.total!,
+    status: r.status!,
+  }),
+};
+
 const adapter = new DrizzleAdapter(db);
 
 const domain = await wireDomain(definition, {
   persistenceAdapter: adapter,
   aggregates: {
-    Payment: { persistence: "event-sourced" },
-    Order: { persistence: adapter.stateStored(orders) },
-    BankAccount: { persistence: adapter.stateStored(bankAccounts) },
+    Order: { persistence: adapter.stateStored(orders, { mapper: orderMapper }) },
   },
 });
 ```
 
-**Column resolution** works in two modes:
+The mapper's `toRow` / `fromRow` are pure and lossless: `fromRow(toRow(state))` must equal `state`. The framework calls `toRow` once per save and `fromRow` once per loaded row, then merges in the id and version columns.
 
-1. **Convention-based** (default): The adapter scans the Drizzle table definition for columns named `aggregate_id`, `state`, and `version`. If your table follows this naming, no explicit mapping is needed.
+#### Opaque JSON via `jsonStateMapper`
 
-2. **Explicit mapping**: For tables with custom column names, provide a `columns` object:
+When you want a dedicated table without per-field columns — for instance, to share a schema with another service — use `jsonStateMapper(table)`:
 
 ```ts
-adapter.stateStored(orders, {
-  aggregateId: orders.orderId,
-  state: orders.orderData,
-  version: orders.rev,
+import { jsonStateMapper } from "@noddde/drizzle";
+
+const orders = sqliteTable("orders", {
+  aggregateId: text("aggregate_id").primaryKey(),
+  state: text("state").notNull(),
+  version: integer("version").notNull().default(0),
+});
+
+adapter.stateStored(orders, { mapper: jsonStateMapper(orders) });
+```
+
+`jsonStateMapper` resolves columns by JS-key convention (`aggregateId`, `state`, `version`). For non-conventional names, pass overrides:
+
+```ts
+adapter.stateStored(customOrders, {
+  mapper: jsonStateMapper(customOrders, {
+    aggregateIdColumn: customOrders.id,
+    stateColumn: customOrders.data,
+    versionColumn: customOrders.rev,
+  }),
 });
 ```
 
-If convention-based resolution fails (columns not found), the adapter throws with a clear error listing the available columns in the table.
+If a required column is missing and no override is provided, `jsonStateMapper` throws at call time with a clear error listing the missing keys.
 
-The `stateStored()` method returns a `StateStoredAggregatePersistence` that can be passed directly to the `persistence` field in per-aggregate wiring. It shares the same transaction store as all other stores on the adapter, ensuring UoW atomicity across shared and dedicated tables.
+The `stateStored()` method returns a `StateStoredAggregatePersistence` that shares the adapter's transaction store, so dedicated tables participate in the same UoW transactions as the shared stores.
+
+For more on the trade-offs, see [Why an Aggregate State Mapper?](/docs/design-decisions/why-state-mapper).
 
 ## Prisma
 
@@ -293,34 +345,76 @@ The Prisma adapter uses built-in Prisma models (NodddeEvent, NodddeAggregateStat
 
 The Prisma adapter uses interactive transactions via `prisma.$transaction(async (tx) => { ... })`. When a unit of work commits, it sets `txStore.current` to the transactional client `tx`, and all persistence classes route their queries through it. Prisma automatically rolls back the transaction if any operation throws.
 
-### Advanced Configuration
+### Per-Aggregate State Tables
 
-For per-aggregate state tables, use the `stateStored()` helper method:
+Pass the camelCase Prisma model delegate name and a `PrismaStateMapper`. The framework writes the `aggregateIdField` and `versionField`; the mapper owns the rest of the row.
+
+#### Typed columns (recommended)
 
 ```ts
+import type { PrismaStateMapper } from "@noddde/prisma";
+import type { Prisma } from "@prisma/client";
+
+type OrderState = {
+  customerId: string;
+  total: number;
+  status: "open" | "paid" | "cancelled";
+};
+
+const orderMapper: PrismaStateMapper<
+  OrderState,
+  Prisma.OrderUncheckedCreateInput
+> = {
+  aggregateIdField: "aggregateId",
+  versionField: "version",
+  toRow: (s) => ({
+    customerId: s.customerId,
+    total: s.total,
+    status: s.status,
+  }),
+  fromRow: (r) => ({
+    customerId: r.customerId!,
+    total: r.total!,
+    status: r.status as OrderState["status"],
+  }),
+};
+
 const adapter = new PrismaAdapter(prisma);
 
 const domain = await wireDomain(definition, {
   persistenceAdapter: adapter,
   aggregates: {
-    Order: {
-      persistence: adapter.stateStored("order", {
-        aggregateId: "orderId",
-        state: "orderData",
-        version: "rev",
-      }),
-    },
+    Order: { persistence: adapter.stateStored("order", { mapper: orderMapper }) },
   },
 });
 ```
 
-Since Prisma uses generated model delegates (e.g., `prisma.order`), the first argument to `stateStored()` must match the camelCase delegate name on your PrismaClient. The adapter validates that the model exists at creation time.
+The Prisma adapter validates that the model exists at creation time and throws a clear error if `prisma.order` is not generated.
+
+#### Opaque JSON via `jsonStateMapper`
+
+```ts
+import { jsonStateMapper } from "@noddde/prisma";
+
+adapter.stateStored("order", { mapper: jsonStateMapper() });
+
+// With non-conventional field names:
+adapter.stateStored("customOrder", {
+  mapper: jsonStateMapper({
+    aggregateIdField: "id",
+    stateField: "data",
+    versionField: "rev",
+  }),
+});
+```
 
 For pessimistic concurrency, pass the `dialect` option since PrismaClient does not expose the database provider at runtime:
 
 ```ts
 const adapter = new PrismaAdapter(prisma, { dialect: "postgresql" });
 ```
+
+For more on the trade-offs, see [Why an Aggregate State Mapper?](/docs/design-decisions/why-state-mapper).
 
 ## TypeORM
 
@@ -393,13 +487,36 @@ The TypeORM adapter uses built-in entity classes for all stores. The database ty
 
 The TypeORM adapter uses `dataSource.manager.transaction()` to wrap operations. When a unit of work commits, it sets `txStore.current` to the transactional `EntityManager`, and all persistence classes use it for their repository operations.
 
-### Advanced Configuration
+### Per-Aggregate State Tables
 
-For per-aggregate state tables, use the `stateStored()` helper method with a TypeORM entity class:
+Pass the TypeORM entity class and a `TypeORMStateMapper`. The framework writes the `aggregateIdField` and `versionField`; the mapper owns the rest of the entity properties.
+
+#### Typed columns (recommended)
 
 ```ts
-import { TypeORMAdapter } from "@noddde/typeorm";
-import { OrderEntity } from "./entities"; // your own TypeORM entity
+import type { TypeORMStateMapper } from "@noddde/typeorm";
+import { OrderTypedEntity } from "./entities"; // your own TypeORM entity
+
+type OrderState = {
+  customerId: string;
+  total: number;
+  status: "open" | "paid" | "cancelled";
+};
+
+const orderMapper: TypeORMStateMapper<OrderState, OrderTypedEntity> = {
+  aggregateIdField: "aggregateId",
+  versionField: "version",
+  toRow: (s) => ({
+    customerId: s.customerId,
+    total: s.total,
+    status: s.status,
+  }),
+  fromRow: (r) => ({
+    customerId: r.customerId!,
+    total: r.total!,
+    status: r.status!,
+  }),
+};
 
 const adapter = new TypeORMAdapter(dataSource);
 
@@ -407,15 +524,30 @@ const domain = await wireDomain(definition, {
   persistenceAdapter: adapter,
   aggregates: {
     Order: {
-      persistence: adapter.stateStored(OrderEntity, {
-        aggregateId: "orderId",
-        state: "orderData",
-        version: "rev",
-      }),
+      persistence: adapter.stateStored(OrderTypedEntity, { mapper: orderMapper }),
     },
   },
 });
 ```
+
+#### Opaque JSON via `jsonStateMapper`
+
+```ts
+import { jsonStateMapper } from "@noddde/typeorm";
+
+adapter.stateStored(OrderEntity, { mapper: jsonStateMapper<OrderEntity>() });
+
+// With non-conventional property names:
+adapter.stateStored(CustomOrderEntity, {
+  mapper: jsonStateMapper<CustomOrderEntity>({
+    aggregateIdField: "id",
+    stateField: "data",
+    versionField: "rev",
+  }),
+});
+```
+
+For more on the trade-offs, see [Why an Aggregate State Mapper?](/docs/design-decisions/why-state-mapper).
 
 ## How Transactions Work
 
@@ -1191,10 +1323,43 @@ CREATE TABLE noddde_outbox (
 
 ### Per-Aggregate Dedicated State Tables
 
-By default, all state-stored aggregates share the `noddde_aggregate_states` table. For aggregates where you need direct SQL queries on domain fields, create a dedicated table and use the adapter's `stateStored()` helper:
+By default, all state-stored aggregates share the `noddde_aggregate_states` table. For aggregates where you need direct SQL queries on domain fields — or want to fit an existing schema — create a dedicated table and use the adapter's `stateStored()` helper with a state mapper.
+
+The framework writes the `aggregateId` and `version` columns; the mapper owns the rest. Use a typed mapper for one column per state field, or `jsonStateMapper(...)` for opaque-JSON parity with the legacy behavior.
+
+#### Typed columns (recommended)
 
 ```sql
--- Example: dedicated table for an Order aggregate
+-- Dedicated table with one column per state field
+CREATE TABLE IF NOT EXISTS orders (
+  aggregate_id TEXT PRIMARY KEY,
+  version      INTEGER NOT NULL DEFAULT 0,
+  customer_id  TEXT NOT NULL,
+  total_cents  INTEGER NOT NULL,
+  status       TEXT NOT NULL
+);
+```
+
+Each adapter accepts its own table reference format (Drizzle table object, Prisma model name, TypeORM entity class) plus a `mapper` option:
+
+```ts
+// Drizzle
+adapter.stateStored(orders, { mapper: orderMapper });
+
+// Prisma
+adapter.stateStored("order", { mapper: orderMapper });
+
+// TypeORM
+adapter.stateStored(OrderEntity, { mapper: orderMapper });
+```
+
+See the Drizzle, Prisma, and TypeORM "Per-Aggregate State Tables" sections above for full mapper examples.
+
+#### Opaque JSON
+
+For the previous opaque-JSON behavior, use `jsonStateMapper(...)`:
+
+```sql
 CREATE TABLE IF NOT EXISTS orders (
   aggregate_id TEXT PRIMARY KEY,
   state        JSONB NOT NULL,       -- or TEXT for MySQL/SQLite
@@ -1202,28 +1367,22 @@ CREATE TABLE IF NOT EXISTS orders (
 );
 ```
 
-The dedicated table must have at least `aggregate_id`, `state`, and `version` columns. Column names can be customized via the `stateStored()` options. Each adapter accepts its own table reference format:
-
 ```ts
-// Drizzle: pass the Drizzle table object
-adapter.stateStored(ordersTable);
+// Drizzle
+adapter.stateStored(orders, { mapper: jsonStateMapper(orders) });
 
-// Prisma: pass the camelCase model delegate name
-adapter.stateStored("order", {
-  aggregateId: "orderId",
-  state: "data",
-  version: "rev",
-});
+// Prisma
+adapter.stateStored("order", { mapper: jsonStateMapper() });
 
-// TypeORM: pass the entity class
-adapter.stateStored(OrderEntity, {
-  aggregateId: "orderId",
-  state: "data",
-  version: "rev",
-});
+// TypeORM
+adapter.stateStored(OrderEntity, { mapper: jsonStateMapper<OrderEntity>() });
 ```
 
-See the Drizzle, Prisma, and TypeORM "Advanced Configuration" sections above for full per-adapter examples.
+#### Migrating from `columns: { ... }`
+
+Earlier releases accepted a `columns` map alongside the table. That field has been removed; pass `{ mapper: jsonStateMapper(...) }` to keep the same on-disk shape, or supply a typed mapper to spread state across dedicated columns. Each adapter spec's `## Migration` section in the repository (`specs/drizzle/`, `specs/prisma/`, `specs/typeorm/`) shows the before/after for every variant.
+
+For background on why the API took this shape, see [Why an Aggregate State Mapper?](/docs/design-decisions/why-state-mapper).
 
 ## Next Steps
 

@@ -1,9 +1,14 @@
 import { describe, it, expect } from "vitest";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import { ConcurrencyError } from "@noddde/core";
+import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { isPersistenceAdapter, ConcurrencyError } from "@noddde/core";
 import type { PartialEventLoad } from "@noddde/core";
-import { createDrizzlePersistence } from "../index";
+import {
+  createDrizzlePersistence,
+  DrizzleAdapter,
+  jsonStateMapper,
+} from "../index";
 import {
   events,
   aggregateStates,
@@ -11,6 +16,13 @@ import {
   snapshots,
   outbox,
 } from "../sqlite/schema";
+
+// Custom table used for DrizzleAdapter.stateStored tests
+const customStateTable = sqliteTable("custom_states", {
+  aggregateId: text("aggregate_id").notNull().primaryKey(),
+  state: text("state").notNull(),
+  version: integer("version").notNull().default(0),
+});
 
 function createTestDb() {
   const sqlite = new Database(":memory:");
@@ -746,5 +758,95 @@ describe("Drizzle Multi-Dialect Persistence", () => {
 
       expect(infra.outboxStore).toBeUndefined();
     });
+  });
+});
+
+describe("DrizzleAdapter", () => {
+  function createAdapterDb() {
+    const sqlite = new Database(":memory:");
+    sqlite.exec(`
+      CREATE TABLE noddde_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        aggregate_name TEXT NOT NULL,
+        aggregate_id TEXT NOT NULL,
+        sequence_number INTEGER NOT NULL,
+        event_name TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        metadata TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX noddde_events_stream_version_idx
+        ON noddde_events (aggregate_name, aggregate_id, sequence_number);
+      CREATE TABLE noddde_aggregate_states (
+        aggregate_name TEXT NOT NULL,
+        aggregate_id TEXT NOT NULL,
+        state TEXT NOT NULL,
+        version INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (aggregate_name, aggregate_id)
+      );
+      CREATE TABLE noddde_saga_states (
+        saga_name TEXT NOT NULL,
+        saga_id TEXT NOT NULL,
+        state TEXT NOT NULL,
+        PRIMARY KEY (saga_name, saga_id)
+      );
+      CREATE TABLE noddde_snapshots (
+        aggregate_name TEXT NOT NULL,
+        aggregate_id TEXT NOT NULL,
+        state TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        PRIMARY KEY (aggregate_name, aggregate_id)
+      );
+      CREATE TABLE noddde_outbox (
+        id TEXT PRIMARY KEY,
+        event TEXT NOT NULL,
+        aggregate_name TEXT,
+        aggregate_id TEXT,
+        created_at TEXT NOT NULL,
+        published_at TEXT
+      );
+      CREATE TABLE custom_states (
+        aggregate_id TEXT NOT NULL PRIMARY KEY,
+        state TEXT NOT NULL,
+        version INTEGER NOT NULL DEFAULT 0
+      );
+    `);
+    return drizzle(sqlite);
+  }
+
+  it("DrizzleAdapter implements PersistenceAdapter", () => {
+    const db = createAdapterDb();
+    const adapter = new DrizzleAdapter(db);
+    expect(isPersistenceAdapter(adapter)).toBe(true);
+  });
+
+  it("DrizzleAdapter provides all stores", () => {
+    const db = createAdapterDb();
+    const adapter = new DrizzleAdapter(db);
+
+    expect(adapter.unitOfWorkFactory).toBeDefined();
+    expect(adapter.eventSourcedPersistence).toBeDefined();
+    expect(adapter.stateStoredPersistence).toBeDefined();
+    expect(adapter.sagaPersistence).toBeDefined();
+    expect(adapter.snapshotStore).toBeDefined();
+    expect(adapter.outboxStore).toBeDefined();
+  });
+
+  it("DrizzleAdapter.stateStored returns dedicated persistence", () => {
+    const db = createAdapterDb();
+    const adapter = new DrizzleAdapter(db);
+    const dedicated = adapter.stateStored(customStateTable, {
+      mapper: jsonStateMapper(customStateTable),
+    });
+
+    expect(dedicated).toBeDefined();
+    expect(dedicated.save).toBeTypeOf("function");
+    expect(dedicated.load).toBeTypeOf("function");
+  });
+
+  it("DrizzleAdapter close is a no-op", async () => {
+    const db = createAdapterDb();
+    const adapter = new DrizzleAdapter(db);
+    await expect(adapter.close()).resolves.toBeUndefined();
   });
 });

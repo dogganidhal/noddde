@@ -11,7 +11,7 @@ import type {
   AggregateLocker,
 } from "@noddde/core";
 import type { TypeORMTransactionStore } from "./unit-of-work";
-import type { TypeORMStateTableColumnMap } from "./builder";
+import type { TypeORMStateMapper } from "./builder";
 import {
   TypeORMEventSourcedAggregatePersistence,
   TypeORMStateStoredAggregatePersistence,
@@ -22,12 +22,6 @@ import {
 import { TypeORMDedicatedStateStoredPersistence } from "./dedicated-state-persistence";
 import { createTypeORMUnitOfWorkFactory } from "./unit-of-work";
 import { TypeORMAdvisoryLocker } from "./advisory-locker";
-
-const DEFAULT_COLUMNS: TypeORMStateTableColumnMap = {
-  aggregateId: "aggregateId",
-  state: "state",
-  version: "version",
-};
 
 /** Database types that support advisory locking. */
 const ADVISORY_LOCK_TYPES = new Set(["postgres", "mysql", "mariadb", "mssql"]);
@@ -92,23 +86,32 @@ export class TypeORMAdapter implements PersistenceAdapter {
    * TypeORM entity. Use this when an aggregate needs its own state table
    * instead of the shared one.
    *
-   * @param entity - A TypeORM entity class.
-   * @param columns - Optional column mapping overrides.
+   * Pass `jsonStateMapper<TEntity>()` for opaque-JSON parity with the legacy
+   * column-map API, or supply a fully-typed `TypeORMStateMapper` to persist
+   * state directly into individual entity columns.
+   *
+   * @param entity  - A TypeORM entity class (`new () => TEntity`).
+   * @param options - Required options object containing the mapper.
    * @returns A persistence implementation bound to the given entity.
+   *
+   * @example
+   * ```ts
+   * // Opaque JSON column
+   * adapter.stateStored(OrderEntity, { mapper: jsonStateMapper<OrderEntity>() });
+   *
+   * // Typed columns
+   * adapter.stateStored(OrderEntity, { mapper: orderMapper });
+   * ```
    */
-  stateStored(
-    entity: Function,
-    columns?: Partial<TypeORMStateTableColumnMap>,
+  stateStored<TState, TEntity>(
+    entity: new () => TEntity,
+    options: { mapper: TypeORMStateMapper<TState, TEntity> },
   ): StateStoredAggregatePersistence {
-    const resolvedColumns: TypeORMStateTableColumnMap = {
-      ...DEFAULT_COLUMNS,
-      ...columns,
-    };
     return new TypeORMDedicatedStateStoredPersistence(
       this.dataSource,
       this.txStore,
       entity,
-      resolvedColumns,
+      options.mapper,
     );
   }
 

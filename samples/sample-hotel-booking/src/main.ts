@@ -23,13 +23,16 @@ import {
   InMemoryIdempotencyStore,
   InMemoryViewStoreFactory,
 } from "@noddde/engine";
-import { everyNEvents } from "@noddde/core";
 import { RabbitMqEventBus } from "@noddde/rabbitmq";
 
 import { SystemClock } from "./infrastructure/services/clock";
 import { ConsoleEmailService } from "./infrastructure/services/email-service";
 import { ConsoleSmsService } from "./infrastructure/services/sms-service";
 import { FakePaymentGateway } from "./infrastructure/services/payment-gateway";
+import {
+  roomsTable,
+  roomStateMapper,
+} from "./infrastructure/persistence/db-schema";
 
 import { Room } from "./domain/write-model/aggregates/room";
 import { Booking } from "./domain/write-model/aggregates/booking";
@@ -110,6 +113,21 @@ async function main() {
       PRIMARY KEY (view_type, view_id)
     );
   `);
+  // Dedicated typed-column table for the Room aggregate.
+  // State is stored with one column per RoomState field instead of opaque JSON.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS rooms (
+      aggregate_id TEXT NOT NULL PRIMARY KEY,
+      version INTEGER NOT NULL DEFAULT 0,
+      room_number TEXT,
+      type TEXT,
+      floor INTEGER NOT NULL DEFAULT 0,
+      price_per_night REAL NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'created',
+      current_booking_id TEXT,
+      current_guest_id TEXT
+    );
+  `);
 
   const db = drizzle(pool);
   const adapter = new DrizzleAdapter(db);
@@ -176,9 +194,12 @@ async function main() {
     // Per-aggregate persistence and concurrency
     aggregates: {
       Room: {
-        persistence: "event-sourced",
+        // Room uses a dedicated typed-column state table via DrizzleStateMapper.
+        // State is stored in the `rooms` PostgreSQL table with one column per
+        // RoomState field, rather than the shared opaque `noddde_aggregate_states` table.
+        persistence: () =>
+          adapter.stateStored(roomsTable, { mapper: roomStateMapper }),
         concurrency: { maxRetries: 3 },
-        snapshots: { strategy: everyNEvents(50) },
       },
       Booking: {
         persistence: "event-sourced",

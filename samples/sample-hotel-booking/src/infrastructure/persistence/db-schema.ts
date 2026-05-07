@@ -8,6 +8,10 @@ export {
   snapshots,
 } from "@noddde/drizzle/pg";
 
+// Re-export the dedicated Room aggregate table and its state mapper
+export { roomsTable } from "./rooms-table";
+export { roomStateMapper } from "./room-state-mapper";
+
 /**
  * PostgreSQL table for projection view storage (generic key-value store).
  * Each row stores one view instance identified by type + id.

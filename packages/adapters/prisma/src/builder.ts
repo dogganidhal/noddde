@@ -7,6 +7,7 @@ import type {
   SnapshotStore,
   OutboxStore,
   UnitOfWorkFactory,
+  AggregateStateMapper,
 } from "@noddde/core";
 import type { PrismaTransactionStore } from "./unit-of-work";
 import {
@@ -20,34 +21,42 @@ import { PrismaDedicatedStateStoredPersistence } from "./dedicated-state-persist
 import { createPrismaUnitOfWorkFactory } from "./unit-of-work";
 
 /**
- * Column mapping for a custom state-stored aggregate table in Prisma.
- * Maps logical noddde columns to Prisma model property names.
- * Defaults: `{ aggregateId: "aggregateId", state: "state", version: "version" }`.
+ * Prisma-specific bi-directional mapper between an aggregate's state and
+ * the state portion of a row on a Prisma model. Extends the core
+ * {@link AggregateStateMapper} with the Prisma model property names the
+ * adapter needs at query-construction time.
+ *
+ * The mapper's `toRow` / `fromRow` handle only the state portion of the row.
+ * The adapter writes the aggregate id and version itself using the property
+ * names provided by `aggregateIdField` and `versionField`.
+ *
+ * @typeParam TState - The aggregate's state type.
+ * @typeParam TRow   - The Prisma row shape (e.g. `Prisma.<Model>UncheckedCreateInput`).
  */
-export interface PrismaStateTableColumnMap {
-  /** Property name holding the aggregate instance ID (string PK). */
-  aggregateId: string;
-  /** Property name holding the serialized aggregate state (text). */
-  state: string;
-  /** Property name holding the version number (integer). */
-  version: string;
+export interface PrismaStateMapper<TState, TRow extends Record<string, unknown>>
+  extends AggregateStateMapper<TState, Partial<TRow>> {
+  /** The name of the Prisma model property holding the aggregate instance ID. */
+  readonly aggregateIdField: keyof TRow & string;
+  /** The name of the Prisma model property holding the version number. */
+  readonly versionField: keyof TRow & string;
 }
 
 /**
- * Configuration for a per-aggregate state table in Prisma.
+ * Configuration for a per-aggregate state table in Prisma. The `mapper` is
+ * required and is the single source of truth for the row schema.
+ *
+ * @typeParam TState - The aggregate's state type.
+ * @typeParam TRow   - The Prisma row shape.
  */
-export interface PrismaAggregateStateTableConfig {
+export interface PrismaAggregateStateTableConfig<
+  TState = unknown,
+  TRow extends Record<string, unknown> = Record<string, unknown>,
+> {
   /** Prisma model name (camelCase as used in PrismaClient, e.g., "order"). */
   model: string;
-  /** Column mappings. If omitted, uses defaults: aggregateId, state, version. */
-  columns?: Partial<PrismaStateTableColumnMap>;
+  /** The bi-directional state mapper for this aggregate's model. Required. */
+  mapper: PrismaStateMapper<TState, TRow>;
 }
-
-const DEFAULT_COLUMNS: PrismaStateTableColumnMap = {
-  aggregateId: "aggregateId",
-  state: "state",
-  version: "version",
-};
 
 /**
  * Configuration for {@link createPrismaAdapter}.
@@ -173,11 +182,6 @@ export function createPrismaAdapter(
     const dedicatedStores = new Map<string, StateStoredAggregatePersistence>();
 
     for (const [name, aggConfig] of Object.entries(config.aggregateStates)) {
-      const columns: PrismaStateTableColumnMap = {
-        ...DEFAULT_COLUMNS,
-        ...aggConfig.columns,
-      };
-
       // Validate the model delegate exists on the Prisma client
       const delegate = (prisma as any)[aggConfig.model];
       if (!delegate) {
@@ -193,7 +197,7 @@ export function createPrismaAdapter(
           prisma,
           txStore,
           aggConfig.model,
-          columns,
+          aggConfig.mapper,
         ),
       );
     }

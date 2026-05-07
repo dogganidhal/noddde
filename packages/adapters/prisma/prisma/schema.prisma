@@ -65,3 +65,15 @@ model NodddeOutboxEntry {
 
   @@map("noddde_outbox")
 }
+
+/// Test fixture: typed-column dedicated state table for the Order aggregate.
+/// Used by the typed-column PrismaStateMapper integration tests.
+model Order {
+  aggregateId String @id
+  customerId  String
+  total       Int
+  status      String
+  version     Int
+
+  @@map("orders")
+}

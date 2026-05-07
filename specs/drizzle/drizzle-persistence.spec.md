@@ -6,11 +6,12 @@ status: implemented
 exports:
   - DrizzleAdapter
   - DrizzleAdapterOptions
+  - DrizzleStateMapper
+  - jsonStateMapper
   - createDrizzleAdapter (deprecated)
   - DrizzleAdapterConfig (deprecated)
   - DrizzleAdapterResult (deprecated)
   - AggregateStateTableConfig
-  - StateTableColumnMap
   - createDrizzlePersistence (deprecated)
   - DrizzlePersistenceInfrastructure (deprecated)
   - DrizzleNodddeSchema (deprecated)
@@ -35,13 +36,15 @@ exports:
   - outbox (mysqlTable)
 depends_on:
   - core/persistence/persistence
+  - core/persistence/aggregate-state-mapper
   - core/persistence/unit-of-work
   - core/persistence/snapshot
   - core/persistence/outbox
   - core/persistence/adapter
 docs:
-  - docs/content/docs/infrastructure/persistence-adapters.mdx
-  - docs/content/docs/domain-configuration/unit-of-work.mdx
+  - running/persistence-adapters.mdx
+  - running/domain-configuration.mdx
+  - design-decisions/why-state-mapper.mdx
 ---
 
 # Drizzle Multi-Dialect Persistence
@@ -64,32 +67,61 @@ import type {
   Event,
   OutboxStore,
   OutboxEntry,
+  AggregateStateMapper,
 } from "@noddde/core";
+import type { Table, AnyColumn } from "drizzle-orm";
 
 /**
- * Column mapping for a custom state-stored aggregate table.
- * Maps logical noddde columns to actual Drizzle column references.
- * If omitted from AggregateStateTableConfig, columns are resolved
- * by convention (looks for columns named aggregate_id, state, version).
+ * Drizzle-specific bi-directional mapper between an aggregate's state and
+ * the state portion of a row in a dedicated table. Extends the core
+ * AggregateStateMapper with Drizzle column references the adapter needs
+ * to construct WHERE clauses for SELECT and UPDATE queries.
+ *
+ * The mapper's toRow / fromRow handle only the state portion of the row;
+ * the adapter writes the aggregate id and version columns itself using
+ * the keys derived from aggregateIdColumn and versionColumn.
+ *
+ * @typeParam TState  - The aggregate's state type.
+ * @typeParam TTable  - The Drizzle table definition.
  */
-export interface StateTableColumnMap {
-  /** Column holding the aggregate instance ID (string PK). */
-  aggregateId: any;
-  /** Column holding the serialized aggregate state (text/jsonb). */
-  state: any;
-  /** Column holding the version number (integer). */
-  version: any;
+export interface DrizzleStateMapper<TState, TTable extends Table>
+  extends AggregateStateMapper<TState, Partial<TTable["$inferInsert"]>> {
+  /** Drizzle column reference for the aggregate-id column. */
+  readonly aggregateIdColumn: AnyColumn;
+  /** Drizzle column reference for the version column. */
+  readonly versionColumn: AnyColumn;
 }
 
 /**
- * Configuration for a per-aggregate state table.
+ * Configuration for a per-aggregate dedicated state table. The mapper
+ * is required and is the single source of truth for the row schema.
  */
-export interface AggregateStateTableConfig {
+export interface AggregateStateTableConfig<TState = unknown, TTable = any> {
   /** The Drizzle table definition. */
-  table: any;
-  /** Column mappings. If omitted, uses convention-based defaults. */
-  columns?: Partial<StateTableColumnMap>;
+  table: TTable;
+  /** The bi-directional state mapper for this aggregate's table. */
+  mapper: DrizzleStateMapper<TState, TTable extends Table ? TTable : Table>;
 }
+
+/**
+ * Convenience helper that builds a DrizzleStateMapper which serializes
+ * state to a single column as JSON. Equivalent to the legacy opaque
+ * dedicated-state behavior.
+ *
+ * @param table   - The Drizzle table definition.
+ * @param options - Optional column overrides. If omitted, the helper looks
+ *                  for columns at JS keys `aggregateId`, `version`, and
+ *                  `state` on the table; missing required columns throw at
+ *                  call time.
+ */
+export function jsonStateMapper<TTable extends Table>(
+  table: TTable,
+  options?: {
+    aggregateIdColumn?: AnyColumn;
+    versionColumn?: AnyColumn;
+    stateColumn?: AnyColumn;
+  },
+): DrizzleStateMapper<unknown, TTable>;
 
 /**
  * Configuration for createDrizzleAdapter.
@@ -340,16 +372,31 @@ All three dialects define the same logical schema with the same table names (`no
 44. `createDrizzleAdapter` returns a `DrizzleAdapterResult<C>` with all configured stores.
 45. All persistence instances from a single `createDrizzleAdapter` call share the same `DrizzleTransactionStore` so that operations inside a UoW participate in the same transaction.
 
-### Per-Aggregate State Persistence
+### Per-Aggregate State Persistence (Mapper-Based)
 
-46. `stateStoreFor(aggregateName)` returns a `StateStoredAggregatePersistence` bound to that aggregate's dedicated table.
+46. `stateStoreFor(aggregateName)` returns a `StateStoredAggregatePersistence` bound to that aggregate's dedicated table via its `DrizzleStateMapper`.
 47. `stateStoreFor(aggregateName)` is type-safe: only accepts keys from the `aggregateStates` config as valid aggregate names.
 48. `stateStoreFor(aggregateName)` throws at runtime if no dedicated table was configured for that aggregate name.
 49. The dedicated state persistence ignores the `aggregateName` parameter passed to `save()`/`load()` — the table itself is the namespace.
-50. The dedicated state persistence uses the column mapping to read/write the correct columns in the dedicated table.
-51. When `columns` is omitted from `AggregateStateTableConfig`, columns are resolved by convention: looks for columns named `aggregate_id`, `state`, `version` in the Drizzle table definition.
-52. If convention-based column resolution fails (required columns not found), `createDrizzleAdapter` throws at call time with a clear error listing the available columns in the table.
-53. Dedicated state persistence participates in the same UoW transaction as shared persistence via the shared `DrizzleTransactionStore`.
+50. **Mapper-driven save (insert path, `expectedVersion === 0`)**: the adapter calls `mapper.toRow(state)`, then merges in `{ [idKey]: aggregateId, [verKey]: 1 }` where `idKey` and `verKey` are the JS property keys derived from `mapper.aggregateIdColumn` and `mapper.versionColumn`. Drizzle unique-constraint violations on insert are translated to `ConcurrencyError`.
+51. **Mapper-driven save (update path, `expectedVersion > 0`)**: the adapter calls `mapper.toRow(state)`, then issues `UPDATE table SET ...stateRow, [verKey]: expectedVersion + 1 WHERE aggregateIdColumn = aggregateId AND versionColumn = expectedVersion`. Zero rows affected throws `ConcurrencyError`.
+52. **Mapper-driven load**: the adapter issues `SELECT * FROM table WHERE aggregateIdColumn = aggregateId`, strips the id and version columns from the row, and calls `mapper.fromRow(stateRow)` with the remainder. Returns `{ state, version }` or `null` if no row.
+53. The adapter resolves `idKey` / `verKey` from the table once at construction time via `findKeyForColumn(table, mapper.aggregateIdColumn)` etc. Resolution failure (column reference not found in the table) throws at construction.
+54. `mapper` is required in `AggregateStateTableConfig` — omitting it is a TypeScript compile error.
+55. Dedicated state persistence participates in the same UoW transaction as shared persistence via the shared `DrizzleTransactionStore`.
+
+### `jsonStateMapper` Convenience Helper
+
+56. `jsonStateMapper(table)` returns a `DrizzleStateMapper<unknown, TTable>` whose `toRow(state)` returns `{ [stateKey]: JSON.stringify(state) }` and `fromRow(row)` returns `JSON.parse(row[stateKey])`.
+57. With no options argument, `jsonStateMapper(table)` resolves `aggregateIdColumn`, `versionColumn`, and `stateColumn` by JS-key convention: `table.aggregateId`, `table.version`, `table.state`. Missing required columns throw at call time with a clear error listing the missing keys.
+58. With an options argument, the helper uses the provided `aggregateIdColumn` / `versionColumn` / `stateColumn` overrides (any subset). Unspecified columns fall back to the convention.
+59. The helper is exported from `@noddde/drizzle`.
+
+### `DrizzleAdapter.stateStored()` Mapper API
+
+60. `DrizzleAdapter.stateStored(table, options)` accepts an options object containing `mapper: DrizzleStateMapper<TState, TTable>`.
+61. The legacy two-argument form `stateStored(table, columns?)` is removed — adopters supply a mapper (or `jsonStateMapper(table)` for opaque-JSON parity).
+62. The returned `StateStoredAggregatePersistence` shares the adapter's `DrizzleTransactionStore`.
 
 ### Backwards Compatibility
 
@@ -367,7 +414,9 @@ All three dialects define the same logical schema with the same table names (`no
 - [ ] Dedicated state persistence instances share the same txStore as shared persistence.
 - [ ] `eventStore` and `sagaStore` are required in config (enforced at compile time).
 - [ ] `stateStoreFor()` fails fast if aggregate name was not registered.
-- [ ] Convention-based column resolution fails fast at `createDrizzleAdapter` call time, not at query time.
+- [ ] Mapper-derived JS key resolution fails fast at adapter construction time, not at query time.
+- [ ] `mapper.toRow(state)` is called once per save; `mapper.fromRow(row)` is called once per loaded row.
+- [ ] The adapter never serializes state itself when a mapper is in use — all state encoding/decoding is the mapper's responsibility.
 
 ## Edge Cases
 
@@ -528,10 +577,15 @@ it("saves and loads events with JSON-parsed payloads", async () => {
   });
   const persistence = adapter.eventSourcedPersistence;
 
-  await persistence.save("Order", "order-1", [
-    { name: "OrderPlaced", payload: { total: 100 } },
-    { name: "OrderConfirmed", payload: { confirmedAt: "2024-01-01" } },
-  ]);
+  await persistence.save(
+    "Order",
+    "order-1",
+    [
+      { name: "OrderPlaced", payload: { total: 100 } },
+      { name: "OrderConfirmed", payload: { confirmedAt: "2024-01-01" } },
+    ],
+    0,
+  );
 
   const loaded = await persistence.load("Order", "order-1");
   expect(loaded).toHaveLength(2);
@@ -572,12 +626,18 @@ it("appends events with incrementing sequence numbers", async () => {
   });
   const persistence = adapter.eventSourcedPersistence;
 
-  await persistence.save("Order", "order-1", [
-    { name: "OrderPlaced", payload: {} },
-  ]);
-  await persistence.save("Order", "order-1", [
-    { name: "OrderConfirmed", payload: {} },
-  ]);
+  await persistence.save(
+    "Order",
+    "order-1",
+    [{ name: "OrderPlaced", payload: {} }],
+    0,
+  );
+  await persistence.save(
+    "Order",
+    "order-1",
+    [{ name: "OrderConfirmed", payload: {} }],
+    1,
+  );
 
   const loaded = await persistence.load("Order", "order-1");
   expect(loaded).toHaveLength(2);
@@ -597,12 +657,18 @@ it("isolates events by aggregate name", async () => {
   });
   const persistence = adapter.eventSourcedPersistence;
 
-  await persistence.save("Order", "id-1", [
-    { name: "OrderPlaced", payload: {} },
-  ]);
-  await persistence.save("Payment", "id-1", [
-    { name: "PaymentReceived", payload: {} },
-  ]);
+  await persistence.save(
+    "Order",
+    "id-1",
+    [{ name: "OrderPlaced", payload: {} }],
+    0,
+  );
+  await persistence.save(
+    "Payment",
+    "id-1",
+    [{ name: "PaymentReceived", payload: {} }],
+    0,
+  );
 
   const orderEvents = await persistence.load("Order", "id-1");
   const paymentEvents = await persistence.load("Payment", "id-1");
@@ -617,7 +683,7 @@ it("isolates events by aggregate name", async () => {
 ### State-stored save and load roundtrip
 
 ```ts
-it("saves and loads state with JSON parsing", async () => {
+it("saves and loads state with version", async () => {
   const db = createTestDb();
   const adapter = createDrizzleAdapter(db, {
     eventStore: events,
@@ -626,16 +692,24 @@ it("saves and loads state with JSON parsing", async () => {
   });
   const persistence = adapter.stateStoredPersistence;
 
-  await persistence.save("Account", "acc-1", { balance: 500, owner: "Alice" });
-  const state = await persistence.load("Account", "acc-1");
-  expect(state).toEqual({ balance: 500, owner: "Alice" });
+  await persistence.save(
+    "Account",
+    "acc-1",
+    { balance: 500, owner: "Alice" },
+    0,
+  );
+  const result = await persistence.load("Account", "acc-1");
+  expect(result).toEqual({
+    state: { balance: 500, owner: "Alice" },
+    version: 1,
+  });
 });
 ```
 
-### State-stored returns undefined for nonexistent aggregate
+### State-stored returns null for nonexistent aggregate
 
 ```ts
-it("returns undefined for nonexistent aggregate", async () => {
+it("returns null for nonexistent aggregate", async () => {
   const db = createTestDb();
   const adapter = createDrizzleAdapter(db, {
     eventStore: events,
@@ -643,18 +717,18 @@ it("returns undefined for nonexistent aggregate", async () => {
     stateStore: aggregateStates,
   });
 
-  const state = await adapter.stateStoredPersistence.load(
+  const result = await adapter.stateStoredPersistence.load(
     "Account",
     "nonexistent",
   );
-  expect(state).toBeUndefined();
+  expect(result).toBeNull();
 });
 ```
 
 ### State-stored overwrites on repeated save
 
 ```ts
-it("overwrites state on subsequent saves", async () => {
+it("overwrites state on subsequent saves and increments version", async () => {
   const db = createTestDb();
   const adapter = createDrizzleAdapter(db, {
     eventStore: events,
@@ -663,11 +737,11 @@ it("overwrites state on subsequent saves", async () => {
   });
   const persistence = adapter.stateStoredPersistence;
 
-  await persistence.save("Account", "acc-1", { balance: 100 });
-  await persistence.save("Account", "acc-1", { balance: 200 });
+  await persistence.save("Account", "acc-1", { balance: 100 }, 0);
+  await persistence.save("Account", "acc-1", { balance: 200 }, 1);
 
-  const state = await persistence.load("Account", "acc-1");
-  expect(state).toEqual({ balance: 200 });
+  const result = await persistence.load("Account", "acc-1");
+  expect(result).toEqual({ state: { balance: 200 }, version: 2 });
 });
 ```
 
@@ -701,12 +775,20 @@ it("commits all operations atomically and returns deferred events", async () => 
   const uow = adapter.unitOfWorkFactory();
 
   uow.enlist(async () => {
-    await adapter.eventSourcedPersistence.save("Order", "o1", [
-      { name: "OrderPlaced", payload: { total: 50 } },
-    ]);
+    await adapter.eventSourcedPersistence.save(
+      "Order",
+      "o1",
+      [{ name: "OrderPlaced", payload: { total: 50 } }],
+      0,
+    );
   });
   uow.enlist(async () => {
-    await adapter.stateStoredPersistence.save("Account", "a1", { balance: 50 });
+    await adapter.stateStoredPersistence.save(
+      "Account",
+      "a1",
+      { balance: 50 },
+      0,
+    );
   });
   uow.deferPublish({ name: "OrderPlaced", payload: { total: 50 } });
 
@@ -725,7 +807,7 @@ it("commits all operations atomically and returns deferred events", async () => 
     "Account",
     "a1",
   );
-  expect(loadedState).toEqual({ balance: 50 });
+  expect(loadedState).toEqual({ state: { balance: 50 }, version: 1 });
 });
 ```
 
@@ -741,9 +823,12 @@ it("rollback discards all operations and events", async () => {
   const uow = adapter.unitOfWorkFactory();
 
   uow.enlist(async () => {
-    await adapter.eventSourcedPersistence.save("Order", "o1", [
-      { name: "OrderPlaced", payload: {} },
-    ]);
+    await adapter.eventSourcedPersistence.save(
+      "Order",
+      "o1",
+      [{ name: "OrderPlaced", payload: {} }],
+      0,
+    );
   });
   uow.deferPublish({ name: "OrderPlaced", payload: {} });
 
@@ -1080,7 +1165,10 @@ it("creates all stores with shared transaction context", () => {
     snapshotStore: snapshots,
     outboxStore: outbox,
     aggregateStates: {
-      Order: { table: aggregateStates },
+      Order: {
+        table: aggregateStates,
+        mapper: jsonStateMapper(aggregateStates),
+      },
     },
   });
 
@@ -1133,10 +1221,11 @@ it("createDrizzlePersistence continues to work unchanged", async () => {
 });
 ```
 
-### Per-aggregate state table: save and load roundtrip
+### Per-aggregate state table: jsonStateMapper roundtrip on conventional table
 
 ```ts
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { jsonStateMapper } from "@noddde/drizzle";
 
 const ordersTable = sqliteTable("orders", {
   aggregateId: text("aggregate_id").notNull().primaryKey(),
@@ -1172,13 +1261,13 @@ function createTestDbWithCustomTables() {
   return drizzle(sqlite);
 }
 
-it("per-aggregate state table: save and load roundtrip", async () => {
+it("per-aggregate state table: jsonStateMapper save and load roundtrip", async () => {
   const db = createTestDbWithCustomTables();
   const adapter = createDrizzleAdapter(db, {
     eventStore: events,
     sagaStore: sagaStates,
     aggregateStates: {
-      Order: { table: ordersTable },
+      Order: { table: ordersTable, mapper: jsonStateMapper(ordersTable) },
     },
   });
 
@@ -1206,7 +1295,7 @@ it("per-aggregate state table: returns null for nonexistent", async () => {
     eventStore: events,
     sagaStore: sagaStates,
     aggregateStates: {
-      Order: { table: ordersTable },
+      Order: { table: ordersTable, mapper: jsonStateMapper(ordersTable) },
     },
   });
 
@@ -1226,7 +1315,7 @@ it("per-aggregate state table: throws ConcurrencyError on version mismatch", asy
     eventStore: events,
     sagaStore: sagaStates,
     aggregateStates: {
-      Order: { table: ordersTable },
+      Order: { table: ordersTable, mapper: jsonStateMapper(ordersTable) },
     },
   });
 
@@ -1236,11 +1325,11 @@ it("per-aggregate state table: throws ConcurrencyError on version mismatch", asy
   // Try to save with wrong version
   await expect(
     persistence.save("Order", "order-1", { status: "confirmed" }, 0),
-  ).rejects.toThrow("ConcurrencyError");
+  ).rejects.toThrow(ConcurrencyError);
 });
 ```
 
-### Per-aggregate state table: custom column mapping
+### Per-aggregate state table: jsonStateMapper with non-conventional column names
 
 ```ts
 const customOrdersTable = sqliteTable("custom_orders", {
@@ -1249,7 +1338,7 @@ const customOrdersTable = sqliteTable("custom_orders", {
   ver: integer("ver").notNull().default(0),
 });
 
-it("per-aggregate state table: uses custom column mapping", async () => {
+it("per-aggregate state table: jsonStateMapper accepts column overrides", async () => {
   const sqlite = new Database(":memory:");
   sqlite.exec(`
     CREATE TABLE noddde_events (
@@ -1280,11 +1369,11 @@ it("per-aggregate state table: uses custom column mapping", async () => {
     aggregateStates: {
       Order: {
         table: customOrdersTable,
-        columns: {
-          aggregateId: customOrdersTable.id,
-          state: customOrdersTable.data,
-          version: customOrdersTable.ver,
-        },
+        mapper: jsonStateMapper(customOrdersTable, {
+          aggregateIdColumn: customOrdersTable.id,
+          stateColumn: customOrdersTable.data,
+          versionColumn: customOrdersTable.ver,
+        }),
       },
     },
   });
@@ -1299,6 +1388,178 @@ it("per-aggregate state table: uses custom column mapping", async () => {
 });
 ```
 
+### Per-aggregate state table: typed-column mapper roundtrip
+
+```ts
+import type { DrizzleStateMapper } from "@noddde/drizzle";
+
+type OrderState = {
+  customerId: string;
+  total: number;
+  status: "open" | "paid" | "cancelled";
+};
+
+const typedOrdersTable = sqliteTable("typed_orders", {
+  aggregateId: text("aggregate_id").notNull().primaryKey(),
+  customerId: text("customer_id").notNull(),
+  total: integer("total_cents").notNull(),
+  status: text("status").$type<OrderState["status"]>().notNull(),
+  version: integer("version").notNull().default(0),
+});
+
+const orderMapper: DrizzleStateMapper<OrderState, typeof typedOrdersTable> = {
+  aggregateIdColumn: typedOrdersTable.aggregateId,
+  versionColumn: typedOrdersTable.version,
+  toRow: (state) => ({
+    customerId: state.customerId,
+    total: state.total,
+    status: state.status,
+  }),
+  fromRow: (row) => ({
+    customerId: row.customerId!,
+    total: row.total!,
+    status: row.status!,
+  }),
+};
+
+it("per-aggregate state table: typed-column mapper writes and reads typed rows", async () => {
+  const sqlite = new Database(":memory:");
+  sqlite.exec(`
+    CREATE TABLE noddde_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      aggregate_name TEXT NOT NULL,
+      aggregate_id TEXT NOT NULL,
+      sequence_number INTEGER NOT NULL,
+      event_name TEXT NOT NULL,
+      payload TEXT NOT NULL
+    );
+    CREATE TABLE noddde_saga_states (
+      saga_name TEXT NOT NULL,
+      saga_id TEXT NOT NULL,
+      state TEXT NOT NULL,
+      PRIMARY KEY (saga_name, saga_id)
+    );
+    CREATE TABLE typed_orders (
+      aggregate_id TEXT NOT NULL PRIMARY KEY,
+      customer_id TEXT NOT NULL,
+      total_cents INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 0
+    );
+  `);
+  const db = drizzle(sqlite);
+
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
+    aggregateStates: {
+      Order: { table: typedOrdersTable, mapper: orderMapper },
+    },
+  });
+
+  const persistence = adapter.stateStoreFor("Order");
+  await persistence.save(
+    "Order",
+    "o-1",
+    { customerId: "c-7", total: 4200, status: "open" },
+    0,
+  );
+
+  // Verify the row landed in typed columns, not as JSON
+  const raw = sqlite
+    .prepare("SELECT * FROM typed_orders WHERE aggregate_id = ?")
+    .get("o-1") as any;
+  expect(raw.customer_id).toBe("c-7");
+  expect(raw.total_cents).toBe(4200);
+  expect(raw.status).toBe("open");
+  expect(raw.version).toBe(1);
+
+  const loaded = await persistence.load("Order", "o-1");
+  expect(loaded).not.toBeNull();
+  expect(loaded!.state).toEqual({
+    customerId: "c-7",
+    total: 4200,
+    status: "open",
+  });
+  expect(loaded!.version).toBe(1);
+});
+```
+
+### Per-aggregate state table: typed-column mapper concurrency
+
+```ts
+it("typed-column mapper: throws ConcurrencyError on version mismatch", async () => {
+  const sqlite = new Database(":memory:");
+  sqlite.exec(`
+    CREATE TABLE noddde_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      aggregate_name TEXT NOT NULL,
+      aggregate_id TEXT NOT NULL,
+      sequence_number INTEGER NOT NULL,
+      event_name TEXT NOT NULL,
+      payload TEXT NOT NULL
+    );
+    CREATE TABLE noddde_saga_states (
+      saga_name TEXT NOT NULL,
+      saga_id TEXT NOT NULL,
+      state TEXT NOT NULL,
+      PRIMARY KEY (saga_name, saga_id)
+    );
+    CREATE TABLE typed_orders (
+      aggregate_id TEXT NOT NULL PRIMARY KEY,
+      customer_id TEXT NOT NULL,
+      total_cents INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 0
+    );
+  `);
+  const db = drizzle(sqlite);
+
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    sagaStore: sagaStates,
+    aggregateStates: {
+      Order: { table: typedOrdersTable, mapper: orderMapper },
+    },
+  });
+
+  const persistence = adapter.stateStoreFor("Order");
+  await persistence.save(
+    "Order",
+    "o-1",
+    { customerId: "c-7", total: 1000, status: "open" },
+    0,
+  );
+
+  await expect(
+    persistence.save(
+      "Order",
+      "o-1",
+      { customerId: "c-7", total: 2000, status: "paid" },
+      0,
+    ),
+  ).rejects.toThrow(ConcurrencyError);
+});
+```
+
+### Per-aggregate state table: typed-column mapper type safety
+
+```ts
+import { expectTypeOf } from "vitest";
+
+it("typed-column mapper: TS rejects mappers with mismatched row keys", () => {
+  // Compile-time only — ensures the mapper's toRow return type is constrained
+  // to Partial<typeof typedOrdersTable.$inferInsert>.
+  type Row = Partial<typeof typedOrdersTable.$inferInsert>;
+  expectTypeOf<ReturnType<typeof orderMapper.toRow>>().toMatchTypeOf<Row>();
+
+  // @ts-expect-error — `mapper` is required in AggregateStateTableConfig.
+  const _bad: AggregateStateTableConfig<OrderState, typeof typedOrdersTable> = {
+    table: typedOrdersTable,
+  };
+});
+```
+
 ### Per-aggregate state table: stateStoreFor throws for unknown aggregate
 
 ```ts
@@ -1308,7 +1569,7 @@ it("stateStoreFor throws for unconfigured aggregate", () => {
     eventStore: events,
     sagaStore: sagaStates,
     aggregateStates: {
-      Order: { table: ordersTable },
+      Order: { table: ordersTable, mapper: jsonStateMapper(ordersTable) },
     },
   });
 
@@ -1329,7 +1590,7 @@ it("per-aggregate state table: participates in UoW transaction", async () => {
     eventStore: events,
     sagaStore: sagaStates,
     aggregateStates: {
-      Order: { table: ordersTable },
+      Order: { table: ordersTable, mapper: jsonStateMapper(ordersTable) },
     },
   });
 
@@ -1362,7 +1623,7 @@ it("per-aggregate state table: participates in UoW transaction", async () => {
 });
 ```
 
-### Adapter: convention-based column resolution fails at creation time
+### jsonStateMapper: convention-based resolution fails fast on missing columns
 
 ```ts
 const badTable = sqliteTable("bad_table", {
@@ -1370,25 +1631,125 @@ const badTable = sqliteTable("bad_table", {
   bar: integer("bar").notNull(),
 });
 
-it("createDrizzleAdapter throws clear error when convention resolution fails", () => {
+it("jsonStateMapper throws clear error when convention resolution fails", () => {
   const sqlite = new Database(":memory:");
   sqlite.exec(
     `CREATE TABLE bad_table (foo TEXT NOT NULL, bar INTEGER NOT NULL);`,
   );
   const db = drizzle(sqlite);
 
-  // Throws at createDrizzleAdapter call time, not lazily
-  expect(() =>
-    createDrizzleAdapter(db, {
-      eventStore: events,
-      sagaStore: sagaStates,
-      aggregateStates: {
-        Bad: { table: badTable },
-      },
-    }),
-  ).toThrow(/aggregate_id.*state.*version/);
+  // jsonStateMapper(badTable) throws at call time — the table has none
+  // of the conventional `aggregateId` / `state` / `version` JS keys.
+  expect(() => jsonStateMapper(badTable)).toThrow(
+    /aggregateId.*state.*version/,
+  );
 });
 ```
+
+---
+
+## Migration
+
+This release removes `StateTableColumnMap` and the `columns?: Partial<StateTableColumnMap>` field from `AggregateStateTableConfig`. Per-aggregate dedicated state tables now require a `DrizzleStateMapper` (the `mapper` field is mandatory). This is a breaking change.
+
+**Before**
+
+```ts
+createDrizzleAdapter(db, {
+  eventStore: events,
+  sagaStore: sagaStates,
+  aggregateStates: {
+    Order: { table: ordersTable },
+  },
+});
+
+createDrizzleAdapter(db, {
+  eventStore: events,
+  sagaStore: sagaStates,
+  aggregateStates: {
+    Order: {
+      table: customOrdersTable,
+      columns: {
+        aggregateId: customOrdersTable.id,
+        state: customOrdersTable.data,
+        version: customOrdersTable.ver,
+      },
+    },
+  },
+});
+
+// DrizzleAdapter class
+adapter.stateStored(customTable);
+adapter.stateStored(customTable, {
+  aggregateId: customTable.id,
+  state: customTable.data,
+  version: customTable.ver,
+});
+```
+
+**After (opaque-JSON parity via `jsonStateMapper`)**
+
+```ts
+import { jsonStateMapper } from "@noddde/drizzle";
+
+createDrizzleAdapter(db, {
+  eventStore: events,
+  sagaStore: sagaStates,
+  aggregateStates: {
+    Order: { table: ordersTable, mapper: jsonStateMapper(ordersTable) },
+  },
+});
+
+createDrizzleAdapter(db, {
+  eventStore: events,
+  sagaStore: sagaStates,
+  aggregateStates: {
+    Order: {
+      table: customOrdersTable,
+      mapper: jsonStateMapper(customOrdersTable, {
+        aggregateIdColumn: customOrdersTable.id,
+        stateColumn: customOrdersTable.data,
+        versionColumn: customOrdersTable.ver,
+      }),
+    },
+  },
+});
+
+// DrizzleAdapter class
+adapter.stateStored(customTable, { mapper: jsonStateMapper(customTable) });
+adapter.stateStored(customTable, {
+  mapper: jsonStateMapper(customTable, {
+    aggregateIdColumn: customTable.id,
+    stateColumn: customTable.data,
+    versionColumn: customTable.ver,
+  }),
+});
+```
+
+**After (typed columns via custom `DrizzleStateMapper`)**
+
+```ts
+import type { DrizzleStateMapper } from "@noddde/drizzle";
+
+const orderMapper: DrizzleStateMapper<OrderState, typeof typedOrders> = {
+  aggregateIdColumn: typedOrders.aggregateId,
+  versionColumn: typedOrders.version,
+  toRow: (s) => ({
+    customerId: s.customerId,
+    total: s.total,
+    status: s.status,
+  }),
+  fromRow: (r) => ({
+    customerId: r.customerId!,
+    total: r.total!,
+    status: r.status!,
+  }),
+};
+
+adapter.stateStored(typedOrders, { mapper: orderMapper });
+```
+
+The `state` column is no longer required on dedicated tables when a typed-column mapper is in use — adopters can persist state across any number of typed columns and query them directly with SQL/Drizzle.
 
 ---
 
@@ -1462,12 +1823,14 @@ export class DrizzleAdapter implements PersistenceAdapter {
    * Returns a StateStoredAggregatePersistence bound to a dedicated Drizzle table.
    * Use this when an aggregate needs its own state table instead of the shared one.
    *
-   * @param table - A Drizzle table definition.
-   * @param columns - Optional column mapping overrides.
+   * @param table   - A Drizzle table definition.
+   * @param options - Required options object containing the mapper. Pass
+   *                  `jsonStateMapper(table)` for opaque-JSON parity, or a
+   *                  user-defined `DrizzleStateMapper` for typed columns.
    */
-  stateStored(
-    table: any,
-    columns?: Partial<StateTableColumnMap>,
+  stateStored<TState, TTable extends Table>(
+    table: TTable,
+    options: { mapper: DrizzleStateMapper<TState, TTable> },
   ): StateStoredAggregatePersistence;
 
   /**
@@ -1485,7 +1848,7 @@ export class DrizzleAdapter implements PersistenceAdapter {
 31. All persistence stores (`eventSourcedPersistence`, `stateStoredPersistence`, `sagaPersistence`, `snapshotStore`, `outboxStore`, `unitOfWorkFactory`) are created eagerly in the constructor.
 32. All persistence instances share a single `DrizzleTransactionStore`, ensuring UoW atomicity.
 33. `aggregateLocker` is provided for PostgreSQL and MySQL dialects (via `DrizzleAdvisoryLocker`). It is `undefined` for SQLite.
-34. `stateStored(table, columns?)` returns a `StateStoredAggregatePersistence` bound to the given table. The returned persistence shares the same transaction store.
+34. `stateStored(table, { mapper })` returns a `StateStoredAggregatePersistence` bound to the given table via the supplied `DrizzleStateMapper`. The returned persistence shares the same transaction store. The legacy two-argument form (`stateStored(table, columns?)`) has been removed — adopters supply a mapper (or call `jsonStateMapper(table)` for opaque-JSON parity).
 35. `close()` is a no-op that resolves immediately. Drizzle does not own the database connection pool.
 36. `isPersistenceAdapter(new DrizzleAdapter(db))` returns `true`.
 37. The existing `createDrizzleAdapter` function is marked `@deprecated` and delegates to `DrizzleAdapter` internally.
@@ -1530,8 +1893,12 @@ expect(adapter.outboxStore).toBeDefined();
 ### DrizzleAdapter.stateStored returns dedicated persistence
 
 ```ts
+import { jsonStateMapper } from "@noddde/drizzle";
+
 const adapter = new DrizzleAdapter(db);
-const dedicated = adapter.stateStored(customTable);
+const dedicated = adapter.stateStored(customTable, {
+  mapper: jsonStateMapper(customTable),
+});
 
 expect(dedicated).toBeDefined();
 expect(dedicated.save).toBeTypeOf("function");

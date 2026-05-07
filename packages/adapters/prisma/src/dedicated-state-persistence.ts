@@ -5,7 +5,7 @@ import {
   type StateStoredAggregatePersistence,
 } from "@noddde/core";
 import type { PrismaTransactionStore } from "./unit-of-work";
-import type { PrismaStateTableColumnMap } from "./builder";
+import type { PrismaStateMapper } from "./builder";
 
 /**
  * Prisma-backed state-stored aggregate persistence bound to a
@@ -13,8 +13,9 @@ import type { PrismaStateTableColumnMap } from "./builder";
  * this class ignores the `aggregateName` parameter — the model
  * itself is the namespace.
  *
- * Supports custom column mappings for models where property names
- * differ from the noddde convention.
+ * All state encoding/decoding is delegated to the provided
+ * {@link PrismaStateMapper}. The adapter writes the aggregate id
+ * and version columns itself using the property names declared on the mapper.
  */
 export class PrismaDedicatedStateStoredPersistence
   implements StateStoredAggregatePersistence
@@ -23,7 +24,10 @@ export class PrismaDedicatedStateStoredPersistence
     private readonly prisma: PrismaClient,
     private readonly txStore: PrismaTransactionStore,
     private readonly modelName: string,
-    private readonly columns: PrismaStateTableColumnMap,
+    private readonly mapper: PrismaStateMapper<
+      unknown,
+      Record<string, unknown>
+    >,
   ) {}
 
   private getDelegate(): any {
@@ -34,20 +38,20 @@ export class PrismaDedicatedStateStoredPersistence
   async save(
     _aggregateName: string,
     aggregateId: string,
-    state: any,
+    state: unknown,
     expectedVersion: number,
   ): Promise<void> {
     const delegate = this.getDelegate();
-    const serialized = JSON.stringify(state);
+    const stateRow = this.mapper.toRow(state);
 
     if (expectedVersion === 0) {
       // Insert path: new aggregate
       try {
         await delegate.create({
           data: {
-            [this.columns.aggregateId]: aggregateId,
-            [this.columns.state]: serialized,
-            [this.columns.version]: 1,
+            ...stateRow,
+            [this.mapper.aggregateIdField]: aggregateId,
+            [this.mapper.versionField]: 1,
           },
         });
       } catch (error: any) {
@@ -69,12 +73,12 @@ export class PrismaDedicatedStateStoredPersistence
       // Update path: optimistic concurrency check via version match
       const result = await delegate.updateMany({
         where: {
-          [this.columns.aggregateId]: aggregateId,
-          [this.columns.version]: expectedVersion,
+          [this.mapper.aggregateIdField]: aggregateId,
+          [this.mapper.versionField]: expectedVersion,
         },
         data: {
-          [this.columns.state]: serialized,
-          [this.columns.version]: expectedVersion + 1,
+          ...stateRow,
+          [this.mapper.versionField]: expectedVersion + 1,
         },
       });
 
@@ -92,22 +96,26 @@ export class PrismaDedicatedStateStoredPersistence
   async load(
     _aggregateName: string,
     aggregateId: string,
-  ): Promise<{ state: any; version: number } | null> {
+  ): Promise<{ state: unknown; version: number } | null> {
     const delegate = this.getDelegate();
 
     const row = await delegate.findFirst({
-      where: { [this.columns.aggregateId]: aggregateId },
+      where: { [this.mapper.aggregateIdField]: aggregateId },
     });
 
     if (!row) return null;
 
-    const stateValue = row[this.columns.state];
-    const versionValue = row[this.columns.version];
+    const version: number = row[this.mapper.versionField];
 
-    return {
-      state:
-        typeof stateValue === "string" ? JSON.parse(stateValue) : stateValue,
-      version: versionValue,
-    };
+    // Strip the id and version properties before handing the row to the mapper
+    const {
+      [this.mapper.aggregateIdField]: _id,
+      [this.mapper.versionField]: _ver,
+      ...stateRow
+    } = row;
+
+    const state = this.mapper.fromRow(stateRow);
+
+    return { state, version };
   }
 }
