@@ -10,11 +10,7 @@ import type {
   ViewStore,
   ViewStoreFactory,
 } from "@noddde/core";
-import {
-  defineAggregate,
-  defineDomain,
-  defineProjection,
-} from "@noddde/core";
+import { defineAggregate, defineDomain, defineProjection } from "@noddde/core";
 import {
   wireDomain,
   EventEmitterEventBus,

@@ -38,12 +38,12 @@ The `vitest.config.mts` for the core package was updated to alias `@noddde/engin
 
 8 tests generated from spec, grouped into 4 `describe` blocks:
 
-| Scenario heading                                            | Tests | Initial state |
-| ----------------------------------------------------------- | ----- | ------------- |
-| defineDomain (core)                                         | 4     | RED           |
-| defineDomain (core) — legacy overload                       | 1     | RED           |
-| defineDomain (core) — processModel                          | 2     | RED           |
-| defineDomain re-export from @noddde/engine                  | 1     | RED (module resolution issue) |
+| Scenario heading                           | Tests | Initial state                 |
+| ------------------------------------------ | ----- | ----------------------------- |
+| defineDomain (core)                        | 4     | RED                           |
+| defineDomain (core) — legacy overload      | 1     | RED                           |
+| defineDomain (core) — processModel         | 2     | RED                           |
+| defineDomain re-export from @noddde/engine | 1     | RED (module resolution issue) |
 
 The re-export test required adding `@noddde/engine` to the core vitest alias config to resolve correctly (without the alias, the test compared source vs. built-dist function instances, which are different objects).
 
@@ -96,17 +96,17 @@ All existing engine tests continue to pass via the re-export. `tsc --noEmit` cle
 
 ## Requirements Coverage
 
-| Requirement                                              | Covered |
-| -------------------------------------------------------- | ------- |
-| defineDomain returns same object reference (identity)    | YES     |
-| defineDomain is sync, no side effects                    | YES     |
-| Overload 1: T inferred, narrow types preserved           | YES     |
-| Overload 2: deprecated, explicit generics, typed handler | YES     |
-| processModel optional; omission vs. {} both valid        | YES     |
-| processModel.sagas omitted + standaloneEventHandlers set | YES     |
-| @noddde/engine re-exports defineDomain (same reference)  | YES     |
+| Requirement                                              | Covered                                       |
+| -------------------------------------------------------- | --------------------------------------------- |
+| defineDomain returns same object reference (identity)    | YES                                           |
+| defineDomain is sync, no side effects                    | YES                                           |
+| Overload 1: T inferred, narrow types preserved           | YES                                           |
+| Overload 2: deprecated, explicit generics, typed handler | YES                                           |
+| processModel optional; omission vs. {} both valid        | YES                                           |
+| processModel.sagas omitted + standaloneEventHandlers set | YES                                           |
+| @noddde/engine re-exports defineDomain (same reference)  | YES                                           |
 | File-private helper types not exported                   | YES (no public exports for handler-map types) |
-| Empty aggregates/projections maps valid                  | YES     |
+| Empty aggregates/projections maps valid                  | YES                                           |
 
 ---
 

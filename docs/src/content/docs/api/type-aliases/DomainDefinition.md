@@ -61,10 +61,10 @@ The projection map. Inferred narrow type preserves typed query dispatch downstre
 
 The write side: aggregates and standalone command handlers.
 
-| Property                     | Type                                                       | Description                                           |
-| :--------------------------- | :--------------------------------------------------------- | :---------------------------------------------------- |
+| Property                     | Type                                                       | Description                                             |
+| :--------------------------- | :--------------------------------------------------------- | :------------------------------------------------------ |
 | `aggregates`                 | `TAggregates`                                              | A map of aggregate definitions keyed by aggregate name. |
-| `standaloneCommandHandlers?` | _Optional_ map of `StandaloneCommandHandler` keyed by name | Standalone command handlers (file-private map type).  |
+| `standaloneCommandHandlers?` | _Optional_ map of `StandaloneCommandHandler` keyed by name | Standalone command handlers (file-private map type).    |
 
 ---
 
@@ -74,10 +74,10 @@ The write side: aggregates and standalone command handlers.
 
 The read side: projections and standalone query handlers.
 
-| Property                   | Type                                              | Description                                            |
-| :------------------------- | :------------------------------------------------ | :----------------------------------------------------- |
-| `projections`              | `TProjections`                                    | A map of projection definitions keyed by name.         |
-| `standaloneQueryHandlers?` | _Optional_ map of `QueryHandler` keyed by name    | Standalone query handlers (file-private map type).     |
+| Property                   | Type                                           | Description                                        |
+| :------------------------- | :--------------------------------------------- | :------------------------------------------------- |
+| `projections`              | `TProjections`                                 | A map of projection definitions keyed by name.     |
+| `standaloneQueryHandlers?` | _Optional_ map of `QueryHandler` keyed by name | Standalone query handlers (file-private map type). |
 
 ---
 
@@ -87,7 +87,7 @@ The read side: projections and standalone query handlers.
 
 Process model: sagas and standalone event handlers. Optional — omit if the domain has no cross-aggregate workflows or event-driven side effects.
 
-| Property                    | Type                                              | Description                                            |
-| :-------------------------- | :------------------------------------------------ | :----------------------------------------------------- |
-| `sagas?`                    | _Optional_ map of `Saga` keyed by name            | A map of saga definitions. Omit if no sagas.           |
-| `standaloneEventHandlers?`  | _Optional_ map of `EventHandler` keyed by name    | Standalone event handlers (file-private map type).     |
+| Property                   | Type                                           | Description                                        |
+| :------------------------- | :--------------------------------------------- | :------------------------------------------------- |
+| `sagas?`                   | _Optional_ map of `Saga` keyed by name         | A map of saga definitions. Omit if no sagas.       |
+| `standaloneEventHandlers?` | _Optional_ map of `EventHandler` keyed by name | Standalone event handlers (file-private map type). |

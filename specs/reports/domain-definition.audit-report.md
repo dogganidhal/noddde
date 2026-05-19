@@ -7,23 +7,23 @@
 
 ### Mechanical Checks
 
-| Check                 | Result | Details                                                                                         |
-| --------------------- | ------ | ----------------------------------------------------------------------------------------------- |
-| Export coverage       | PASS   | 2/2 exports present (`DomainDefinition`, `defineDomain`); both reachable from `@noddde/core`.   |
-| Stubs remaining       | PASS   | 0 stubs in `packages/core/src/ddd/domain-definition.ts`.                                        |
-| Type check (core)     | PASS   | `npx tsc --noEmit` clean.                                                                       |
-| Type check (engine)   | PASS   | `npx tsc --noEmit` clean.                                                                       |
-| Tests (core)          | PASS   | 27/27 test files, 301/301 tests passing (incl. 8 new domain-definition tests).                  |
-| Tests (engine)        | PASS   | 34/34 test files, 345/345 tests passing.                                                        |
-| Tests (CLI)           | PASS   | 20/20 test files, 191/191 tests passing — template now imports from `@noddde/core`.             |
-| Tests (sample-flash-sale) | PASS | 6/6 test files, 27/27 tests passing.                                                          |
-| Lint                  | PASS   | `yarn lint` zero warnings across all 14 packages.                                               |
-| Re-export check       | PASS   | Engine source re-exports both `defineDomain` and `DomainDefinition` from `@noddde/core`.        |
-| Reference-equality    | PASS   | Verified in production builds via dist (`require('@noddde/engine').defineDomain === require('@noddde/core').defineDomain`); the vitest alias is consistent with this. |
-| Sample compatibility  | PASS   | `samples/sample-flash-sale` tsc + tests pass without any sample code change.                    |
-| Invariants enforced   | PASS   | Identity (reference equality) + sync + pure-no-side-effects all verified by tests.              |
-| Edge cases covered    | PASS   | Empty maps, `processModel` omitted vs `{}`, sagas omitted + standaloneEventHandlers, fresh-reference-per-call. |
-| Prettier (touched src) | PASS  | LF/CRLF differences are a Windows-local working-copy artifact (`core.autocrlf=true`); Git stores LF, so CI sees LF and prettier passes. Confirmed via `git show :file`. |
+| Check                     | Result | Details                                                                                                                                                                 |
+| ------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Export coverage           | PASS   | 2/2 exports present (`DomainDefinition`, `defineDomain`); both reachable from `@noddde/core`.                                                                           |
+| Stubs remaining           | PASS   | 0 stubs in `packages/core/src/ddd/domain-definition.ts`.                                                                                                                |
+| Type check (core)         | PASS   | `npx tsc --noEmit` clean.                                                                                                                                               |
+| Type check (engine)       | PASS   | `npx tsc --noEmit` clean.                                                                                                                                               |
+| Tests (core)              | PASS   | 27/27 test files, 301/301 tests passing (incl. 8 new domain-definition tests).                                                                                          |
+| Tests (engine)            | PASS   | 34/34 test files, 345/345 tests passing.                                                                                                                                |
+| Tests (CLI)               | PASS   | 20/20 test files, 191/191 tests passing — template now imports from `@noddde/core`.                                                                                     |
+| Tests (sample-flash-sale) | PASS   | 6/6 test files, 27/27 tests passing.                                                                                                                                    |
+| Lint                      | PASS   | `yarn lint` zero warnings across all 14 packages.                                                                                                                       |
+| Re-export check           | PASS   | Engine source re-exports both `defineDomain` and `DomainDefinition` from `@noddde/core`.                                                                                |
+| Reference-equality        | PASS   | Verified in production builds via dist (`require('@noddde/engine').defineDomain === require('@noddde/core').defineDomain`); the vitest alias is consistent with this.   |
+| Sample compatibility      | PASS   | `samples/sample-flash-sale` tsc + tests pass without any sample code change.                                                                                            |
+| Invariants enforced       | PASS   | Identity (reference equality) + sync + pure-no-side-effects all verified by tests.                                                                                      |
+| Edge cases covered        | PASS   | Empty maps, `processModel` omitted vs `{}`, sagas omitted + standaloneEventHandlers, fresh-reference-per-call.                                                          |
+| Prettier (touched src)    | PASS   | LF/CRLF differences are a Windows-local working-copy artifact (`core.autocrlf=true`); Git stores LF, so CI sees LF and prettier passes. Confirmed via `git show :file`. |
 
 ### Coherence Review
 
