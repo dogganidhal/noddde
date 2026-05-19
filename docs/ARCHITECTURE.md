@@ -62,10 +62,13 @@ See `ROADMAP.md` for the full roadmap. Current state:
 
 - API surface: complete
 - In-memory runtime: complete
+- Distributed event bus adapters: complete (Kafka, NATS, RabbitMQ with consumer groups, at-least-once delivery, configurable retry)
 - Persistence adapters: complete (Drizzle, Prisma, TypeORM with transaction support; bi-directional `AggregateStateMapper` is the primary extension point for binding aggregates to adopter-owned dedicated tables with typed columns)
 - Concurrency control: complete (optimistic with retries, pessimistic with advisory locks)
 - Event metadata: complete (auto-enrichment, correlation propagation through sagas)
 - Snapshotting: complete (configurable strategies, partial event loading)
 - Idempotent commands: complete (commandId deduplication with TTL)
+- Observability: complete (native OpenTelemetry tracing across the full async lifecycle, zero required configuration)
 - Projection rebuild: complete (`Domain.rebuildProjection(name, options?)` with typed name inference, 5 typed error classes, and an `EventReader` capability that adapters opt into)
-- Remaining gaps: observability, distributed systems support (see ROADMAP.md)
+- Error isolation: complete (per-handler error boundaries across all four EventBus implementations; eventual-consistency handler failures are logged and isolated, strong-consistency projection failures still roll back the command atomically)
+- Remaining gaps: type-system stress testing (see ROADMAP.md)

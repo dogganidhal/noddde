@@ -2,7 +2,7 @@
 
 Where noddde is headed: what is shipped, what is required for v1.0, and our vision for distributed TypeScript domains.
 
-**Current Status:** Pre-1.0. The core Decider pattern, type-inference engine, persistence adapters, distributed event buses, and observability are all shipped. We are currently focused on error isolation and developer ergonomics ahead of our v1.0 Release Candidate.
+**Current Status:** Pre-1.0. The core Decider pattern, type-inference engine, persistence adapters, distributed event buses, observability, projection rebuild, and per-handler error isolation are all shipped. Type-system stress testing is the last remaining v1.0 Release Candidate item.
 
 ---
 
@@ -21,6 +21,7 @@ Where noddde is headed: what is shipped, what is required for v1.0, and our visi
 - [x] **Testing Toolkit:** Type-safe Given-When-Then test harnesses (`@noddde/testing`).
 - [x] **Observability & OpenTelemetry (OTel):** Native OTel trace context propagation spanning the full asynchronous lifecycle: API -> Command Bus -> Aggregate -> Event Bus -> Saga -> Read Model. Zero required configuration — auto-detects `@opentelemetry/api` at runtime.
 - [x] **Distributed Event Bus Adapters:** Official adapters for RabbitMQ (`@noddde/rabbitmq`), NATS (`@noddde/nats`), and Kafka (`@noddde/kafka`) with consumer group support, at-least-once delivery, manual acknowledgment, and configurable retry policies.
+- [x] **Projection & Handler Error Isolation:** Per-handler error boundaries across all four shipped EventBus implementations (in-memory + Kafka + NATS + RabbitMQ). A failing read-model reducer, saga handler, or standalone event handler can no longer poison sibling subscribers nor fail the originating command at the API boundary. Each failure is logged with structured fields (`eventName`, `handlerName`, `error`, plus OTel `traceId`/`spanId` when an active span is present). Strong-consistency projections still propagate failures atomically via the command's Unit of Work; broker adapters preserve their existing ack/nack/commit-skip semantics after siblings settle.
 
 ---
 
@@ -30,8 +31,6 @@ _These items must be completed to guarantee state consistency and developer ergo
 
 - [x] **Graceful Shutdown & Connection Draining**
   - `Domain.shutdown()` drains in-flight commands, waits for active Sagas/Outbox relays to finish, and auto-closes infrastructure implementing `Closeable`.
-- [ ] **Projection & Handler Error Isolation**
-  - Granular error boundaries so a single failing read-model reducer does not crash the event bus or block other successful projections.
 - [x] **The CLI & "Golden Path" Scaffolding**
   - `@noddde/cli` with 5 commands: `new project`, `new domain`, `new aggregate`, `new projection`, `new saga`. Project-aware generators auto-place files in the correct layered structure. Extracted handlers (command-handlers, query-handlers, view-reducers, transition-handlers) keep files focused as domains grow.
 - [ ] **Type System Stress Testing**
