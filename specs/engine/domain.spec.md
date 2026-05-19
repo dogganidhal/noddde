@@ -1,20 +1,21 @@
 ---
-title: "Domain Definition & Wiring"
+title: "Domain Wiring"
 module: engine/domain
 source_file: packages/engine/src/domain.ts
 status: implemented
 exports:
   [
     Domain,
-    DomainDefinition,
-    defineDomain,
     AggregateWiring,
     ProjectionWiring,
     DomainWiring,
     wireDomain,
+    InferDomain,
     InferAggregateMapCommands,
     InferProjectionMapQueries,
   ]
+re_exports:
+  - { from: "@noddde/core", names: [DomainDefinition, defineDomain] }
 depends_on:
   - engine/implementations/ee-event-bus
   - engine/implementations/in-memory-command-bus
@@ -31,6 +32,7 @@ depends_on:
   - ddd/aggregate-root
   - ddd/projection
   - ddd/saga
+  - ddd/domain-definition
   - cqrs/command/command
   - cqrs/query/query
   - edd/event
@@ -45,9 +47,9 @@ docs:
   - read-model/projection-rebuild.mdx
 ---
 
-# Domain Definition & Wiring
+# Domain Wiring
 
-> The domain API is split into two phases: **definition** (`defineDomain`) captures the pure domain structure (aggregates, projections, sagas, handlers) as a sync identity function, while **wiring** (`wireDomain`) connects that definition to infrastructure (persistence, buses, concurrency, snapshots) and returns a running `Domain` instance. This separation allows domain definitions to be shared, tested, and analyzed independently of runtime concerns. The `Domain` class remains the central runtime orchestrator.
+> The domain API is split into two phases. The **definition** phase (`defineDomain` + `DomainDefinition`) captures the pure domain structure (aggregates, projections, sagas, handlers) as a sync identity function and is owned by `@noddde/core` — see [`ddd/domain-definition`](../core/ddd/domain-definition.spec.md). This spec covers the **wiring** phase: `wireDomain` connects a `DomainDefinition` to infrastructure (persistence, buses, concurrency, snapshots) and returns a running `Domain` instance. The `Domain` class is the central runtime orchestrator. For backward compatibility, `@noddde/engine` re-exports `DomainDefinition` and `defineDomain` from `@noddde/core`, so existing `import { defineDomain } from "@noddde/engine"` continues to work.
 
 ## Type Contract
 
@@ -69,97 +71,12 @@ type InferProjectionMapQueries<
 > = TMap[keyof TMap] extends Projection<infer U> ? U["queries"] : never;
 
 /**
- * Pure structural definition of a domain. Contains aggregates, projections,
- * sagas, and handler registrations — no runtime or infrastructure concerns.
+ * `DomainDefinition` and `defineDomain` are owned by `@noddde/core` — see
+ * the [ddd/domain-definition spec](../core/ddd/domain-definition.spec.md).
+ * `@noddde/engine` re-exports both for backward compatibility, so existing
+ * `import { defineDomain, DomainDefinition } from "@noddde/engine"` calls
+ * keep working. New code should prefer `from "@noddde/core"`.
  */
-type DomainDefinition<
-  TInfrastructure extends Infrastructure = Infrastructure,
-  TStandaloneCommand extends Command = Command,
-  TStandaloneQuery extends Query<any> = Query<any>,
-  TAggregates extends AggregateMap = AggregateMap,
-  TStandaloneEvent extends Event = Event,
-  TProjections extends ProjectionMap = ProjectionMap,
-> = {
-  writeModel: {
-    aggregates: TAggregates;
-    standaloneCommandHandlers?: StandaloneCommandHandlerMap<
-      TInfrastructure,
-      TStandaloneCommand
-    >;
-  };
-  readModel: {
-    projections: TProjections;
-    standaloneQueryHandlers?: StandaloneQueryHandlerMap<
-      TInfrastructure,
-      TStandaloneQuery
-    >;
-  };
-  processModel?: {
-    /** A map of saga definitions keyed by saga name. Optional — omit if no sagas. */
-    sagas?: SagaMap;
-    /** Optional map of standalone event handlers keyed by event name. */
-    standaloneEventHandlers?: StandaloneEventHandlerMap<
-      TInfrastructure,
-      TStandaloneEvent
-    >;
-  };
-};
-
-/**
- * Maps event names to standalone event handlers. Each handler receives the
- * full event and infrastructure. Follows the same pattern as
- * StandaloneCommandHandlerMap and StandaloneQueryHandlerMap.
- */
-type StandaloneEventHandlerMap<
-  TInfrastructure extends Infrastructure,
-  TStandaloneEvent extends Event,
-> = {
-  [EventName in TStandaloneEvent["name"]]?: EventHandler<
-    Extract<TStandaloneEvent, { name: EventName }>,
-    TInfrastructure
-  >;
-};
-
-/**
- * Sync identity function that creates a domain definition with full type
- * inference. Consistent with defineAggregate, defineProjection, defineSaga.
- *
- * Overload 1 (preferred): Infers all types from the definition object,
- * preserving narrow aggregate/projection types for typed dispatch.
- *
- * Overload 2 (legacy, deprecated): Explicit infrastructure generic for
- * standalone handler typing. Typed dispatch is NOT available because
- * TypeScript cannot infer TAggregates/TProjections when explicit
- * generics are provided.
- */
-function defineDomain<T extends DomainDefinition<any, any, any, any, any, any>>(
-  definition: T,
-): T;
-/** @deprecated Prefer calling defineDomain({...}) without explicit generics. */
-function defineDomain<
-  TInfrastructure extends Infrastructure,
-  TStandaloneCommand extends Command = Command,
-  TStandaloneQuery extends Query<any> = Query<any>,
-  TAggregates extends AggregateMap = AggregateMap,
-  TStandaloneEvent extends Event = Event,
-  TProjections extends ProjectionMap = ProjectionMap,
->(
-  definition: DomainDefinition<
-    TInfrastructure,
-    TStandaloneCommand,
-    TStandaloneQuery,
-    TAggregates,
-    TStandaloneEvent,
-    TProjections
-  >,
-): DomainDefinition<
-  TInfrastructure,
-  TStandaloneCommand,
-  TStandaloneQuery,
-  TAggregates,
-  TStandaloneEvent,
-  TProjections
->;
 
 /**
  * Per-aggregate runtime configuration. Groups persistence, concurrency,
@@ -326,8 +243,7 @@ class Domain<
 ```
 
 - `InferAggregateMapCommands<TMap>` extracts the union of all command types from a map of aggregates. `InferProjectionMapQueries<TMap>` extracts the union of all query types from a map of projections. Both distribute the corresponding single-aggregate/projection inference across every value in the map.
-- `DomainDefinition` captures the pure domain structure: write model (aggregates + standalone command handlers), read model (projections + standalone query handlers), and process model (sagas). `TInfrastructure` is a type parameter only (handler signatures reference it) — no infrastructure value is present. `TProjections` captures the typed projections map (inferred from `readModel.projections`).
-- `defineDomain` is a sync identity function, consistent with `defineAggregate`, `defineProjection`, `defineSaga`. It returns the input with full type inference. `TAggregates` is inferred from `writeModel.aggregates`, `TProjections` from `readModel.projections`.
+- `DomainDefinition` and `defineDomain` are owned by `@noddde/core`. See [`ddd/domain-definition`](../core/ddd/domain-definition.spec.md) for the full type contract and behavioral requirements. Engine re-exports both names for backward compatibility — they are referenced throughout this spec exactly as if they were defined locally.
 - `AggregateWiring` groups per-aggregate runtime config: persistence, concurrency strategy, and snapshots. All fields optional.
 - `ProjectionWiring` provides per-projection view store wiring. Its `viewStore` field is a {@link ViewStoreFactory} singleton — the only accepted form. The legacy `(infrastructure) => ViewStore` function shorthand has been removed.
 - `DomainWiring` separates user-provided infrastructure (`infrastructure`) from framework plumbing (`aggregates`, `projections`, `sagas`, `buses`, `unitOfWork`, `idempotency`, `outbox`).
@@ -479,10 +395,7 @@ When outbox is configured, after the explicit UoW commits and events are dispatc
 
 ### defineDomain() -- Identity Function
 
-1. Accept a `DomainDefinition` object.
-2. Return the same object unchanged with full type inference.
-3. This is a **sync** function — no async, no side effects, no factories called.
-4. Consistent with `defineAggregate`, `defineProjection`, `defineSaga`.
+`defineDomain` lives in `@noddde/core`. See [`ddd/domain-definition`](../core/ddd/domain-definition.spec.md#behavioral-requirements) for its behavioral requirements. `@noddde/engine` re-exports it unchanged.
 
 ### wireDomain() -- Factory Function
 
@@ -546,7 +459,7 @@ In global mode, the same snapshot config applies to all event-sourced aggregates
 - `dispatchQuery` must not be called before `init()` completes. The `_infrastructure` field (including the query bus) is not assigned until `init()` runs.
 - `init()` must be called exactly once. Calling it multiple times may re-register handlers, causing duplicate processing.
 - `wireDomain` always returns an initialized domain. If `init()` throws, the promise rejects.
-- `defineDomain` is sync, pure, and has no side effects. It returns the input unchanged.
+- `defineDomain` invariants are owned by [`ddd/domain-definition`](../core/ddd/domain-definition.spec.md#invariants). Engine re-exports the function unchanged.
 - The command bus enforces single-handler-per-command-name. If two aggregates define handlers for the same command name, registration must fail.
 - Events are published only after successful persistence. If persistence fails, events must not be published (to avoid inconsistency between the store and downstream subscribers).
 - All events from a command are dispatched sequentially after successful persistence. Event ordering from a single command is preserved — events arrive at consumers in the order they were produced.
@@ -592,7 +505,7 @@ In global mode, the same snapshot config applies to all event-sourced aggregates
 - **wireDomain projection viewStore overrides Projection.viewStore** -- If both `wiring.projections[name].viewStore` and `Projection.viewStore` are set, the wiring version takes priority. Both must be `ViewStoreFactory` instances.
 - **wireDomain projection viewStore not provided for projection with identity** -- Throws an error (same as today when `Projection.viewStore` is missing for a projection with `identity`).
 - **wireDomain projection viewStore as a function** -- Type error at compile time and rejected at runtime: only `ViewStoreFactory` instances (anything with a callable `getForContext` method) are accepted. The legacy `(infra) => ViewStore` shorthand has been removed.
-- **defineDomain called multiple times** -- Each call returns a fresh reference. No state is shared between calls.
+- **defineDomain edge cases** -- See [`ddd/domain-definition`](../core/ddd/domain-definition.spec.md#edge-cases).
 
 ## Integration Points
 
@@ -607,61 +520,14 @@ In global mode, the same snapshot config applies to all event-sourced aggregates
 
 ## Test Scenarios
 
-### defineDomain returns a typed DomainDefinition
-
-```ts
-import { describe, it, expect } from "vitest";
-import { defineDomain, defineAggregate } from "@noddde/engine";
-import type {
-  AggregateTypes,
-  DefineCommands,
-  DefineEvents,
-  Infrastructure,
-} from "@noddde/core";
-
-type CounterState = { count: number };
-type CounterEvent = DefineEvents<{ Incremented: { by: number } }>;
-type CounterCommand = DefineCommands<{ Increment: { by: number } }>;
-type CounterTypes = AggregateTypes & {
-  state: CounterState;
-  events: CounterEvent;
-  commands: CounterCommand;
-  infrastructure: Infrastructure;
-};
-
-const Counter = defineAggregate<CounterTypes>({
-  initialState: { count: 0 },
-  decide: {
-    Increment: (cmd) => ({
-      name: "Incremented",
-      payload: { by: cmd.payload.by },
-    }),
-  },
-  evolve: {
-    Incremented: (payload, state) => ({ count: state.count + payload.by }),
-  },
-});
-
-describe("defineDomain", () => {
-  it("should return the definition unchanged with type inference", () => {
-    const definition = defineDomain<Infrastructure>({
-      writeModel: { aggregates: { Counter } },
-      readModel: { projections: {} },
-    });
-
-    expect(definition.writeModel.aggregates).toEqual({ Counter });
-    expect(definition.readModel.projections).toEqual({});
-    expect(definition.processModel).toBeUndefined();
-  });
-});
-```
+> Test scenarios for `defineDomain` itself (identity, processModel shapes, re-export) live in [`ddd/domain-definition`](../core/ddd/domain-definition.spec.md#test-scenarios). The scenarios below cover `wireDomain` and `Domain` runtime behavior, which exercise `defineDomain` only as a setup primitive.
 
 ### wireDomain creates and initializes a domain from definition + wiring
 
 ```ts
 import { describe, it, expect } from "vitest";
+import { defineDomain } from "@noddde/core";
 import {
-  defineDomain,
   wireDomain,
   Domain,
   EventEmitterEventBus,
@@ -754,8 +620,8 @@ describe("wireDomain", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
+import { defineDomain, everyNEvents } from "@noddde/core";
 import {
-  defineDomain,
   wireDomain,
   defineAggregate,
   InMemoryEventSourcedAggregatePersistence,
@@ -766,7 +632,6 @@ import {
   InMemoryCommandBus,
   InMemoryQueryBus,
 } from "@noddde/engine";
-import { everyNEvents } from "@noddde/core";
 import type {
   AggregateTypes,
   DefineCommands,
@@ -880,12 +745,8 @@ describe("wireDomain per-aggregate config", () => {
 
 ```ts
 import { describe, it, expect, vi } from "vitest";
-import {
-  defineDomain,
-  wireDomain,
-  Domain,
-  defineAggregate,
-} from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain, Domain, defineAggregate } from "@noddde/engine";
 import type {
   AggregateTypes,
   DefineCommands,
@@ -988,12 +849,8 @@ describe("wireDomain hello world", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
-import {
-  defineDomain,
-  wireDomain,
-  Domain,
-  defineAggregate,
-} from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain, Domain, defineAggregate } from "@noddde/engine";
 import type {
   AggregateTypes,
   DefineCommands,
@@ -1044,8 +901,8 @@ describe("wireDomain minimal", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
+import { defineDomain } from "@noddde/core";
 import {
-  defineDomain,
   wireDomain,
   defineAggregate,
   defineProjection,
@@ -1174,8 +1031,8 @@ describe("wireDomain projection wiring", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
+import { defineDomain } from "@noddde/core";
 import {
-  defineDomain,
   wireDomain,
   defineAggregate,
   EventEmitterEventBus,
@@ -1254,8 +1111,8 @@ describe("wireDomain infrastructure separation", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
+import { defineDomain } from "@noddde/core";
 import {
-  defineDomain,
   wireDomain,
   defineAggregate,
   EventEmitterEventBus,
@@ -1340,8 +1197,8 @@ describe("standalone event handlers", () => {
 
 ```ts
 import { describe, it, expect, vi } from "vitest";
+import { defineDomain } from "@noddde/core";
 import {
-  defineDomain,
   wireDomain,
   defineAggregate,
   EventEmitterEventBus,
@@ -1420,8 +1277,8 @@ describe("standalone event handlers without sagas", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
+import { defineDomain } from "@noddde/core";
 import {
-  defineDomain,
   wireDomain,
   defineAggregate,
   EventEmitterEventBus,
@@ -1504,8 +1361,8 @@ describe("async standalone event handler", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
+import { defineDomain } from "@noddde/core";
 import {
-  defineDomain,
   wireDomain,
   Domain,
   defineAggregate,
@@ -1571,12 +1428,8 @@ describe("empty standalone event handlers", () => {
 ```ts
 import { describe, it } from "vitest";
 import { expectTypeOf } from "vitest";
-import {
-  defineDomain,
-  wireDomain,
-  defineAggregate,
-  defineProjection,
-} from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain, defineAggregate, defineProjection } from "@noddde/engine";
 import type {
   AggregateTypes,
   DefineCommands,
@@ -1724,7 +1577,8 @@ describe("typed dispatch - aggregate commands", () => {
 ```ts
 import { describe, it } from "vitest";
 import { expectTypeOf } from "vitest";
-import { defineDomain, wireDomain, defineAggregate } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain, defineAggregate } from "@noddde/engine";
 import type {
   AggregateTypes,
   Command,
@@ -1814,7 +1668,8 @@ describe("typed dispatch - standalone commands", () => {
 ```ts
 import { describe, it } from "vitest";
 import { expectTypeOf } from "vitest";
-import { defineDomain, wireDomain, defineProjection } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain, defineProjection } from "@noddde/engine";
 import type {
   DefineEvents,
   DefineQueries,

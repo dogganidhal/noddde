@@ -140,7 +140,8 @@ describe("PlaceBid", () => {
 In production, provide `SystemClock` via the `infrastructure` field in `wireDomain`:
 
 ```ts
-import { defineDomain, wireDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain } from "@noddde/engine";
 
 const auctionDomain = defineDomain({
   writeModel: { aggregates: { Auction } },

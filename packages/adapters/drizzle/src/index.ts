@@ -97,7 +97,8 @@ export interface DrizzlePersistenceInfrastructure {
  * import Database from "better-sqlite3";
  * import { createDrizzlePersistence } from "@noddde/drizzle";
  * import { events, aggregateStates, sagaStates } from "@noddde/drizzle/sqlite";
- * import { defineDomain, wireDomain } from "@noddde/engine";
+ * import { defineDomain } from "@noddde/core";
+ * import { wireDomain } from "@noddde/engine";
  *
  * const db = drizzle(new Database("app.db"));
  * const infra = createDrizzlePersistence(db, { events, aggregateStates, sagaStates });

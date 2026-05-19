@@ -10,9 +10,15 @@ import type {
   ProjectionTypes,
   SagaTypes,
 } from "@noddde/core";
-import { defineAggregate, defineProjection, defineSaga } from "@noddde/core";
 import {
+  createViewStoreFactory,
+  defineAggregate,
   defineDomain,
+  defineProjection,
+  defineSaga,
+  everyNEvents,
+} from "@noddde/core";
+import {
   wireDomain,
   createInMemoryUnitOfWork,
   Domain,
@@ -27,7 +33,6 @@ import {
   InMemoryStateStoredAggregatePersistence,
   InMemoryViewStore,
 } from "@noddde/engine";
-import { createViewStoreFactory, everyNEvents } from "@noddde/core";
 
 // ============================================================
 // wireDomain creates and initializes a domain

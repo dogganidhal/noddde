@@ -402,7 +402,8 @@ This is useful for building views that span multiple domain concepts, such as an
 Projections are registered in the `readModel.projections` map of the domain configuration:
 
 ```ts
-import { defineDomain, wireDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain } from "@noddde/engine";
 
 const bankingDomain = defineDomain({
   writeModel: {

@@ -15,7 +15,6 @@ import {
 } from "@noddde/drizzle/sqlite";
 import { createRoomStateMapper } from "../../infrastructure/persistence/room-state-mapper";
 import {
-  defineDomain,
   wireDomain,
   EventEmitterEventBus,
   InMemoryCommandBus,
@@ -23,7 +22,7 @@ import {
   InMemoryIdempotencyStore,
   InMemoryViewStore,
 } from "@noddde/engine";
-import { createViewStoreFactory } from "@noddde/core";
+import { createViewStoreFactory, defineDomain } from "@noddde/core";
 import type { HotelInfrastructure } from "../../infrastructure/types";
 import type {
   GuestHistoryView,

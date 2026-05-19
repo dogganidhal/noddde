@@ -59,7 +59,8 @@ export interface PrismaPersistenceInfrastructure {
  * ```ts
  * import { PrismaClient } from "@prisma/client";
  * import { createPrismaPersistence } from "@noddde/prisma";
- * import { defineDomain, wireDomain } from "@noddde/engine";
+ * import { defineDomain } from "@noddde/core";
+ * import { wireDomain } from "@noddde/engine";
  *
  * const prisma = new PrismaClient();
  * const infra = createPrismaPersistence(prisma);

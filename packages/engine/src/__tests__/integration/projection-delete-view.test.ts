@@ -7,9 +7,13 @@ import type {
   Infrastructure,
   Query,
 } from "@noddde/core";
-import { DeleteView, defineAggregate, defineProjection } from "@noddde/core";
 import {
+  DeleteView,
+  defineAggregate,
   defineDomain,
+  defineProjection,
+} from "@noddde/core";
+import {
   EventEmitterEventBus,
   InMemoryCommandBus,
   InMemoryEventSourcedAggregatePersistence,

@@ -267,7 +267,8 @@ The aggregate records that the bid happened (as an event) but the state remains 
 ## Running the Example
 
 ```ts
-import { defineDomain, wireDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain } from "@noddde/engine";
 
 const auctionDomain = defineDomain({
   writeModel: { aggregates: { Auction } },

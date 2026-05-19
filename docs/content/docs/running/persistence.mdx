@@ -107,12 +107,11 @@ With `wireDomain`, snapshots are configured as part of the aggregate wiring -- e
 
 ```ts
 import {
-  defineDomain,
   wireDomain,
   InMemoryEventSourcedAggregatePersistence,
   InMemorySnapshotStore,
 } from "@noddde/engine";
-import { everyNEvents } from "@noddde/core";
+import { defineDomain, everyNEvents } from "@noddde/core";
 
 const domain = await wireDomain(myDomain, {
   // Global: snapshots for all event-sourced aggregates

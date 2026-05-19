@@ -1168,9 +1168,13 @@ describe("Reducer return type with DeleteView", () => {
 ```ts
 import { describe, expect, it, vi } from "vitest";
 import type { DefineCommands, DefineEvents, DefineQueries } from "@noddde/core";
-import { DeleteView, defineAggregate, defineProjection } from "@noddde/core";
 import {
+  DeleteView,
+  defineAggregate,
   defineDomain,
+  defineProjection,
+} from "@noddde/core";
+import {
   EventEmitterEventBus,
   InMemoryCommandBus,
   InMemoryEventSourcedAggregatePersistence,
@@ -1564,9 +1568,13 @@ describe("Strong-consistency projection error propagation", () => {
 ```ts
 import { describe, expect, it, vi } from "vitest";
 import type { DefineCommands, DefineEvents, DefineQueries } from "@noddde/core";
-import { DeleteView, defineAggregate, defineProjection } from "@noddde/core";
 import {
+  DeleteView,
+  defineAggregate,
   defineDomain,
+  defineProjection,
+} from "@noddde/core";
+import {
   EventEmitterEventBus,
   InMemoryCommandBus,
   InMemoryEventSourcedAggregatePersistence,

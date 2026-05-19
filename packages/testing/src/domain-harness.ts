@@ -1,15 +1,15 @@
 /* eslint-disable no-unused-vars */
-import type {
-  Aggregate,
-  Projection,
-  Saga,
-  Infrastructure,
-  Command,
-  Event,
-  ViewStoreFactory,
-} from "@noddde/core";
 import {
   defineDomain,
+  type Aggregate,
+  type Projection,
+  type Saga,
+  type Infrastructure,
+  type Command,
+  type Event,
+  type ViewStoreFactory,
+} from "@noddde/core";
+import {
   wireDomain,
   type Domain,
   EventEmitterEventBus,

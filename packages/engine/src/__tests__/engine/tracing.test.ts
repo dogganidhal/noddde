@@ -6,7 +6,12 @@ import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
-import { defineAggregate, defineProjection, defineSaga } from "@noddde/core";
+import {
+  defineAggregate,
+  defineDomain,
+  defineProjection,
+  defineSaga,
+} from "@noddde/core";
 import type {
   AggregateTypes,
   ProjectionTypes,
@@ -17,11 +22,7 @@ import type {
   Infrastructure,
   CQRSInfrastructure,
 } from "@noddde/core";
-import {
-  defineDomain,
-  wireDomain,
-  InMemoryViewStoreFactory,
-} from "@noddde/engine";
+import { wireDomain, InMemoryViewStoreFactory } from "@noddde/engine";
 import { detectOTel, Instrumentation } from "../../tracing";
 import { MetadataEnricher } from "../../executors/metadata-enricher";
 import type { MetadataContext } from "../../domain";

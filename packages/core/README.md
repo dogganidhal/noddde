@@ -19,6 +19,7 @@ npm install @noddde/core
 - **Aggregate definitions** (`defineAggregate`) with the Decider pattern: `initialState`, `decide`, `evolve`
 - **Saga definitions** (`defineSaga`) for orchestrating cross-aggregate workflows as pure functions
 - **Projection definitions** (`defineProjection`) for building read models from event streams
+- **Domain definitions** (`defineDomain`) — a pure, sync identity function that captures the structural shape of a domain (aggregates, projections, sagas, handlers) without any runtime or infrastructure
 - **CQRS abstractions** for command and query buses, handlers, and typed messages
 - **Event-driven types** for event buses, event handlers, and domain events with metadata
 - **Persistence interfaces** for event-sourced and state-stored strategies

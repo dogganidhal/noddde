@@ -1,9 +1,8 @@
 /* eslint-disable no-unused-vars */
 import { describe, expect, it, vi } from "vitest";
 import type { DefineCommands, DefineEvents } from "@noddde/core";
-import { defineAggregate } from "@noddde/core";
+import { defineAggregate, defineDomain, everyNEvents } from "@noddde/core";
 import {
-  defineDomain,
   wireDomain,
   EventEmitterEventBus,
   InMemoryCommandBus,
@@ -12,7 +11,6 @@ import {
   InMemorySnapshotStore,
   InMemoryStateStoredAggregatePersistence,
 } from "@noddde/engine";
-import { everyNEvents } from "@noddde/core";
 
 // ---- Shared counter aggregate ----
 

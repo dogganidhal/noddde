@@ -4,8 +4,8 @@
  * Demonstrates @noddde with Prisma Adapter + SQLite for persistence,
  * including a projection and upcasters.
  */
+import { defineDomain } from "@noddde/core";
 import {
-  defineDomain,
   wireDomain,
   EventEmitterEventBus,
   InMemoryCommandBus,

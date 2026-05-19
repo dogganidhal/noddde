@@ -213,9 +213,9 @@ expect(summary?.status).toBe("confirmed");
 | ------------------------------------ | --------------------------------------------------- |
 | Testing handler logic in isolation   | `testAggregate`, `testProjection`, `testSaga`       |
 | Testing multiple components together | `testDomain`                                        |
-| Custom persistence strategies        | `defineDomain` + `wireDomain` from `@noddde/engine` |
-| Custom bus implementations           | `defineDomain` + `wireDomain` from `@noddde/engine` |
-| Production-like environment tests    | `defineDomain` + `wireDomain` from `@noddde/engine` |
+| Custom persistence strategies        | `defineDomain` from `@noddde/core` + `wireDomain` from `@noddde/engine` |
+| Custom bus implementations           | `defineDomain` from `@noddde/core` + `wireDomain` from `@noddde/engine` |
+| Production-like environment tests    | `defineDomain` from `@noddde/core` + `wireDomain` from `@noddde/engine` |
 
 ## Next Steps
 

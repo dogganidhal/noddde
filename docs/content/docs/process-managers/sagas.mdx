@@ -423,8 +423,8 @@ The full saga runtime lifecycle proceeds as follows:
 Sagas are registered in the `processModel` section of `defineDomain` -- a dedicated top-level key separate from `writeModel` and `readModel`:
 
 ```ts
+import { defineDomain } from "@noddde/core";
 import {
-  defineDomain,
   wireDomain,
   InMemorySagaPersistence,
 } from "@noddde/engine";

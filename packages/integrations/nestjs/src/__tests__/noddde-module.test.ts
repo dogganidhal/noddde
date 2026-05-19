@@ -11,7 +11,7 @@ import {
   NodddeMetadataInterceptor,
 } from "../noddde.module";
 import type { MetadataExtractor } from "../noddde.module";
-import { defineDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
 import type { Domain } from "@noddde/engine";
 
 describe("NodddeModule", () => {

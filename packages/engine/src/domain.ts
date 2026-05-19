@@ -38,7 +38,15 @@ import type {
   OutboxEntry,
 } from "@noddde/core";
 import type { AggregateLocker, Closeable } from "@noddde/core";
-import { isCloseable, isConnectable, DeleteView } from "@noddde/core";
+import {
+  isCloseable,
+  isConnectable,
+  DeleteView,
+  defineDomain,
+} from "@noddde/core";
+import type { DomainDefinition } from "@noddde/core";
+export { defineDomain } from "@noddde/core";
+export type { DomainDefinition } from "@noddde/core";
 import { OutboxRelay } from "./outbox-relay";
 import type { OutboxRelayOptions } from "./outbox-relay";
 import { uuidv7 } from "./uuid";
@@ -125,6 +133,7 @@ type ProjectionMap = Record<string | symbol, Projection<any>>;
 
 type SagaMap = Record<string | symbol, Saga<any, any>>;
 
+/** @internal File-private alias used by ExtractStandaloneCommand. */
 type StandaloneCommandHandlerMap<
   TInfrastructure extends Infrastructure,
   TStandaloneCommand extends Command,
@@ -135,33 +144,14 @@ type StandaloneCommandHandlerMap<
   >;
 };
 
+/** @internal File-private alias used by ExtractStandaloneQuery. */
 type StandaloneQueryHandlerMap<
   TInfrastructure extends Infrastructure,
   TStandaloneQuery extends Query<any>,
 > = {
   [QueryName in TStandaloneQuery["name"]]?: QueryHandler<
     TInfrastructure,
-    Extract<
-      TStandaloneQuery,
-      {
-        name: QueryName;
-      }
-    >
-  >;
-};
-
-/**
- * Maps event names to standalone event handlers. Each handler receives the
- * full event and infrastructure. Follows the same pattern as
- * StandaloneCommandHandlerMap and StandaloneQueryHandlerMap.
- */
-type StandaloneEventHandlerMap<
-  TInfrastructure extends Infrastructure,
-  TStandaloneEvent extends Event,
-> = {
-  [EventName in TStandaloneEvent["name"]]?: EventHandler<
-    Extract<TStandaloneEvent, { name: EventName }>,
-    TInfrastructure
+    Extract<TStandaloneQuery, { name: QueryName }>
   >;
 };
 
@@ -310,56 +300,6 @@ export type ProjectionWiring = {
 };
 
 /**
- * Pure structural definition of a domain. Contains aggregates, projections,
- * sagas, and handler registrations — no runtime or infrastructure concerns.
- *
- * Created via {@link defineDomain}. Pass to {@link wireDomain} along with
- * infrastructure wiring to create a running {@link Domain}.
- */
-export type DomainDefinition<
-  TInfrastructure extends Infrastructure = Infrastructure,
-  TStandaloneCommand extends Command = Command,
-  TStandaloneQuery extends Query<any> = Query<any>,
-  TAggregates extends AggregateMap = AggregateMap,
-  TStandaloneEvent extends Event = Event,
-  TProjections extends ProjectionMap = ProjectionMap,
-> = {
-  /** The write side: aggregates and standalone command handlers. */
-  writeModel: {
-    /** A map of aggregate definitions keyed by aggregate name. */
-    aggregates: TAggregates;
-    /** Optional map of standalone command handlers keyed by command name. */
-    standaloneCommandHandlers?: StandaloneCommandHandlerMap<
-      TInfrastructure,
-      TStandaloneCommand
-    >;
-  };
-  /** The read side: projections and standalone query handlers. */
-  readModel: {
-    /** A map of projection definitions keyed by projection name. */
-    projections: TProjections;
-    /** Optional map of standalone query handlers keyed by query name. */
-    standaloneQueryHandlers?: StandaloneQueryHandlerMap<
-      TInfrastructure,
-      TStandaloneQuery
-    >;
-  };
-  /**
-   * Process model: sagas and standalone event handlers. Optional — omit if
-   * the domain has no cross-aggregate workflows or event-driven side effects.
-   */
-  processModel?: {
-    /** A map of saga definitions keyed by saga name. Optional — omit if no sagas. */
-    sagas?: SagaMap;
-    /** Optional map of standalone event handlers keyed by event name. */
-    standaloneEventHandlers?: StandaloneEventHandlerMap<
-      TInfrastructure,
-      TStandaloneEvent
-    >;
-  };
-};
-
-/**
  * Runtime infrastructure wiring for a domain. Connects a {@link DomainDefinition}
  * to persistence, buses, concurrency, snapshots, and user-provided services.
  *
@@ -411,66 +351,6 @@ export type DomainWiring<
   /** Framework logger. Defaults to NodddeLogger at 'warn' level. */
   logger?: Logger;
 };
-
-/* eslint-disable no-redeclare */
-/**
- * Creates a pure, sync domain definition with full type inference.
- * Consistent with {@link defineAggregate}, {@link defineProjection}, {@link defineSaga}.
- *
- * **Preferred usage** (no explicit generics — enables typed dispatch):
- * ```ts
- * const domain = defineDomain({
- *   writeModel: { aggregates: { Counter, Todo } },
- *   readModel: { projections: { CounterView } },
- * });
- * ```
- *
- * **Legacy usage** (explicit infrastructure generic — typed dispatch is NOT available):
- * ```ts
- * const domain = defineDomain<MyInfrastructure>({...});
- * ```
- *
- * @returns The same definition object, fully typed.
- */
-export function defineDomain<
-  T extends DomainDefinition<any, any, any, any, any, any>,
->(definition: T): T;
-/**
- * Legacy overload: explicit infrastructure generic. Standalone handler
- * infrastructure is typed, but typed dispatch (narrowed command/query names)
- * is NOT available because TypeScript cannot infer TAggregates/TProjections
- * when explicit generics are provided.
- *
- * @deprecated Prefer calling `defineDomain({...})` without explicit generics.
- */
-export function defineDomain<
-  TInfrastructure extends Infrastructure,
-  TStandaloneCommand extends Command = Command,
-  TStandaloneQuery extends Query<any> = Query<any>,
-  TAggregates extends AggregateMap = AggregateMap,
-  TStandaloneEvent extends Event = Event,
-  TProjections extends ProjectionMap = ProjectionMap,
->(
-  definition: DomainDefinition<
-    TInfrastructure,
-    TStandaloneCommand,
-    TStandaloneQuery,
-    TAggregates,
-    TStandaloneEvent,
-    TProjections
-  >,
-): DomainDefinition<
-  TInfrastructure,
-  TStandaloneCommand,
-  TStandaloneQuery,
-  TAggregates,
-  TStandaloneEvent,
-  TProjections
->;
-export function defineDomain(definition: DomainDefinition): DomainDefinition {
-  return definition;
-}
-/* eslint-enable no-redeclare */
 
 /**
  * Internal context passed by wireDomain to Domain, carrying pre-computed

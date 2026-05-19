@@ -226,8 +226,8 @@ export class NodddeMetadataInterceptor implements NestInterceptor {
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Test } from "@nestjs/testing";
 import { NodddeModule, NODDDE_DOMAIN } from "@noddde/nestjs";
-import { defineDomain, wireDomain } from "@noddde/engine";
-import { defineAggregate, defineProjection } from "@noddde/core";
+import { wireDomain } from "@noddde/engine";
+import { defineAggregate, defineDomain, defineProjection } from "@noddde/core";
 
 describe("NodddeModule", () => {
   it("should create a Domain via forRoot and make it injectable", async () => {
@@ -256,7 +256,7 @@ describe("NodddeModule", () => {
 import { describe, it, expect, vi } from "vitest";
 import { Test } from "@nestjs/testing";
 import { NodddeModule, NODDDE_DOMAIN } from "@noddde/nestjs";
-import { defineDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
 
 describe("NodddeModule", () => {
   it("should resolve factory with injected deps and create Domain", async () => {
@@ -294,7 +294,7 @@ describe("NodddeModule", () => {
 import { describe, it, expect, vi } from "vitest";
 import { Test } from "@nestjs/testing";
 import { NodddeModule, NODDDE_DOMAIN } from "@noddde/nestjs";
-import { defineDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
 import type { Domain } from "@noddde/engine";
 
 describe("NodddeModule", () => {
@@ -333,7 +333,7 @@ import {
   NODDDE_QUERY_BUS,
   NODDDE_EVENT_BUS,
 } from "@noddde/nestjs";
-import { defineDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
 import type { Domain } from "@noddde/engine";
 
 describe("NodddeModule", () => {
@@ -372,7 +372,7 @@ import {
   NODDDE_QUERY_BUS,
   NODDDE_EVENT_BUS,
 } from "@noddde/nestjs";
-import { defineDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
 
 describe("NodddeModule", () => {
   it("should not register bus tokens when exposeBuses is false", async () => {
@@ -401,7 +401,7 @@ import { describe, it, expect } from "vitest";
 import { Test } from "@nestjs/testing";
 import { Module, Injectable, Inject } from "@nestjs/common";
 import { NodddeModule, NODDDE_DOMAIN } from "@noddde/nestjs";
-import { defineDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
 import type { Domain } from "@noddde/engine";
 
 @Injectable()
@@ -446,7 +446,7 @@ import {
   NodddeMetadataInterceptor,
 } from "@noddde/nestjs";
 import type { MetadataExtractor } from "@noddde/nestjs";
-import { defineDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
 import type { Domain } from "@noddde/engine";
 import type { ExecutionContext, CallHandler } from "@nestjs/common";
 import { of } from "rxjs";
