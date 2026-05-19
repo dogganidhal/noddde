@@ -317,7 +317,10 @@ describe("rebuildProjection: empty event log", () => {
       name: "Item",
       initialState: () => null,
       decide: {
-        CreateItem: (cmd) => ({ name: "ItemCreated", payload: { id: cmd.payload.id } }),
+        CreateItem: (cmd) => ({
+          name: "ItemCreated",
+          payload: { id: cmd.payload.id },
+        }),
       },
       evolve: {
         ItemCreated: (p) => ({ id: p.id }),
@@ -410,7 +413,9 @@ describe("rebuildProjection: single aggregate replay", () => {
       evolve: {
         AccountCreated: (p) => ({ id: p.id, balance: 0 }),
         DepositMade: (p, s) =>
-          s ? { ...s, balance: s.balance + p.amount } : { id: p.id, balance: p.amount },
+          s
+            ? { ...s, balance: s.balance + p.amount }
+            : { id: p.id, balance: p.amount },
       },
     });
 
@@ -428,7 +433,9 @@ describe("rebuildProjection: single aggregate replay", () => {
         DepositMade: {
           id: (e) => e.payload.id,
           reduce: (e, v) =>
-            v ? { ...v, balance: v.balance + e.payload.amount } : { id: e.payload.id, balance: e.payload.amount },
+            v
+              ? { ...v, balance: v.balance + e.payload.amount }
+              : { id: e.payload.id, balance: e.payload.amount },
         },
       },
       queryHandlers: {},
@@ -493,8 +500,12 @@ import { wireDomain, InMemoryViewStoreFactory } from "@noddde/engine";
 describe("rebuildProjection: truncates stale views", () => {
   it("should remove stale views even when no replay event re-creates them", async () => {
     type ItemView = { id: string; name: string };
-    type ItemEvent = DefineEvents<{ ItemCreated: { id: string; name: string } }>;
-    type ItemCommand = DefineCommands<{ CreateItem: { id: string; name: string } }>;
+    type ItemEvent = DefineEvents<{
+      ItemCreated: { id: string; name: string };
+    }>;
+    type ItemCommand = DefineCommands<{
+      CreateItem: { id: string; name: string };
+    }>;
     type ItemQuery = DefineQueries<{
       GetItem: { payload: { id: string }; result: ItemView | null };
     }>;
@@ -550,7 +561,9 @@ describe("rebuildProjection: truncates stale views", () => {
     });
 
     // Manually corrupt the store with a stale view that no event will reproduce.
-    await factory.getForContext().save("stale-id", { id: "stale-id", name: "Stale" });
+    await factory
+      .getForContext()
+      .save("stale-id", { id: "stale-id", name: "Stale" });
 
     expect(await factory.getForContext().load("stale-id")).toBeTruthy();
 
@@ -700,7 +713,10 @@ describe("rebuildProjection: unhandled events are skipped", () => {
       initialState: () => null,
       decide: {
         Create: (cmd) => ({ name: "Created", payload: { id: cmd.payload.id } }),
-        MakeNoise: (cmd) => ({ name: "Noise", payload: { id: cmd.payload.id } }),
+        MakeNoise: (cmd) => ({
+          name: "Noise",
+          payload: { id: cmd.payload.id },
+        }),
       },
       evolve: {
         Created: (p) => ({ id: p.id, balance: 0 }),
@@ -791,7 +807,9 @@ describe("rebuildProjection: strong-consistency rejection", () => {
     }>({
       name: "Agg",
       initialState: () => null,
-      decide: { Create: (cmd) => ({ name: "Created", payload: { id: cmd.payload.id } }) },
+      decide: {
+        Create: (cmd) => ({ name: "Created", payload: { id: cmd.payload.id } }),
+      },
       evolve: { Created: (p) => ({ id: p.id }) },
     });
 
@@ -877,7 +895,9 @@ describe("rebuildProjection: missing EventReader", () => {
     }>({
       name: "Agg",
       initialState: () => null,
-      decide: { Create: (cmd) => ({ name: "Created", payload: { id: cmd.payload.id } }) },
+      decide: {
+        Create: (cmd) => ({ name: "Created", payload: { id: cmd.payload.id } }),
+      },
       evolve: { Created: (p) => ({ id: p.id }) },
     });
 
@@ -909,7 +929,9 @@ describe("rebuildProjection: missing EventReader", () => {
       aggregates: {
         persistence: () => new InMemoryStateStoredAggregatePersistence(),
       },
-      projections: { Proj: { viewStore: new InMemoryViewStoreFactory<View>() } },
+      projections: {
+        Proj: { viewStore: new InMemoryViewStoreFactory<View>() },
+      },
     });
 
     await expect(domain.rebuildProjection("Proj")).rejects.toBeInstanceOf(
@@ -931,10 +953,7 @@ import {
   type DefineCommands,
   type DefineQueries,
 } from "@noddde/core";
-import {
-  wireDomain,
-  ViewStoreNotTruncatableError,
-} from "@noddde/engine";
+import { wireDomain, ViewStoreNotTruncatableError } from "@noddde/engine";
 
 describe("rebuildProjection: missing truncate()", () => {
   it("should throw ViewStoreNotTruncatableError when the store cannot truncate", async () => {
@@ -953,7 +972,9 @@ describe("rebuildProjection: missing truncate()", () => {
     }>({
       name: "Agg",
       initialState: () => null,
-      decide: { Create: (cmd) => ({ name: "Created", payload: { id: cmd.payload.id } }) },
+      decide: {
+        Create: (cmd) => ({ name: "Created", payload: { id: cmd.payload.id } }),
+      },
       evolve: { Created: (p) => ({ id: p.id }) },
     });
 
@@ -1006,10 +1027,7 @@ import {
   type DefineEvents,
   type DefineCommands,
 } from "@noddde/core";
-import {
-  wireDomain,
-  ProjectionNotFoundError,
-} from "@noddde/engine";
+import { wireDomain, ProjectionNotFoundError } from "@noddde/engine";
 
 describe("rebuildProjection: unknown projection name", () => {
   it("should throw ProjectionNotFoundError when name is not registered", async () => {
@@ -1024,7 +1042,9 @@ describe("rebuildProjection: unknown projection name", () => {
     }>({
       name: "Agg",
       initialState: () => null,
-      decide: { DoX: (cmd) => ({ name: "X", payload: { id: cmd.payload.id } }) },
+      decide: {
+        DoX: (cmd) => ({ name: "X", payload: { id: cmd.payload.id } }),
+      },
       evolve: { X: () => null },
     });
 
@@ -1075,7 +1095,9 @@ describe("rebuildProjection: subscriptions detach during replay", () => {
     }>({
       name: "Agg",
       initialState: () => null,
-      decide: { Create: (cmd) => ({ name: "Created", payload: { id: cmd.payload.id } }) },
+      decide: {
+        Create: (cmd) => ({ name: "Created", payload: { id: cmd.payload.id } }),
+      },
       evolve: { Created: (p) => ({ id: p.id }) },
     });
 
@@ -1163,7 +1185,9 @@ describe("rebuildProjection: subscriptions re-attach after replay", () => {
     }>({
       name: "Agg",
       initialState: () => null,
-      decide: { Create: (cmd) => ({ name: "Created", payload: { id: cmd.payload.id } }) },
+      decide: {
+        Create: (cmd) => ({ name: "Created", payload: { id: cmd.payload.id } }),
+      },
       evolve: { Created: (p) => ({ id: p.id }) },
     });
 
@@ -1236,7 +1260,9 @@ describe("rebuildProjection: onProgress callback", () => {
     }>({
       name: "Agg",
       initialState: () => null,
-      decide: { Create: (cmd) => ({ name: "Created", payload: { id: cmd.payload.id } }) },
+      decide: {
+        Create: (cmd) => ({ name: "Created", payload: { id: cmd.payload.id } }),
+      },
       evolve: { Created: (p) => ({ id: p.id }) },
     });
 
@@ -1260,7 +1286,9 @@ describe("rebuildProjection: onProgress callback", () => {
       readModel: { projections: { Proj } },
     });
     const domain = await wireDomain(def, {
-      projections: { Proj: { viewStore: new InMemoryViewStoreFactory<View>() } },
+      projections: {
+        Proj: { viewStore: new InMemoryViewStoreFactory<View>() },
+      },
     });
 
     for (let i = 0; i < 5; i++) {
@@ -1316,7 +1344,9 @@ describe("rebuildProjection: type-level name inference", () => {
     }>({
       name: "Agg",
       initialState: () => null,
-      decide: { Create: (cmd) => ({ name: "Created", payload: { id: cmd.payload.id } }) },
+      decide: {
+        Create: (cmd) => ({ name: "Created", payload: { id: cmd.payload.id } }),
+      },
       evolve: { Created: (p) => ({ id: p.id }) },
     });
 
@@ -1340,7 +1370,9 @@ describe("rebuildProjection: type-level name inference", () => {
       readModel: { projections: { KnownProj } },
     });
     const domain = await wireDomain(def, {
-      projections: { KnownProj: { viewStore: new InMemoryViewStoreFactory<View>() } },
+      projections: {
+        KnownProj: { viewStore: new InMemoryViewStoreFactory<View>() },
+      },
     });
 
     // Sanity: known name is fine.

@@ -9,15 +9,15 @@
 
 ## Specs Implemented
 
-| Spec | Status Before | Status After |
-|------|--------------|--------------|
-| `specs/core/persistence/event-reader.spec.md` | ready | implemented |
-| `specs/core/persistence/view-store.spec.md` | implemented (truncate added) | implemented |
-| `specs/core/persistence/adapter.spec.md` | implemented (eventReader added) | implemented |
-| `specs/engine/implementations/in-memory-view-store.spec.md` | implemented (truncate added) | implemented |
-| `specs/engine/implementations/in-memory-aggregate-persistence.spec.md` | implemented (read() added) | implemented |
-| `specs/engine/projection-rebuild.spec.md` | ready | implemented |
-| `specs/engine/domain.spec.md` | ready | implemented |
+| Spec                                                                   | Status Before                   | Status After |
+| ---------------------------------------------------------------------- | ------------------------------- | ------------ |
+| `specs/core/persistence/event-reader.spec.md`                          | ready                           | implemented  |
+| `specs/core/persistence/view-store.spec.md`                            | implemented (truncate added)    | implemented  |
+| `specs/core/persistence/adapter.spec.md`                               | implemented (eventReader added) | implemented  |
+| `specs/engine/implementations/in-memory-view-store.spec.md`            | implemented (truncate added)    | implemented  |
+| `specs/engine/implementations/in-memory-aggregate-persistence.spec.md` | implemented (read() added)      | implemented  |
+| `specs/engine/projection-rebuild.spec.md`                              | ready                           | implemented  |
+| `specs/engine/domain.spec.md`                                          | ready                           | implemented  |
 
 ---
 
@@ -60,6 +60,7 @@
 ## TypeScript
 
 Both packages compile clean with `tsc --noEmit`:
+
 - `packages/core` — 0 errors
 - `packages/engine` — 0 errors
 

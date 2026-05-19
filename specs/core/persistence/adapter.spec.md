@@ -478,8 +478,7 @@ import type { PersistenceAdapter, EventReader } from "@noddde/core";
 describe("PersistenceAdapter.eventReader", () => {
   it("should accept an EventReader on the adapter", () => {
     const reader: EventReader = {
-      read: () =>
-        (async function* () {})(),
+      read: () => (async function* () {})(),
     };
     const adapter: PersistenceAdapter = {
       unitOfWorkFactory: { create: async () => null as any },

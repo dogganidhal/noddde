@@ -239,8 +239,7 @@ describe("EventReadOptions", () => {
       },
     };
     expectTypeOf(opts.after).toMatchTypeOf<
-      | { aggregateName: string; aggregateId: ID; version: number }
-      | undefined
+      { aggregateName: string; aggregateId: ID; version: number } | undefined
     >();
   });
 
