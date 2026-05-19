@@ -2,7 +2,7 @@
 title: "EventBus"
 module: edd/event-bus
 source_file: packages/core/src/edd/event-bus.ts
-status: implemented
+status: ready
 exports: [EventBus, AsyncEventHandler]
 depends_on: [edd/event, infrastructure/closeable]
 docs:
@@ -48,13 +48,15 @@ export interface EventBus extends Closeable {
 4. **Handlers receive full Event object** -- Handlers receive `{ name, payload, metadata? }`, not just the payload. This allows access to metadata for correlation, tracing, and sequencing.
 5. **close releases all resources** -- `close()` clears registered handlers and releases any underlying connections (transport, sockets, etc.). After `close()`, dispatching or registering handlers may throw.
 6. **close is idempotent** -- Calling `close()` multiple times has no additional effect after the first call (inherited from `Closeable`).
+7. **Per-handler error isolation is mandatory** -- Implementations MUST run all registered handlers for a single event delivery to completion, regardless of individual handler failures. A handler that throws or returns a rejected promise MUST NOT short-circuit invocation of its siblings. This requirement is non-negotiable for every `EventBus` implementation (in-memory, broker-backed, future transports).
+8. **Each handler failure MUST be individually observable** -- Implementations MUST log every individual handler failure at `error` level via the framework `Logger`, with at least the fields `eventName`, `handlerName` (best-effort from `handler.name`), and the error itself. When an active OpenTelemetry span is available, log entries SHOULD include `traceId` and `spanId` for log↔trace correlation.
 
 ## Invariants
 
 - Any object implementing `EventBus` must have `dispatch`, `on`, and `close` methods.
 - `dispatch` always returns `Promise<void>` regardless of event type.
 - `on` supports multiple handlers per event name (fan-out).
-- The interface makes no guarantees about ordering, delivery, or idempotency — those are implementation concerns.
+- Per-handler isolation is mandatory; implementations may choose how aggregate handler failure interacts with their transport-level ack/retry/DLQ (e.g. message redelivery, offset commits, nack policies) — but in-process fan-out of siblings is non-negotiable.
 - After `close()`, the bus should not deliver events to handlers.
 
 ## Edge Cases
@@ -64,6 +66,7 @@ export interface EventBus extends Closeable {
 - **Void return**: Implementations that are synchronous internally still must return a `Promise<void>`.
 - **on after close**: Behavior is implementation-defined (may throw or silently ignore).
 - **dispatch after close**: Behavior is implementation-defined (may throw or silently ignore).
+- **In-process handler failure**: In-memory implementations whose `dispatch` awaits handlers MUST NOT reject due to handler failure — `dispatch` resolves successfully even if all handlers failed. Broker-backed implementations whose `dispatch` is a publish call (handler invocation happens later in a consumer loop) MUST still complete all in-process sibling handlers per delivery, regardless of failures; the transport-level ack/retry/DLQ policy is implementation-defined.
 
 ## Integration Points
 

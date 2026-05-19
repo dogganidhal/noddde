@@ -40,12 +40,13 @@ describe("OutboxRelay", () => {
     expect(count).toBe(0);
   });
 
-  it("should skip entries that fail to dispatch and process the rest", async () => {
+  it("should mark all entries published even when a handler throws — handler errors are isolated by the bus", async () => {
     const store = new InMemoryOutboxStore();
     const eventBus = new EventEmitterEventBus();
     const relay = new OutboxRelay(store, eventBus);
 
-    // First event handler throws
+    // First event handler throws — but EventEmitterEventBus isolates handler
+    // errors so dispatch() resolves regardless, and the relay marks both entries published.
     eventBus.on("FailEvent", () => {
       throw new Error("Dispatch failed");
     });
@@ -69,13 +70,13 @@ describe("OutboxRelay", () => {
 
     const count = await relay.processOnce();
 
-    expect(count).toBe(1);
+    // Both entries dispatched successfully — handler isolation means dispatch() never rejects.
+    expect(count).toBe(2);
     expect(dispatched).toHaveLength(1);
 
-    // Failed entry should still be unpublished
+    // Both entries are now published — the relay has no way to detect handler failure.
     const remaining = await store.loadUnpublished();
-    expect(remaining).toHaveLength(1);
-    expect(remaining[0]!.id).toBe("fail");
+    expect(remaining).toHaveLength(0);
   });
 
   afterEach(() => {

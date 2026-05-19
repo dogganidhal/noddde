@@ -2,7 +2,7 @@
 title: "ProjectionTypes, Projection, ProjectionEventHandler, DeleteView, defineProjection & Infer Utilities"
 module: ddd/projection
 source_file: packages/core/src/ddd/projection.ts
-status: implemented
+status: ready
 exports:
   [
     ProjectionTypes,
@@ -131,6 +131,10 @@ docs:
 20. **Deletion is idempotent** — returning `DeleteView` for a `viewId` whose view does not exist is a no-op. The engine still calls `viewStore.delete(viewId)`, which the `ViewStore` contract requires to resolve successfully.
 21. **Strong-consistency deletion enlists in the UoW** — for `consistency: "strong"` projections, the engine enlists `viewStore.delete(viewId)` in the same `UnitOfWork` as the originating command, alongside or in place of `save`.
 
+22. **Eventual-consistency reducer failures are isolated by the event bus** — when a reducer (or the surrounding `load → reduce → save`/`delete` pipeline) throws for an eventual-consistency projection, the failure is caught by the `EventBus` per-handler isolation contract (see `core/edd/event-bus`). The failure does NOT propagate to the originating command, and it does NOT prevent sibling projections, sagas, or standalone event handlers from being invoked for the same event. The view at the resolved `viewId` is NOT updated for that event; operators must replay events or repair the view manually. Each failure is observable via a single structured log entry from the bus.
+
+23. **Strong-consistency reducer failures DO propagate via UoW rollback** — when a reducer (or the enlisted `load → reduce → save`/`delete` pipeline) throws for a `consistency: "strong"` projection, the failure is NOT isolated by the bus (strong projections bypass the bus subscription path entirely; they run via `onEventsProduced` → `uow.enlist`). The UoW commit fails, rolling back the aggregate's events and any sibling strong projection writes atomically. The originating command's `dispatch` rejects with the error. This is the only path by which a projection failure can affect command outcomes.
+
 ## Invariants
 
 - The `on` map has at most one key per event name in `T["events"]`; keys are optional.
@@ -173,8 +177,8 @@ docs:
 - View store configuration lives in the domain runtime (`DomainWiring.projections` via `wireDomain`), not in the projection definition.
 - When a view store is configured for a projection and `on` entries have `id`, the engine auto-persists views: `event → id → load → reduce → (save | delete)`. The branch is selected by checking whether the awaited reducer return value is the `DeleteView` sentinel.
 - When `T` has a `viewStore` type hint, query handlers receive `{ views: viewStoreInstance }` merged into their infrastructure.
-- Strong consistency projections: view persistence (save OR delete) is enlisted in the command's `UnitOfWork` via `onEventsProduced` callback. Inside the enlisted thunk, the engine calls `factory.getForContext(uow.context)` to obtain a transactionally-scoped store before performing `load` + `reduce` + (`save` | `delete`).
-- Eventual consistency projections: view persistence (save OR delete) happens asynchronously via event bus subscription, using a cached `getForContext(undefined)` instance.
+- Strong consistency projections: view persistence (save OR delete) is enlisted in the command's `UnitOfWork` via `onEventsProduced` callback. Inside the enlisted thunk, the engine calls `factory.getForContext(uow.context)` to obtain a transactionally-scoped store before performing `load` + `reduce` + (`save` | `delete`). Reducer failures on this path propagate to the command via UoW rollback.
+- Eventual consistency projections: view persistence (save OR delete) happens asynchronously via event bus subscription, using a cached `getForContext(undefined)` instance. Reducer failures on this path are isolated by the bus (see `core/edd/event-bus` for the isolation contract); the failure is logged but does not affect the originating command or sibling subscribers.
 - Query handlers receive `{ views }` typed as `T["viewStore"]` (or the inferred `ViewStore<T["view"]>` when no type hint is present). The instance is the cached `getForContext(undefined)` result and is therefore non-transactional — query handlers run outside the command UoW.
 - Wiring a projection requires a `ViewStoreFactory`. For in-memory development, use `InMemoryViewStoreFactory<TView>`. For ad-hoc cases (capturing a pre-built store), use `createViewStoreFactory(() => store)`. The legacy `(infra) => ViewStore` function form is no longer accepted.
 - `DeleteView` is exported from `@noddde/core` so user reducers can import and return it directly.
@@ -1323,6 +1327,234 @@ describe("DeleteView idempotency", () => {
     await expect(viewStore.delete("x")).resolves.toBeUndefined();
     await expect(viewStore.delete("x")).resolves.toBeUndefined();
     expect(await viewStore.load("x")).toBeUndefined();
+  });
+});
+```
+
+### Eventual-consistency reducer failure is isolated — command succeeds, sibling projection still updated
+
+> Integration scenario — full engine wiring. Demonstrates the bus-level isolation contract from the projection caller's perspective.
+
+```ts
+import { describe, expect, it, vi } from "vitest";
+import type { DefineCommands, DefineEvents, DefineQueries } from "@noddde/core";
+import { defineAggregate, defineProjection } from "@noddde/core";
+import {
+  defineDomain,
+  EventEmitterEventBus,
+  InMemoryCommandBus,
+  InMemoryEventSourcedAggregatePersistence,
+  InMemoryQueryBus,
+  InMemoryViewStore,
+  wireDomain,
+} from "@noddde/engine";
+
+describe("Eventual-consistency projection error isolation", () => {
+  type UserEvent = DefineEvents<{ UserCreated: { id: string; name: string } }>;
+  type UserCommand = DefineCommands<{ CreateUser: { name: string } }>;
+  type UserTypes = {
+    state: { name: string } | null;
+    events: UserEvent;
+    commands: UserCommand;
+    infrastructure: {};
+  };
+  type UserView = { id: string; name: string };
+  type UserQuery = DefineQueries<{
+    GetUser: { payload: { id: string }; result: UserView | undefined | null };
+  }>;
+  type UserProjectionTypes = {
+    events: UserEvent;
+    queries: UserQuery;
+    view: UserView;
+    infrastructure: {};
+  };
+
+  const User = defineAggregate<UserTypes>({
+    initialState: null,
+    decide: {
+      CreateUser: (cmd) => ({
+        name: "UserCreated",
+        payload: { id: cmd.targetAggregateId, name: cmd.payload.name },
+      }),
+    },
+    evolve: { UserCreated: (payload) => ({ name: payload.name }) },
+  });
+
+  const FailingProjection = defineProjection<UserProjectionTypes>({
+    on: {
+      UserCreated: {
+        id: (event) => event.payload.id,
+        reduce: () => {
+          throw new Error("read-model bug");
+        },
+      },
+    },
+    queryHandlers: {},
+  });
+
+  const HealthyProjection = defineProjection<UserProjectionTypes>({
+    on: {
+      UserCreated: {
+        id: (event) => event.payload.id,
+        reduce: (event) => ({
+          id: event.payload.id,
+          name: event.payload.name,
+        }),
+      },
+    },
+    queryHandlers: {},
+  });
+
+  it("should keep the command successful and still update the sibling projection when one reducer throws", async () => {
+    const failingStore = new InMemoryViewStore<UserView>();
+    const healthyStore = new InMemoryViewStore<UserView>();
+    const healthySaveSpy = vi.spyOn(healthyStore, "save");
+
+    const definition = defineDomain({
+      writeModel: { aggregates: { User } },
+      readModel: { projections: { FailingProjection, HealthyProjection } },
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => new InMemoryEventSourcedAggregatePersistence(),
+      },
+      projections: {
+        FailingProjection: { viewStore: () => failingStore },
+        HealthyProjection: { viewStore: () => healthyStore },
+      },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    // The command must succeed despite FailingProjection's reducer throwing.
+    await expect(
+      domain.commandBus.dispatch({
+        name: "CreateUser",
+        targetAggregateId: "u-1",
+        payload: { name: "Alice" },
+      }),
+    ).resolves.not.toThrow();
+
+    // Eventual consistency: allow the event bus to drain.
+    await new Promise((r) => setTimeout(r, 10));
+
+    // HealthyProjection's view was updated.
+    expect(healthySaveSpy).toHaveBeenCalledWith("u-1", {
+      id: "u-1",
+      name: "Alice",
+    });
+    expect(await healthyStore.load("u-1")).toEqual({
+      id: "u-1",
+      name: "Alice",
+    });
+
+    // FailingProjection's view is NOT updated (the reducer threw before save).
+    expect(await failingStore.load("u-1")).toBeUndefined();
+  });
+});
+```
+
+### Strong-consistency reducer failure rolls back the command atomically
+
+> Regression guard for the strong-consistency path: bus-level isolation must NOT apply.
+
+```ts
+import { describe, expect, it, vi } from "vitest";
+import type { DefineCommands, DefineEvents, DefineQueries } from "@noddde/core";
+import { defineAggregate, defineProjection } from "@noddde/core";
+import {
+  defineDomain,
+  EventEmitterEventBus,
+  InMemoryCommandBus,
+  InMemoryEventSourcedAggregatePersistence,
+  InMemoryQueryBus,
+  InMemoryViewStore,
+  wireDomain,
+} from "@noddde/engine";
+
+describe("Strong-consistency projection error propagation", () => {
+  type UserEvent = DefineEvents<{ UserCreated: { id: string; name: string } }>;
+  type UserCommand = DefineCommands<{ CreateUser: { name: string } }>;
+  type UserTypes = {
+    state: { name: string } | null;
+    events: UserEvent;
+    commands: UserCommand;
+    infrastructure: {};
+  };
+  type UserView = { id: string; name: string };
+  type UserQuery = DefineQueries<{
+    GetUser: { payload: { id: string }; result: UserView | undefined | null };
+  }>;
+  type UserProjectionTypes = {
+    events: UserEvent;
+    queries: UserQuery;
+    view: UserView;
+    infrastructure: {};
+    viewStore: InMemoryViewStore<UserView>;
+  };
+
+  const User = defineAggregate<UserTypes>({
+    initialState: null,
+    decide: {
+      CreateUser: (cmd) => ({
+        name: "UserCreated",
+        payload: { id: cmd.targetAggregateId, name: cmd.payload.name },
+      }),
+    },
+    evolve: { UserCreated: (payload) => ({ name: payload.name }) },
+  });
+
+  const StrongFailingProjection = defineProjection<UserProjectionTypes>({
+    on: {
+      UserCreated: {
+        id: (event) => event.payload.id,
+        reduce: () => {
+          throw new Error("strong read-model bug");
+        },
+      },
+    },
+    queryHandlers: {},
+    consistency: "strong",
+  });
+
+  it("should reject the command and not persist any aggregate events when a strong reducer throws", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+    const saveSpy = vi.spyOn(persistence, "save");
+    const viewStore = new InMemoryViewStore<UserView>();
+
+    const definition = defineDomain({
+      writeModel: { aggregates: { User } },
+      readModel: { projections: { StrongFailingProjection } },
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: { persistence: () => persistence },
+      projections: {
+        StrongFailingProjection: { viewStore: () => viewStore },
+      },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    await expect(
+      domain.commandBus.dispatch({
+        name: "CreateUser",
+        targetAggregateId: "u-1",
+        payload: { name: "Alice" },
+      }),
+    ).rejects.toThrow(/strong read-model bug/);
+
+    // Aggregate events MUST NOT be persisted — UoW rollback.
+    expect(saveSpy).not.toHaveBeenCalled();
+    // View MUST NOT be persisted — same UoW rollback.
+    expect(await viewStore.load("u-1")).toBeUndefined();
   });
 });
 ```

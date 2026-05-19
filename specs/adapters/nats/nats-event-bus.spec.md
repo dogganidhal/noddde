@@ -2,7 +2,7 @@
 title: "NatsEventBus"
 module: adapters/nats/nats-event-bus
 source_file: packages/adapters/nats/src/nats-event-bus.ts
-status: implemented
+status: ready
 exports: [NatsEventBus, NatsEventBusConfig]
 depends_on:
   - core/edd/event-bus
@@ -50,6 +50,12 @@ export interface NatsEventBusConfig {
   resilience?: BrokerResilience;
   /** Framework logger instance. Defaults to NodddeLogger("warn", "noddde:nats") from @noddde/engine. */
   logger?: Logger;
+  /**
+   * OpenTelemetry instrumentation used to enrich per-handler error logs with
+   * `traceId`/`spanId` correlation fields. Defaults to a no-op instance.
+   * Provided via `@noddde/engine` `Instrumentation`.
+   */
+  instrumentation?: Instrumentation;
 }
 
 export class NatsEventBus implements EventBus, Connectable {
@@ -83,7 +89,15 @@ export class NatsEventBus implements EventBus, Connectable {
 5. **on registers handlers by event name** -- `on(eventName, handler)` stores the handler in an internal registry keyed by event name. Multiple handlers per event name are supported (fan-out within the same process).
 6. **JetStream consumer with group-scoped durable name** -- When subscriptions are activated (after `connect()`), a JetStream consumer is created for each registered event name's subject. The durable consumer name is `${consumerGroup}_${sanitized(eventName)}` where `sanitized` replaces non-alphanumeric characters (except `_` and `-`) with underscores. This ensures two services with different `consumerGroup` values get independent durable consumers on the same stream — they do not share cursor positions or steal each other's messages.
 7. **Message deserialization with poison message protection** -- Incoming NATS messages are deserialized from JSON in `_consumeSubscription`. Deserialization is wrapped in try/catch. If `JSON.parse` throws (malformed message), the error is logged and `msg.term()` is called to permanently discard it. The `msg.term()` call is itself wrapped in try/catch — if the connection dropped between receipt and term, the error is logged but the consumer loop continues to the next message.
-8. **Parallel handler invocation** -- Handlers for the same event are invoked concurrently via `Promise.all()`. If any handler rejects, `msg.nak()` is called for immediate redelivery (instead of silently relying on the ack timeout). The error is logged with event name and error details. The `msg.nak()` call is itself wrapped in try/catch — if the connection dropped, the error is logged but the consumer loop continues. Handlers that already completed will re-execute on redelivery — consumers must be idempotent.
+8. **Isolated parallel handler invocation** -- Handlers for the same event are invoked concurrently via `Promise.allSettled()` (not `Promise.all()`). This guarantees that **every registered handler runs to completion** even when some of them fail — siblings are never silenced or short-circuited by an earlier rejection. After all handlers settle, the bus iterates the rejected results and logs each one individually via the framework `Logger` at `error` level with structured fields (see "Per-handler error logging" below). If at least one handler rejected, `_handleMessage` then propagates a failure (re-throwing the first rejection's reason) so the outer consumer loop calls `msg.nak()` for immediate redelivery per current behavior (capped by `maxDeliver`). The `msg.nak()` call is itself wrapped in try/catch — if the connection dropped, the error is logged but the consumer loop continues. Handlers that already completed will re-execute on redelivery — consumers must be idempotent.
+
+   8c. **Per-handler error logging** -- For each rejected handler, the bus calls `logger.error(message, fields)` exactly once with:
+
+   - `eventName: string` — from `event.name`.
+   - `eventId?: string` — from `event.metadata?.eventId` when present.
+   - `handlerName: string` — read from the handler's `name` property; falls back to `event.name` when anonymous.
+   - `error: { name, message, stack? }` — extracted from the caught exception. Non-`Error` rejection values are coerced via `String(value)` into `message`.
+   - `traceId?: string` and `spanId?: string` — populated from the active OpenTelemetry span via the configured `Instrumentation` instance. Absent when no span is active or when `@opentelemetry/api` is not installed.
 9. **Ack after handlers** -- The message is acknowledged (`msg.ack()`) only after all handlers have completed successfully. The `msg.ack()` call is wrapped in try/catch for the same connection-drop resilience as nak/term.
 
 ### Backpressure
@@ -100,7 +114,7 @@ export class NatsEventBus implements EventBus, Connectable {
 
 ### Error Handling
 
-15. **Handler errors prevent ack** -- If any handler rejects during parallel invocation, the `Promise.all` rejection propagates and the message is not acknowledged (NATS will redeliver based on consumer config).
+15. **Handler errors prevent ack** -- After `Promise.allSettled` settles every registered handler and each rejection has been logged individually, `_handleMessage` re-throws the first rejected handler's reason. The outer consumer loop catches this and calls `msg.nak()` for redelivery (capped by `maxDeliver`). The message is not acknowledged. All sibling handlers ran to completion before this re-throw — none are silenced by an earlier rejection.
     15b. **Consumer loop error propagation** -- The consumer loop promise (`_consumeSubscription`) must NOT be fire-and-forget (`void`). It must have a `.catch()` handler that logs the error. If the async iterator throws (e.g., connection drop), the error is caught and logged instead of becoming an unhandled promise rejection.
 16. **Serialization errors on dispatch** -- If event serialization fails, `dispatch` rejects with the serialization error.
 17. **Connection errors on dispatch** -- If the NATS server is unreachable, `dispatch` rejects with a connection error.
@@ -117,7 +131,9 @@ export class NatsEventBus implements EventBus, Connectable {
 
 - All dispatched events are serialized as JSON (must be JSON-serializable).
 - Handlers registered via `on()` receive the full `Event` object.
-- Messages are acknowledged only after successful handler completion.
+- Messages are acknowledged only after every handler for the message has settled and none rejected.
+- All registered handlers for an event delivery run to completion, even when some fail (per-handler isolation via `Promise.allSettled`).
+- Each handler failure produces exactly one `logger.error` call with structured fields.
 - The bus does not deduplicate events.
 - Subject names follow the pattern `${subjectPrefix}${eventName}`.
 - JetStream durable consumer names follow the pattern `${consumerGroup}_${sanitized(eventName)}`.
@@ -130,7 +146,8 @@ export class NatsEventBus implements EventBus, Connectable {
 - **No handler registered for consumed subject**: Message is acknowledged with no processing.
 - **Handler throws**: Message is not acknowledged; NATS redelivers based on consumer config.
 - **Dispatch with no payload**: Events with `payload: undefined` are serialized as `{"name":"X","payload":null}`.
-- **Multiple handlers for same event**: All handlers invoked in parallel via `Promise.all()`. If any handler rejects, the message is not acknowledged (enabling redelivery). Handlers that already completed will re-execute on redelivery.
+- **Multiple handlers for same event**: All handlers invoked in parallel via `Promise.allSettled()`. Every handler runs to completion. Each rejection is logged individually. If at least one rejected, the message is not acknowledged (NATS redelivers per `maxDeliver`). Handlers that already completed will re-execute on redelivery.
+- **Two handlers, one throws**: Both handlers run; one error log is emitted with the failed handler's name; `msg.nak()` is called → NATS redelivers.
 - **on() called before connect()**: Handlers are buffered; subscriptions happen when `connect()` is called.
 - **on() called after close()**: Throws an error.
 - **Stream does not exist**: `connect()` creates the stream if `streamName` is configured and stream does not exist.
@@ -293,14 +310,14 @@ describe("NatsEventBus", () => {
 });
 ```
 
-### parallel handler failure prevents ack
+### parallel handler failure prevents ack while siblings still complete
 
 ```ts
 import { describe, it, expect, vi } from "vitest";
 import { NatsEventBus } from "@noddde/nats";
 
 describe("NatsEventBus", () => {
-  it("should reject if any handler throws during parallel invocation", async () => {
+  it("should reject _handleMessage after all handlers settled, with siblings completed", async () => {
     const bus = new NatsEventBus({
       servers: "localhost:4222",
       consumerGroup: "test-group",
@@ -316,6 +333,131 @@ describe("NatsEventBus", () => {
     await expect(
       (bus as any)._handleMessage("TestEvent", JSON.stringify(event)),
     ).rejects.toThrow("handler failed");
+
+    // The successful sibling completed even though another handler threw.
+    expect(successHandler).toHaveBeenCalledOnce();
+  });
+});
+```
+
+### sibling handler completes when an earlier handler throws (Promise.allSettled)
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { NatsEventBus } from "@noddde/nats";
+
+describe("NatsEventBus error isolation", () => {
+  it("should run every handler to completion even when an earlier one throws", async () => {
+    const bus = new NatsEventBus({
+      servers: "localhost:4222",
+      consumerGroup: "test-group",
+    });
+
+    const before = vi.fn();
+    const after = vi.fn();
+    bus.on("E", before);
+    bus.on("E", async () => {
+      throw new Error("boom");
+    });
+    bus.on("E", after);
+
+    await expect(
+      (bus as any)._handleMessage("E", JSON.stringify({ name: "E", payload: {} })),
+    ).rejects.toThrow();
+
+    expect(before).toHaveBeenCalledOnce();
+    expect(after).toHaveBeenCalledOnce();
+  });
+});
+```
+
+### individual logging per failed handler with handlerName and error fields
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { NatsEventBus } from "@noddde/nats";
+import type { Logger } from "@noddde/core";
+
+describe("NatsEventBus error isolation", () => {
+  it("should log once per failed handler with handlerName and error fields", async () => {
+    const logger: Logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      child: vi.fn().mockReturnThis(),
+    };
+    const bus = new NatsEventBus({
+      servers: "localhost:4222",
+      consumerGroup: "test-group",
+      logger,
+    });
+
+    async function failingA() {
+      throw new Error("err-a");
+    }
+    async function failingB() {
+      throw new Error("err-b");
+    }
+    bus.on("E", vi.fn());
+    bus.on("E", failingA);
+    bus.on("E", failingB);
+
+    await expect(
+      (bus as any)._handleMessage("E", JSON.stringify({ name: "E", payload: {} })),
+    ).rejects.toThrow();
+
+    const errorCalls = (logger.error as ReturnType<typeof vi.fn>).mock.calls;
+    const handlerErrorCalls = errorCalls.filter(
+      ([, fields]) => (fields as any)?.handlerName !== undefined,
+    );
+    expect(handlerErrorCalls).toHaveLength(2);
+    const names = handlerErrorCalls.map(([, f]) => (f as any).handlerName);
+    expect(names).toEqual(expect.arrayContaining(["failingA", "failingB"]));
+    const messages = handlerErrorCalls.map(([, f]) => (f as any).error?.message);
+    expect(messages).toEqual(expect.arrayContaining(["err-a", "err-b"]));
+  });
+});
+```
+
+### nak behavior is unchanged under partial failure
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { NatsEventBus } from "@noddde/nats";
+
+describe("NatsEventBus error isolation", () => {
+  it("should call msg.nak() when any handler fails (existing redelivery behavior is preserved)", async () => {
+    const bus = new NatsEventBus({
+      servers: "localhost:4222",
+      consumerGroup: "test-group",
+    });
+
+    bus.on("E", vi.fn());
+    bus.on("E", async () => {
+      throw new Error("boom");
+    });
+
+    const event = { name: "E", payload: {} };
+    const nak = vi.fn();
+    const ack = vi.fn();
+    const term = vi.fn();
+    const msg = {
+      data: new TextEncoder().encode(JSON.stringify(event)),
+      nak,
+      ack,
+      term,
+    };
+
+    const sub = (async function* () {
+      yield msg;
+    })();
+
+    await (bus as any)._consumeSubscription(sub, "E");
+
+    // Regression guard: nak is called on handler failure, ack is not.
+    expect(nak).toHaveBeenCalledOnce();
+    expect(ack).not.toHaveBeenCalled();
   });
 });
 ```

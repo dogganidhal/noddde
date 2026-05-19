@@ -2,7 +2,7 @@
 title: "EventHandler"
 module: edd/event-handler
 source_file: packages/core/src/edd/event-handler.ts
-status: implemented
+status: ready
 exports: [EventHandler]
 depends_on: [edd/event, infrastructure/index]
 docs:
@@ -29,6 +29,7 @@ docs:
 - The handler may perform side effects: I/O, external calls, state mutations.
 - Returning `void` (synchronous) or `Promise<void>` (asynchronous) are both valid.
 - Infrastructure provides access to repositories, services, and other external dependencies.
+- **Handler failures are isolated by the event bus.** When the handler is invoked via any `EventBus` implementation that conforms to the framework contract (in-memory, Kafka, NATS, RabbitMQ, or any future transport), a thrown error or rejected promise is caught by the bus and logged with structured fields. The failure does NOT propagate to the originating command, and it does NOT prevent sibling subscribers (other event handlers, projections, sagas) from being invoked for the same event. See `core/edd/event-bus` for the isolation contract and `engine/implementations/ee-event-bus` for the in-memory implementation's specifics.
 
 ## Invariants
 
@@ -130,6 +131,92 @@ describe("EventHandler sync/async", () => {
       // no-op, async
     };
     expect(handler).toBeDefined();
+  });
+});
+```
+
+### Failing standalone event handler does not affect sibling handlers nor the dispatcher
+
+> Integration scenario — full engine wiring. Demonstrates the bus-level isolation contract from the standalone event handler's perspective.
+
+```ts
+import { describe, expect, it, vi } from "vitest";
+import type { DefineCommands, DefineEvents } from "@noddde/core";
+import { defineAggregate } from "@noddde/core";
+import {
+  defineDomain,
+  EventEmitterEventBus,
+  InMemoryCommandBus,
+  InMemoryEventSourcedAggregatePersistence,
+  InMemoryQueryBus,
+  wireDomain,
+} from "@noddde/engine";
+
+describe("Standalone event handler error isolation", () => {
+  type UserEvent = DefineEvents<{ UserCreated: { id: string; name: string } }>;
+  type UserCommand = DefineCommands<{ CreateUser: { name: string } }>;
+  type UserTypes = {
+    state: { name: string } | null;
+    events: UserEvent;
+    commands: UserCommand;
+    infrastructure: {};
+  };
+
+  const User = defineAggregate<UserTypes>({
+    initialState: null,
+    decide: {
+      CreateUser: (cmd) => ({
+        name: "UserCreated",
+        payload: { id: cmd.targetAggregateId, name: cmd.payload.name },
+      }),
+    },
+    evolve: { UserCreated: (payload) => ({ name: payload.name }) },
+  });
+
+  it("should keep the command successful and still invoke sibling handlers when one throws", async () => {
+    const healthyHandler = vi.fn();
+
+    const definition = defineDomain({
+      writeModel: { aggregates: { User } },
+      eventHandlers: {
+        UserCreated: [
+          async () => {
+            throw new Error("handler bug");
+          },
+          healthyHandler,
+        ],
+      },
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => new InMemoryEventSourcedAggregatePersistence(),
+      },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    // Command must succeed despite the failing handler.
+    await expect(
+      domain.commandBus.dispatch({
+        name: "CreateUser",
+        targetAggregateId: "u-1",
+        payload: { name: "Alice" },
+      }),
+    ).resolves.not.toThrow();
+
+    // Eventual consistency: allow the event bus to drain.
+    await new Promise((r) => setTimeout(r, 10));
+
+    // The sibling handler was still invoked with the event.
+    expect(healthyHandler).toHaveBeenCalledOnce();
+    expect(healthyHandler.mock.calls[0]![0]).toMatchObject({
+      name: "UserCreated",
+      payload: { id: "u-1", name: "Alice" },
+    });
   });
 });
 ```

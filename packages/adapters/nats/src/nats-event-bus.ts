@@ -13,7 +13,7 @@ import type {
   Logger,
 } from "@noddde/core";
 import type { Event } from "@noddde/core";
-import { NodddeLogger } from "@noddde/engine";
+import { Instrumentation, NodddeLogger } from "@noddde/engine";
 
 /** Configuration for the NatsEventBus. */
 export interface NatsEventBusConfig {
@@ -35,6 +35,11 @@ export interface NatsEventBusConfig {
   resilience?: BrokerResilience;
   /** Framework logger instance. Defaults to NodddeLogger("warn", "noddde:nats") from @noddde/engine. */
   logger?: Logger;
+  /**
+   * OpenTelemetry instrumentation used to enrich per-handler error logs with
+   * `traceId`/`spanId` correlation fields. Defaults to a no-op instance.
+   */
+  instrumentation?: Instrumentation;
 }
 
 /**
@@ -60,6 +65,7 @@ export interface NatsEventBusConfig {
 export class NatsEventBus implements EventBus, Connectable {
   private readonly _config: NatsEventBusConfig;
   private readonly _logger: Logger;
+  private readonly _instrumentation: Instrumentation;
   private _nc: NatsConnection | null = null;
   private _js: JetStreamClient | null = null;
   private _connected: boolean = false;
@@ -69,6 +75,7 @@ export class NatsEventBus implements EventBus, Connectable {
   constructor(config: NatsEventBusConfig) {
     this._config = config;
     this._logger = config.logger ?? new NodddeLogger("warn", "noddde:nats");
+    this._instrumentation = config.instrumentation ?? new Instrumentation(null);
   }
 
   /**
@@ -181,8 +188,10 @@ export class NatsEventBus implements EventBus, Connectable {
 
   /**
    * Handles an incoming NATS message for the given event name.
-   * Deserializes the message, invokes all registered handlers concurrently via `Promise.all()`,
-   * and returns. If any handler rejects, the rejection propagates and the message is not acknowledged.
+   * Deserializes the message, invokes all registered handlers concurrently via `Promise.allSettled()`.
+   * After all handlers settle, logs each rejection individually via the framework Logger. If at least
+   * one handler rejected, re-throws the first rejection's reason so the outer consumer loop naks the
+   * message (enabling redelivery). All sibling handlers ran to completion before the re-throw.
    * Exposed as a semi-private method for testability.
    *
    * @param eventName - The event name (used to look up handlers).
@@ -191,7 +200,50 @@ export class NatsEventBus implements EventBus, Connectable {
   async _handleMessage(eventName: string, messageData: string): Promise<void> {
     const event = JSON.parse(messageData) as Event;
     const handlers = this._handlers.get(eventName) ?? [];
-    await Promise.all(handlers.map((handler) => handler(event)));
+
+    const results = await Promise.allSettled(
+      handlers.map((handler) => handler(event)),
+    );
+
+    const { traceId, spanId } =
+      this._instrumentation.getActiveTraceCorrelation();
+
+    let firstRejection: unknown = undefined;
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i]!;
+      if (result.status === "rejected") {
+        const handler = handlers[i]!;
+        const err = result.reason;
+        const handlerName =
+          handler.name && handler.name !== "handler" && handler.name !== ""
+            ? handler.name
+            : event.name;
+
+        const errorFields =
+          err instanceof Error
+            ? { name: err.name, message: err.message, stack: err.stack }
+            : { name: "Error", message: String(err) };
+
+        this._logger.error(`Handler error for event "${event.name}"`, {
+          eventName: event.name,
+          ...(event.metadata?.eventId !== undefined && {
+            eventId: event.metadata.eventId,
+          }),
+          handlerName,
+          error: errorFields,
+          ...(traceId !== undefined && { traceId }),
+          ...(spanId !== undefined && { spanId }),
+        });
+
+        if (firstRejection === undefined) {
+          firstRejection = err;
+        }
+      }
+    }
+
+    if (firstRejection !== undefined) {
+      throw firstRejection;
+    }
   }
 
   private _subjectFor(eventName: string): string {

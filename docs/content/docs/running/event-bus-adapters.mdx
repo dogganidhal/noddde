@@ -45,6 +45,35 @@ const eventBus = new EventEmitterEventBus();
 
 This is the right choice for development, testing, and single-process deployments. Events are dispatched synchronously within the same process — there is no network I/O, no serialization, and no delivery guarantee beyond the process boundary.
 
+### Configuration
+
+```ts
+import { EventEmitterEventBus } from "@noddde/engine";
+
+const eventBus = new EventEmitterEventBus({
+  // logger: myCustomLogger,      // optional — defaults to NodddeLogger("warn", "noddde:ee-event-bus")
+  // instrumentation: myInstrumentation, // optional — defaults to a no-op Instrumentation(null)
+});
+```
+
+| Option            | Type              | Required | Default                                       | Description                                                                                           |
+| ----------------- | ----------------- | -------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `logger`          | `Logger`          | No       | `NodddeLogger("warn", "noddde:ee-event-bus")` | Framework logger for structured per-handler error logs                                                |
+| `instrumentation` | `Instrumentation` | No       | `new Instrumentation(null)`                   | OTel instrumentation used to enrich error logs with `traceId`/`spanId` when an active span is present |
+
+Both fields are optional and the bare `new EventEmitterEventBus()` form remains supported.
+
+## Handler Error Isolation
+
+All four shipped adapters (`EventEmitterEventBus`, `KafkaEventBus`, `NatsEventBus`, `RabbitMqEventBus`) implement the same per-handler isolation contract:
+
+- **Every registered handler runs to completion** for each event delivery, even when some throw. A buggy projection or saga can never short-circuit a sibling handler.
+- **Each handler failure is logged exactly once** via the framework `Logger` at `error` level with structured fields: `eventName`, `eventId?`, `handlerName`, `error: { name, message, stack? }`, and `traceId?`/`spanId?` when an OpenTelemetry span is active.
+- **`EventEmitterEventBus.dispatch` never rejects from a handler failure** — it always resolves. This means eventual-consistency projection or standalone-handler bugs cannot fail the originating command at the API boundary.
+- **Broker adapters preserve transport-level redelivery semantics**: after every handler has settled, if any rejected, the adapter re-throws so the consumer loop performs its existing ack/nack/commit-skip behavior (Kafka skips offset commit, NATS calls `msg.nak()`, RabbitMQ calls `channel.nack(msg, false, true)`).
+
+The only path by which a projection failure affects command outcomes is the **strong-consistency** projection mode (`consistency: "strong"`). Strong projections bypass the event bus entirely and enlist their `load → reduce → save`/`delete` in the originating command's `UnitOfWork`. A throw there fails the UoW commit and propagates to the command's `dispatch`. See [View Persistence — Consistency Modes](/docs/read-model/view-persistence#consistency-modes).
+
 ## Kafka
 
 ### Installation
@@ -86,8 +115,8 @@ const eventBus = new KafkaEventBus({
 ### How It Works
 
 - **Publishing**: Events are serialized as JSON and sent to a Kafka topic derived from the event name (`${topicPrefix}${event.name}`). The message key is determined by the `partitionKeyStrategy` option: by default (`"aggregateId"`), the key is `event.metadata?.aggregateId` (stringified), ensuring per-aggregate partition ordering. If no `aggregateId` is present, the key is `null` (round-robin). A custom function can be provided to derive the key from the full event.
-- **Subscribing**: Handlers registered via `on()` receive messages through a Kafka consumer. Handlers registered before `connect()` are buffered and subscriptions are created when the connection is established. Multiple handlers for the same event are invoked in parallel via `Promise.all()` — independent handlers (projections, sagas) do not block each other.
-- **Delivery**: At-least-once. The consumer runs with `autoCommit: false` — offsets are committed explicitly via `consumer.commitOffsets()` only after all handlers complete successfully. If any handler fails, the offset is not committed and the message will be redelivered. After a successful commit, the in-memory delivery count entry for the message is pruned to prevent unbounded memory growth. Consumers must be idempotent.
+- **Subscribing**: Handlers registered via `on()` receive messages through a Kafka consumer. Handlers registered before `connect()` are buffered and subscriptions are created when the connection is established. Multiple handlers for the same event are invoked in parallel via `Promise.allSettled()` — every handler runs to completion even when some fail, and each failure is logged individually with structured fields (see [Handler Error Isolation](#handler-error-isolation)).
+- **Delivery**: At-least-once. The consumer runs with `autoCommit: false` — offsets are committed explicitly via `consumer.commitOffsets()` only after all handlers complete successfully. If any handler fails, the first rejection is re-thrown after all siblings have settled (so the offset is not committed and the message is redelivered). After a successful commit, the in-memory delivery count entry for the message is pruned to prevent unbounded memory growth. Consumers must be idempotent — handlers that completed before a sibling failure will re-execute on redelivery.
 - **Poison message protection**: Malformed messages that fail JSON deserialization are logged and skipped (offset committed), preventing corrupt data from blocking the partition. If `resilience.maxRetries` is configured, messages that exceed the delivery attempt limit are also skipped with a warning.
 - **Connection resilience**: The optional `resilience` config (`BrokerResilience` from `@noddde/core`) is mapped to kafkajs retry options for automatic reconnection on broker unavailability. `maxAttempts` maps to kafkajs `retries` (minus 1, since kafkajs counts retries after the first attempt), `initialDelayMs` to `initialRetryTime`, and `maxDelayMs` to `maxRetryTime`. The `sessionTimeout` and `heartbeatInterval` options tune consumer rebalance behavior for slow handlers. Concurrent `connect()` calls are deduplicated via a connection promise mutex to prevent parallel connection attempts.
 - **Logging**: All internal logging uses the framework `Logger` interface from `@noddde/core`. Pass a custom `logger` in the config or accept the default (`NodddeLogger("warn", "noddde:kafka")`). All log calls include structured context data (event name, error details).
@@ -147,8 +176,8 @@ const eventBus = new NatsEventBus({
 ### How It Works
 
 - **Publishing**: Events are serialized as JSON, encoded as `Uint8Array`, and published to a NATS subject (`${subjectPrefix}${event.name}`). When a `streamName` is configured, JetStream publish acknowledgment is awaited.
-- **Subscribing**: JetStream consumers with durable subscriptions are created for each registered event name, using the durable name pattern `${consumerGroup}_${eventName}`. Two services with different `consumerGroup` values get independent consumers on the same stream. Handlers registered before `connect()` are buffered; subscriptions are activated during `connect()` — if any subscription fails, `connect()` rejects immediately (fail-fast). Handlers registered after `connect()` create subscriptions immediately (failures are logged, not thrown). Multiple handlers for the same event are invoked in parallel via `Promise.all()` — independent handlers do not block each other.
-- **Delivery**: At-least-once with JetStream. Messages are acknowledged only after all handlers complete successfully. If any handler fails, the message is explicitly nacked for immediate redelivery. Consumers must be idempotent.
+- **Subscribing**: JetStream consumers with durable subscriptions are created for each registered event name, using the durable name pattern `${consumerGroup}_${eventName}`. Two services with different `consumerGroup` values get independent consumers on the same stream. Handlers registered before `connect()` are buffered; subscriptions are activated during `connect()` — if any subscription fails, `connect()` rejects immediately (fail-fast). Handlers registered after `connect()` create subscriptions immediately (failures are logged, not thrown). Multiple handlers for the same event are invoked in parallel via `Promise.allSettled()` — every handler runs to completion even when some fail, and each failure is logged individually with structured fields (see [Handler Error Isolation](#handler-error-isolation)).
+- **Delivery**: At-least-once with JetStream. Messages are acknowledged only after all handlers complete successfully. If any handler fails, the first rejection is re-thrown after all siblings have settled, and the consumer loop calls `msg.nak()` for immediate redelivery (capped by `maxDeliver`). Consumers must be idempotent — handlers that completed before a sibling failure will re-execute on redelivery.
 - **Poison message protection**: Malformed messages that fail JSON deserialization are permanently discarded via `msg.term()`, preventing corrupt data from blocking the subscription via infinite redelivery. If `resilience.maxRetries` is configured, it maps to the JetStream `maxDeliver` consumer option, limiting how many times NATS will redeliver a message before discarding it server-side.
 - **Backpressure**: The `prefetchCount` option controls how many unacknowledged messages the server delivers to each consumer (mapped to JetStream `maxAckPending`), providing natural backpressure when handlers are slow.
 - **Connection resilience**: NATS native reconnection is enabled by default. The optional `resilience` config maps `maxAttempts` to NATS `maxReconnectAttempts` and `initialDelayMs` to `reconnectTimeWait` for automatic recovery on connection loss. `maxDelayMs` is ignored because NATS uses fixed-interval reconnection (no exponential backoff).
@@ -216,8 +245,8 @@ const eventBus = new RabbitMqEventBus({
 ### How It Works
 
 - **Publishing**: Events are serialized as JSON and published to the configured exchange with the event name as the routing key. Messages are marked `{ persistent: true }` for durability. When `event.metadata.eventId` is present, it is set as the AMQP `messageId` property, giving consumers a stable identifier for retry tracking. The bus uses a **confirm channel** (`createConfirmChannel`) and awaits `waitForConfirms()` after each publish, guaranteeing the broker has accepted the message before `dispatch()` resolves.
-- **Subscribing**: Each event name gets a dedicated durable queue (`${queuePrefix}.${eventName}`) bound to the exchange. Multiple handlers for the same event are invoked in parallel via `Promise.all()` -- independent handlers do not block each other. Consumers must be idempotent since handlers that completed before a failure will re-execute on redelivery.
-- **Delivery**: At-least-once with manual acknowledgment. On handler success, the message is acked. On handler failure, the message is nacked with requeue for redelivery.
+- **Subscribing**: Each event name gets a dedicated durable queue (`${queuePrefix}.${eventName}`) bound to the exchange. Multiple handlers for the same event are invoked in parallel via `Promise.allSettled()` — every handler runs to completion even when some fail, and each failure is logged individually with structured fields (see [Handler Error Isolation](#handler-error-isolation)). Consumers must be idempotent since handlers that completed before a sibling failure will re-execute on redelivery.
+- **Delivery**: At-least-once with manual acknowledgment. On handler success, the message is acked. On any handler failure, the first rejection is re-thrown after all siblings have settled, and the consume callback calls `channel.nack(msg, false, true)` for requeue.
 - **Poison message protection**: Malformed messages that fail JSON deserialization are acknowledged and skipped, preventing infinite nack/requeue loops. If `resilience.maxRetries` is configured, messages that exceed the delivery count limit (tracked via an in-memory counter per message) are also acknowledged and discarded. The in-memory approach is used instead of `x-death` headers because `x-death` requires a dead-letter exchange to be configured.
 - **Backpressure**: The `prefetchCount` option limits how many unacknowledged messages the broker sends to this consumer, providing natural backpressure when handlers are slow.
 - **Connection resilience**: The `resilience` option enables retry with exponential backoff on initial connection failure. Delay doubles on each attempt, capped at `maxDelayMs`. If all attempts fail, the last error is thrown. After a successful connection, `error` and `close` handlers are registered on the AMQP connection to detect unexpected disconnections. On unexpected close, the bus automatically attempts reconnection **indefinitely** using jittered exponential backoff (base delay doubles each attempt, capped at `maxDelayMs`, with +-25% random jitter to prevent thundering herd). Unlike the initial `connect()`, mid-session reconnection ignores `maxAttempts` and retries until either the broker recovers or `close()` is called. During reconnection, `dispatch()` rejects with a connection error. Once reconnected, the exchange and all consumers are re-established automatically.

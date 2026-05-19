@@ -14,3 +14,5 @@ export * from "./implementations/in-memory-view-store-factory";
 export * from "./implementations/in-memory-outbox-store";
 export * from "./outbox-relay";
 export * from "./logger";
+export { Instrumentation, detectOTel } from "./tracing";
+export type { OTelApi } from "./tracing";

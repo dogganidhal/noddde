@@ -817,3 +817,119 @@ describe("RabbitMqEventBus", () => {
     ).rejects.toThrow(/not connected/i);
   });
 });
+
+// ### sibling handler completes when an earlier handler throws (Promise.allSettled)
+describe("RabbitMqEventBus error isolation", () => {
+  it("should run every handler to completion even when an earlier one throws", async () => {
+    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+
+    const before = vi.fn();
+    const after = vi.fn();
+    bus.on("E", before);
+    bus.on("E", async () => {
+      throw new Error("boom");
+    });
+    bus.on("E", after);
+
+    await expect(
+      (bus as any)._handleMessage(
+        "E",
+        Buffer.from(JSON.stringify({ name: "E", payload: {} })),
+      ),
+    ).rejects.toThrow();
+
+    expect(before).toHaveBeenCalledOnce();
+    expect(after).toHaveBeenCalledOnce();
+  });
+});
+
+// ### individual logging per failed handler with handlerName and error fields
+describe("RabbitMqEventBus error isolation", () => {
+  it("should log once per failed handler with handlerName and error fields", async () => {
+    const logger: Logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      child: vi.fn().mockReturnThis(),
+    };
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      logger,
+    });
+
+    async function failingA() {
+      throw new Error("err-a");
+    }
+    async function failingB() {
+      throw new Error("err-b");
+    }
+    bus.on("E", vi.fn());
+    bus.on("E", failingA);
+    bus.on("E", failingB);
+
+    await expect(
+      (bus as any)._handleMessage(
+        "E",
+        Buffer.from(JSON.stringify({ name: "E", payload: {} })),
+      ),
+    ).rejects.toThrow();
+
+    const errorCalls = (logger.error as ReturnType<typeof vi.fn>).mock.calls;
+    const handlerErrorCalls = errorCalls.filter(
+      ([, fields]) => (fields as any)?.handlerName !== undefined,
+    );
+    expect(handlerErrorCalls).toHaveLength(2);
+    const names = handlerErrorCalls.map(([, f]) => (f as any).handlerName);
+    expect(names).toEqual(expect.arrayContaining(["failingA", "failingB"]));
+    const messages = handlerErrorCalls.map(
+      ([, f]) => (f as any).error?.message,
+    );
+    expect(messages).toEqual(expect.arrayContaining(["err-a", "err-b"]));
+  });
+});
+
+// ### nack-with-requeue behavior is unchanged under partial failure
+describe("RabbitMqEventBus error isolation", () => {
+  it("should call channel.nack(msg, false, true) when any handler fails (existing redelivery behavior is preserved)", async () => {
+    const nack = vi.fn();
+    const ack = vi.fn();
+    const mockChannel = {
+      assertExchange: vi.fn().mockResolvedValue(undefined),
+      assertQueue: vi.fn().mockResolvedValue({ queue: "test" }),
+      bindQueue: vi.fn().mockResolvedValue(undefined),
+      consume: vi.fn(),
+      ack,
+      nack,
+      prefetch: vi.fn(),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    (bus as any)._connection = {};
+    (bus as any)._channel = mockChannel;
+    (bus as any)._connected = true;
+
+    bus.on("E", vi.fn());
+    bus.on("E", async () => {
+      throw new Error("boom");
+    });
+
+    await (bus as any)._setupConsumer("E");
+
+    // Extract the consume callback registered by _setupConsumer.
+    const consumeCallback = mockChannel.consume.mock.calls[0]![1];
+
+    const event = { name: "E", payload: {} };
+    const msg = {
+      content: Buffer.from(JSON.stringify(event)),
+      properties: { messageId: "m-1" },
+    };
+
+    await consumeCallback(msg);
+
+    // Regression guard: nack with requeue=true on failure, ack is not called.
+    expect(nack).toHaveBeenCalledWith(msg, false, true);
+    expect(ack).not.toHaveBeenCalled();
+  });
+});

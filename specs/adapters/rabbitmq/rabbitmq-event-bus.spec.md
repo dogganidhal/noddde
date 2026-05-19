@@ -2,7 +2,7 @@
 title: "RabbitMqEventBus"
 module: adapters/rabbitmq/rabbitmq-event-bus
 source_file: packages/adapters/rabbitmq/src/rabbitmq-event-bus.ts
-status: implemented
+status: ready
 exports: [RabbitMqEventBus, RabbitMqEventBusConfig]
 depends_on:
   - core/edd/event-bus
@@ -45,6 +45,12 @@ export interface RabbitMqEventBusConfig {
   resilience?: BrokerResilience;
   /** Framework logger instance. Defaults to NodddeLogger("warn", "noddde:rabbitmq") from @noddde/engine. */
   logger?: Logger;
+  /**
+   * OpenTelemetry instrumentation used to enrich per-handler error logs with
+   * `traceId`/`spanId` correlation fields. Defaults to a no-op instance.
+   * Provided via `@noddde/engine` `Instrumentation`.
+   */
+  instrumentation?: Instrumentation;
 }
 
 export class RabbitMqEventBus implements EventBus, Connectable {
@@ -80,7 +86,15 @@ export class RabbitMqEventBus implements EventBus, Connectable {
 6. **Queue binding** -- When subscriptions are activated (after `connect()`), a durable queue named `${queuePrefix}.${eventName}` is asserted and bound to the exchange with `eventName` as the routing key.
 7. **Consumer setup** -- A consumer is started on the queue. Incoming messages are deserialized from JSON and passed to all registered handlers.
    7b. **Message deserialization with poison message protection** -- Deserialization is wrapped in try/catch. If `JSON.parse` throws (malformed message), the error is logged and the message is acknowledged (skipped). Poison messages must never block the queue via infinite nack/requeue loops.
-8. **Parallel handler invocation** -- Handlers for the same event are invoked concurrently via `Promise.all()`. If any handler rejects, the message is nacked for redelivery. Handlers that already completed will re-execute on redelivery — consumers must be idempotent. This differs from `EventEmitterEventBus` (which invokes sequentially) because broker adapters operate in distributed contexts where independent handlers should not block each other.
+8. **Isolated parallel handler invocation** -- Handlers for the same event are invoked concurrently via `Promise.allSettled()` (not `Promise.all()`). This guarantees that **every registered handler runs to completion** even when some of them fail — siblings are never silenced or short-circuited by an earlier rejection. After all handlers settle, the bus iterates the rejected results and logs each one individually via the framework `Logger` at `error` level with structured fields (see "Per-handler error logging" below). If at least one handler rejected, `_handleMessage` then propagates a failure (re-throwing the first rejection's reason) so the outer consume callback calls `channel.nack(msg, false, true)` for requeue per current behavior (capped by the in-memory `maxRetries` counter). Handlers that already completed will re-execute on redelivery — consumers must be idempotent. This differs from `EventEmitterEventBus` (which invokes sequentially within a single process) because broker adapters operate in distributed contexts where independent handlers should not block each other.
+
+   8c. **Per-handler error logging** -- For each rejected handler, the bus calls `logger.error(message, fields)` exactly once with:
+
+   - `eventName: string` — from `event.name`.
+   - `eventId?: string` — from `event.metadata?.eventId` when present.
+   - `handlerName: string` — read from the handler's `name` property; falls back to `event.name` when anonymous.
+   - `error: { name, message, stack? }` — extracted from the caught exception. Non-`Error` rejection values are coerced via `String(value)` into `message`.
+   - `traceId?: string` and `spanId?: string` — populated from the active OpenTelemetry span via the configured `Instrumentation` instance. Absent when no span is active or when `@opentelemetry/api` is not installed.
    8b. **maxRetries delivery limit** -- If `resilience.maxRetries` is configured, track delivery attempts using an in-memory `Map<string, number>` keyed by a stable message identifier (e.g., `messageId` from properties, or a hash of the content). On each message receipt, increment the count and check against `maxRetries`. If the count exceeds `maxRetries`, log a warning and ack the message (discard it). This prevents handler-level poison messages from blocking the queue indefinitely via infinite nack/requeue. Note: the in-memory counter resets on consumer restart, which is acceptable since restarted consumers also reset their processing state. The previous `x-death` header approach does not work without a dead-letter exchange configured.
 9. **Manual ack after handlers** -- The message is acknowledged (`channel.ack(msg)`) only after all handlers have completed successfully (all promises in the `Promise.all` resolved). All `channel.ack()` and `channel.nack()` calls are wrapped in try/catch — if the channel closed during reconnection, the error is logged but does not crash the consumer callback.
 
@@ -98,7 +112,7 @@ export class RabbitMqEventBus implements EventBus, Connectable {
 
 ### Error Handling
 
-15. **Handler errors cause nack** -- If any handler rejects during parallel invocation, the message is nacked (`channel.nack(msg, false, true)`) for redelivery. The `nack()` call is wrapped in try/catch — if the channel is stale (closed during reconnection), the error is logged.
+15. **Handler errors cause nack** -- After `Promise.allSettled` settles every registered handler and each rejection has been logged individually, `_handleMessage` re-throws the first rejected handler's reason. The outer consume callback catches this and calls `channel.nack(msg, false, true)` for requeue per current behavior (capped by the in-memory `maxRetries` counter). The `nack()` call is wrapped in try/catch — if the channel is stale (closed during reconnection), the error is logged. All sibling handlers ran to completion before this re-throw — none are silenced by an earlier rejection.
 16. **Serialization errors on dispatch** -- If event serialization fails, `dispatch` rejects with the serialization error.
 17. **Connection errors on dispatch** -- If the channel is closed or RabbitMQ is unreachable, `dispatch` rejects with a connection error.
 
@@ -110,7 +124,9 @@ export class RabbitMqEventBus implements EventBus, Connectable {
 
 - All dispatched events are serialized as JSON (must be JSON-serializable).
 - Handlers registered via `on()` receive the full `Event` object.
-- Messages are acknowledged only after successful handler completion; nacked on handler failure.
+- Messages are acknowledged only after every handler for the message has settled and none rejected; nacked on any handler failure.
+- All registered handlers for an event delivery run to completion, even when some fail (per-handler isolation via `Promise.allSettled`).
+- Each handler failure produces exactly one `logger.error` call with structured fields.
 - The bus does not deduplicate events.
 - Exchange is durable (survives broker restarts).
 - Queues are durable (survive broker restarts).
@@ -123,7 +139,8 @@ export class RabbitMqEventBus implements EventBus, Connectable {
 - **No handler registered for consumed queue**: Message is acknowledged with no processing.
 - **Handler throws**: Message is nacked with requeue=true for redelivery.
 - **Dispatch with no payload**: Events with `payload: undefined` are serialized as `{"name":"X","payload":null}`.
-- **Multiple handlers for same event**: All handlers invoked in parallel via `Promise.all()`. If any handler rejects, the message is nacked for redelivery. Handlers that already completed will re-execute on redelivery.
+- **Multiple handlers for same event**: All handlers invoked in parallel via `Promise.allSettled()`. Every handler runs to completion. Each rejection is logged individually. If at least one rejected, the message is nacked with requeue=true (broker redelivers per `maxRetries`). Handlers that already completed will re-execute on redelivery.
+- **Two handlers, one throws**: Both handlers run; one error log is emitted with the failed handler's name; `channel.nack(msg, false, true)` is called → broker requeues.
 - **on() called before connect()**: Handlers are buffered; queue bindings and consumers are set up when `connect()` is called.
 - **on() called after close()**: Throws an error.
 - **Exchange does not exist**: `connect()` asserts (creates) the exchange.
@@ -284,14 +301,14 @@ describe("RabbitMqEventBus", () => {
 });
 ```
 
-### parallel handler failure causes nack
+### parallel handler failure causes nack while siblings still complete
 
 ```ts
 import { describe, it, expect, vi } from "vitest";
 import { RabbitMqEventBus } from "@noddde/rabbitmq";
 
 describe("RabbitMqEventBus", () => {
-  it("should reject if any handler throws during parallel invocation", async () => {
+  it("should reject _handleMessage after all handlers settled, with siblings completed", async () => {
     const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
 
     const successHandler = vi.fn();
@@ -307,6 +324,147 @@ describe("RabbitMqEventBus", () => {
         Buffer.from(JSON.stringify(event)),
       ),
     ).rejects.toThrow("handler failed");
+
+    // The successful sibling completed even though another handler threw.
+    expect(successHandler).toHaveBeenCalledOnce();
+  });
+});
+```
+
+### sibling handler completes when an earlier handler throws (Promise.allSettled)
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { RabbitMqEventBus } from "@noddde/rabbitmq";
+
+describe("RabbitMqEventBus error isolation", () => {
+  it("should run every handler to completion even when an earlier one throws", async () => {
+    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+
+    const before = vi.fn();
+    const after = vi.fn();
+    bus.on("E", before);
+    bus.on("E", async () => {
+      throw new Error("boom");
+    });
+    bus.on("E", after);
+
+    await expect(
+      (bus as any)._handleMessage(
+        "E",
+        Buffer.from(JSON.stringify({ name: "E", payload: {} })),
+      ),
+    ).rejects.toThrow();
+
+    expect(before).toHaveBeenCalledOnce();
+    expect(after).toHaveBeenCalledOnce();
+  });
+});
+```
+
+### individual logging per failed handler with handlerName and error fields
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { RabbitMqEventBus } from "@noddde/rabbitmq";
+import type { Logger } from "@noddde/core";
+
+describe("RabbitMqEventBus error isolation", () => {
+  it("should log once per failed handler with handlerName and error fields", async () => {
+    const logger: Logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      child: vi.fn().mockReturnThis(),
+    };
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      logger,
+    });
+
+    async function failingA() {
+      throw new Error("err-a");
+    }
+    async function failingB() {
+      throw new Error("err-b");
+    }
+    bus.on("E", vi.fn());
+    bus.on("E", failingA);
+    bus.on("E", failingB);
+
+    await expect(
+      (bus as any)._handleMessage(
+        "E",
+        Buffer.from(JSON.stringify({ name: "E", payload: {} })),
+      ),
+    ).rejects.toThrow();
+
+    const errorCalls = (logger.error as ReturnType<typeof vi.fn>).mock.calls;
+    const handlerErrorCalls = errorCalls.filter(
+      ([, fields]) => (fields as any)?.handlerName !== undefined,
+    );
+    expect(handlerErrorCalls).toHaveLength(2);
+    const names = handlerErrorCalls.map(([, f]) => (f as any).handlerName);
+    expect(names).toEqual(expect.arrayContaining(["failingA", "failingB"]));
+    const messages = handlerErrorCalls.map(([, f]) => (f as any).error?.message);
+    expect(messages).toEqual(expect.arrayContaining(["err-a", "err-b"]));
+  });
+});
+```
+
+### nack-with-requeue behavior is unchanged under partial failure
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { RabbitMqEventBus } from "@noddde/rabbitmq";
+
+describe("RabbitMqEventBus error isolation", () => {
+  it("should call channel.nack(msg, false, true) when any handler fails (existing redelivery behavior is preserved)", async () => {
+    const nack = vi.fn();
+    const ack = vi.fn();
+    const mockChannel = {
+      assertExchange: vi.fn().mockResolvedValue(undefined),
+      assertQueue: vi.fn().mockResolvedValue({ queue: "test" }),
+      bindQueue: vi.fn().mockResolvedValue(undefined),
+      consume: vi.fn(),
+      ack,
+      nack,
+      prefetch: vi.fn(),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    (bus as any)._connection = {};
+    (bus as any)._channel = mockChannel;
+    (bus as any)._connected = true;
+
+    bus.on("E", vi.fn());
+    bus.on("E", async () => {
+      throw new Error("boom");
+    });
+
+    // Capture the consume callback to invoke it directly with a synthetic message.
+    let capturedCallback: ((msg: any) => Promise<void>) | undefined;
+    mockChannel.consume = vi.fn(async (_queue, cb) => {
+      capturedCallback = cb;
+      return { consumerTag: "tag" };
+    }) as any;
+
+    await (bus as any)._createSubscriptionForEvent("E");
+    expect(capturedCallback).toBeDefined();
+
+    const event = { name: "E", payload: {} };
+    const msg = {
+      content: Buffer.from(JSON.stringify(event)),
+      properties: { messageId: "m-1" },
+    };
+
+    await capturedCallback!(msg);
+
+    // Regression guard: nack with requeue=true on failure, ack is not called.
+    expect(nack).toHaveBeenCalledWith(msg, false, true);
+    expect(ack).not.toHaveBeenCalled();
   });
 });
 ```

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { NatsEventBus } from "@noddde/nats";
+import type { Logger } from "@noddde/core";
 
 describe("NatsEventBus", () => {
   it("should publish event to subject derived from event name", async () => {
@@ -619,5 +620,116 @@ describe("NatsEventBus", () => {
       expect.stringContaining("Handler error"),
       expect.objectContaining({ eventName: "TestEvent" }),
     );
+  });
+});
+
+// ### sibling handler completes when an earlier handler throws (Promise.allSettled)
+describe("NatsEventBus error isolation", () => {
+  it("should run every handler to completion even when an earlier one throws", async () => {
+    const bus = new NatsEventBus({
+      servers: "localhost:4222",
+      consumerGroup: "test-group",
+    });
+
+    const before = vi.fn();
+    const after = vi.fn();
+    bus.on("E", before);
+    bus.on("E", async () => {
+      throw new Error("boom");
+    });
+    bus.on("E", after);
+
+    await expect(
+      (bus as any)._handleMessage(
+        "E",
+        JSON.stringify({ name: "E", payload: {} }),
+      ),
+    ).rejects.toThrow();
+
+    expect(before).toHaveBeenCalledOnce();
+    expect(after).toHaveBeenCalledOnce();
+  });
+});
+
+// ### individual logging per failed handler with handlerName and error fields
+describe("NatsEventBus error isolation", () => {
+  it("should log once per failed handler with handlerName and error fields", async () => {
+    const logger: Logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      child: vi.fn().mockReturnThis(),
+    };
+    const bus = new NatsEventBus({
+      servers: "localhost:4222",
+      consumerGroup: "test-group",
+      logger,
+    });
+
+    async function failingA() {
+      throw new Error("err-a");
+    }
+    async function failingB() {
+      throw new Error("err-b");
+    }
+    bus.on("E", vi.fn());
+    bus.on("E", failingA);
+    bus.on("E", failingB);
+
+    await expect(
+      (bus as any)._handleMessage(
+        "E",
+        JSON.stringify({ name: "E", payload: {} }),
+      ),
+    ).rejects.toThrow();
+
+    const errorCalls = (logger.error as ReturnType<typeof vi.fn>).mock.calls;
+    const handlerErrorCalls = errorCalls.filter(
+      ([, fields]) => (fields as any)?.handlerName !== undefined,
+    );
+    expect(handlerErrorCalls).toHaveLength(2);
+    const names = handlerErrorCalls.map(([, f]) => (f as any).handlerName);
+    expect(names).toEqual(expect.arrayContaining(["failingA", "failingB"]));
+    const messages = handlerErrorCalls.map(
+      ([, f]) => (f as any).error?.message,
+    );
+    expect(messages).toEqual(expect.arrayContaining(["err-a", "err-b"]));
+  });
+});
+
+// ### nak behavior is unchanged under partial failure
+describe("NatsEventBus error isolation", () => {
+  it("should call msg.nak() when any handler fails (existing redelivery behavior is preserved)", async () => {
+    const bus = new NatsEventBus({
+      servers: "localhost:4222",
+      consumerGroup: "test-group",
+    });
+
+    bus.on("E", vi.fn());
+    bus.on("E", async () => {
+      throw new Error("boom");
+    });
+
+    const event = { name: "E", payload: {} };
+    const nak = vi.fn();
+    const ack = vi.fn();
+    const term = vi.fn();
+    const msg = {
+      data: new TextEncoder().encode(JSON.stringify(event)),
+      nak,
+      ack,
+      term,
+    };
+
+    const sub = (async function* () {
+      yield msg;
+    })();
+
+    await (bus as any)._consumeSubscription(sub, "E");
+
+    // Regression guard: nak is called on handler failure, ack is not.
+    expect(nak).toHaveBeenCalledOnce();
+    expect(ack).not.toHaveBeenCalled();
   });
 });

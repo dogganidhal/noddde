@@ -438,8 +438,16 @@ The key in the projections map (e.g., `"AccountBalance"`) is the projection's na
 
 The `EventBus` implementation determines delivery guarantees:
 
-- **`EventEmitterEventBus`** (built-in) -- In-process, sequentially awaited delivery. Events are delivered immediately after persistence. If a handler throws, the error propagates. Suitable for single-process applications and testing.
-- **Custom implementations** -- You can implement asynchronous delivery, at-least-once guarantees, or distributed event buses by providing your own `EventBus` implementation.
+- **`EventEmitterEventBus`** (built-in) -- In-process, sequentially awaited delivery. Events are delivered immediately after persistence. If a reducer (or any other eventual-consistency subscriber) throws, the failure is **isolated by the bus**: each failure is logged once with structured fields and sibling handlers still run. The originating command's `dispatch` is unaffected. Suitable for single-process applications and testing.
+- **Broker adapters (Kafka, NATS, RabbitMQ)** -- Same isolation contract per delivery; in addition, on any handler failure the transport schedules redelivery (skip offset commit, `msg.nak()`, `channel.nack(..., requeue=true)`). Consumers must be idempotent.
+- **Custom implementations** -- You can implement asynchronous delivery, at-least-once guarantees, or distributed event buses by providing your own `EventBus` implementation. Custom buses MUST honor the per-handler isolation invariant (see the [EventBus contract](/docs/running/event-bus-adapters#handler-error-isolation)).
+
+<Callout type="info">
+  Eventual-consistency reducers (`consistency: "eventual"`, the default) cannot
+  fail a command. If you need a reducer failure to roll back the command, use
+  `consistency: "strong"` — see [View Persistence — Consistency
+  Modes](/docs/read-model/view-persistence#consistency-modes).
+</Callout>
 
 ## Testing Reducers
 

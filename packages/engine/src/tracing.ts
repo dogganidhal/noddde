@@ -109,6 +109,21 @@ export class Instrumentation {
   }
 
   /**
+   * Returns the `traceId` and `spanId` from the currently active OpenTelemetry span.
+   * Both fields are absent (not `null`, not empty strings) when no span is active
+   * or when `@opentelemetry/api` is not installed in the host application.
+   * Used by EventBus implementations to enrich per-handler error log entries with
+   * log↔trace correlation fields.
+   */
+  getActiveTraceCorrelation(): { traceId?: string; spanId?: string } {
+    if (!this.otel) return {};
+    const span = this.otel.trace.getActiveSpan();
+    if (!span) return {};
+    const ctx = span.spanContext();
+    return { traceId: ctx.traceId, spanId: ctx.spanId };
+  }
+
+  /**
    * Extracts trace context from a carrier (typically event metadata) and
    * runs `fn` inside the restored context. If carrier has no traceparent,
    * runs `fn` in the current context as-is.
