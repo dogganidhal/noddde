@@ -1,4 +1,5 @@
 export * from "./domain";
+export * from "./projection-rebuild";
 export * from "./implementations/ee-event-bus";
 export * from "./implementations/in-memory-command-bus";
 export * from "./implementations/in-memory-query-bus";

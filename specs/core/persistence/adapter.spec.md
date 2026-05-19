@@ -12,14 +12,16 @@ depends_on:
   - core/persistence/snapshot
   - core/persistence/outbox
   - core/persistence/idempotency
+  - core/persistence/event-reader
   - core/infrastructure
 docs:
   - docs/content/docs/infrastructure/persistence-adapters.mdx
+  - docs/content/docs/read-model/projection-rebuild.mdx
 ---
 
 # Persistence Adapter Interface
 
-> A standard interface for database adapters that plug into `wireDomain`. Adapter implementations (Drizzle, Prisma, TypeORM, etc.) implement `PersistenceAdapter` to provide persistence stores, unit-of-work factories, snapshot stores, and other infrastructure. The engine resolves missing wiring from the adapter automatically, eliminating repetitive boilerplate. Community adapter authors implement this single interface to be compatible with the framework.
+> A standard interface for database adapters that plug into `wireDomain`. Adapter implementations (Drizzle, Prisma, TypeORM, etc.) implement `PersistenceAdapter` to provide persistence stores, unit-of-work factories, snapshot stores, and other infrastructure. The engine resolves missing wiring from the adapter automatically, eliminating repetitive boilerplate. Community adapter authors implement this single interface to be compatible with the framework. The optional `eventReader` capability enables [projection rebuild](../../engine/projection-rebuild.spec.md) on top of the adapter's event log.
 
 ## Type Contract
 
@@ -33,6 +35,7 @@ import type {
   OutboxStore,
   IdempotencyStore,
   AggregateLocker,
+  EventReader,
 } from "@noddde/core";
 
 /**
@@ -74,6 +77,19 @@ export interface PersistenceAdapter {
 
   /** Aggregate locker for pessimistic concurrency. Optional. */
   aggregateLocker?: AggregateLocker;
+
+  /**
+   * Global event-log reader. Optional — enables
+   * {@link Domain.rebuildProjection}. Adapters that store events in a
+   * single append-only log can implement this on the same class as
+   * `eventSourcedPersistence` or expose a dedicated reader.
+   *
+   * When absent, the engine falls back to checking whether the resolved
+   * event-sourced persistence structurally implements `EventReader` (the
+   * in-memory implementation does). When neither is available,
+   * `rebuildProjection` throws `EventReaderUnavailableError`.
+   */
+  eventReader?: EventReader;
 
   /**
    * Optional initialization hook. Called by `Domain.init()` before
@@ -150,6 +166,18 @@ export function isPersistenceAdapter(
 22. When `wiring.outbox.store` is not provided, the engine falls back to `adapter.outboxStore`.
 23. When `wiring.idempotency` is not provided, the engine falls back to `adapter.idempotencyStore`.
 
+### Event reader resolution
+
+23a. When `Domain.rebuildProjection` is called, the engine resolves an `EventReader` in this order:
+
+1. `adapter.eventReader` (if the adapter is present and provides one).
+2. The resolved event-sourced persistence — if the object structurally implements `EventReader` (has a callable `read` method).
+3. Throw `EventReaderUnavailableError`.
+
+23b. The adapter's `eventReader` and `eventSourcedPersistence` MAY be the same object (e.g., a class that implements both interfaces). The engine treats them as distinct capabilities — populating one does not automatically populate the other.
+
+23c. Providing `eventReader` is OPTIONAL even when sagas, snapshots, or other capabilities are wired. The engine only consults it during `rebuildProjection` — it is never required for command dispatch, query dispatch, or normal projection updates.
+
 ### Adapter lifecycle
 
 24. `adapter.init?.()` is called at the start of `Domain.init()`, after logger setup.
@@ -179,6 +207,8 @@ export function isPersistenceAdapter(
 - **Adapter without `aggregateLocker` + aggregate with `concurrency: 'pessimistic'`**: error at init time.
 - **Adapter without `sagaPersistence` + domain with sagas**: error at init time.
 - **Adapter without `snapshotStore` + aggregate with `snapshots: { strategy }`**: error at init time.
+- **Adapter without `eventReader` + `rebuildProjection` called**: if the wired event-sourced persistence does not structurally implement `EventReader` either, `rebuildProjection` throws `EventReaderUnavailableError` at the call site (not at init time — capability is only required when rebuild is invoked).
+- **Adapter with `eventReader` but no `eventSourcedPersistence`**: valid. State-stored aggregates can co-exist with a separate read-side event log used for projection rebuild (rare but allowed).
 - **`isPersistenceAdapter(null)`**: returns `false`.
 - **`isPersistenceAdapter({})`**: returns `false` (no `unitOfWorkFactory`).
 - **`isPersistenceAdapter({ unitOfWorkFactory: "not-a-function" })`**: returns `false`.
@@ -437,4 +467,33 @@ expect(wired).toBeDefined();
 const wired = await wireDomain(domain, {});
 
 expect(wired).toBeDefined();
+```
+
+### PersistenceAdapter accepts an optional EventReader
+
+```ts
+import { describe, it, expectTypeOf } from "vitest";
+import type { PersistenceAdapter, EventReader } from "@noddde/core";
+
+describe("PersistenceAdapter.eventReader", () => {
+  it("should accept an EventReader on the adapter", () => {
+    const reader: EventReader = {
+      read: () =>
+        (async function* () {})(),
+    };
+    const adapter: PersistenceAdapter = {
+      unitOfWorkFactory: { create: async () => null as any },
+      eventReader: reader,
+    };
+    expectTypeOf(adapter.eventReader).toEqualTypeOf<EventReader | undefined>();
+  });
+
+  it("should be optional", () => {
+    const adapter: PersistenceAdapter = {
+      unitOfWorkFactory: { create: async () => null as any },
+    };
+    expectTypeOf(adapter.eventReader).toEqualTypeOf<EventReader | undefined>();
+    expect(adapter.eventReader).toBeUndefined();
+  });
+});
 ```

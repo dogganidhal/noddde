@@ -9,6 +9,7 @@ import type { SnapshotStore } from "./snapshot";
 import type { OutboxStore } from "./outbox";
 import type { IdempotencyStore } from "./idempotency";
 import type { AggregateLocker } from "./aggregate-locker";
+import type { EventReader } from "./event-reader";
 
 /**
  * Standard interface for database persistence adapters.
@@ -51,6 +52,19 @@ export interface PersistenceAdapter {
 
   /** Aggregate locker for pessimistic concurrency. Optional. */
   aggregateLocker?: AggregateLocker;
+
+  /**
+   * Global event-log reader. Optional — enables
+   * {@link Domain.rebuildProjection}. Adapters that store events in a
+   * single append-only log can implement this on the same class as
+   * `eventSourcedPersistence` or expose a dedicated reader.
+   *
+   * When absent, the engine falls back to checking whether the resolved
+   * event-sourced persistence structurally implements `EventReader` (the
+   * in-memory implementation does). When neither is available,
+   * `rebuildProjection` throws `EventReaderUnavailableError`.
+   */
+  eventReader?: EventReader;
 
   /**
    * Optional initialization hook. Called by `Domain.init()` before

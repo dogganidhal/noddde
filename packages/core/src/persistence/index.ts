@@ -20,6 +20,7 @@ export type { OutboxEntry, OutboxStore } from "./outbox";
 export type { PersistenceAdapter } from "./adapter";
 export { isPersistenceAdapter } from "./adapter";
 export type { AggregateStateMapper } from "./aggregate-state-mapper";
+export type { EventReader, EventReadOptions } from "./event-reader";
 
 /**
  * Persistence strategy that stores the current aggregate state directly.

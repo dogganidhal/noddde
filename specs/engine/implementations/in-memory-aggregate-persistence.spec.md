@@ -8,20 +8,21 @@ exports:
     InMemoryEventSourcedAggregatePersistence,
     InMemoryStateStoredAggregatePersistence,
   ]
-depends_on: [engine/domain, edd/event]
+depends_on: [engine/domain, edd/event, core/persistence/event-reader]
 docs:
   - infrastructure/in-memory-implementations.mdx
+  - read-model/projection-rebuild.mdx
 ---
 
 # InMemoryAggregatePersistence
 
-> Two in-memory persistence implementations for aggregates: `InMemoryEventSourcedAggregatePersistence` stores event streams in a Map, and `InMemoryStateStoredAggregatePersistence` stores state snapshots in a Map. Both use a composite key of `(aggregateName, aggregateId)` for namespaced storage. Data is lost when the process exits. Suitable for development, testing, and prototyping.
+> Two in-memory persistence implementations for aggregates: `InMemoryEventSourcedAggregatePersistence` stores event streams in a Map, and `InMemoryStateStoredAggregatePersistence` stores state snapshots in a Map. Both use a composite key of `(aggregateName, aggregateId)` for namespaced storage. Data is lost when the process exits. The event-sourced implementation ALSO implements `EventReader`, enabling [projection rebuild](../projection-rebuild.spec.md) on the in-memory path without an explicit adapter. Suitable for development, testing, and prototyping.
 
 ## Type Contract
 
 ```ts
 class InMemoryEventSourcedAggregatePersistence
-  implements EventSourcedAggregatePersistence, PartialEventLoad
+  implements EventSourcedAggregatePersistence, PartialEventLoad, EventReader
 {
   load(aggregateName: string, aggregateId: string): Promise<Event[]>;
   save(
@@ -35,6 +36,7 @@ class InMemoryEventSourcedAggregatePersistence
     aggregateId: string,
     afterVersion: number,
   ): Promise<Event[]>;
+  read(options?: EventReadOptions): AsyncIterable<Event>;
 }
 
 class InMemoryStateStoredAggregatePersistence
@@ -55,6 +57,7 @@ class InMemoryStateStoredAggregatePersistence
 
 - Both implement their respective interfaces from `engine/domain`.
 - Both use `Promise`-based APIs for consistency with durable persistence implementations, even though the in-memory operations are synchronous.
+- `InMemoryEventSourcedAggregatePersistence` additionally implements `EventReader` so the in-memory development/test path supports `Domain.rebuildProjection` without requiring a separate adapter.
 
 ## Behavioral Requirements
 
@@ -67,6 +70,11 @@ class InMemoryStateStoredAggregatePersistence
 5. **Event ordering** -- Events are returned in the order they were appended across all `save` calls. If `save` is called twice with `[e1, e2]` then `[e3]`, `load` returns `[e1, e2, e3]`.
 6. **Concurrency error on version mismatch** -- If `expectedVersion !== currentStreamLength`, `save` throws `ConcurrencyError` with the aggregate name, ID, expected version, and actual version (stream length).
 7. **loadAfterVersion returns partial stream** -- `loadAfterVersion(name, id, afterVersion)` returns events starting at position `afterVersion` in the stream (0-indexed). Equivalent to `allEvents.slice(afterVersion)`. Returns `[]` if `afterVersion >= streamLength`. Returns all events if `afterVersion === 0`.
+8. **read() yields every persisted event** -- `read()` (no options) returns an `AsyncIterable<Event>` that yields every event in the internal map. The traversal order MUST be: iterate aggregate keys in `Map.prototype.entries` insertion order; for each key, yield its events in stored order (0..length-1). Each event MUST be yielded exactly once per `read()` call.
+9. **read({ aggregateName }) filters by aggregate name** -- When `options.aggregateName` is provided, `read()` MUST yield only events whose internal map key starts with `${aggregateName}:`. Events from other aggregate names MUST be skipped.
+10. **read({ after }) is not supported** -- The in-memory implementation does NOT support cursoring. When `options.after` is provided, `read()` MUST throw `new Error("EventReader: 'after' cursor is not supported by InMemoryEventSourcedAggregatePersistence")` from the first `next()` call of the returned iterator.
+11. **read() on empty store yields nothing** -- When no events have been saved, `read()` returns an iterable that immediately terminates.
+12. **read() and save() are concurrent-safe within a single async context** -- Iterating with `read()` while `save()` is awaiting in a parallel async task is undefined per the spec but MUST NOT corrupt internal state. The implementation MAY include or omit events saved during iteration; documentation recommends halting writes before iterating.
 
 ### InMemoryStateStoredAggregatePersistence
 
@@ -90,11 +98,16 @@ class InMemoryStateStoredAggregatePersistence
 - **Save with `undefined` state** -- For state-stored, `save(name, id, undefined)` stores `undefined`. `load` then returns `undefined`, which is indistinguishable from "not found". Callers should avoid this.
 - **Multiple aggregates with same ID but different names** -- Must be stored independently. `save("Order", "1", ...)` and `save("Account", "1", ...)` do not interfere.
 - **Large event streams** -- No limit on the number of events stored. Memory is the only constraint.
+- **read() before any save** -- Returns an iterable that immediately terminates (zero iterations).
+- **read({ aggregateName }) for an aggregate with no events** -- Returns an iterable that immediately terminates.
+- **read({ aggregateName }) with multiple matching aggregates** -- Yields events from every matching aggregate, in map insertion order.
+- **read({ after }) call** -- Throws on first `next()` because the cursor option is not supported.
 
 ## Integration Points
 
 - **Domain.init()** -- The domain receives the persistence instance from `DomainWiring.aggregates.persistence` and uses it for all aggregate load/save operations.
 - **Domain.dispatchCommand()** -- For event-sourced: loads the event stream, replays to rebuild state, executes the command handler, then saves new events. For state-stored: loads the snapshot, executes the handler, then saves the updated state.
+- **Domain.rebuildProjection()** -- Detects that `InMemoryEventSourcedAggregatePersistence` structurally implements `EventReader` (via `typeof persistence.read === "function"`) and uses it as the rebuild event source when no explicit `adapter.eventReader` is wired. No additional wiring required for in-memory development.
 
 ## Test Scenarios
 
@@ -444,6 +457,143 @@ describe("InMemoryStateStoredAggregatePersistence", () => {
     await expect(
       persistence.save("Account", "acc-1", { balance: 200 }, 0),
     ).rejects.toThrow(ConcurrencyError);
+  });
+});
+```
+
+### Event-sourced: read() yields every event in append order
+
+```ts
+import { describe, it, expect } from "vitest";
+import { InMemoryEventSourcedAggregatePersistence } from "@noddde/engine";
+
+describe("InMemoryEventSourcedAggregatePersistence.read", () => {
+  it("should yield every persisted event in insertion order", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+
+    await persistence.save(
+      "Account",
+      "acc-1",
+      [
+        { name: "AccountCreated", payload: { id: "acc-1" } },
+        { name: "DepositMade", payload: { amount: 50 } },
+      ],
+      0,
+    );
+    await persistence.save(
+      "Account",
+      "acc-2",
+      [
+        { name: "AccountCreated", payload: { id: "acc-2" } },
+        { name: "DepositMade", payload: { amount: 75 } },
+      ],
+      0,
+    );
+
+    const collected: string[] = [];
+    for await (const event of persistence.read()) {
+      collected.push(event.name);
+    }
+
+    expect(collected).toEqual([
+      "AccountCreated",
+      "DepositMade",
+      "AccountCreated",
+      "DepositMade",
+    ]);
+  });
+});
+```
+
+### Event-sourced: read() filters by aggregateName
+
+```ts
+import { describe, it, expect } from "vitest";
+import { InMemoryEventSourcedAggregatePersistence } from "@noddde/engine";
+
+describe("InMemoryEventSourcedAggregatePersistence.read aggregateName filter", () => {
+  it("should yield only events from aggregates matching the filter", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+
+    await persistence.save(
+      "Order",
+      "o-1",
+      [{ name: "OrderPlaced", payload: { id: "o-1" } }],
+      0,
+    );
+    await persistence.save(
+      "Account",
+      "a-1",
+      [{ name: "AccountCreated", payload: { id: "a-1" } }],
+      0,
+    );
+
+    const names: string[] = [];
+    for await (const event of persistence.read({ aggregateName: "Order" })) {
+      names.push(event.name);
+    }
+
+    expect(names).toEqual(["OrderPlaced"]);
+  });
+});
+```
+
+### Event-sourced: read() on empty store yields nothing
+
+```ts
+import { describe, it, expect } from "vitest";
+import { InMemoryEventSourcedAggregatePersistence } from "@noddde/engine";
+
+describe("InMemoryEventSourcedAggregatePersistence.read empty store", () => {
+  it("should produce an iterable that immediately terminates", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+
+    let count = 0;
+    for await (const _ of persistence.read()) count++;
+    expect(count).toBe(0);
+  });
+});
+```
+
+### Event-sourced: read({ after }) throws
+
+```ts
+import { describe, it, expect } from "vitest";
+import { InMemoryEventSourcedAggregatePersistence } from "@noddde/engine";
+
+describe("InMemoryEventSourcedAggregatePersistence.read after cursor", () => {
+  it("should throw when an after cursor is provided", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+    await persistence.save(
+      "Order",
+      "o-1",
+      [{ name: "OrderPlaced", payload: {} }],
+      0,
+    );
+
+    const iterator = persistence
+      .read({
+        after: { aggregateName: "Order", aggregateId: "o-1", version: 0 },
+      })
+      [Symbol.asyncIterator]();
+
+    await expect(iterator.next()).rejects.toThrow(
+      /'after' cursor is not supported/,
+    );
+  });
+});
+```
+
+### Event-sourced: implements EventReader structurally
+
+```ts
+import { describe, it, expect } from "vitest";
+import { InMemoryEventSourcedAggregatePersistence } from "@noddde/engine";
+
+describe("InMemoryEventSourcedAggregatePersistence EventReader shape", () => {
+  it("should expose a callable read() method (duck-typed EventReader)", () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+    expect(typeof (persistence as { read?: unknown }).read).toBe("function");
   });
 });
 ```

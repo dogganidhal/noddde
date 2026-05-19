@@ -11,7 +11,7 @@ docs:
 
 # InMemoryViewStore
 
-> In-memory `ViewStore` implementation that stores projection views in a `Map`, keyed by `String(viewId)`. Data is lost when the process exits. Implements the full `ViewStore` contract — `save`, `load`, and `delete`. Includes convenience methods `findAll()` and `find(predicate)` for development and testing. Suitable for development, testing, and prototyping. For production, use a durable store (TypeORM, Prisma, Drizzle adapters, or custom).
+> In-memory `ViewStore` implementation that stores projection views in a `Map`, keyed by `String(viewId)`. Data is lost when the process exits. Implements the full `ViewStore` contract — `save`, `load`, `delete`, and `truncate`. Includes convenience methods `findAll()` and `find(predicate)` for development and testing. The `truncate` method clears the internal map and is required to participate in [projection rebuild](../projection-rebuild.spec.md). Suitable for development, testing, and prototyping. For production, use a durable store (TypeORM, Prisma, Drizzle adapters, or custom).
 
 ## Type Contract
 
@@ -22,6 +22,7 @@ export class InMemoryViewStore<TView> implements ViewStore<TView> {
   save(viewId: ID, view: TView): Promise<void>;
   load(viewId: ID): Promise<TView | undefined>;
   delete(viewId: ID): Promise<void>;
+  truncate(): Promise<void>;
 
   /** Returns all stored views. Convenience for testing. */
   findAll(): Promise<TView[]>;
@@ -31,10 +32,11 @@ export class InMemoryViewStore<TView> implements ViewStore<TView> {
 }
 ```
 
-- Implements the `ViewStore<TView>` interface from `@noddde/core`.
+- Implements the `ViewStore<TView>` interface from `@noddde/core`, including the optional `truncate` method.
 - `load` returns `undefined` (not `null`) when no view exists for the given key.
 - `save` overwrites the entire view for the given viewId.
 - `delete` removes the entry for the given viewId. Idempotent — never throws on missing keys.
+- `truncate` clears every entry in the internal `Map`. Idempotent — calling on an empty store is a no-op.
 - `findAll` and `find` are convenience methods not on the base `ViewStore` interface.
 
 ## Behavioral Requirements
@@ -48,6 +50,9 @@ export class InMemoryViewStore<TView> implements ViewStore<TView> {
 7. **find filters by predicate** -- `find(predicate)` returns all stored views for which `predicate(view)` returns `true`.
 8. **Delete removes the entry** -- `delete(viewId)` removes the entry from the internal `Map` keyed by `String(viewId)`. After `delete`, a subsequent `load(viewId)` returns `undefined`.
 9. **Delete is idempotent** -- `delete(viewId)` resolves successfully whether or not the entry existed; it never throws.
+10. **Truncate clears every entry** -- `truncate()` removes ALL entries from the internal `Map`. After `truncate`, `findAll()` returns `[]` and `load(viewId)` returns `undefined` for every previously stored `viewId`.
+11. **Truncate is idempotent** -- `truncate()` resolves successfully whether or not the store contained entries; it never throws.
+12. **Truncate leaves the store usable** -- After `truncate()`, subsequent `save(viewId, view)` calls succeed and store views as if the instance were freshly constructed.
 
 ## Invariants
 
@@ -72,12 +77,16 @@ export class InMemoryViewStore<TView> implements ViewStore<TView> {
 - **Delete then load** -- `load(viewId)` returns `undefined` after `delete(viewId)` for a previously stored view.
 - **Delete then save** -- `save(viewId, view)` after `delete(viewId)` stores the new view fresh; subsequent `load(viewId)` returns the new view.
 - **Delete with numeric ID after save with string ID** -- `delete(42)` removes the entry stored via `save("42", ...)` thanks to `String()` coercion.
+- **Truncate on empty store** -- Resolves successfully without error. `findAll()` returns `[]` before and after.
+- **Truncate then findAll** -- After `truncate()`, `findAll()` returns `[]` regardless of how many views were stored before.
+- **Truncate then save then load** -- After `truncate()`, a subsequent `save("k", v)` and `load("k")` round-trips correctly.
 
 ## Integration Points
 
 - **Domain.init()** -- View stores are resolved during domain initialization from projection `viewStore` factories.
 - **Projection event handling** -- When an event arrives for a projection with `identity`: (1) derive viewId via `identity[eventName](event)`, (2) `load(viewId)`, (3) if `undefined`, use `initialView`, (4) run reducer, (5) if reducer returned `DeleteView`, call `delete(viewId)`; otherwise call `save(viewId, newView)`.
 - **Query handler infrastructure** -- The resolved view store is injected as `{ views }` into query handler infrastructure. Query handlers may call `views.delete(viewId)` directly when needed.
+- **Projection rebuild** -- `Domain.rebuildProjection` calls `viewStore.truncate()` before replaying the event log. The in-memory store's `truncate` implementation makes the rebuild path work out-of-the-box for development and tests.
 
 ## Test Scenarios
 
@@ -363,6 +372,64 @@ describe("InMemoryViewStore save after delete", () => {
     await store.save("k", { value: 2 });
 
     expect(await store.load("k")).toEqual({ value: 2 });
+  });
+});
+```
+
+### truncate clears every stored view
+
+```ts
+import { describe, it, expect } from "vitest";
+import { InMemoryViewStore } from "@noddde/engine";
+
+describe("InMemoryViewStore truncate", () => {
+  it("should remove every stored view", async () => {
+    const store = new InMemoryViewStore<{ n: number }>();
+
+    await store.save("a", { n: 1 });
+    await store.save("b", { n: 2 });
+    await store.save("c", { n: 3 });
+
+    await store.truncate();
+
+    expect(await store.load("a")).toBeUndefined();
+    expect(await store.load("b")).toBeUndefined();
+    expect(await store.load("c")).toBeUndefined();
+    expect(await store.findAll()).toEqual([]);
+  });
+});
+```
+
+### truncate is idempotent
+
+```ts
+import { describe, it, expect } from "vitest";
+import { InMemoryViewStore } from "@noddde/engine";
+
+describe("InMemoryViewStore truncate idempotency", () => {
+  it("should resolve successfully on an empty store", async () => {
+    const store = new InMemoryViewStore<{ id: string }>();
+    await expect(store.truncate()).resolves.toBeUndefined();
+    await expect(store.truncate()).resolves.toBeUndefined();
+  });
+});
+```
+
+### truncate leaves the store usable
+
+```ts
+import { describe, it, expect } from "vitest";
+import { InMemoryViewStore } from "@noddde/engine";
+
+describe("InMemoryViewStore truncate then save", () => {
+  it("should support save/load after truncation", async () => {
+    const store = new InMemoryViewStore<{ value: number }>();
+
+    await store.save("a", { value: 1 });
+    await store.truncate();
+    await store.save("a", { value: 99 });
+
+    expect(await store.load("a")).toEqual({ value: 99 });
   });
 });
 ```

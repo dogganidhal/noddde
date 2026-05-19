@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, expectTypeOf } from "vitest";
+import type { PersistenceAdapter, EventReader } from "@noddde/core";
 import { isPersistenceAdapter } from "@noddde/core";
 
 describe("isPersistenceAdapter", () => {
@@ -62,5 +63,26 @@ describe("isPersistenceAdapter", () => {
     expect(isPersistenceAdapter({ unitOfWorkFactory: 42 })).toBe(false);
     expect(isPersistenceAdapter({ unitOfWorkFactory: null })).toBe(false);
     expect(isPersistenceAdapter({ unitOfWorkFactory: {} })).toBe(false);
+  });
+});
+
+describe("PersistenceAdapter.eventReader", () => {
+  it("should accept an EventReader on the adapter", () => {
+    const reader: EventReader = {
+      read: () => (async function* () {})(),
+    };
+    const adapter: PersistenceAdapter = {
+      unitOfWorkFactory: { create: async () => null as any },
+      eventReader: reader,
+    };
+    expectTypeOf(adapter.eventReader).toEqualTypeOf<EventReader | undefined>();
+  });
+
+  it("should be optional", () => {
+    const adapter: PersistenceAdapter = {
+      unitOfWorkFactory: { create: async () => null as any },
+    };
+    expectTypeOf(adapter.eventReader).toEqualTypeOf<EventReader | undefined>();
+    expect(adapter.eventReader).toBeUndefined();
   });
 });

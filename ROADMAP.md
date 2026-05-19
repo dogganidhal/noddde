@@ -36,8 +36,8 @@ _These items must be completed to guarantee state consistency and developer ergo
   - `@noddde/cli` with 5 commands: `new project`, `new domain`, `new aggregate`, `new projection`, `new saga`. Project-aware generators auto-place files in the correct layered structure. Extracted handlers (command-handlers, query-handlers, view-reducers, transition-handlers) keep files focused as domains grow.
 - [ ] **Type System Stress Testing**
   - Formal benchmarks for the type inference bundles to ensure IDE performance and TS compilation remain instant even with large domains.
-- [ ] **Projection Rebuild API**
-  - A standardized utility to truncate a read-model and safely replay the entire event store through a specific projection.
+- [x] **Projection Rebuild API**
+  - `Domain.rebuildProjection(name, options?)` detaches the projection's live subscriptions, truncates its view store, and replays the entire event log through its `on` map handlers — with typed projection-name inference, 5 typed error classes, and an `EventReader` capability adapters opt into via `PersistenceAdapter.eventReader` or by structurally implementing `read()` on their event-sourced persistence.
 
 ---
 

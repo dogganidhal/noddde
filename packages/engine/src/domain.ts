@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type {
   Aggregate,
   AggregateCommand,
+  AsyncEventHandler,
   Command,
   CQRSInfrastructure,
   Event,
@@ -104,6 +105,19 @@ import {
   PerAggregatePersistenceResolver,
 } from "./aggregate-persistence-resolver";
 import type { AggregatePersistenceResolver } from "./aggregate-persistence-resolver";
+import type { RebuildContext } from "./projection-rebuild";
+import {
+  EventReaderUnavailableError,
+  MissingViewStoreFactoryError,
+  ProjectionNotFoundError,
+  StrongConsistencyRebuildError,
+  ViewStoreNotTruncatableError,
+  rebuildProjectionImpl,
+} from "./projection-rebuild";
+import type {
+  ProjectionRebuildOptions,
+  ProjectionRebuildResult,
+} from "./projection-rebuild";
 
 type AggregateMap = Record<string | symbol, Aggregate<any>>;
 
@@ -488,6 +502,7 @@ export class Domain<
   TStandaloneQuery extends Query<any> = Query<any>,
   TAggregateCommand extends AggregateCommand<any> = AggregateCommand<any>,
   TProjectionQuery extends Query<any> = Query<any>,
+  TProjections extends ProjectionMap = ProjectionMap,
 > {
   private _infrastructure!: TInfrastructure &
     CQRSInfrastructure &
@@ -506,6 +521,21 @@ export class Domain<
   private _drainResolve: (() => void) | null = null;
   /** All resolved infrastructure components for auto-close discovery. */
   private _allComponents: unknown[] = [];
+  /**
+   * Registry of event-bus handler references for eventual-consistency
+   * projections, keyed projectionName → eventName → handler.
+   * Populated during init() step 10 and consumed by rebuildProjection().
+   */
+  private readonly _projectionSubscriptions = new Map<
+    string,
+    Map<string, AsyncEventHandler>
+  >();
+  /** Persistence resolver. Used for EventReader structural fallback during rebuildProjection. */
+  private _persistenceResolver?: AggregatePersistenceResolver;
+  /** Resolved view store factories keyed by projection name. Populated during init(). */
+  private _resolvedViewStoreFactories?: Map<string, ViewStoreFactory>;
+  /** Resolved projections keyed by projection name. Populated during init(). */
+  private _resolvedProjections?: Map<string, Projection<any>>;
   /** The fully resolved infrastructure (custom + CQRS buses + framework logger). */
   public get infrastructure(): TInfrastructure &
     CQRSInfrastructure &
@@ -850,6 +880,9 @@ export class Domain<
       this._instrumentation,
     );
 
+    // Store the persistence resolver for EventReader structural fallback in rebuildProjection.
+    this._persistenceResolver = persistenceResolver;
+
     // Step 5.9: Resolve view stores for projections.
     // Each wiring entry must supply a ViewStoreFactory. The engine caches
     // getForContext(undefined) as the "base" non-transactional instance for
@@ -859,6 +892,8 @@ export class Domain<
     const resolvedViewStores = new Map<string, ViewStore>();
     const resolvedViewStoreFactories = new Map<string, ViewStoreFactory>();
     const resolvedProjections = new Map<string, Projection<any>>();
+    this._resolvedViewStoreFactories = resolvedViewStoreFactories;
+    this._resolvedProjections = resolvedProjections;
     for (const [name, projection] of Object.entries(
       definition.readModel.projections,
     )) {
@@ -1145,7 +1180,7 @@ export class Domain<
         if (!handler?.id) continue;
         const pName = projectionName;
         const instr = this._instrumentation;
-        this.subscribeToEvent(eventBus, eventName, async (event: Event) => {
+        const boundHandler = async (event: Event): Promise<void> => {
           const runProjection = async (): Promise<void> => {
             const viewId = handler.id(event);
             const currentView =
@@ -1173,7 +1208,17 @@ export class Domain<
               runProjection,
             ),
           );
-        });
+        };
+
+        // Record in subscription registry for rebuildProjection detach/re-attach
+        if (!this._projectionSubscriptions.has(projectionName)) {
+          this._projectionSubscriptions.set(projectionName, new Map());
+        }
+        this._projectionSubscriptions
+          .get(projectionName)!
+          .set(eventName, boundHandler);
+
+        this.subscribeToEvent(eventBus, eventName, boundHandler);
       }
     }
 
@@ -1555,6 +1600,104 @@ export class Domain<
       this._releaseOperation();
     }
   }
+
+  /**
+   * Rebuilds the named projection from the event log.
+   *
+   * Truncates the projection's view store and replays the entire event log
+   * through its `on` map handlers, restoring the views to a consistent
+   * state derived solely from the event log. v1 supports eventual-consistency
+   * projections only. The caller is responsible for halting writes during
+   * the rebuild window.
+   *
+   * @throws {@link ProjectionNotFoundError} unknown name
+   * @throws {@link StrongConsistencyRebuildError} projection is strong-consistency
+   * @throws {@link MissingViewStoreFactoryError} no viewStore wired
+   * @throws {@link EventReaderUnavailableError} no EventReader resolvable
+   * @throws {@link ViewStoreNotTruncatableError} viewStore lacks truncate()
+   */
+  public async rebuildProjection<TName extends keyof TProjections & string>(
+    name: TName,
+    options: ProjectionRebuildOptions = {},
+  ): Promise<ProjectionRebuildResult> {
+    if (this._shuttingDown) {
+      throw new DomainShutdownError();
+    }
+    if (!this._infrastructure) {
+      throw new Error(
+        "Domain not initialized. Call init() before rebuildProjection().",
+      );
+    }
+
+    const projection = this._resolvedProjections?.get(name);
+    if (!projection) {
+      throw new ProjectionNotFoundError(name);
+    }
+
+    if (projection.consistency === "strong") {
+      throw new StrongConsistencyRebuildError(name);
+    }
+
+    const factory = this._resolvedViewStoreFactories?.get(name);
+    if (!factory) {
+      throw new MissingViewStoreFactoryError(name);
+    }
+
+    const baseStore = factory.getForContext(undefined);
+
+    // Resolve EventReader: adapter.eventReader first, then structural fallback.
+    let eventReader: import("@noddde/core").EventReader | undefined =
+      this.wiring.persistenceAdapter?.eventReader;
+
+    if (!eventReader && this._persistenceResolver) {
+      const aggregateNames = Object.keys(this.definition.writeModel.aggregates);
+      for (const aggName of aggregateNames) {
+        try {
+          const p = this._persistenceResolver.resolve(aggName);
+          if (typeof (p as { read?: unknown }).read === "function") {
+            eventReader = p as unknown as import("@noddde/core").EventReader;
+            break;
+          }
+        } catch {
+          // resolver may throw for unknown names; continue
+        }
+      }
+    }
+
+    if (!eventReader) {
+      throw new EventReaderUnavailableError();
+    }
+
+    if (typeof (baseStore as { truncate?: unknown }).truncate !== "function") {
+      throw new ViewStoreNotTruncatableError(name);
+    }
+
+    if (
+      options.progressInterval !== undefined &&
+      (!Number.isInteger(options.progressInterval) ||
+        options.progressInterval <= 0)
+    ) {
+      throw new RangeError(
+        `progressInterval must be a positive integer, got ${options.progressInterval}`,
+      );
+    }
+
+    const logger =
+      options.logger ?? this._infrastructure.logger.child("projection-rebuild");
+
+    const ctx: RebuildContext = {
+      projectionName: name,
+      projection,
+      viewStore: baseStore,
+      viewStoreFactory: factory,
+      eventReader,
+      eventBus: this._infrastructure.eventBus,
+      subscriptionRegistry: this._projectionSubscriptions,
+      logger,
+    };
+
+    return rebuildProjectionImpl(ctx, options);
+  }
 }
 
 /**
@@ -1679,7 +1822,8 @@ export type InferDomain<
   ExtractStandaloneCommand<TDef>,
   ExtractStandaloneQuery<TDef>,
   InferAggregateMapCommands<ExtractAggregates<TDef>>,
-  InferProjectionMapQueries<ExtractProjections<TDef>>
+  InferProjectionMapQueries<ExtractProjections<TDef>>,
+  ExtractProjections<TDef>
 >;
 
 export const wireDomain = async <
@@ -1701,7 +1845,8 @@ export const wireDomain = async <
     TStandaloneCommand,
     TStandaloneQuery,
     InferAggregateMapCommands<TAggregates>,
-    InferProjectionMapQueries<TProjections>
+    InferProjectionMapQueries<TProjections>,
+    TProjections
   >
 > => {
   // Determine if aggregates wiring is per-aggregate or global
@@ -1729,7 +1874,8 @@ export const wireDomain = async <
     TStandaloneCommand,
     TStandaloneQuery,
     InferAggregateMapCommands<TAggregates>,
-    InferProjectionMapQueries<TProjections>
+    InferProjectionMapQueries<TProjections>,
+    TProjections
   >(
     definition as DomainDefinition<
       TInfrastructure,

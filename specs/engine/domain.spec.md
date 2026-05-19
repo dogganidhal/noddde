@@ -2,7 +2,7 @@
 title: "Domain Definition & Wiring"
 module: engine/domain
 source_file: packages/engine/src/domain.ts
-status: ready
+status: implemented
 exports:
   [
     Domain,
@@ -22,6 +22,7 @@ depends_on:
   - engine/implementations/in-memory-aggregate-persistence
   - engine/implementations/in-memory-saga-persistence
   - engine/aggregate-persistence-resolver
+  - engine/projection-rebuild
   - engine/executors/command-lifecycle-executor
   - engine/executors/saga-executor
   - engine/executors/metadata-enricher
@@ -41,6 +42,7 @@ docs:
   - domain-configuration/write-model.mdx
   - domain-configuration/read-model.mdx
   - domain-configuration/infrastructure.mdx
+  - read-model/projection-rebuild.mdx
 ---
 
 # Domain Definition & Wiring
@@ -260,7 +262,8 @@ const wireDomain: <
     TStandaloneCommand,
     TStandaloneQuery,
     InferAggregateMapCommands<TAggregates>,
-    InferProjectionMapQueries<TProjections>
+    InferProjectionMapQueries<TProjections>,
+    TProjections
   >
 >;
 
@@ -279,6 +282,7 @@ class Domain<
   TStandaloneQuery extends Query<any> = Query<any>,
   TAggregateCommand extends AggregateCommand<any> = AggregateCommand<any>,
   TProjectionQuery extends Query<any> = Query<any>,
+  TProjections extends ProjectionMap = ProjectionMap,
 > {
   /** The fully resolved infrastructure (custom + CQRS buses + framework logger). */
   get infrastructure(): TInfrastructure &
@@ -304,6 +308,20 @@ class Domain<
   dispatchQuery<TQuery extends TProjectionQuery | TStandaloneQuery>(
     query: TQuery,
   ): Promise<QueryResult<TQuery>>;
+
+  /**
+   * Rebuilds the named projection from the event log. The projection name is
+   * a typed union of the projections registered in the enclosing domain
+   * definition — passing an unknown name is a compile-time error.
+   *
+   * v1 supports eventual-consistency projections only and requires the
+   * caller to halt writes during the rebuild window. See
+   * `specs/engine/projection-rebuild.spec.md` for the full contract.
+   */
+  rebuildProjection<TName extends keyof TProjections & string>(
+    name: TName,
+    options?: ProjectionRebuildOptions,
+  ): Promise<ProjectionRebuildResult>;
 }
 ```
 
@@ -436,6 +454,16 @@ The `dispatchQuery` method delegates query dispatch to the underlying query bus:
 2. **Return** -- Return the result from the query bus.
 
 `dispatchQuery` is a thin convenience wrapper. It performs no validation, error wrapping, or routing logic beyond delegation. Error propagation, handler lookup, and routing are the responsibility of the query bus implementation.
+
+### Domain.rebuildProjection() -- Projection Rebuild
+
+`rebuildProjection<TName extends keyof TProjections & string>(name, options?)` truncates a projection's view store and replays the entire event log through its `on` map handlers.
+
+1. **Typed name parameter** -- `TName` is constrained to `keyof TProjections & string`. The `TProjections` generic on `Domain` is inferred from `definition.readModel.projections` by `wireDomain` (sixth type parameter). Unknown names produce a `TS2345` error at the call site; runtime checks defend against `any`-typed callers.
+2. **Delegation to projection-rebuild helper** -- The method delegates the full pipeline (validation, subscription detach, truncate, replay, subscription re-attach) to the helper defined in `specs/engine/projection-rebuild.spec.md`. The helper consumes the Domain's internal projection registry (`resolvedProjections`, `resolvedViewStoreFactories`), the event bus handle, the projection-subscription registry (populated at init step 11), the wired `PersistenceAdapter.eventReader` (if any), and the resolved event-sourced persistence (for the structural-fallback path).
+3. **Subscription registry** -- `init()` step 11 (event listener registration for eventual-consistency projections) MUST additionally record, for each `(projectionName, eventName)` pair, the precise handler function reference registered on the event bus. This registry is stored on the `Domain` instance and read by `rebuildProjection` to detach and re-attach subscriptions atomically. Strong-consistency projections are NOT recorded — they have no event-bus subscriptions to manage.
+4. **Pre-init / post-shutdown guards** -- `rebuildProjection` throws `DomainShutdownError` once `_shuttingDown` is true (same as `dispatchCommand`/`dispatchQuery`). If called before `init()`, throws `Error("Domain not initialized")`.
+5. **TProjections threading** -- `Domain`'s sixth generic `TProjections extends ProjectionMap = ProjectionMap` defaults to the open `ProjectionMap` type so that legacy callers that omitted the generic (or used `Domain<...>` with five generics) compile unchanged. `wireDomain` AND `InferDomain` MUST pass `ExtractProjections<TDef>` as the sixth argument. Existing call sites that do not explicitly construct `Domain<...>` literals are unaffected.
 
 ### Domain.startOutboxRelay() / stopOutboxRelay() / processOutboxOnce() -- Outbox Lifecycle
 

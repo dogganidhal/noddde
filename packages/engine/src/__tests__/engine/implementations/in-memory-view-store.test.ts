@@ -172,3 +172,40 @@ describe("InMemoryViewStore save after delete", () => {
     expect(await store.load("k")).toEqual({ value: 2 });
   });
 });
+
+describe("InMemoryViewStore truncate", () => {
+  it("should remove every stored view", async () => {
+    const store = new InMemoryViewStore<{ n: number }>();
+
+    await store.save("a", { n: 1 });
+    await store.save("b", { n: 2 });
+    await store.save("c", { n: 3 });
+
+    await store.truncate();
+
+    expect(await store.load("a")).toBeUndefined();
+    expect(await store.load("b")).toBeUndefined();
+    expect(await store.load("c")).toBeUndefined();
+    expect(await store.findAll()).toEqual([]);
+  });
+});
+
+describe("InMemoryViewStore truncate idempotency", () => {
+  it("should resolve successfully on an empty store", async () => {
+    const store = new InMemoryViewStore<{ id: string }>();
+    await expect(store.truncate()).resolves.toBeUndefined();
+    await expect(store.truncate()).resolves.toBeUndefined();
+  });
+});
+
+describe("InMemoryViewStore truncate then save", () => {
+  it("should support save/load after truncation", async () => {
+    const store = new InMemoryViewStore<{ value: number }>();
+
+    await store.save("a", { value: 1 });
+    await store.truncate();
+    await store.save("a", { value: 99 });
+
+    expect(await store.load("a")).toEqual({ value: 99 });
+  });
+});

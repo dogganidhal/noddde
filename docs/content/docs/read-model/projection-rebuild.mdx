@@ -1,0 +1,324 @@
+---
+title: Projection Rebuild
+description: Rebuild a projection's view store from the event log — for schema migrations, projection bug fixes, corrupted views, and new fields.
+---
+
+A projection is just a function of the event log. If you change the function — fix a bug, add a field, migrate the view schema — the existing views are stale. `Domain.rebuildProjection` is the framework's first-class capability for fixing that: it truncates the projection's view store, replays every persisted event through the projection's `on` map handlers, and re-attaches live subscriptions when finished.
+
+This is the same code path live projections use, just driven by the persisted event log instead of the live event bus. Result: a view store equivalent to running the events through the projection from scratch.
+
+## When to Rebuild
+
+Rebuild whenever the projection function changes or the views diverge from the event log:
+
+- **Schema migration.** You added a column to the view (e.g. `lastSeenAt`) and want to backfill it from history.
+- **Projection bug fix.** A reducer had an off-by-one, dropped events, or wrote the wrong value. The events are correct; the views are not.
+- **New fields from existing events.** A new field is derivable from event payloads already in the log — no need for a new aggregate.
+- **Corrupted views.** An adapter migration left stale rows behind; rebuild clears them and rebuilds only what the log supports.
+- **New projections built on old data.** When you add a projection after the system has been running, rebuild populates it with the full history.
+
+Do **not** rebuild for a hot-path issue that needs a live fix — rebuild is an operational tool, not a runtime feature.
+
+## The API
+
+```ts
+class Domain<...> {
+  rebuildProjection<TName extends keyof TProjections & string>(
+    name: TName,
+    options?: ProjectionRebuildOptions,
+  ): Promise<ProjectionRebuildResult>;
+}
+```
+
+`name` is constrained to the projection names registered in the enclosing `defineDomain` call — passing an unknown name is a TypeScript compile error. (For loosely typed callers — dynamic loaders, ops scripts that take a string from the CLI — a runtime `ProjectionNotFoundError` is the last line of defense.)
+
+```ts title="Minimal usage"
+import { wireDomain } from "@noddde/engine";
+
+const domain = await wireDomain(domainDefinition, {
+  /* ... persistenceAdapter, projections, etc. */
+});
+
+const result = await domain.rebuildProjection("AccountBalance");
+
+console.log(result);
+// {
+//   projectionName: "AccountBalance",
+//   eventsRead: 12_408,
+//   eventsApplied: 8_204,    // <= eventsRead; the rest didn't match the on map
+//   viewsDeleted: 12,         // <= eventsApplied; DeleteView returns
+//   durationMs: 4_117,
+// }
+```
+
+### ProjectionRebuildOptions
+
+```ts
+interface ProjectionRebuildOptions {
+  logger?: Logger;
+  progressInterval?: number;
+  onProgress?: (progress: { eventsApplied: number }) => void | Promise<void>;
+}
+```
+
+- **`logger`** — Override the rebuild logger. Defaults to `domain.infrastructure.logger.child("projection-rebuild")`.
+- **`progressInterval`** — How many _applied_ events between `onProgress` ticks. Must be a positive integer; defaults to `1000`. The counter is `eventsApplied`, not `eventsRead` — events not matched by the projection's `on` map do not tick the callback.
+- **`onProgress`** — Invoked inside the replay loop and awaited. Slow callbacks throttle the rebuild but do not lose events. A throw aborts the rebuild and propagates after subscriptions re-attach.
+
+```ts title="With progress callback"
+await domain.rebuildProjection("OrderSummary", {
+  progressInterval: 5_000,
+  onProgress: async ({ eventsApplied }) => {
+    await metrics.gauge("projection.rebuild.applied", eventsApplied, {
+      projection: "OrderSummary",
+    });
+  },
+});
+```
+
+### ProjectionRebuildResult
+
+```ts
+interface ProjectionRebuildResult {
+  projectionName: string;
+  eventsRead: number; // total events the EventReader yielded
+  eventsApplied: number; // events the projection's on map handled
+  viewsDeleted: number; // reducers that returned DeleteView
+  durationMs: number; // wall-clock validation→re-attach
+}
+```
+
+Counters obey: `eventsRead >= eventsApplied >= viewsDeleted >= 0`.
+
+## What Rebuild Does (And Doesn't Do)
+
+The rebuild pipeline, in order:
+
+1. **Validate.** Resolve the projection by name, reject `consistency: "strong"`, resolve the view store factory, resolve an `EventReader` (see below), check that the view store has a `truncate()` method.
+2. **Detach subscriptions.** Remove the projection's specific event-bus handlers so they don't fire mid-replay.
+3. **Truncate.** Call `viewStore.truncate()` to clear the view universe atomically.
+4. **Replay.** Iterate the full event log (via `EventReader.read()`). For each event whose name appears in the projection's `on` map: derive `viewId`, load the current view (or use `initialView`), run the reducer, save or delete the new view, tick `onProgress` every `progressInterval` events.
+5. **Re-attach subscriptions.** Always — in a `finally` block, even on failure — so live event flow resumes.
+
+A successful rebuild leaves the view store in a state equivalent to running the same event log through the projection from scratch. A failed rebuild leaves subscriptions re-attached but the view store partially rebuilt — callers should retry the rebuild (after halting writes).
+
+### What rebuild explicitly does **not** do
+
+- **It does not pause aggregate writes.** v1 of the API requires the **caller** to ensure no commands are dispatched while a rebuild is in flight. Concurrent writes during a rebuild produce undefined results — the truncate races the in-flight UoW, the replay races new events being persisted, and the post-rebuild views can drift from the log. The framework's roadmap includes serialized rebuild and per-projection pause primitives; v1 is intentionally simple.
+- **It does not rebuild strong-consistency projections.** Strong-consistency projections write inside the aggregate's UoW; rebuilding them safely requires holding write locks across the entire log. v1 throws `StrongConsistencyRebuildError` before any I/O for these projections. To migrate a strong-consistency projection, switch it to eventual consistency for the rebuild window, rebuild, then switch back — or do it during a maintenance window with all writers stopped.
+- **It does not serialize concurrent rebuilds of the same projection.** Calling `rebuildProjection("X")` twice in parallel is undefined. Rebuilds of _different_ projections are independent and safe to run concurrently.
+- **It does not enforce idempotency.** Rebuild does not consult `idempotencyStore` — it's replaying persisted history, not re-handling commands. Reducers must already be deterministic (they were when the projection was running).
+
+## Halting Writes
+
+The simplest pattern: stop the process that issues commands, rebuild, restart.
+
+```ts title="Ops script"
+// Stop your command-producing service (e.g., your HTTP server).
+// Then run:
+const domain = await wireDomain(definition, wiring);
+await domain.rebuildProjection("AccountBalance", {
+  onProgress: ({ eventsApplied }) =>
+    console.log(`applied ${eventsApplied} events`),
+});
+await domain.shutdown();
+// Restart your service.
+```
+
+If you cannot stop writes (e.g., a 24/7 system with no acceptable downtime), the standard workaround is **shadow rebuild**:
+
+1. Wire a _second_ view store factory pointed at a fresh table or namespace.
+2. Configure a temporary projection definition pointed at the new factory.
+3. Run `rebuildProjection` against the temporary projection.
+4. When complete, swap the live read path to point at the new table (atomic rename, dual-write cutover, or feature flag).
+
+The framework does not yet automate shadow rebuild; the building blocks are there (per-projection `viewStore` wiring), and the pattern is mechanical.
+
+## Errors
+
+`rebuildProjection` throws one of five typed errors during validation — before any I/O:
+
+| Error                           | When                                                                                                              | Catch with                                 |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `ProjectionNotFoundError`       | The name is not registered in the domain definition. (Compile-time guarded for typed callers; runtime for `any`.) | `instanceof ProjectionNotFoundError`       |
+| `StrongConsistencyRebuildError` | The projection has `consistency: "strong"`. v1 rejects these.                                                     | `instanceof StrongConsistencyRebuildError` |
+| `MissingViewStoreFactoryError`  | `DomainWiring.projections[name].viewStore` is not set. Without a target store, rebuild is meaningless.            | `instanceof MissingViewStoreFactoryError`  |
+| `EventReaderUnavailableError`   | No `EventReader` is resolvable from the wired adapter or the event-sourced persistence.                           | `instanceof EventReaderUnavailableError`   |
+| `ViewStoreNotTruncatableError`  | The view store has no `truncate()` method. Adapter authors should add it.                                         | `instanceof ViewStoreNotTruncatableError`  |
+
+A `RangeError` is thrown when `progressInterval` is not a positive integer.
+
+`DomainShutdownError` is thrown if `rebuildProjection` is called after `domain.shutdown()`.
+
+All five projection errors carry the `projectionName` (where relevant) and a `readonly name` literal field for narrowing. Ops scripts can branch on each.
+
+```ts title="Defensive ops script"
+import {
+  EventReaderUnavailableError,
+  ProjectionNotFoundError,
+  ViewStoreNotTruncatableError,
+} from "@noddde/engine";
+
+try {
+  await domain.rebuildProjection(name);
+} catch (err) {
+  if (err instanceof ProjectionNotFoundError) {
+    process.exit(2);
+  }
+  if (err instanceof EventReaderUnavailableError) {
+    console.error("Adapter does not expose an EventReader. Cannot rebuild.");
+    process.exit(3);
+  }
+  if (err instanceof ViewStoreNotTruncatableError) {
+    console.error("View store has no truncate(). Upgrade the adapter.");
+    process.exit(4);
+  }
+  throw err;
+}
+```
+
+## Resolving the EventReader
+
+Rebuild reads from an `EventReader` — a read-only, append-order capability for streaming events from the log. The framework resolves it in this order:
+
+1. **`persistenceAdapter.eventReader`** if you wired one explicitly on the adapter.
+2. **Structural fallback** on the resolved event-sourced persistence — any persistence object with a callable `read()` method is treated as an `EventReader`. The in-memory `InMemoryEventSourcedAggregatePersistence` ships this out of the box, so rebuild works in development and tests with no extra wiring.
+3. If neither is found, `EventReaderUnavailableError`.
+
+```ts
+interface EventReader {
+  read(options?: EventReadOptions): AsyncIterable<Event>;
+}
+
+interface EventReadOptions {
+  aggregateName?: string;
+  after?: { aggregateName: string; aggregateId: ID; version: number };
+}
+```
+
+v1 of the engine always calls `read({})` — the options are reserved for adapters that want to ship filtering and cursoring ahead of engine consumers.
+
+### A Worked Example (Banking Domain)
+
+Suppose you have an `AccountBalance` projection that mis-handled an early `DepositMade` event — it added the amount instead of subtracting a fee. The events are correct; the live views are not.
+
+```ts title="Fix the reducer"
+const AccountBalance = defineProjection<AccountBalanceTypes>({
+  on: {
+    AccountCreated: {
+      id: (e) => e.payload.accountId,
+      reduce: (e) => ({ id: e.payload.accountId, balance: 0 }),
+    },
+    DepositMade: {
+      id: (e) => e.payload.accountId,
+      reduce: (e, view) => ({
+        ...view!,
+        // Fix: subtract the fee that should have been there all along.
+        balance: view!.balance + e.payload.amount - e.payload.fee,
+      }),
+    },
+  },
+  queryHandlers: { GetBalance: getBalance },
+});
+```
+
+After deploying the fix, the in-flight views are still wrong (they were built with the buggy reducer). Run:
+
+```ts title="ops/rebuild-account-balance.ts"
+import { wireDomain } from "@noddde/engine";
+import { bankingDomain } from "../src/domain";
+import { wiring } from "../src/wiring";
+
+async function main() {
+  const domain = await wireDomain(bankingDomain, wiring);
+
+  console.log("Halting writers…");
+  // (Stop your command-producing service first.)
+
+  const result = await domain.rebuildProjection("AccountBalance", {
+    progressInterval: 1_000,
+    onProgress: ({ eventsApplied }) =>
+      console.log(`  applied ${eventsApplied} events`),
+  });
+
+  console.log(`Rebuilt in ${result.durationMs}ms:`, result);
+  await domain.shutdown();
+}
+
+main().catch((err) => {
+  console.error("Rebuild failed:", err);
+  process.exit(1);
+});
+```
+
+After this completes, every `AccountBalance` view in the store reflects the corrected reducer applied to the full event history.
+
+## For Adapter Authors
+
+To make your adapter participate in rebuild, implement two capabilities:
+
+### 1. `ViewStore.truncate()`
+
+Add a `truncate()` method to your `ViewStore` implementation:
+
+```ts
+async truncate(): Promise<void> {
+  // Clear every view managed by this store. Must be atomic enough that
+  // the store reaches an empty state — typically a single DELETE FROM
+  // <table> or DROP/recreate for very large tables.
+  await this.client.delete(this.table).execute();
+}
+```
+
+Contract requirements:
+
+- **Total** — remove every view, not just one.
+- **Idempotent** — calling on an empty store must succeed.
+- **Scope-bounded** — clear only this projection's view universe. Do not touch other projections' tables or shared rows.
+
+When `truncate()` is absent, `rebuildProjection` throws `ViewStoreNotTruncatableError` before any I/O.
+
+### 2. `EventReader`
+
+Either implement `EventReader` directly on your event-sourced persistence class (so the structural fallback picks it up automatically) or expose it explicitly on the adapter:
+
+```ts title="Implementing directly on persistence"
+class PostgresEventSourcedPersistence
+  implements EventSourcedAggregatePersistence, EventReader
+{
+  async *read(options?: EventReadOptions): AsyncIterable<Event> {
+    // Stream events from a server-side cursor; don't materialize the
+    // whole log in memory.
+    const cursor = await this.client.cursor(/* ... SQL ... */);
+    for await (const row of cursor) {
+      yield toEvent(row);
+    }
+  }
+  // ... save, load, etc.
+}
+```
+
+```ts title="Exposing explicitly on the adapter"
+class PostgresAdapter implements PersistenceAdapter {
+  unitOfWorkFactory = /* ... */;
+  eventSourcedPersistence = new PostgresEventSourcedPersistence(this.client);
+  eventReader = new PostgresEventReader(this.client);
+  // ...
+}
+```
+
+Contract requirements for `read()`:
+
+- **Per-aggregate ordering** — events from the same `(aggregateName, aggregateId)` MUST yield in version order.
+- **Cross-aggregate ordering** is adapter-defined but stable for a single call.
+- **Single-pass** — each event yielded at most once per `read()` call.
+- **No side effects.**
+- **Stream from storage** — adapters SHOULD use cursors / paged queries / change feeds rather than buffering the full log in memory.
+
+See [`specs/core/persistence/event-reader.spec.md`](https://github.com/dogganidhal/noddde/blob/main/specs/core/persistence/event-reader.spec.md) for the full contract.
+
+## See Also
+
+- [Projections](/docs/read-model/projections) — how projections are defined and wired.
+- [View Persistence](/docs/read-model/view-persistence) — the `ViewStore` interface and consistency strategies.
+- [Domain Configuration](/docs/running/domain-configuration) — wiring projections via `DomainWiring`.

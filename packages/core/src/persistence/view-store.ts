@@ -52,6 +52,18 @@ export interface ViewStore<TView = any> {
    * @param viewId - The unique identifier of the view instance to delete.
    */
   delete(viewId: ID): Promise<void>;
+
+  /**
+   * Optional: removes every view managed by this store, leaving it empty.
+   *
+   * Used by {@link Domain.rebuildProjection} to clear stale views before
+   * replaying the event log. Implementations that cannot atomically clear
+   * their backing storage SHOULD NOT implement this method — the engine
+   * detects its absence and refuses rebuild with a clear error.
+   *
+   * Idempotent: truncating an already-empty store is a no-op.
+   */
+  truncate?(): Promise<void>;
 }
 
 /**
