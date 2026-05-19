@@ -2,13 +2,13 @@ import { describe, it, expect } from "vitest";
 import {
   DeleteView,
   defineAggregate,
+  defineDomain,
   defineProjection,
   type DefineEvents,
   type DefineCommands,
   type DefineQueries,
 } from "@noddde/core";
 import {
-  defineDomain,
   wireDomain,
   InMemoryViewStoreFactory,
   ProjectionNotFoundError,

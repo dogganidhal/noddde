@@ -1342,9 +1342,8 @@ describe("DeleteView idempotency", () => {
 ```ts
 import { describe, expect, it, vi } from "vitest";
 import type { DefineCommands, DefineEvents, DefineQueries } from "@noddde/core";
-import { defineAggregate, defineProjection } from "@noddde/core";
+import { defineAggregate, defineDomain, defineProjection } from "@noddde/core";
 import {
-  defineDomain,
   EventEmitterEventBus,
   InMemoryCommandBus,
   InMemoryEventSourcedAggregatePersistence,
@@ -1469,9 +1468,8 @@ describe("Eventual-consistency projection error isolation", () => {
 ```ts
 import { describe, expect, it, vi } from "vitest";
 import type { DefineCommands, DefineEvents, DefineQueries } from "@noddde/core";
-import { defineAggregate, defineProjection } from "@noddde/core";
+import { defineAggregate, defineDomain, defineProjection } from "@noddde/core";
 import {
-  defineDomain,
   EventEmitterEventBus,
   InMemoryCommandBus,
   InMemoryEventSourcedAggregatePersistence,
