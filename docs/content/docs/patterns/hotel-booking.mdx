@@ -610,8 +610,8 @@ The domain configuration uses `defineDomain` to capture the pure domain structur
 ```ts
 // src/main.ts
 import { DrizzleAdapter } from "@noddde/drizzle";
+import { defineDomain } from "@noddde/core";
 import {
-  defineDomain,
   wireDomain,
   InMemoryCommandBus,
   InMemoryQueryBus,

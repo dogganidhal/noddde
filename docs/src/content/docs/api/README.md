@@ -46,6 +46,7 @@ title: "@noddde/core"
 
 - [AggregateTypes](/api/type-aliases/aggregatetypes/)
 - [DecideHandler](/api/type-aliases/decidehandler/)
+- [DomainDefinition](/api/type-aliases/domaindefinition/)
 - [EvolveHandler](/api/type-aliases/evolvehandler/)
 - [DefineCommands](/api/type-aliases/definecommands/)
 - [DefineEvents](/api/type-aliases/defineevents/)
@@ -84,6 +85,7 @@ title: "@noddde/core"
 ## Functions
 
 - [defineAggregate](/api/functions/defineaggregate/)
+- [defineDomain](/api/functions/definedomain/)
 - [defineProjection](/api/functions/defineprojection/)
 - [defineSaga](/api/functions/definesaga/)
 - [everyNEvents](/api/functions/everynevents/)

@@ -130,8 +130,8 @@ export const FlashSaleItem = defineAggregate<FlashSaleItemTypes>({
 ## Domain Configuration
 
 ```ts
+import { defineDomain } from "@noddde/core";
 import {
-  defineDomain,
   wireDomain,
   InMemoryCommandBus,
   InMemoryQueryBus,

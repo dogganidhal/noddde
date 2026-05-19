@@ -74,7 +74,7 @@ The module is registered as `@Global()` — you can inject the `Domain` from any
 Use `InferDomain` to derive a fully typed `Domain` from your definition. This gives you type-safe `dispatchCommand()` and `dispatchQuery()` — command names, payloads, and query results are all narrowed at compile time:
 
 ```ts title="src/domain/index.ts"
-import { defineDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
 import type { InferDomain } from "@noddde/nestjs";
 import { Order, Inventory } from "./aggregates";
 import { OrderSummary } from "./projections";

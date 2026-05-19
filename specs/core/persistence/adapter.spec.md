@@ -272,7 +272,8 @@ expect(isPersistenceAdapter({ unitOfWorkFactory: "not-a-function" })).toBe(
 ### Adapter defaults resolve for aggregate persistence
 
 ```ts
-import { defineDomain, wireDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain } from "@noddde/engine";
 import type { PersistenceAdapter } from "@noddde/core";
 
 // Minimal aggregate for testing

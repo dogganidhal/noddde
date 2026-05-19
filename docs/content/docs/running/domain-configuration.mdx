@@ -20,10 +20,10 @@ This separation allows domain definitions to be shared, tested, and analyzed ind
 
 ## Defining the Domain
 
-`defineDomain` is a sync identity function -- it returns the input unchanged with full type inference. Consistent with `defineAggregate`, `defineProjection`, `defineSaga`.
+`defineDomain` is a sync identity function -- it returns the input unchanged with full type inference. Consistent with `defineAggregate`, `defineProjection`, `defineSaga`. It lives in `@noddde/core` (and is re-exported from `@noddde/engine` for backward compatibility).
 
 ```ts
-import { defineDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
 
 const bankingDomain = defineDomain({
   writeModel: {
@@ -504,8 +504,8 @@ When a saga dispatches commands in response to an event, the engine automaticall
 Here is a full domain configuration for a banking application using `defineDomain` + `wireDomain`:
 
 ```ts
+import { defineDomain } from "@noddde/core";
 import {
-  defineDomain,
   wireDomain,
   EventEmitterEventBus,
   InMemoryCommandBus,

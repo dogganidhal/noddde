@@ -1,11 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   wireDomain,
-  defineDomain,
   DomainShutdownError,
   InMemoryOutboxStore,
 } from "@noddde/engine";
-import { defineAggregate } from "@noddde/core";
+import { defineAggregate, defineDomain } from "@noddde/core";
 import type { Closeable } from "@noddde/core";
 
 describe("Domain.shutdown", () => {

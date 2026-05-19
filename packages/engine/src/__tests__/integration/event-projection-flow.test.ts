@@ -4,10 +4,10 @@ import type { DefineCommands, DefineEvents, DefineQueries } from "@noddde/core";
 import {
   createViewStoreFactory,
   defineAggregate,
+  defineDomain,
   defineProjection,
 } from "@noddde/core";
 import {
-  defineDomain,
   wireDomain,
   EventEmitterEventBus,
   InMemoryCommandBus,

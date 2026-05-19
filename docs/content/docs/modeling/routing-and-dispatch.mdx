@@ -10,7 +10,8 @@ When you call `domain.dispatchCommand()`, the framework executes a deterministic
 The entry point for all command processing is `domain.dispatchCommand()`. You pass a command object with a `name`, a `targetAggregateId`, and optionally a `payload`:
 
 ```typescript
-import { defineDomain, wireDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain } from "@noddde/engine";
 
 const bankingDomain = defineDomain({
   // ... definition

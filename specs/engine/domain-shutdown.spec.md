@@ -122,7 +122,8 @@ class Domain<TInfrastructure, TStandaloneCommand, TStandaloneQuery> {
 
 ```ts
 import { describe, it, expect } from "vitest";
-import { wireDomain, defineDomain, DomainShutdownError } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain, DomainShutdownError } from "@noddde/engine";
 import { defineAggregate } from "@noddde/core";
 
 describe("Domain.shutdown", () => {
@@ -168,7 +169,8 @@ describe("Domain.shutdown", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
-import { wireDomain, defineDomain, DomainShutdownError } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain, DomainShutdownError } from "@noddde/engine";
 
 describe("Domain.shutdown", () => {
   it("should reject queries after shutdown", async () => {
@@ -192,7 +194,8 @@ describe("Domain.shutdown", () => {
 
 ```ts
 import { describe, it, expect, vi } from "vitest";
-import { wireDomain, defineDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain } from "@noddde/engine";
 import { defineAggregate } from "@noddde/core";
 
 describe("Domain.shutdown", () => {
@@ -271,7 +274,8 @@ describe("Domain.shutdown", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
-import { wireDomain, defineDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain } from "@noddde/engine";
 
 describe("Domain.shutdown", () => {
   it("should return the same promise when called twice", async () => {
@@ -297,7 +301,8 @@ describe("Domain.shutdown", () => {
 
 ```ts
 import { describe, it, expect, vi } from "vitest";
-import { wireDomain, defineDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain } from "@noddde/engine";
 import type { Closeable } from "@noddde/core";
 
 describe("Domain.shutdown", () => {
@@ -331,7 +336,8 @@ describe("Domain.shutdown", () => {
 
 ```ts
 import { describe, it, expect, vi } from "vitest";
-import { wireDomain, defineDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain } from "@noddde/engine";
 
 describe("Domain.shutdown", () => {
   it("should close infrastructure in reverse order", async () => {
@@ -374,7 +380,8 @@ describe("Domain.shutdown", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
-import { wireDomain, defineDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain } from "@noddde/engine";
 import { defineAggregate } from "@noddde/core";
 
 describe("Domain.shutdown", () => {
@@ -419,7 +426,8 @@ describe("Domain.shutdown", () => {
 
 ```ts
 import { describe, it, expect, vi } from "vitest";
-import { wireDomain, defineDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain } from "@noddde/engine";
 
 describe("Domain.shutdown", () => {
   it("should continue closing remaining infrastructure if one close() throws", async () => {
@@ -466,7 +474,8 @@ describe("Domain.shutdown", () => {
 
 ```ts
 import { describe, it, expect, vi } from "vitest";
-import { wireDomain, defineDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain } from "@noddde/engine";
 import { defineAggregate } from "@noddde/core";
 
 describe("Domain.shutdown", () => {
@@ -526,7 +535,8 @@ describe("Domain.shutdown", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
-import { wireDomain, defineDomain, DomainShutdownError } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain, DomainShutdownError } from "@noddde/engine";
 
 describe("Domain.shutdown", () => {
   it("should reject withUnitOfWork calls after shutdown", async () => {
@@ -550,7 +560,8 @@ describe("Domain.shutdown", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
-import { wireDomain, defineDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain } from "@noddde/engine";
 
 describe("Domain.shutdown", () => {
   it("should resolve immediately when no operations are in-flight", async () => {
@@ -591,7 +602,8 @@ describe("DomainShutdownError", () => {
 
 ```ts
 import { describe, it, expect, vi } from "vitest";
-import { wireDomain, defineDomain, InMemoryOutboxStore } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain, InMemoryOutboxStore } from "@noddde/engine";
 import { defineAggregate } from "@noddde/core";
 import type { Event } from "@noddde/core";
 

@@ -3,11 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import type { DefineCommands, DefineEvents, Event } from "@noddde/core";
 import {
   defineAggregate,
+  defineDomain,
   defineEventUpcasterChain,
   defineUpcasters,
+  everyNEvents,
 } from "@noddde/core";
 import {
-  defineDomain,
   wireDomain,
   EventEmitterEventBus,
   InMemoryCommandBus,
@@ -15,7 +16,6 @@ import {
   InMemoryQueryBus,
   InMemorySnapshotStore,
 } from "@noddde/engine";
-import { everyNEvents } from "@noddde/core";
 
 // ---- V2 aggregate: current schema has `status` on Created ----
 

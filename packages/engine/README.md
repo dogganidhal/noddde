@@ -16,7 +16,7 @@ npm install @noddde/core @noddde/engine
 
 `@noddde/engine` provides:
 
-- **Domain orchestration** (`defineDomain`, `wireDomain`) to compose aggregates, projections, and sagas into a running domain
+- **Domain orchestration** (`wireDomain`) to compose aggregates, projections, and sagas into a running domain (the `defineDomain` structural helper lives in `@noddde/core` and is re-exported here for backward compatibility)
 - **In-memory implementations** for all infrastructure contracts: command bus, query bus, event bus, aggregate persistence, saga persistence, snapshot store, outbox store, unit of work, locking, and idempotency
 - **Outbox relay** for reliable event publishing
 - **Logger** with pluggable backends
@@ -26,7 +26,8 @@ The in-memory implementations are useful for development, testing, and prototypi
 ## Usage
 
 ```typescript
-import { defineDomain, wireDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain } from "@noddde/engine";
 import { BankAccount } from "./aggregates/bank-account";
 import { BalanceProjection } from "./projections/balance";
 

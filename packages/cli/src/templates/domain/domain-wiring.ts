@@ -3,7 +3,7 @@ import type { EventBusAdapter } from "../../utils/event-bus.js";
 
 /** Template for domain/domain.ts — defineDomain() call. */
 export function domainDefinitionTemplate(ctx: TemplateContext): string {
-  return `import { defineDomain } from "@noddde/engine";
+  return `import { defineDomain } from "@noddde/core";
 import { ${ctx.name} } from "./write-model/aggregates/${ctx.kebabName}/index.js";
 import { ${ctx.name}Projection } from "./read-model/projections/${ctx.kebabName}/index.js";
 import type { ${ctx.name}Infrastructure } from "../infrastructure/index.js";

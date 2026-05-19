@@ -1,7 +1,8 @@
 /* eslint-disable no-unused-vars */
 import { describe, it, expect } from "vitest";
 import { expectTypeOf } from "vitest";
-import { defineDomain, wireDomain, Domain } from "../../domain";
+import { wireDomain, Domain } from "../../domain";
+import { defineDomain } from "@noddde/core";
 import { InMemoryViewStoreFactory } from "../../implementations/in-memory-view-store-factory";
 import {
   defineAggregate,

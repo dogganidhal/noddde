@@ -1168,9 +1168,13 @@ describe("Reducer return type with DeleteView", () => {
 ```ts
 import { describe, expect, it, vi } from "vitest";
 import type { DefineCommands, DefineEvents, DefineQueries } from "@noddde/core";
-import { DeleteView, defineAggregate, defineProjection } from "@noddde/core";
 import {
+  DeleteView,
+  defineAggregate,
   defineDomain,
+  defineProjection,
+} from "@noddde/core";
+import {
   EventEmitterEventBus,
   InMemoryCommandBus,
   InMemoryEventSourcedAggregatePersistence,
@@ -1338,9 +1342,8 @@ describe("DeleteView idempotency", () => {
 ```ts
 import { describe, expect, it, vi } from "vitest";
 import type { DefineCommands, DefineEvents, DefineQueries } from "@noddde/core";
-import { defineAggregate, defineProjection } from "@noddde/core";
+import { defineAggregate, defineDomain, defineProjection } from "@noddde/core";
 import {
-  defineDomain,
   EventEmitterEventBus,
   InMemoryCommandBus,
   InMemoryEventSourcedAggregatePersistence,
@@ -1465,9 +1468,8 @@ describe("Eventual-consistency projection error isolation", () => {
 ```ts
 import { describe, expect, it, vi } from "vitest";
 import type { DefineCommands, DefineEvents, DefineQueries } from "@noddde/core";
-import { defineAggregate, defineProjection } from "@noddde/core";
+import { defineAggregate, defineDomain, defineProjection } from "@noddde/core";
 import {
-  defineDomain,
   EventEmitterEventBus,
   InMemoryCommandBus,
   InMemoryEventSourcedAggregatePersistence,
@@ -1564,9 +1566,13 @@ describe("Strong-consistency projection error propagation", () => {
 ```ts
 import { describe, expect, it, vi } from "vitest";
 import type { DefineCommands, DefineEvents, DefineQueries } from "@noddde/core";
-import { DeleteView, defineAggregate, defineProjection } from "@noddde/core";
 import {
+  DeleteView,
+  defineAggregate,
   defineDomain,
+  defineProjection,
+} from "@noddde/core";
+import {
   EventEmitterEventBus,
   InMemoryCommandBus,
   InMemoryEventSourcedAggregatePersistence,

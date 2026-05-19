@@ -57,7 +57,8 @@ Key differences from aggregate decide handlers:
 Standalone command handlers are registered in the `writeModel.standaloneCommandHandlers` map of your domain configuration:
 
 ```typescript
-import { defineDomain, wireDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain } from "@noddde/engine";
 
 const bankingDomain = defineDomain({
   writeModel: {

@@ -1,9 +1,8 @@
 /* eslint-disable no-unused-vars */
 import { describe, expect, it, vi } from "vitest";
 import type { DefineCommands, DefineEvents } from "@noddde/core";
-import { defineSaga } from "@noddde/core";
+import { defineDomain, defineSaga } from "@noddde/core";
 import {
-  defineDomain,
   wireDomain,
   EventEmitterEventBus,
   InMemoryCommandBus,

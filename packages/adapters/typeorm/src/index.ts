@@ -70,7 +70,8 @@ export interface TypeORMPersistenceInfrastructure {
  *   NodddeSagaStateEntity,
  *   NodddeSnapshotEntity,
  * } from "@noddde/typeorm";
- * import { defineDomain, wireDomain } from "@noddde/engine";
+ * import { defineDomain } from "@noddde/core";
+ * import { wireDomain } from "@noddde/engine";
  *
  * const dataSource = new DataSource({
  *   type: "sqlite",

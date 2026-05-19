@@ -195,7 +195,8 @@ const AccountProjection = defineProjection<AccountProjectionDef>({
 
 ```ts title="domain.ts"
 // In domain wiring -- a ViewStoreFactory is provided here
-import { defineDomain, wireDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain } from "@noddde/engine";
 import { PrismaAccountViewStoreFactory } from "./infrastructure/prisma-account-view-store-factory";
 
 const definition = defineDomain({

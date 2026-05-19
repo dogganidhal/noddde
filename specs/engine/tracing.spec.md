@@ -472,7 +472,8 @@ import type {
   DefineQueries,
   Infrastructure,
 } from "@noddde/core";
-import { defineDomain, wireDomain, InMemoryViewStore } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain, InMemoryViewStore } from "@noddde/engine";
 
 type CounterEvents = DefineEvents<{
   Incremented: { counterId: string };
@@ -605,7 +606,8 @@ import type {
   Infrastructure,
   CQRSInfrastructure,
 } from "@noddde/core";
-import { defineDomain, wireDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain } from "@noddde/engine";
 
 type OrderEvents = DefineEvents<{
   OrderPlaced: { orderId: string };

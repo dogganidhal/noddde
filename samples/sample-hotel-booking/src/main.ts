@@ -14,8 +14,8 @@
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { DrizzleAdapter } from "@noddde/drizzle";
+import { defineDomain } from "@noddde/core";
 import {
-  defineDomain,
   wireDomain,
   EventEmitterEventBus,
   InMemoryCommandBus,

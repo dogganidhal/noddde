@@ -21,8 +21,8 @@ import {
   NodddeSnapshotEntity,
   NodddeOutboxEntryEntity,
 } from "@noddde/typeorm";
+import { defineDomain } from "@noddde/core";
 import {
-  defineDomain,
   wireDomain,
   EventEmitterEventBus,
   InMemoryCommandBus,

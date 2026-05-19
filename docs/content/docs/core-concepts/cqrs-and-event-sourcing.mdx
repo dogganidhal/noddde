@@ -39,7 +39,8 @@ The write model is where domain logic lives. Its primary building blocks are **a
 In the domain definition, the write model is declared under the `writeModel` key:
 
 ```typescript
-import { defineDomain, wireDomain } from "@noddde/engine";
+import { defineDomain } from "@noddde/core";
+import { wireDomain } from "@noddde/engine";
 
 const bankingDomain = defineDomain({
   writeModel: {

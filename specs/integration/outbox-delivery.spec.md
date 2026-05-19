@@ -46,9 +46,8 @@ docs:
 ```ts
 import { describe, it, expect, vi } from "vitest";
 import type { DefineCommands, DefineEvents } from "@noddde/core";
-import { defineAggregate } from "@noddde/core";
+import { defineAggregate, defineDomain } from "@noddde/core";
 import {
-  defineDomain,
   wireDomain,
   InMemoryOutboxStore,
   InMemoryEventSourcedAggregatePersistence,
