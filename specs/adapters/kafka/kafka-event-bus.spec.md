@@ -103,7 +103,8 @@ export class KafkaEventBus implements EventBus, Connectable {
    - `handlerName: string` — read from the handler's `name` property; falls back to `event.name` when anonymous.
    - `error: { name, message, stack? }` — extracted from the caught exception. Non-`Error` rejection values are coerced via `String(value)` into `message`.
    - `traceId?: string` and `spanId?: string` — populated from the active OpenTelemetry span via the configured `Instrumentation` instance. Absent when no span is active or when `@opentelemetry/api` is not installed.
-   9b. **maxRetries delivery limit** -- If `resilience.maxRetries` is configured, track delivery attempts using a custom Kafka header (`x-noddde-delivery-count`). On each message receipt, read the header, increment it, and check against `maxRetries`. If the count exceeds `maxRetries`, log a warning and commit the offset (skip the message). This prevents handler-level poison messages from blocking the partition indefinitely.
+     9b. **maxRetries delivery limit** -- If `resilience.maxRetries` is configured, track delivery attempts using a custom Kafka header (`x-noddde-delivery-count`). On each message receipt, read the header, increment it, and check against `maxRetries`. If the count exceeds `maxRetries`, log a warning and commit the offset (skip the message). This prevents handler-level poison messages from blocking the partition indefinitely.
+
 10. **Explicit offset commit after handlers** -- The consumer is configured with `autoCommit: false` in `consumer.run()`. After all handlers for a message have completed successfully (all promises in the `Promise.all` resolved), the offset is committed explicitly via `consumer.commitOffsets([{ topic, partition, offset: nextOffset }])` where `nextOffset` is `message.offset + 1` (as a string). This provides at-least-once delivery. Without explicit `commitOffsets()`, offsets are never persisted to Kafka and every consumer restart would reprocess all messages. After committing, the delivery count entry for this offset is pruned from the `_deliveryCounts` map to prevent unbounded memory growth.
 
 ### Backpressure
@@ -392,7 +393,10 @@ describe("KafkaEventBus error isolation", () => {
     bus.on("E", after);
 
     await expect(
-      (bus as any)._handleMessage("E", JSON.stringify({ name: "E", payload: {} })),
+      (bus as any)._handleMessage(
+        "E",
+        JSON.stringify({ name: "E", payload: {} }),
+      ),
     ).rejects.toThrow();
 
     expect(before).toHaveBeenCalledOnce();
@@ -435,7 +439,10 @@ describe("KafkaEventBus error isolation", () => {
     bus.on("E", failingB);
 
     await expect(
-      (bus as any)._handleMessage("E", JSON.stringify({ name: "E", payload: {} })),
+      (bus as any)._handleMessage(
+        "E",
+        JSON.stringify({ name: "E", payload: {} }),
+      ),
     ).rejects.toThrow();
 
     const errorCalls = (logger.error as ReturnType<typeof vi.fn>).mock.calls;
@@ -446,7 +453,9 @@ describe("KafkaEventBus error isolation", () => {
     expect(handlerErrorCalls).toHaveLength(2);
     const names = handlerErrorCalls.map(([, f]) => (f as any).handlerName);
     expect(names).toEqual(expect.arrayContaining(["failingA", "failingB"]));
-    const messages = handlerErrorCalls.map(([, f]) => (f as any).error?.message);
+    const messages = handlerErrorCalls.map(
+      ([, f]) => (f as any).error?.message,
+    );
     expect(messages).toEqual(expect.arrayContaining(["err-a", "err-b"]));
   });
 });

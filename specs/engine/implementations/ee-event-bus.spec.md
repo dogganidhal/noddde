@@ -5,12 +5,7 @@ source_file: packages/engine/src/implementations/ee-event-bus.ts
 status: ready
 exports: [EventEmitterEventBus, EventEmitterEventBusConfig]
 depends_on:
-  [
-    edd/event-bus,
-    edd/event,
-    infrastructure/closeable,
-    infrastructure/logger,
-  ]
+  [edd/event-bus, edd/event, infrastructure/closeable, infrastructure/logger]
 docs:
   - infrastructure/in-memory-implementations.mdx
 ---
@@ -106,12 +101,12 @@ class EventEmitterEventBus implements EventBus {
 
 This is a **breaking change** from the previous version:
 
-| Aspect               | Before                                         | After                                                |
-| -------------------- | ---------------------------------------------- | ---------------------------------------------------- |
-| Handler argument     | `payload` only                                 | Full `Event` object (`{ name, payload, metadata? }`) |
-| Dispatch semantics   | Fire-and-forget (`emit` + resolve immediately) | Sequential await with per-handler isolation          |
-| Handler registration | Direct `EventEmitter.on`                       | `bus.on(eventName, handler)` method                  |
-| Error propagation    | Listener errors were unhandled rejections      | Handler errors are caught, logged, and isolated      |
+| Aspect               | Before                                         | After                                                                                                 |
+| -------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Handler argument     | `payload` only                                 | Full `Event` object (`{ name, payload, metadata? }`)                                                  |
+| Dispatch semantics   | Fire-and-forget (`emit` + resolve immediately) | Sequential await with per-handler isolation                                                           |
+| Handler registration | Direct `EventEmitter.on`                       | `bus.on(eventName, handler)` method                                                                   |
+| Error propagation    | Listener errors were unhandled rejections      | Handler errors are caught, logged, and isolated                                                       |
 | Constructor          | `new EventEmitterEventBus()`                   | `new EventEmitterEventBus({ logger?, instrumentation? })` (both fields optional, backward-compatible) |
 
 **Migration steps for handler consumers:**
@@ -493,7 +488,8 @@ describe("EventEmitterEventBus error isolation", () => {
     });
 
     expect(logger.error).toHaveBeenCalledOnce();
-    const [, fields] = (logger.error as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const [, fields] = (logger.error as ReturnType<typeof vi.fn>).mock
+      .calls[0]!;
     expect(fields).toMatchObject({
       eventName: "AccountCreated",
       eventId: "evt-001",
@@ -532,7 +528,8 @@ describe("EventEmitterEventBus error isolation", () => {
 
     await bus.dispatch({ name: "E" as const, payload: {} });
 
-    const [, fields] = (logger.error as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const [, fields] = (logger.error as ReturnType<typeof vi.fn>).mock
+      .calls[0]!;
     expect(fields.handlerName).toBe("myProjectionHandler");
   });
 });
@@ -562,7 +559,8 @@ describe("EventEmitterEventBus error isolation", () => {
 
     await bus.dispatch({ name: "UserCreated" as const, payload: {} });
 
-    const [, fields] = (logger.error as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const [, fields] = (logger.error as ReturnType<typeof vi.fn>).mock
+      .calls[0]!;
     expect(fields.handlerName).toBe("UserCreated");
   });
 });
@@ -596,7 +594,8 @@ describe("EventEmitterEventBus error isolation", () => {
         throw new Error("boom");
       });
       await bus.dispatch({ name: "E" as const, payload: {} });
-      const [, fields] = (logger.error as ReturnType<typeof vi.fn>).mock.calls[0]!;
+      const [, fields] = (logger.error as ReturnType<typeof vi.fn>).mock
+        .calls[0]!;
       expect(fields.traceId).toBeUndefined();
       expect(fields.spanId).toBeUndefined();
       return;
@@ -620,7 +619,8 @@ describe("EventEmitterEventBus error isolation", () => {
       await bus.dispatch({ name: "E" as const, payload: {} });
     });
 
-    const [, fields] = (logger.error as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const [, fields] = (logger.error as ReturnType<typeof vi.fn>).mock
+      .calls[0]!;
     expect(fields.traceId).toEqual(expect.any(String));
     expect(fields.spanId).toEqual(expect.any(String));
   });

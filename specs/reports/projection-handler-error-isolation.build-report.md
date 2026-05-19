@@ -75,6 +75,7 @@ Implemented per-handler error isolation across all four EventBus implementations
 ### Modified test files
 
 - `packages/engine/src/__tests__/engine/implementations/ee-event-bus.test.ts` — 9 new scenarios appended
+
   - One handler throws sync; siblings still invoked; dispatch resolves
   - One handler rejects async; siblings still invoked
   - All handlers throw; dispatch resolves; one log per failure
@@ -86,14 +87,17 @@ Implemented per-handler error isolation across all four EventBus implementations
   - `traceId`/`spanId` enriched when OTel span is active (uses `NodeTracerProvider` + `InMemorySpanExporter` setup)
 
 - `packages/engine/src/__tests__/engine/outbox-relay.test.ts` — Updated one existing test
+
   - "skip entries that fail to dispatch" test updated: under new isolation contract, `dispatch` never rejects from handler failure, so both entries are marked published (count=2, not 1)
 
 - `packages/adapters/kafka/src/__tests__/kafka-event-bus.test.ts` — 3 new scenarios
+
   - Sibling completes when earlier handler throws
   - Individual error log per failed handler
   - Offset not committed when any handler fails
 
 - `packages/adapters/nats/src/__tests__/nats-event-bus.test.ts` — 3 new scenarios
+
   - Sibling completes when earlier handler throws
   - Individual error log per failed handler
   - `nak()` called on failure

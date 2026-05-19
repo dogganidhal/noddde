@@ -98,6 +98,7 @@ export class NatsEventBus implements EventBus, Connectable {
    - `handlerName: string` — read from the handler's `name` property; falls back to `event.name` when anonymous.
    - `error: { name, message, stack? }` — extracted from the caught exception. Non-`Error` rejection values are coerced via `String(value)` into `message`.
    - `traceId?: string` and `spanId?: string` — populated from the active OpenTelemetry span via the configured `Instrumentation` instance. Absent when no span is active or when `@opentelemetry/api` is not installed.
+
 9. **Ack after handlers** -- The message is acknowledged (`msg.ack()`) only after all handlers have completed successfully. The `msg.ack()` call is wrapped in try/catch for the same connection-drop resilience as nak/term.
 
 ### Backpressure
@@ -362,7 +363,10 @@ describe("NatsEventBus error isolation", () => {
     bus.on("E", after);
 
     await expect(
-      (bus as any)._handleMessage("E", JSON.stringify({ name: "E", payload: {} })),
+      (bus as any)._handleMessage(
+        "E",
+        JSON.stringify({ name: "E", payload: {} }),
+      ),
     ).rejects.toThrow();
 
     expect(before).toHaveBeenCalledOnce();
@@ -404,7 +408,10 @@ describe("NatsEventBus error isolation", () => {
     bus.on("E", failingB);
 
     await expect(
-      (bus as any)._handleMessage("E", JSON.stringify({ name: "E", payload: {} })),
+      (bus as any)._handleMessage(
+        "E",
+        JSON.stringify({ name: "E", payload: {} }),
+      ),
     ).rejects.toThrow();
 
     const errorCalls = (logger.error as ReturnType<typeof vi.fn>).mock.calls;
@@ -414,7 +421,9 @@ describe("NatsEventBus error isolation", () => {
     expect(handlerErrorCalls).toHaveLength(2);
     const names = handlerErrorCalls.map(([, f]) => (f as any).handlerName);
     expect(names).toEqual(expect.arrayContaining(["failingA", "failingB"]));
-    const messages = handlerErrorCalls.map(([, f]) => (f as any).error?.message);
+    const messages = handlerErrorCalls.map(
+      ([, f]) => (f as any).error?.message,
+    );
     expect(messages).toEqual(expect.arrayContaining(["err-a", "err-b"]));
   });
 });

@@ -95,7 +95,8 @@ export class RabbitMqEventBus implements EventBus, Connectable {
    - `handlerName: string` — read from the handler's `name` property; falls back to `event.name` when anonymous.
    - `error: { name, message, stack? }` — extracted from the caught exception. Non-`Error` rejection values are coerced via `String(value)` into `message`.
    - `traceId?: string` and `spanId?: string` — populated from the active OpenTelemetry span via the configured `Instrumentation` instance. Absent when no span is active or when `@opentelemetry/api` is not installed.
-   8b. **maxRetries delivery limit** -- If `resilience.maxRetries` is configured, track delivery attempts using an in-memory `Map<string, number>` keyed by a stable message identifier (e.g., `messageId` from properties, or a hash of the content). On each message receipt, increment the count and check against `maxRetries`. If the count exceeds `maxRetries`, log a warning and ack the message (discard it). This prevents handler-level poison messages from blocking the queue indefinitely via infinite nack/requeue. Note: the in-memory counter resets on consumer restart, which is acceptable since restarted consumers also reset their processing state. The previous `x-death` header approach does not work without a dead-letter exchange configured.
+     8b. **maxRetries delivery limit** -- If `resilience.maxRetries` is configured, track delivery attempts using an in-memory `Map<string, number>` keyed by a stable message identifier (e.g., `messageId` from properties, or a hash of the content). On each message receipt, increment the count and check against `maxRetries`. If the count exceeds `maxRetries`, log a warning and ack the message (discard it). This prevents handler-level poison messages from blocking the queue indefinitely via infinite nack/requeue. Note: the in-memory counter resets on consumer restart, which is acceptable since restarted consumers also reset their processing state. The previous `x-death` header approach does not work without a dead-letter exchange configured.
+
 9. **Manual ack after handlers** -- The message is acknowledged (`channel.ack(msg)`) only after all handlers have completed successfully (all promises in the `Promise.all` resolved). All `channel.ack()` and `channel.nack()` calls are wrapped in try/catch — if the channel closed during reconnection, the error is logged but does not crash the consumer callback.
 
 ### Backpressure
@@ -407,7 +408,9 @@ describe("RabbitMqEventBus error isolation", () => {
     expect(handlerErrorCalls).toHaveLength(2);
     const names = handlerErrorCalls.map(([, f]) => (f as any).handlerName);
     expect(names).toEqual(expect.arrayContaining(["failingA", "failingB"]));
-    const messages = handlerErrorCalls.map(([, f]) => (f as any).error?.message);
+    const messages = handlerErrorCalls.map(
+      ([, f]) => (f as any).error?.message,
+    );
     expect(messages).toEqual(expect.arrayContaining(["err-a", "err-b"]));
   });
 });

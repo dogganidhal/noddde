@@ -756,16 +756,8 @@ describe("SagaExecutor", () => {
 
 ```ts
 import { describe, expect, it, vi } from "vitest";
-import type {
-  DefineCommands,
-  DefineEvents,
-  DefineQueries,
-} from "@noddde/core";
-import {
-  defineAggregate,
-  defineProjection,
-  defineSaga,
-} from "@noddde/core";
+import type { DefineCommands, DefineEvents, DefineQueries } from "@noddde/core";
+import { defineAggregate, defineProjection, defineSaga } from "@noddde/core";
 import {
   defineDomain,
   EventEmitterEventBus,
