@@ -1,5 +1,7 @@
 import type {
   Event,
+  EventReader,
+  EventReadOptions,
   EventSourcedAggregatePersistence,
   ID,
   PartialEventLoad,
@@ -20,7 +22,7 @@ import { ConcurrencyError } from "@noddde/core";
  * For production, use a durable event store (PostgreSQL, EventStoreDB, etc.).
  */
 export class InMemoryEventSourcedAggregatePersistence
-  implements EventSourcedAggregatePersistence, PartialEventLoad
+  implements EventSourcedAggregatePersistence, PartialEventLoad, EventReader
 {
   private readonly store = new Map<string, Event[]>();
 
@@ -91,6 +93,39 @@ export class InMemoryEventSourcedAggregatePersistence
     } else {
       this.store.set(key, [...events]);
     }
+  }
+
+  /**
+   * Returns an async iterable that yields every persisted event in map
+   * insertion order. Within each aggregate stream, events are yielded in
+   * stored order (index 0 … length-1).
+   *
+   * `options.aggregateName` filters to keys that start with
+   * `"${aggregateName}:"`.
+   *
+   * `options.after` is not supported — throws on the first `next()` call.
+   */
+  public read(options?: EventReadOptions): AsyncIterable<Event> {
+    const store = this.store;
+    return {
+      [Symbol.asyncIterator]() {
+        return (async function* () {
+          if (options?.after) {
+            throw new Error(
+              "EventReader: 'after' cursor is not supported by InMemoryEventSourcedAggregatePersistence",
+            );
+          }
+          const prefix =
+            options?.aggregateName != null ? `${options.aggregateName}:` : null;
+          for (const [key, events] of store.entries()) {
+            if (prefix !== null && !key.startsWith(prefix)) continue;
+            for (const event of events) {
+              yield event;
+            }
+          }
+        })();
+      },
+    };
   }
 }
 

@@ -567,8 +567,20 @@ const projection = defineProjection<Def>({
 
 For more details, see [View Persistence](/docs/read-model/view-persistence).
 
+## Rebuilding a Projection
+
+A projection is a function of the event log. When you fix a reducer bug, add a field, or migrate the view schema, the views drift from the log — `Domain.rebuildProjection("<name>")` truncates the view store and replays every persisted event through the projection's `on` map handlers, restoring the views to a state derived solely from the event log.
+
+```ts
+const result = await domain.rebuildProjection("AccountBalance");
+// { eventsRead, eventsApplied, viewsDeleted, durationMs, projectionName }
+```
+
+The projection name is a typed union of the projections registered in the enclosing `defineDomain` call — passing an unknown name is a compile-time error. v1 supports eventual-consistency projections only and requires the caller to halt writes during the rebuild window. See [Projection Rebuild](/docs/read-model/projection-rebuild) for the full contract, options, error taxonomy, and adapter requirements.
+
 ## Next Steps
 
 - [View Persistence](/docs/read-model/view-persistence) -- ViewStore interface, InMemoryViewStore, ORM adapters, and consistency modes
+- [Projection Rebuild](/docs/read-model/projection-rebuild) -- Restoring projection views from the event log
 - [Queries](/docs/read-model/queries) -- Defining and dispatching type-safe queries
 - [Testing Aggregates and Projections](/docs/testing/testing-aggregates-and-projections) -- Testing strategies for both sides of the domain

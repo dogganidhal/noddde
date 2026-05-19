@@ -52,6 +52,14 @@ export class InMemoryViewStore<TView> implements ViewStore<TView> {
   }
 
   /**
+   * Removes every view managed by this store.
+   * Idempotent — calling on an already-empty store is a no-op.
+   */
+  public async truncate(): Promise<void> {
+    this.store.clear();
+  }
+
+  /**
    * Returns all stored views. Order is not guaranteed.
    * Convenience method for development and testing — not part of
    * the base `ViewStore` interface.

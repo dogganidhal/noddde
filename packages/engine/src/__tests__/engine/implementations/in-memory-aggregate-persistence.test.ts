@@ -213,3 +213,106 @@ describe("InMemoryStateStoredAggregatePersistence", () => {
     expect(accountState).toEqual({ state: { balance: 500 }, version: 1 });
   });
 });
+
+describe("InMemoryEventSourcedAggregatePersistence.read", () => {
+  it("should yield every persisted event in insertion order", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+
+    await persistence.save(
+      "Account",
+      "acc-1",
+      [
+        { name: "AccountCreated", payload: { id: "acc-1" } },
+        { name: "DepositMade", payload: { amount: 50 } },
+      ],
+      0,
+    );
+    await persistence.save(
+      "Account",
+      "acc-2",
+      [
+        { name: "AccountCreated", payload: { id: "acc-2" } },
+        { name: "DepositMade", payload: { amount: 75 } },
+      ],
+      0,
+    );
+
+    const collected: string[] = [];
+    for await (const event of persistence.read()) {
+      collected.push(event.name);
+    }
+
+    expect(collected).toEqual([
+      "AccountCreated",
+      "DepositMade",
+      "AccountCreated",
+      "DepositMade",
+    ]);
+  });
+});
+
+describe("InMemoryEventSourcedAggregatePersistence.read aggregateName filter", () => {
+  it("should yield only events from aggregates matching the filter", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+
+    await persistence.save(
+      "Order",
+      "o-1",
+      [{ name: "OrderPlaced", payload: { id: "o-1" } }],
+      0,
+    );
+    await persistence.save(
+      "Account",
+      "a-1",
+      [{ name: "AccountCreated", payload: { id: "a-1" } }],
+      0,
+    );
+
+    const names: string[] = [];
+    for await (const event of persistence.read({ aggregateName: "Order" })) {
+      names.push(event.name);
+    }
+
+    expect(names).toEqual(["OrderPlaced"]);
+  });
+});
+
+describe("InMemoryEventSourcedAggregatePersistence.read empty store", () => {
+  it("should produce an iterable that immediately terminates", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+
+    let count = 0;
+    // eslint-disable-next-line no-unused-vars
+    for await (const _ of persistence.read()) count++;
+    expect(count).toBe(0);
+  });
+});
+
+describe("InMemoryEventSourcedAggregatePersistence.read after cursor", () => {
+  it("should throw when an after cursor is provided", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+    await persistence.save(
+      "Order",
+      "o-1",
+      [{ name: "OrderPlaced", payload: {} }],
+      0,
+    );
+
+    const iterator = persistence
+      .read({
+        after: { aggregateName: "Order", aggregateId: "o-1", version: 0 },
+      })
+      [Symbol.asyncIterator]();
+
+    await expect(iterator.next()).rejects.toThrow(
+      /'after' cursor is not supported/,
+    );
+  });
+});
+
+describe("InMemoryEventSourcedAggregatePersistence EventReader shape", () => {
+  it("should expose a callable read() method (duck-typed EventReader)", () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+    expect(typeof (persistence as { read?: unknown }).read).toBe("function");
+  });
+});

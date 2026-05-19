@@ -67,4 +67,5 @@ See `ROADMAP.md` for the full roadmap. Current state:
 - Event metadata: complete (auto-enrichment, correlation propagation through sagas)
 - Snapshotting: complete (configurable strategies, partial event loading)
 - Idempotent commands: complete (commandId deduplication with TTL)
-- Remaining gaps: projection rebuild, observability, distributed systems support (see ROADMAP.md)
+- Projection rebuild: complete (`Domain.rebuildProjection(name, options?)` with typed name inference, 5 typed error classes, and an `EventReader` capability that adapters opt into)
+- Remaining gaps: observability, distributed systems support (see ROADMAP.md)

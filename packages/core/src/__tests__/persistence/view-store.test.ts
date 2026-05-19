@@ -184,3 +184,70 @@ describe("ViewStore extension preserves delete", () => {
     >();
   });
 });
+
+describe("ViewStore truncate optional", () => {
+  it("should accept a store without truncate", () => {
+    const noTruncate: ViewStore<{ id: string }> = {
+      save: async (_viewId: ID, _view: { id: string }) => {},
+      load: async (_viewId: ID) => undefined,
+      delete: async (_viewId: ID) => {},
+    };
+    expectTypeOf(noTruncate.truncate).toEqualTypeOf<
+      (() => Promise<void>) | undefined
+    >();
+  });
+
+  it("should accept a store with truncate", () => {
+    const withTruncate: ViewStore<{ id: string }> = {
+      save: async () => {},
+      load: async () => undefined,
+      delete: async () => {},
+      truncate: async () => {},
+    };
+    expectTypeOf(withTruncate.truncate).toEqualTypeOf<
+      (() => Promise<void>) | undefined
+    >();
+  });
+});
+
+describe("ViewStore truncate contract", () => {
+  function runTruncateContract(createStore: () => ViewStore<{ n: number }>) {
+    it("should remove every previously saved view", async () => {
+      const store = createStore();
+      if (typeof store.truncate !== "function") {
+        // Stores that don't implement truncate are out of scope here.
+        return;
+      }
+      await store.save("a", { n: 1 });
+      await store.save("b", { n: 2 });
+      await store.save("c", { n: 3 });
+
+      await store.truncate();
+
+      expect(await store.load("a")).toBeFalsy();
+      expect(await store.load("b")).toBeFalsy();
+      expect(await store.load("c")).toBeFalsy();
+    });
+
+    it("should be idempotent on an empty store", async () => {
+      const store = createStore();
+      if (typeof store.truncate !== "function") return;
+      await expect(store.truncate()).resolves.toBeUndefined();
+      await expect(store.truncate()).resolves.toBeUndefined();
+    });
+
+    it("should leave the store usable after truncation", async () => {
+      const store = createStore();
+      if (typeof store.truncate !== "function") return;
+      await store.save("a", { n: 1 });
+      await store.truncate();
+      await store.save("a", { n: 99 });
+      expect(await store.load("a")).toEqual({ n: 99 });
+    });
+  }
+
+  describe("InMemoryViewStore", () => {
+    const { InMemoryViewStore } = require("@noddde/engine");
+    runTruncateContract(() => new InMemoryViewStore());
+  });
+});

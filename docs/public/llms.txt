@@ -30,6 +30,7 @@
 - [Projections](https://noddde.dev/docs/read-model/projections): Building read-optimized views from event streams
 - [View Persistence](https://noddde.dev/docs/read-model/view-persistence): ViewStore, auto-persistence, and consistency strategies
 - [Queries](https://noddde.dev/docs/read-model/queries): DefineQueries, query handlers, and the QueryBus
+- [Projection Rebuild](https://noddde.dev/docs/read-model/projection-rebuild): Domain.rebuildProjection, EventReader, ViewStore.truncate, and the rebuild error taxonomy
 
 ## Process Managers
 

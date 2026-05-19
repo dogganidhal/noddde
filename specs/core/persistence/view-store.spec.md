@@ -8,11 +8,12 @@ depends_on: [core/id]
 docs:
   - projections/overview.mdx
   - projections/view-persistence.mdx
+  - read-model/projection-rebuild.mdx
 ---
 
 # ViewStore & ViewStoreFactory
 
-> Base persistence and query interface for projection views. Each projection can extend `ViewStore` with custom query methods (e.g., `findByBalanceRange`, `listByStatus`). The framework calls `save()`, `load()`, and `delete()` for automatic view persistence when a projection has an `identity` map. Reducers signal deletion by returning the `DeleteView` sentinel; the engine routes that to `delete()` instead of `save()`. This mirrors the `SagaPersistence` pattern but is scoped to a single view type per projection.
+> Base persistence and query interface for projection views. Each projection can extend `ViewStore` with custom query methods (e.g., `findByBalanceRange`, `listByStatus`). The framework calls `save()`, `load()`, and `delete()` for automatic view persistence when a projection has an `identity` map. Reducers signal deletion by returning the `DeleteView` sentinel; the engine routes that to `delete()` instead of `save()`. The optional `truncate()` method clears every view managed by the store — required to participate in [projection rebuild](../../engine/projection-rebuild.spec.md). This mirrors the `SagaPersistence` pattern but is scoped to a single view type per projection.
 >
 > The companion `ViewStoreFactory<TView>` is a singleton that mints `ViewStore<TView>` instances scoped to a transactional context. The engine calls `factory.getForContext(uow.context)` per strong-consistency read-modify-write so that the developer's view store — including any custom methods — uses the active transaction client. For non-transactional paths (eventual-consistency projections, query handlers), the engine calls `getForContext(undefined)` once and caches the result.
 
@@ -47,6 +48,18 @@ export interface ViewStore<TView = any> {
    * view is a no-op and resolves successfully without error.
    */
   delete(viewId: ID): Promise<void>;
+
+  /**
+   * Optional: removes every view managed by this store, leaving it empty.
+   *
+   * Used by {@link Domain.rebuildProjection} to clear stale views before
+   * replaying the event log. Implementations that cannot atomically clear
+   * their backing storage SHOULD NOT implement this method — the engine
+   * detects its absence and refuses rebuild with a clear error.
+   *
+   * Idempotent: truncating an already-empty store is a no-op.
+   */
+  truncate?(): Promise<void>;
 }
 ```
 
@@ -54,7 +67,8 @@ export interface ViewStore<TView = any> {
 - `save` persists a view instance keyed by `viewId`, replacing any previously stored view.
 - `load` retrieves a view instance by `viewId`. Returns `undefined` or `null` if no view exists.
 - `delete` removes a view instance by `viewId`. Idempotent — never throws on missing views.
-- All three methods are async (return `Promise`).
+- `truncate` (optional) removes every view managed by this store. When present, the projection-rebuild flow uses it to clear stale views before replaying events. When absent, `Domain.rebuildProjection` throws `ViewStoreNotTruncatableError`.
+- All four methods are async (return `Promise`).
 - `viewId` is typed as `ID` (`string | number | bigint`) from `@noddde/core`.
 
 ```ts
@@ -115,6 +129,10 @@ export function createViewStoreFactory<TView>(
 9. **`createViewStoreFactory` is identity-shaped** — `createViewStoreFactory(build)` returns `{ getForContext: build }`. Calling `factory.getForContext(ctx)` is equivalent to calling `build(ctx)`.
 10. **Delete is idempotent** -- `delete(viewId)` resolves successfully whether or not a view exists for `viewId`. Implementations must NOT throw when the view is absent.
 11. **Delete is total** -- After `delete(viewId)` resolves, a subsequent `load(viewId)` MUST return `undefined` or `null` (the same not-found semantics as a viewId that was never stored).
+12. **Truncate is optional** -- `truncate?()` is an OPTIONAL method on the base interface. Implementations MAY omit it. The framework's projection-rebuild flow checks for its presence at runtime (`typeof store.truncate === "function"`) and refuses to rebuild a projection whose view store cannot truncate.
+13. **Truncate is total** -- When implemented, `truncate()` MUST remove every view managed by this store, regardless of `viewId`. After `truncate()` resolves, `load(viewId)` for any `viewId` previously written MUST return `undefined` or `null`.
+14. **Truncate is idempotent** -- Calling `truncate()` on an already-empty store MUST resolve successfully without error.
+15. **Truncate is scope-bounded** -- A `ViewStore` instance is associated with a single projection's view universe (one factory per projection in `DomainWiring.projections`). `truncate()` clears that universe only — it MUST NOT affect other projections' view stores, other tables, or unrelated rows in shared infrastructure.
 
 ## Invariants
 
@@ -135,6 +153,10 @@ export function createViewStoreFactory<TView>(
 - **Delete on missing view**: `delete(viewId)` for a viewId that has no stored view is a no-op — resolves successfully without error.
 - **Delete then load**: `load(viewId)` after `delete(viewId)` returns `undefined` or `null`.
 - **Delete then save**: `save(viewId, view)` after `delete(viewId)` succeeds and stores the new view as if it were freshly created.
+- **Truncate on empty store**: `truncate()` on a store with no views is a no-op — resolves successfully.
+- **Truncate then load**: After `truncate()`, `load(viewId)` for any `viewId` returns `undefined` or `null`.
+- **Truncate then save**: After `truncate()`, `save(viewId, view)` succeeds and stores the new view as if the store had been freshly initialized.
+- **Adapter without truncate**: A `ViewStore` implementation that omits `truncate` is valid — it cannot participate in projection rebuild, but everything else (save/load/delete, query handlers, strong-consistency UoW enlistment) works normally.
 
 ## Integration Points
 
@@ -142,6 +164,7 @@ export function createViewStoreFactory<TView>(
 - Used by `ProjectionQueryInfra` to inject `{ views: ViewStore }` into query handler infrastructure.
 - Implemented by `InMemoryViewStore` (engine), `TypeORMViewStore`, `PrismaViewStore`, `DrizzleViewStore` (ORM adapters).
 - The engine calls `save()`, `load()`, and `delete()` during automatic view persistence when identity is configured. `delete()` is invoked when a projection reducer returns the `DeleteView` sentinel from `@noddde/core`.
+- The engine calls `truncate()` (when present) from `Domain.rebuildProjection` to clear stale views before replaying the event log. When the method is absent on the wired store, the engine throws `ViewStoreNotTruncatableError` and does not attempt to read events.
 - `ViewStoreFactory` is the **only** value type accepted by `ProjectionWiring.viewStore` in `DomainWiring` and by the optional `viewStore?` field on a `Projection` definition. The legacy `(infra) => ViewStore` function form is not accepted. The engine calls `factory.getForContext(uow.context)` once per enlisted strong-consistency read-modify-write, and `factory.getForContext(undefined)` once at init for query-handler / eventual-consistency paths.
 - `InMemoryViewStoreFactory<TView>` (engine) is the default factory backing in-memory tests and prototypes; it always returns the same `InMemoryViewStore<TView>` instance regardless of `ctx`.
 
@@ -389,6 +412,92 @@ describe("ViewStore extension preserves delete", () => {
     expectTypeOf<AccountViewStore["delete"]>().toEqualTypeOf<
       ViewStore<AccountView>["delete"]
     >();
+  });
+});
+```
+
+### ViewStore truncate is optional in the type
+
+```ts
+import { describe, it, expectTypeOf } from "vitest";
+import type { ViewStore, ID } from "@noddde/core";
+
+describe("ViewStore truncate optional", () => {
+  it("should accept a store without truncate", () => {
+    const noTruncate: ViewStore<{ id: string }> = {
+      save: async (_viewId: ID, _view: { id: string }) => {},
+      load: async (_viewId: ID) => undefined,
+      delete: async (_viewId: ID) => {},
+    };
+    expectTypeOf(noTruncate.truncate).toEqualTypeOf<
+      (() => Promise<void>) | undefined
+    >();
+  });
+
+  it("should accept a store with truncate", () => {
+    const withTruncate: ViewStore<{ id: string }> = {
+      save: async () => {},
+      load: async () => undefined,
+      delete: async () => {},
+      truncate: async () => {},
+    };
+    expectTypeOf(withTruncate.truncate).toEqualTypeOf<
+      (() => Promise<void>) | undefined
+    >();
+  });
+});
+```
+
+### ViewStore truncate removes every stored view
+
+<!--
+  Contract test: invoked by both the InMemoryViewStore spec and any
+  adapter spec whose store implements truncate.
+-->
+
+```ts
+import { describe, it, expect } from "vitest";
+import type { ViewStore } from "@noddde/core";
+
+describe("ViewStore truncate contract", () => {
+  function runTruncateContract(createStore: () => ViewStore<{ n: number }>) {
+    it("should remove every previously saved view", async () => {
+      const store = createStore();
+      if (typeof store.truncate !== "function") {
+        // Stores that don't implement truncate are out of scope here.
+        return;
+      }
+      await store.save("a", { n: 1 });
+      await store.save("b", { n: 2 });
+      await store.save("c", { n: 3 });
+
+      await store.truncate();
+
+      expect(await store.load("a")).toBeFalsy();
+      expect(await store.load("b")).toBeFalsy();
+      expect(await store.load("c")).toBeFalsy();
+    });
+
+    it("should be idempotent on an empty store", async () => {
+      const store = createStore();
+      if (typeof store.truncate !== "function") return;
+      await expect(store.truncate()).resolves.toBeUndefined();
+      await expect(store.truncate()).resolves.toBeUndefined();
+    });
+
+    it("should leave the store usable after truncation", async () => {
+      const store = createStore();
+      if (typeof store.truncate !== "function") return;
+      await store.save("a", { n: 1 });
+      await store.truncate();
+      await store.save("a", { n: 99 });
+      expect(await store.load("a")).toEqual({ n: 99 });
+    });
+  }
+
+  describe("InMemoryViewStore", () => {
+    const { InMemoryViewStore } = require("@noddde/engine");
+    runTruncateContract(() => new InMemoryViewStore());
   });
 });
 ```

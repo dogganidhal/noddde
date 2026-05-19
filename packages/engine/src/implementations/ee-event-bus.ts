@@ -55,6 +55,22 @@ export class EventEmitterEventBus implements EventBus {
   }
 
   /**
+   * Removes a previously registered handler for the given event name.
+   * No-op if the handler is not currently registered.
+   *
+   * Used by {@link Domain.rebuildProjection} to detach projection
+   * subscriptions during the replay window.
+   */
+  public off(eventName: string, handler: AsyncEventHandler): void {
+    const existing = this.handlers.get(eventName);
+    if (!existing) return;
+    const idx = existing.indexOf(handler);
+    if (idx !== -1) {
+      existing.splice(idx, 1);
+    }
+  }
+
+  /**
    * Releases all resources: clears all registered handlers.
    * After calling `close()`, dispatching any event is a no-op.
    * Idempotent: subsequent calls resolve immediately.
