@@ -1,15 +1,33 @@
-/* eslint-disable no-unused-vars */
-import type { AsyncEventHandler, Event, EventBus } from "@noddde/core";
+import type { AsyncEventHandler, Event, EventBus, Logger } from "@noddde/core";
 import { EventEmitter } from "node:events";
+import { NodddeLogger } from "../logger";
+import { Instrumentation } from "../tracing";
+
+/**
+ * Configuration for the {@link EventEmitterEventBus}.
+ */
+export interface EventEmitterEventBusConfig {
+  /**
+   * Framework logger instance.
+   * Defaults to `new NodddeLogger("warn", "noddde:ee-event-bus")`.
+   */
+  logger?: Logger;
+  /**
+   * OpenTelemetry instrumentation used to enrich error logs with trace correlation IDs.
+   * Defaults to a no-op `Instrumentation(null)` instance.
+   */
+  instrumentation?: Instrumentation;
+}
 
 /**
  * In-memory {@link EventBus} implementation backed by Node.js `EventEmitter`.
  * Events are dispatched within the same process.
  *
- * Handlers registered via {@link on} are awaited during {@link dispatch},
- * ensuring async projection reducers and saga handlers complete before
- * dispatch resolves. The underlying `EventEmitter` is retained for
- * backward compatibility but all handlers are also tracked internally.
+ * Handlers registered via {@link on} are awaited sequentially during {@link dispatch}.
+ * Each handler invocation is wrapped in its own try/catch: a failure (synchronous throw
+ * or rejected promise) is caught, logged via the framework {@link Logger} at `error` level
+ * with structured fields, and dispatch continues to the next handler. `dispatch` never
+ * rejects from a handler failure — it always resolves with `undefined`.
  *
  * Suitable for development, testing, and single-process applications.
  * For production multi-process deployments, use a message broker (Kafka, RabbitMQ, etc.).
@@ -17,13 +35,31 @@ import { EventEmitter } from "node:events";
 export class EventEmitterEventBus implements EventBus {
   /**
    * The underlying Node.js `EventEmitter`. Retained for backward
-   * compatibility and introspection. Handlers registered via {@link on}
-   * are also registered here so that `emitter.listenerCount` etc. work.
+   * compatibility and introspection.
    */
   private readonly underlying = new EventEmitter();
 
   /** Internal async-aware handler registry keyed by event name. */
   private readonly handlers = new Map<string, AsyncEventHandler[]>();
+
+  /** Framework logger for structured error logging on handler failures. */
+  private readonly _logger: Logger;
+
+  /** OTel instrumentation for trace correlation enrichment on handler failures. */
+  private readonly _instrumentation: Instrumentation;
+
+  /**
+   * Constructs the bus. Both config fields are optional.
+   *
+   * @param config - Optional configuration. When omitted, defaults are used for both
+   *   `logger` (warn-level NodddeLogger) and `instrumentation` (no-op).
+   */
+  constructor(config?: EventEmitterEventBusConfig) {
+    this._logger =
+      config?.logger ?? new NodddeLogger("warn", "noddde:ee-event-bus");
+    this._instrumentation =
+      config?.instrumentation ?? new Instrumentation(null);
+  }
 
   /**
    * Registers an async-capable event handler for a given event name.
@@ -43,13 +79,50 @@ export class EventEmitterEventBus implements EventBus {
   /**
    * Dispatches an event to all registered handlers and awaits their completion.
    *
+   * Each handler invocation is wrapped in its own try/catch. A handler that throws
+   * (synchronously or via a rejected promise) is caught, logged at `error` level with
+   * structured fields (`eventName`, `eventId`, `handlerName`, `error`, and optional
+   * `traceId`/`spanId`), and dispatch continues to the next handler. `dispatch` always
+   * resolves with `undefined` — it never rejects due to a handler failure.
+   *
    * @param event - The event to dispatch.
    */
   public async dispatch<TEvent extends Event>(event: TEvent): Promise<void> {
     const eventHandlers = this.handlers.get(event.name);
-    if (eventHandlers) {
-      for (const handler of eventHandlers) {
+    if (!eventHandlers) {
+      return;
+    }
+
+    for (const handler of eventHandlers) {
+      try {
         await handler(event);
+      } catch (err: unknown) {
+        const { traceId, spanId } =
+          this._instrumentation.getActiveTraceCorrelation();
+
+        const handlerName =
+          handler.name && handler.name !== "handler" && handler.name !== ""
+            ? handler.name
+            : event.name;
+
+        const errorFields =
+          err instanceof Error
+            ? { name: err.name, message: err.message, stack: err.stack }
+            : { name: "Error", message: String(err) };
+
+        this._logger.error(
+          `Handler "${handlerName}" failed for event "${event.name}"`,
+          {
+            eventName: event.name,
+            ...(event.metadata?.eventId !== undefined && {
+              eventId: event.metadata.eventId,
+            }),
+            handlerName,
+            error: errorFields,
+            ...(traceId !== undefined && { traceId }),
+            ...(spanId !== undefined && { spanId }),
+          },
+        );
       }
     }
   }

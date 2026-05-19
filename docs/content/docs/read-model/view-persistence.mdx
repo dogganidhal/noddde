@@ -463,7 +463,7 @@ Command -> Aggregate -> Events -> UoW commit -> Event Bus -> Projection reducer 
                                 atomic boundary                                  independent
 ```
 
-If the view update fails, the aggregate state is already committed. This is the standard CQRS pattern.
+If the view update fails, the aggregate state is already committed. This is the standard CQRS pattern. **A failing eventual reducer cannot fail the originating command** — the bus catches the throw, logs it once with structured fields, and sibling subscribers still run. Operators must replay the event or repair the view manually. See [Handler Error Isolation](/docs/running/event-bus-adapters#handler-error-isolation).
 
 ### Strong Consistency
 
@@ -489,7 +489,7 @@ const projection = defineProjection<Def>({
 });
 ```
 
-Strong-consistency projections do **not** subscribe to the event bus (to avoid double processing). They are processed inline during command execution.
+Strong-consistency projections do **not** subscribe to the event bus (to avoid double processing). They are processed inline during command execution. Because they bypass the bus, **bus-level error isolation does not apply** — a reducer throw fails the UoW commit, propagates to the originating command's `dispatch`, and rolls back the aggregate's events along with any sibling strong-projection writes.
 
 For the atomic guarantee to hold against a real database, the factory's `getForContext(ctx)` must return a store that uses `ctx` as its transactional executor (e.g. a Prisma `TransactionClient`, a TypeORM `EntityManager`, a Drizzle tx). The framework calls `getForContext(uow.context)` per enlisted read-modify-write so the store sees the live transaction.
 

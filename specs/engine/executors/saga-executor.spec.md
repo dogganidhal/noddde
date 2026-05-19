@@ -147,6 +147,7 @@ class SagaExecutor {
 - **SagaPersistence** -- Saga state is loaded and saved via the persistence interface.
 - **MetadataEnricher** -- Indirectly used: the metadata context set by the saga flows through `AsyncLocalStorage` to the `MetadataEnricher` in `CommandLifecycleExecutor`, ensuring correlation propagation.
 - **EventBus** -- Events deferred by aggregate commands within the saga are published after UoW commit.
+- **EventBus error isolation (layering)** -- `SagaExecutor.execute()` continues to perform its own internal `log + rollback UoW + rethrow` on failure (BR #13). The rollback contract is unchanged. However, when the executor's rethrow surfaces back to the bus, the bus's per-handler isolation layer (see `core/edd/event-bus`) catches the rethrow so it no longer poisons sibling subscribers (other sagas, projections, standalone handlers) on the same event. In other words: a saga still fails atomically (its UoW rolls back), but its failure no longer cascades to unrelated read-side consumers of the triggering event.
 
 ## Test Scenarios
 
@@ -745,6 +746,140 @@ describe("SagaExecutor", () => {
     const state = await sagaPersistence.load("NoCmdSaga", "nc1");
     expect(state).toEqual({ step: 1 });
     expect(dispatchSpy).not.toHaveBeenCalled();
+  });
+});
+```
+
+### saga handler failure is isolated from sibling subscribers on the same event
+
+> Integration scenario — verifies the layering: SagaExecutor logs + rolls back + rethrows; the event bus's per-handler isolation absorbs the rethrow so sibling projections on the same event still update.
+
+```ts
+import { describe, expect, it, vi } from "vitest";
+import type { DefineCommands, DefineEvents, DefineQueries } from "@noddde/core";
+import { defineAggregate, defineProjection, defineSaga } from "@noddde/core";
+import {
+  defineDomain,
+  EventEmitterEventBus,
+  InMemoryCommandBus,
+  InMemoryEventSourcedAggregatePersistence,
+  InMemoryQueryBus,
+  InMemorySagaPersistence,
+  InMemoryViewStore,
+  wireDomain,
+} from "@noddde/engine";
+
+describe("Saga-failure isolation from sibling subscribers", () => {
+  type UserEvent = DefineEvents<{ UserCreated: { id: string; name: string } }>;
+  type UserCommand = DefineCommands<{ CreateUser: { name: string } }>;
+  type UserTypes = {
+    state: { name: string } | null;
+    events: UserEvent;
+    commands: UserCommand;
+    infrastructure: {};
+  };
+  type UserView = { id: string; name: string };
+  type UserQuery = DefineQueries<{
+    GetUser: { payload: { id: string }; result: UserView | undefined | null };
+  }>;
+  type UserProjectionTypes = {
+    events: UserEvent;
+    queries: UserQuery;
+    view: UserView;
+    infrastructure: {};
+  };
+  type FailingSagaState = { started: boolean };
+  type FailingSagaTypes = {
+    state: FailingSagaState;
+    events: UserEvent;
+    commands: never;
+    infrastructure: {};
+  };
+
+  const User = defineAggregate<UserTypes>({
+    initialState: null,
+    decide: {
+      CreateUser: (cmd) => ({
+        name: "UserCreated",
+        payload: { id: cmd.targetAggregateId, name: cmd.payload.name },
+      }),
+    },
+    evolve: { UserCreated: (payload) => ({ name: payload.name }) },
+  });
+
+  const HealthyProjection = defineProjection<UserProjectionTypes>({
+    on: {
+      UserCreated: {
+        id: (event) => event.payload.id,
+        reduce: (event) => ({
+          id: event.payload.id,
+          name: event.payload.name,
+        }),
+      },
+    },
+    queryHandlers: {},
+  });
+
+  const FailingSaga = defineSaga<FailingSagaTypes>({
+    initialState: { started: false },
+    startedBy: ["UserCreated"],
+    on: {
+      UserCreated: {
+        id: (event) => event.payload.id,
+        handle: () => {
+          throw new Error("saga bug");
+        },
+      },
+    },
+  });
+
+  it("should let sibling projections update and keep the command successful when a saga handler throws", async () => {
+    const viewStore = new InMemoryViewStore<UserView>();
+    const sagaPersistence = new InMemorySagaPersistence();
+    const sagaSaveSpy = vi.spyOn(sagaPersistence, "save");
+
+    const definition = defineDomain({
+      writeModel: { aggregates: { User } },
+      readModel: {
+        projections: { HealthyProjection },
+        sagas: { FailingSaga },
+      },
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => new InMemoryEventSourcedAggregatePersistence(),
+      },
+      projections: {
+        HealthyProjection: { viewStore: () => viewStore },
+      },
+      sagas: { persistence: () => sagaPersistence },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    await expect(
+      domain.commandBus.dispatch({
+        name: "CreateUser",
+        targetAggregateId: "u-1",
+        payload: { name: "Alice" },
+      }),
+    ).resolves.not.toThrow();
+
+    // Eventual consistency: allow the event bus to drain.
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Saga state NOT persisted — its UoW rolled back (SagaExecutor contract).
+    expect(sagaSaveSpy).not.toHaveBeenCalled();
+
+    // Sibling projection still updated — bus isolation absorbed the saga's rethrow.
+    expect(await viewStore.load("u-1")).toEqual({
+      id: "u-1",
+      name: "Alice",
+    });
   });
 });
 ```

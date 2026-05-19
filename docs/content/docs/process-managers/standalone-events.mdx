@@ -33,6 +33,7 @@ Key characteristics:
 - **Fire-and-forget.** The handler returns `void` — it does not produce commands or events.
 - **Full event access.** Receives the complete event including metadata for audit/tracing.
 - **Async-capable.** Can return `Promise<void>` for async operations.
+- **Isolated from siblings and the originating command.** When the handler throws, the event bus catches the failure, logs it once with structured fields (`eventName`, `handlerName`, `error`, plus `traceId`/`spanId` when an OTel span is active), and continues delivery to sibling handlers. The originating command's `dispatch` is unaffected. See [Handler Error Isolation](/docs/running/event-bus-adapters#handler-error-isolation).
 
 ## Registering Standalone Event Handlers
 

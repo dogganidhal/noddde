@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { KafkaEventBus } from "@noddde/kafka";
+import type { Logger } from "@noddde/core";
 
 /** Builds a minimal mock consumer with all required methods. */
 function makeMockConsumer() {
@@ -571,5 +572,133 @@ describe("KafkaEventBus", () => {
       expect.stringContaining("deserialize"),
       expect.objectContaining({ eventName: "TestEvent" }),
     );
+  });
+});
+
+// ### sibling handler completes when an earlier handler throws (Promise.allSettled)
+describe("KafkaEventBus error isolation", () => {
+  it("should run every handler to completion even when an earlier one throws", async () => {
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+
+    const before = vi.fn();
+    const after = vi.fn();
+    bus.on("E", before);
+    bus.on("E", async () => {
+      throw new Error("boom");
+    });
+    bus.on("E", after);
+
+    await expect(
+      (bus as any)._handleMessage(
+        "E",
+        JSON.stringify({ name: "E", payload: {} }),
+      ),
+    ).rejects.toThrow();
+
+    expect(before).toHaveBeenCalledOnce();
+    expect(after).toHaveBeenCalledOnce();
+  });
+});
+
+// ### individual logging per failed handler with handlerName and error fields
+describe("KafkaEventBus error isolation", () => {
+  it("should log once per failed handler with handlerName and error fields", async () => {
+    const logger: Logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      child: vi.fn().mockReturnThis(),
+    };
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+      logger,
+    });
+
+    async function failingA() {
+      throw new Error("err-a");
+    }
+    async function failingB() {
+      throw new Error("err-b");
+    }
+    bus.on("E", vi.fn());
+    bus.on("E", failingA);
+    bus.on("E", failingB);
+
+    await expect(
+      (bus as any)._handleMessage(
+        "E",
+        JSON.stringify({ name: "E", payload: {} }),
+      ),
+    ).rejects.toThrow();
+
+    const errorCalls = (logger.error as ReturnType<typeof vi.fn>).mock.calls;
+    // One error log per failed handler (2 failures → 2 log entries).
+    const handlerErrorCalls = errorCalls.filter(
+      ([, fields]) => (fields as any)?.handlerName !== undefined,
+    );
+    expect(handlerErrorCalls).toHaveLength(2);
+    const names = handlerErrorCalls.map(([, f]) => (f as any).handlerName);
+    expect(names).toEqual(expect.arrayContaining(["failingA", "failingB"]));
+    const messages = handlerErrorCalls.map(
+      ([, f]) => (f as any).error?.message,
+    );
+    expect(messages).toEqual(expect.arrayContaining(["err-a", "err-b"]));
+  });
+});
+
+// ### offset commit behavior is unchanged under partial failure
+describe("KafkaEventBus error isolation", () => {
+  it("should not commit the offset when any handler fails (existing redelivery behavior is preserved)", async () => {
+    const mockProducer = {
+      send: vi.fn().mockResolvedValue(undefined),
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+    };
+    const commitOffsets = vi.fn().mockResolvedValue(undefined);
+    const mockConsumer = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      subscribe: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+      commitOffsets,
+      run: vi.fn().mockResolvedValue(undefined),
+    };
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+    (bus as any)._kafka = mockKafka;
+
+    await bus.connect();
+
+    bus.on("E", vi.fn());
+    bus.on("E", async () => {
+      throw new Error("boom");
+    });
+
+    await expect(
+      (bus as any)._handleMessage(
+        "E",
+        JSON.stringify({ name: "E", payload: {} }),
+        "topic:0:42",
+      ),
+    ).rejects.toThrow();
+
+    // The Kafka consumer never commits the offset on a failed handler — broker
+    // redelivers per existing retry/maxRetries semantics. Regression guard.
+    expect(commitOffsets).not.toHaveBeenCalled();
   });
 });

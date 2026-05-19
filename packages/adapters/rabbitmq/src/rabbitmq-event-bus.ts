@@ -6,7 +6,7 @@ import type {
   Logger,
 } from "@noddde/core";
 import type { Event } from "@noddde/core";
-import { NodddeLogger } from "@noddde/engine";
+import { Instrumentation, NodddeLogger } from "@noddde/engine";
 import type { ChannelModel, ConfirmChannel } from "amqplib";
 import amqplib from "amqplib";
 
@@ -43,6 +43,11 @@ export interface RabbitMqEventBusConfig {
    * Defaults to `new NodddeLogger("warn", "noddde:rabbitmq")` from `@noddde/engine`.
    */
   logger?: Logger;
+  /**
+   * OpenTelemetry instrumentation used to enrich per-handler error logs with
+   * `traceId`/`spanId` correlation fields. Defaults to a no-op instance.
+   */
+  instrumentation?: Instrumentation;
 }
 
 /**
@@ -69,6 +74,7 @@ export class RabbitMqEventBus implements EventBus, Connectable {
   private readonly _url: string;
   private readonly _prefetchCount: number;
   private readonly _logger: Logger;
+  private readonly _instrumentation: Instrumentation;
 
   /**
    * Full config stored for test inspection.
@@ -120,6 +126,7 @@ export class RabbitMqEventBus implements EventBus, Connectable {
     this._queuePrefix = config.queuePrefix ?? "noddde";
     this._prefetchCount = config.prefetchCount ?? 10;
     this._logger = config.logger ?? new NodddeLogger("warn", "noddde:rabbitmq");
+    this._instrumentation = config.instrumentation ?? new Instrumentation(null);
   }
 
   /**
@@ -391,14 +398,17 @@ export class RabbitMqEventBus implements EventBus, Connectable {
 
   /**
    * Handles an incoming message by deserializing it and invoking all
-   * registered handlers for the event name concurrently via `Promise.all`.
+   * registered handlers for the event name concurrently via `Promise.allSettled`.
    * Exposed as a semi-private method to allow test injection.
    *
    * Wraps JSON.parse in try/catch to protect against poison messages:
-   * if deserialization fails, the error is logged and the method resolves
+   * if deserialization fails, the error is logged and `{ poisoned: true }` is returned
    * (caller is expected to ack the message to prevent infinite redelivery).
    *
-   * If any handler rejects, the error propagates (message will be nacked).
+   * After all handlers settle, logs each rejection individually via the framework Logger.
+   * If at least one handler rejected, re-throws the first rejection's reason so the outer
+   * consume callback nacks the message with requeue. All sibling handlers ran to completion
+   * before the re-throw.
    * @internal
    */
   async _handleMessage(
@@ -417,7 +427,54 @@ export class RabbitMqEventBus implements EventBus, Connectable {
     }
 
     const handlers = this._handlers.get(eventName) ?? [];
-    await Promise.all(handlers.map((handler) => handler(event)));
+
+    const results = await Promise.allSettled(
+      handlers.map((handler) => handler(event)),
+    );
+
+    const { traceId, spanId } =
+      this._instrumentation.getActiveTraceCorrelation();
+
+    let firstRejection: unknown = undefined;
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i]!;
+      if (result.status === "rejected") {
+        const handler = handlers[i]!;
+        const err = result.reason;
+        const handlerName =
+          handler.name && handler.name !== "handler" && handler.name !== ""
+            ? handler.name
+            : event.name;
+
+        const errorFields =
+          err instanceof Error
+            ? { name: err.name, message: err.message, stack: err.stack }
+            : { name: "Error", message: String(err) };
+
+        this._logger.error(
+          `Handler "${handlerName}" failed for event "${event.name}"`,
+          {
+            eventName: event.name,
+            ...(event.metadata?.eventId !== undefined && {
+              eventId: event.metadata.eventId,
+            }),
+            handlerName,
+            error: errorFields,
+            ...(traceId !== undefined && { traceId }),
+            ...(spanId !== undefined && { spanId }),
+          },
+        );
+
+        if (firstRejection === undefined) {
+          firstRejection = err;
+        }
+      }
+    }
+
+    if (firstRejection !== undefined) {
+      throw firstRejection;
+    }
+
     return { poisoned: false };
   }
 

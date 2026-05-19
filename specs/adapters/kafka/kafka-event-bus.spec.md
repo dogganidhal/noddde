@@ -54,6 +54,12 @@ export interface KafkaEventBusConfig {
   partitionKeyStrategy?: "aggregateId" | ((event: Event) => string | null);
   /** Framework logger instance. Defaults to NodddeLogger("warn", "noddde:kafka") from @noddde/engine. */
   logger?: Logger;
+  /**
+   * OpenTelemetry instrumentation used to enrich per-handler error logs with
+   * `traceId`/`spanId` correlation fields. Defaults to a no-op instance.
+   * Provided via `@noddde/engine` `Instrumentation`.
+   */
+  instrumentation?: Instrumentation;
 }
 
 export class KafkaEventBus implements EventBus, Connectable {
@@ -88,8 +94,17 @@ export class KafkaEventBus implements EventBus, Connectable {
 6. **on registers handlers by event name** -- `on(eventName, handler)` stores the handler in an internal registry keyed by event name. Multiple handlers per event name are supported (fan-out within the same process).
 7. **Consumer subscription** -- When `connect()` is called (or when `on` is called after connect), the consumer subscribes to the topic `${topicPrefix}${eventName}` for each registered event name. If `on()` is called after `connect()` and the subscribe fails, the error is logged and the topic is removed from the subscribed set so a future `on()` call can retry. Subscribe errors must not be silently swallowed.
 8. **Message deserialization with poison message protection** -- Incoming Kafka messages are deserialized from JSON. Deserialization is wrapped in try/catch. If `JSON.parse` throws (malformed message), the error is logged and the offset is committed (message skipped). Poison messages must never block the partition via infinite redelivery.
-9. **Parallel handler invocation** -- Handlers for the same event are invoked concurrently via `Promise.all()`. If any handler rejects, the error propagates (consumer does not commit the offset, enabling redelivery). Handlers that already completed will re-execute on redelivery — consumers must be idempotent. This differs from `EventEmitterEventBus` (which invokes sequentially) because broker adapters operate in distributed contexts where independent handlers (projections, sagas) should not block each other.
-   9b. **maxRetries delivery limit** -- If `resilience.maxRetries` is configured, track delivery attempts using a custom Kafka header (`x-noddde-delivery-count`). On each message receipt, read the header, increment it, and check against `maxRetries`. If the count exceeds `maxRetries`, log a warning and commit the offset (skip the message). This prevents handler-level poison messages from blocking the partition indefinitely.
+9. **Isolated parallel handler invocation** -- Handlers for the same event are invoked concurrently via `Promise.allSettled()` (not `Promise.all()`). This guarantees that **every registered handler runs to completion** even when some of them fail — siblings are never silenced or short-circuited by an earlier rejection. After all handlers settle, the bus iterates the rejected results and logs each one individually via the framework `Logger` at `error` level with structured fields (see "Per-handler error logging" below). If at least one handler rejected, `_handleMessage` then propagates a failure (re-throwing the first rejection's reason) so the outer consumer loop skips the offset commit and Kafka redelivers per the existing retry / maxRetries policy. Handlers that already completed will re-execute on redelivery — consumers must be idempotent. This differs from `EventEmitterEventBus` (which invokes sequentially within a single process) because broker adapters operate in distributed contexts where independent handlers (projections, sagas) should not block each other.
+
+   9c. **Per-handler error logging** -- For each rejected handler, the bus calls `logger.error(message, fields)` exactly once with:
+
+   - `eventName: string` — from `event.name`.
+   - `eventId?: string` — from `event.metadata?.eventId` when present.
+   - `handlerName: string` — read from the handler's `name` property; falls back to `event.name` when anonymous.
+   - `error: { name, message, stack? }` — extracted from the caught exception. Non-`Error` rejection values are coerced via `String(value)` into `message`.
+   - `traceId?: string` and `spanId?: string` — populated from the active OpenTelemetry span via the configured `Instrumentation` instance. Absent when no span is active or when `@opentelemetry/api` is not installed.
+     9b. **maxRetries delivery limit** -- If `resilience.maxRetries` is configured, track delivery attempts using a custom Kafka header (`x-noddde-delivery-count`). On each message receipt, read the header, increment it, and check against `maxRetries`. If the count exceeds `maxRetries`, log a warning and commit the offset (skip the message). This prevents handler-level poison messages from blocking the partition indefinitely.
+
 10. **Explicit offset commit after handlers** -- The consumer is configured with `autoCommit: false` in `consumer.run()`. After all handlers for a message have completed successfully (all promises in the `Promise.all` resolved), the offset is committed explicitly via `consumer.commitOffsets([{ topic, partition, offset: nextOffset }])` where `nextOffset` is `message.offset + 1` (as a string). This provides at-least-once delivery. Without explicit `commitOffsets()`, offsets are never persisted to Kafka and every consumer restart would reprocess all messages. After committing, the delivery count entry for this offset is pruned from the `_deliveryCounts` map to prevent unbounded memory growth.
 
 ### Backpressure
@@ -105,7 +120,7 @@ export class KafkaEventBus implements EventBus, Connectable {
 
 ### Error Handling
 
-16. **Handler errors propagate** -- If any handler rejects during parallel invocation, the `Promise.all` rejection propagates (consumer does not commit the offset, enabling redelivery).
+16. **Handler errors propagate as message-level failure** -- After `Promise.allSettled` settles every registered handler and each rejection has been logged individually, `_handleMessage` re-throws the first rejected handler's reason. The outer consumer loop catches this and skips the offset commit, enabling Kafka redelivery per the existing retry / maxRetries policy. All sibling handlers ran to completion before this re-throw — none are silenced by an earlier rejection.
 17. **Serialization errors on dispatch** -- If event serialization fails, `dispatch` rejects with the serialization error.
 18. **Connection errors on dispatch** -- If the broker is unreachable during `dispatch`, the promise rejects with a connection error.
 
@@ -117,7 +132,9 @@ export class KafkaEventBus implements EventBus, Connectable {
 
 - All dispatched events are serialized as JSON (must be JSON-serializable).
 - Handlers registered via `on()` receive the full `Event` object.
-- Offset commits happen only after successful handler completion.
+- Offset commits happen only after every handler for the message has settled and none rejected.
+- All registered handlers for an event delivery run to completion, even when some fail (per-handler isolation via `Promise.allSettled`).
+- Each handler failure produces exactly one `logger.error` call with structured fields.
 - The bus does not deduplicate events (same event dispatched twice = two deliveries).
 - Topic names follow the pattern `${topicPrefix}${eventName}`.
 - Message key defaults to `event.metadata?.aggregateId` (stringified) for per-aggregate partition ordering.
@@ -128,7 +145,8 @@ export class KafkaEventBus implements EventBus, Connectable {
 - **No handler registered for a consumed topic**: Message is acknowledged (committed) with no processing.
 - **Handler throws**: Offset is not committed, message will be redelivered on next poll.
 - **Dispatch with no payload**: Events with `payload: undefined` are serialized as `{"name":"X","payload":null}`.
-- **Multiple handlers for same event**: All handlers are invoked in parallel via `Promise.all()`. If any handler rejects, the offset is not committed (enabling redelivery). Handlers that already completed will re-execute on redelivery.
+- **Multiple handlers for same event**: All handlers are invoked in parallel via `Promise.allSettled()`. Every handler runs to completion. Each rejection is logged individually. If at least one rejected, the offset is not committed (enabling redelivery). Handlers that already completed will re-execute on redelivery.
+- **Two handlers, one throws**: Both handlers run; one error log is emitted with the failed handler's name; offset is not committed → broker redelivers.
 - **on() called before connect()**: Handlers are buffered; subscriptions happen when `connect()` is called.
 - **on() called after close()**: Throws an error.
 - **Large message payloads**: Subject to Kafka's `message.max.bytes` broker config. No framework-level compression.
@@ -321,14 +339,14 @@ describe("KafkaEventBus", () => {
 });
 ```
 
-### parallel handler failure prevents offset commit
+### parallel handler failure prevents offset commit while siblings still complete
 
 ```ts
 import { describe, it, expect, vi } from "vitest";
 import { KafkaEventBus } from "@noddde/kafka";
 
 describe("KafkaEventBus", () => {
-  it("should reject if any handler throws during parallel invocation", async () => {
+  it("should reject _handleMessage after all handlers settled, with siblings completed", async () => {
     const bus = new KafkaEventBus({
       brokers: ["localhost:9092"],
       clientId: "test",
@@ -345,6 +363,158 @@ describe("KafkaEventBus", () => {
     await expect(
       (bus as any)._handleMessage("TestEvent", JSON.stringify(event)),
     ).rejects.toThrow("handler failed");
+
+    // The successful sibling completed even though another handler threw.
+    expect(successHandler).toHaveBeenCalledOnce();
+  });
+});
+```
+
+### sibling handler completes when an earlier handler throws (Promise.allSettled)
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { KafkaEventBus } from "@noddde/kafka";
+
+describe("KafkaEventBus error isolation", () => {
+  it("should run every handler to completion even when an earlier one throws", async () => {
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+
+    const before = vi.fn();
+    const after = vi.fn();
+    bus.on("E", before);
+    bus.on("E", async () => {
+      throw new Error("boom");
+    });
+    bus.on("E", after);
+
+    await expect(
+      (bus as any)._handleMessage(
+        "E",
+        JSON.stringify({ name: "E", payload: {} }),
+      ),
+    ).rejects.toThrow();
+
+    expect(before).toHaveBeenCalledOnce();
+    expect(after).toHaveBeenCalledOnce();
+  });
+});
+```
+
+### individual logging per failed handler with handlerName and error fields
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { KafkaEventBus } from "@noddde/kafka";
+import type { Logger } from "@noddde/core";
+
+describe("KafkaEventBus error isolation", () => {
+  it("should log once per failed handler with handlerName and error fields", async () => {
+    const logger: Logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      child: vi.fn().mockReturnThis(),
+    };
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+      logger,
+    });
+
+    async function failingA() {
+      throw new Error("err-a");
+    }
+    async function failingB() {
+      throw new Error("err-b");
+    }
+    bus.on("E", vi.fn());
+    bus.on("E", failingA);
+    bus.on("E", failingB);
+
+    await expect(
+      (bus as any)._handleMessage(
+        "E",
+        JSON.stringify({ name: "E", payload: {} }),
+      ),
+    ).rejects.toThrow();
+
+    const errorCalls = (logger.error as ReturnType<typeof vi.fn>).mock.calls;
+    // One error log per failed handler (2 failures → 2 log entries).
+    const handlerErrorCalls = errorCalls.filter(
+      ([, fields]) => (fields as any)?.handlerName !== undefined,
+    );
+    expect(handlerErrorCalls).toHaveLength(2);
+    const names = handlerErrorCalls.map(([, f]) => (f as any).handlerName);
+    expect(names).toEqual(expect.arrayContaining(["failingA", "failingB"]));
+    const messages = handlerErrorCalls.map(
+      ([, f]) => (f as any).error?.message,
+    );
+    expect(messages).toEqual(expect.arrayContaining(["err-a", "err-b"]));
+  });
+});
+```
+
+### offset commit behavior is unchanged under partial failure
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { KafkaEventBus } from "@noddde/kafka";
+
+describe("KafkaEventBus error isolation", () => {
+  it("should not commit the offset when any handler fails (existing redelivery behavior is preserved)", async () => {
+    const mockProducer = {
+      send: vi.fn().mockResolvedValue(undefined),
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+    };
+    const commitOffsets = vi.fn().mockResolvedValue(undefined);
+    const mockConsumer = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      subscribe: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+      commitOffsets,
+      // The consumer's `run` is replaced by direct `_handleMessage` calls in this test,
+      // so the test just verifies that `commitOffsets` is not called on the failure path.
+      run: vi.fn().mockResolvedValue(undefined),
+    };
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+    (bus as any)._kafka = mockKafka;
+
+    await bus.connect();
+
+    bus.on("E", vi.fn());
+    bus.on("E", async () => {
+      throw new Error("boom");
+    });
+
+    await expect(
+      (bus as any)._handleMessage(
+        "E",
+        JSON.stringify({ name: "E", payload: {} }),
+        "topic:0:42",
+      ),
+    ).rejects.toThrow();
+
+    // The Kafka consumer never commits the offset on a failed handler — broker
+    // redelivers per existing retry/maxRetries semantics. Regression guard.
+    expect(commitOffsets).not.toHaveBeenCalled();
   });
 });
 ```

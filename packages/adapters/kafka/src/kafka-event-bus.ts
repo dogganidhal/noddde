@@ -7,7 +7,7 @@ import type {
   Logger,
 } from "@noddde/core";
 import type { Event } from "@noddde/core";
-import { NodddeLogger } from "@noddde/engine";
+import { Instrumentation, NodddeLogger } from "@noddde/engine";
 
 /**
  * Configuration for the KafkaEventBus.
@@ -39,6 +39,11 @@ export interface KafkaEventBusConfig {
   partitionKeyStrategy?: "aggregateId" | ((event: Event) => string | null);
   /** Framework logger instance. Defaults to NodddeLogger("warn", "noddde:kafka") from @noddde/engine. */
   logger?: Logger;
+  /**
+   * OpenTelemetry instrumentation used to enrich per-handler error logs with
+   * `traceId`/`spanId` correlation fields. Defaults to a no-op instance.
+   */
+  instrumentation?: Instrumentation;
 }
 
 /**
@@ -58,6 +63,7 @@ export interface KafkaEventBusConfig {
 export class KafkaEventBus implements EventBus, Connectable {
   private readonly _config: KafkaEventBusConfig;
   private readonly _logger: Logger;
+  private readonly _instrumentation: Instrumentation;
   /** The kafkajs Kafka client. Exposed as a field so tests can inject a mock. */
   private _kafka: Pick<Kafka, "producer" | "consumer">;
   private _producer: Producer | null = null;
@@ -83,6 +89,7 @@ export class KafkaEventBus implements EventBus, Connectable {
   constructor(config: KafkaEventBusConfig) {
     this._config = config;
     this._logger = config.logger ?? new NodddeLogger("warn", "noddde:kafka");
+    this._instrumentation = config.instrumentation ?? new Instrumentation(null);
     this._kafka = new Kafka({
       brokers: config.brokers,
       clientId: config.clientId,
@@ -334,7 +341,52 @@ export class KafkaEventBus implements EventBus, Connectable {
 
     const handlers = this._handlers.get(eventName) ?? [];
 
-    await Promise.all(handlers.map((handler) => handler(event)));
+    const results = await Promise.allSettled(
+      handlers.map((handler) => handler(event)),
+    );
+
+    const { traceId, spanId } =
+      this._instrumentation.getActiveTraceCorrelation();
+
+    let firstRejection: unknown = undefined;
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i]!;
+      if (result.status === "rejected") {
+        const handler = handlers[i]!;
+        const err = result.reason;
+        const handlerName =
+          handler.name && handler.name !== "handler" && handler.name !== ""
+            ? handler.name
+            : event.name;
+
+        const errorFields =
+          err instanceof Error
+            ? { name: err.name, message: err.message, stack: err.stack }
+            : { name: "Error", message: String(err) };
+
+        this._logger.error(
+          `Handler "${handlerName}" failed for event "${event.name}"`,
+          {
+            eventName: event.name,
+            ...(event.metadata?.eventId !== undefined && {
+              eventId: event.metadata.eventId,
+            }),
+            handlerName,
+            error: errorFields,
+            ...(traceId !== undefined && { traceId }),
+            ...(spanId !== undefined && { spanId }),
+          },
+        );
+
+        if (firstRejection === undefined) {
+          firstRejection = err;
+        }
+      }
+    }
+
+    if (firstRejection !== undefined) {
+      throw firstRejection;
+    }
   }
 
   /**
