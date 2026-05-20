@@ -21,31 +21,59 @@
     "typescript",
     "persistence"
   ],
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
     },
     "./sqlite": {
-      "types": "./dist/sqlite/schema.d.ts",
-      "default": "./dist/sqlite/schema.js"
+      "import": {
+        "types": "./dist/sqlite/schema.d.mts",
+        "default": "./dist/sqlite/schema.mjs"
+      },
+      "require": {
+        "types": "./dist/sqlite/schema.d.ts",
+        "default": "./dist/sqlite/schema.js"
+      }
     },
     "./pg": {
-      "types": "./dist/pg/schema.d.ts",
-      "default": "./dist/pg/schema.js"
+      "import": {
+        "types": "./dist/pg/schema.d.mts",
+        "default": "./dist/pg/schema.mjs"
+      },
+      "require": {
+        "types": "./dist/pg/schema.d.ts",
+        "default": "./dist/pg/schema.js"
+      }
     },
     "./mysql": {
-      "types": "./dist/mysql/schema.d.ts",
-      "default": "./dist/mysql/schema.js"
+      "import": {
+        "types": "./dist/mysql/schema.d.mts",
+        "default": "./dist/mysql/schema.mjs"
+      },
+      "require": {
+        "types": "./dist/mysql/schema.d.ts",
+        "default": "./dist/mysql/schema.js"
+      }
     }
   },
+  "sideEffects": false,
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsup",
+    "build:watch": "tsup --watch",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings 0",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
