@@ -3,7 +3,23 @@
 **Date**: 2026-04-10
 **Auditor**: Opus 4.6
 **Cycle**: 1
-**Result**: **FAIL**
+**Result**: **FAIL** _(historical — see Resolution below)_
+
+> **Resolution (2026-06-03, v0.3.8):** This FAIL verdict has been resolved by a
+> deliberate spec change, not a code change. After this audit was written, the
+> `saga-executor` spec was updated: requirement #12 in
+> `specs/engine/executors/saga-executor.spec.md` now mandates **sequential**
+> dispatch (`for (const e of events) { await infrastructure.eventBus.dispatch(e); }`)
+> rather than parallel. The justification, captured in the spec, is that
+> sequential dispatch preserves causal ordering of events emitted from a single
+> saga reaction. `saga-executor.ts:160-162` already matches the current spec.
+>
+> The other two dispatch sites flagged in this report (`command-lifecycle-executor.ts:166`
+> and `domain.ts:1332` inside `withUnitOfWork`) remain parallel via
+> `Promise.all(events.map(...))` and continue to match their respective specs.
+>
+> This report is retained for historical traceability of the design decision.
+> It does **not** represent an open issue against the codebase.
 
 ---
 
