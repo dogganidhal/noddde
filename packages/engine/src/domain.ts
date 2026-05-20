@@ -777,25 +777,44 @@ export class Domain<
     for (const [name, projection] of Object.entries(
       definition.readModel.projections,
     )) {
-      resolvedProjections.set(name, projection);
       const wiringViewStore = wiring.projections?.[name];
 
       const factory: ViewStoreFactory | undefined =
         wiringViewStore?.viewStore ??
         (projection.viewStore as ViewStoreFactory | undefined);
+
+      let resolvedProjection: Projection<any> = projection;
+
       if (factory) {
         const baseStore = factory.getForContext(undefined);
         resolvedViewStoreFactories.set(name, factory);
         resolvedViewStores.set(name, baseStore);
-        // Default missing id extractors to event.metadata.aggregateId
+
+        // Build an augmented `on` map without mutating the user-provided
+        // projection. Handlers that already have an `id` extractor are
+        // referenced as-is; handlers missing one are shallow-cloned with a
+        // default extractor that reads `event.metadata.aggregateId`. The
+        // user's `definition.readModel.projections[name]` is never modified.
+        let augmentedAny = false;
+        const augmentedOn: Record<string, unknown> = {};
         for (const [eventName, handler] of Object.entries(projection.on)) {
-          if (handler && !(handler as any).id) {
-            domainLog.warn(
-              `Projection "${String(name)}": handler "${eventName}" has no "id" function. ` +
-                `Defaulting to event.metadata.aggregateId. Provide an explicit "id" ` +
-                `extractor if the view key differs from the aggregate ID.`,
-            );
-            (handler as any).id = (event: Event) => {
+          if (!handler) {
+            augmentedOn[eventName] = handler;
+            continue;
+          }
+          if ((handler as { id?: unknown }).id) {
+            augmentedOn[eventName] = handler;
+            continue;
+          }
+          domainLog.warn(
+            `Projection "${String(name)}": handler "${eventName}" has no "id" function. ` +
+              `Defaulting to event.metadata.aggregateId. Provide an explicit "id" ` +
+              `extractor if the view key differs from the aggregate ID.`,
+          );
+          augmentedAny = true;
+          augmentedOn[eventName] = {
+            ...(handler as object),
+            id: (event: Event) => {
               const id = event.metadata?.aggregateId;
               if (id == null) {
                 throw new Error(
@@ -805,10 +824,18 @@ export class Domain<
                 );
               }
               return id;
-            };
-          }
+            },
+          };
+        }
+        if (augmentedAny) {
+          resolvedProjection = {
+            ...projection,
+            on: augmentedOn as typeof projection.on,
+          };
         }
       }
+
+      resolvedProjections.set(name, resolvedProjection);
     }
 
     // Step 5.8b: Resolve outbox store
@@ -1046,9 +1073,12 @@ export class Domain<
     }
 
     // Step 10: Register event listeners for projections
-    for (const [projectionName, projection] of Object.entries(
-      definition.readModel.projections,
-    )) {
+    //
+    // Iterate over `resolvedProjections` (not `definition.readModel.projections`)
+    // so we read from the augmented `on` map built during Step 5.7 — handlers
+    // missing an explicit `id` extractor have the default `event.metadata.aggregateId`
+    // extractor available without mutating the user-provided definition.
+    for (const [projectionName, projection] of resolvedProjections) {
       // Skip strong-consistency projections — they're handled via onEventsProduced
       if (projection.consistency === "strong") continue;
 
