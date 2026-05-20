@@ -25,6 +25,7 @@ module.exports = {
     ".*.js",
     "node_modules/",
     "dist/",
+    "tsup.config.ts",
   ],
   overrides: [
     {
