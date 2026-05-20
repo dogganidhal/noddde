@@ -110,6 +110,16 @@ When a spec changes or a new spec is added that affects aggregate, projection, o
 
 Never push code that fails formatting or lint. CI runs `yarn format:check` and `yarn lint` — both must pass.
 
+## Releasing
+
+Versioning is driven by [Changesets](https://github.com/changesets/changesets). Packages are versioned **independently**.
+
+- When a PR changes a published package, run `yarn changeset` and commit the generated `.changeset/*.md` file.
+- On push to `main`, the `Release` workflow opens or updates a **"chore(release): version packages"** PR that bumps `package.json` versions and updates `CHANGELOG.md` files.
+- Merging that PR triggers npm publish (with provenance) and per-package git tags (e.g. `@noddde/core@0.2.0`).
+
+Private packages (`samples/*`, `docs`, `@noddde/eslint-config`, `@noddde/typescript-config`) are skipped automatically. PRs that only touch private or non-package files don't need a changeset.
+
 ## Non-Spec Work
 
 For tasks outside the spec pipeline (debugging, CI, docs-only, code review): follow coding conventions above. No spec needed for config changes, CI, or docs-only edits.

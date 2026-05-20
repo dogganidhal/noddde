@@ -1,0 +1,25 @@
+{
+  "$schema": "https://unpkg.com/@changesets/config@3.0.0/schema.json",
+  "changelog": "@changesets/cli/changelog",
+  "commit": false,
+  "fixed": [
+    [
+      "@noddde/core",
+      "@noddde/engine",
+      "@noddde/cli",
+      "@noddde/testing",
+      "@noddde/drizzle",
+      "@noddde/prisma",
+      "@noddde/typeorm",
+      "@noddde/rabbitmq",
+      "@noddde/nats",
+      "@noddde/kafka",
+      "@noddde/nestjs"
+    ]
+  ],
+  "linked": [],
+  "access": "public",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "ignore": []
+}

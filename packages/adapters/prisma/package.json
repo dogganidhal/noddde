@@ -1,6 +1,6 @@
 {
   "name": "@noddde/prisma",
-  "version": "0.0.0",
+  "version": "0.3.8",
   "description": "Prisma persistence adapter for noddde",
   "license": "MIT",
   "author": "Nidhal Dogga",
@@ -36,7 +36,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@noddde/core": "0.0.0"
+    "@noddde/core": "0.3.8"
   },
   "peerDependencies": {
     "@prisma/client": ">=5.0.0"
