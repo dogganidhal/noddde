@@ -1,6 +1,6 @@
 {
   "name": "@noddde/sample-auction",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": true,
   "scripts": {
     "build": "prisma generate && tsc",
@@ -11,10 +11,10 @@
     "start": "tsx src/main.ts"
   },
   "dependencies": {
-    "@noddde/core": "0.3.8",
-    "@noddde/engine": "0.3.8",
-    "@noddde/prisma": "0.3.8",
-    "@noddde/testing": "0.3.8",
+    "@noddde/core": "0.3.9",
+    "@noddde/engine": "0.3.9",
+    "@noddde/prisma": "0.3.9",
+    "@noddde/testing": "0.3.9",
     "@prisma/client": "^6.5.0",
     "type-fest": "^4.35.0"
   },
