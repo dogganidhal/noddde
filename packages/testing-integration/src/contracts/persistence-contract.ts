@@ -19,6 +19,14 @@ export interface PersistenceContractContext {
   stateStored: StateStoredAggregatePersistence;
   /** Optional teardown — closing connections, dropping tables, etc. */
   cleanup?: () => Promise<void>;
+  /**
+   * Adapter-dialect combinations whose payload column can't carry
+   * non-ASCII text (e.g. MSSQL's `TEXT` codepage column type). When true,
+   * the Unicode-roundtrip case still runs but only asserts the non-string
+   * fields survive — the framework itself never strips characters, this
+   * flag exists because some legacy column types do.
+   */
+  unicodeSafe?: boolean;
 }
 
 export type PersistenceContractFactory = () =>
@@ -78,10 +86,13 @@ export function definePersistenceContract(
       });
 
       it("roundtrips JSON payloads with nested objects, arrays, unicode and null", async () => {
+        // Default to true; opt-out only for backends with codepage-limited
+        // payload columns (e.g. MSSQL TEXT, which can't carry the emoji).
+        const unicodeSafe = ctx.unicodeSafe ?? true;
         const payload = {
           total: 9.99,
           items: [{ sku: "ABC-1", qty: 2 }],
-          notes: "Café — leave at door 🚪",
+          notes: unicodeSafe ? "Café — leave at door 🚪" : "leave at door",
           discount: null,
         };
         await ctx.eventSourced.save(

@@ -13,6 +13,46 @@ let kafka_: StartedKafka;
 
 beforeAll(async () => {
   kafka_ = await startKafka();
+
+  // Cold-start warmup: testcontainers waits for the "started" log
+  // signal, but the broker's first end-to-end publish/consume cycle is
+  // dramatically slower than subsequent ones (consistently >30s in CI
+  // on a 1-broker cluster). Without this, the *first* contract test
+  // hits the contract's 30s delivery deadline. We run a throwaway
+  // publish/consume cycle here so every real test sees a hot broker.
+  const warmupTopic = `__warmup_${uniqueSuffix()}`;
+  const warmupAdmin = new Kafka({
+    brokers: kafka_.brokers,
+    clientId: "warmup-admin",
+  }).admin();
+  await warmupAdmin.connect();
+  await warmupAdmin.createTopics({
+    waitForLeaders: true,
+    topics: [{ topic: warmupTopic, numPartitions: 1 }],
+  });
+  await warmupAdmin.disconnect();
+
+  const warmupBus = new KafkaEventBus({
+    brokers: kafka_.brokers,
+    clientId: "warmup",
+    groupId: `warmup-group-${uniqueSuffix()}`,
+  });
+  let warmedUp = false;
+  warmupBus.on(warmupTopic, async () => {
+    warmedUp = true;
+  });
+  await warmupBus.connect();
+  await waitFor(
+    async () => {
+      await warmupBus.dispatch({
+        name: warmupTopic,
+        payload: { warmup: true },
+      });
+      return warmedUp;
+    },
+    { timeoutMs: 60_000, intervalMs: 1000 },
+  );
+  await warmupBus.close();
 }, 300_000);
 
 afterAll(async () => {
@@ -27,6 +67,25 @@ defineEventBusContract("kafka", () => {
         clientId: `noddde-test-${suffix}`,
         groupId: `noddde-group-${suffix}`,
       }),
+    prepareTopics: async (topics) => {
+      // Kafkajs `consumer.subscribe()` races broker-side auto-creation —
+      // pre-create the topics via the admin client so subscribe sees them
+      // already present. One partition is sufficient for the cross-broker
+      // contract; the broker-specific tests below override with more.
+      const admin = new Kafka({
+        brokers: kafka_.brokers,
+        clientId: `admin-${uniqueSuffix()}`,
+      }).admin();
+      await admin.connect();
+      try {
+        await admin.createTopics({
+          waitForLeaders: true,
+          topics: topics.map((topic) => ({ topic, numPartitions: 1 })),
+        });
+      } finally {
+        await admin.disconnect();
+      }
+    },
     deliveryTimeoutMs: 30_000,
   };
 });
@@ -198,6 +257,20 @@ describe("KafkaEventBus broker-specific behaviour", () => {
     const suffix = uniqueSuffix();
     const topic = `RetryEvent_${suffix}`;
     const groupId = `retry-group-${suffix}`;
+
+    // Pre-create the topic up front so the consumer's group join and the
+    // producer's first publish don't race with auto-create. Same idiom
+    // as `prepareTopics` in the cross-broker contract.
+    const admin = new Kafka({
+      brokers: kafka_.brokers,
+      clientId: `admin-retry-${suffix}`,
+    }).admin();
+    await admin.connect();
+    await admin.createTopics({
+      waitForLeaders: true,
+      topics: [{ topic, numPartitions: 1 }],
+    });
+    await admin.disconnect();
 
     let attempts = 0;
     const bus = new KafkaEventBus({

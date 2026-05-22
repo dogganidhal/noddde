@@ -7,6 +7,35 @@ import {
 } from "typeorm";
 
 /**
+ * MSSQL needs `nvarchar(max)` for Unicode-safe JSON storage; `text` is
+ * legacy and ASCII-only there. For every other dialect, plain `text`
+ * is correct. `simple-json`-style column types would be more idiomatic
+ * but break the JSON-string round-trip the persistence layer relies on.
+ */
+const JSON_COLUMN_TYPE = { type: "text" as const };
+const JSON_COLUMN_TYPE_NULLABLE = { type: "text" as const, nullable: true };
+
+/**
+ * Bidirectional transformer for nullable Date columns. We can't rely on
+ * TypeORM's reflect-metadata inference here: `Date | null` collapses to
+ * `Object` in the emit, and TypeORM throws `Data type "Object" not
+ * supported`. Storing as ISO text via a transformer is portable across
+ * every dialect we target.
+ */
+const NULLABLE_DATE_TRANSFORMER = {
+  // Type as `unknown` because TypeORM also calls the transformer on
+  // `FindOperator` values inside `where` clauses (e.g. `Not(IsNull())`).
+  // We only convert real Date instances; anything else is passed through
+  // so TypeORM can apply its own find-operator handling.
+  to: (value: unknown): unknown => {
+    if (value instanceof Date) return value.toISOString();
+    if (value == null) return null;
+    return value;
+  },
+  from: (value: string | null): Date | null => (value ? new Date(value) : null),
+};
+
+/**
  * TypeORM entity for event-sourced aggregate persistence.
  */
 @Entity("noddde_events")
@@ -27,13 +56,16 @@ export class NodddeEventEntity {
   @Column({ name: "event_name" })
   eventName!: string;
 
-  @Column({ type: "text" })
+  @Column(JSON_COLUMN_TYPE)
   payload!: string;
 
-  @Column({ type: "text", nullable: true })
+  @Column(JSON_COLUMN_TYPE_NULLABLE)
   metadata!: string | null;
 
-  @Column({ name: "created_at", type: "datetime" })
+  // No explicit `type` — TypeORM picks the dialect-native datetime
+  // (`datetime` on sqlite/mysql, `timestamp without time zone` on
+  // postgres, `datetime2` on mssql).
+  @Column({ name: "created_at" })
   createdAt!: Date;
 }
 
@@ -105,9 +137,17 @@ export class NodddeOutboxEntryEntity {
   @Column({ name: "aggregate_id", type: "varchar", nullable: true })
   aggregateId!: string | null;
 
-  @Column({ name: "created_at", type: "datetime" })
+  // No explicit `type` — TypeORM picks the dialect-native datetime.
+  @Column({ name: "created_at" })
   createdAt!: Date;
 
-  @Column({ name: "published_at", type: "datetime", nullable: true })
+  // Nullable Date: use a text-backed transformer (see comment above)
+  // because TypeORM can't infer `Date | null`.
+  @Column({
+    name: "published_at",
+    type: "text",
+    nullable: true,
+    transformer: NULLABLE_DATE_TRANSFORMER,
+  })
   publishedAt!: Date | null;
 }

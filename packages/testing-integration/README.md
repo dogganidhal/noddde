@@ -17,7 +17,10 @@
 
 ```ts
 // packages/adapters/drizzle/src/__tests__/integration/postgres.integration.test.ts
-import { startPostgres, definePersistenceContract } from "@noddde/testing-integration";
+import {
+  startPostgres,
+  definePersistenceContract,
+} from "@noddde/testing-integration";
 
 const pg = await startPostgres();
 definePersistenceContract("drizzle/postgres", async () => {
@@ -62,8 +65,8 @@ path filter under-selects.
 
 ## When to add a new test
 
-| Want to … | Where to put the test |
-|---|---|
-| Strengthen behaviour every persistence adapter must obey | `contracts/persistence-contract.ts` (or the relevant contract file) |
-| Cover a dialect-specific quirk (JSONB indexing, MySQL collation, …) | The matching `<adapter>/src/__tests__/integration/<dialect>.integration.test.ts` |
+| Want to …                                                                | Where to put the test                                                                   |
+| ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| Strengthen behaviour every persistence adapter must obey                 | `contracts/persistence-contract.ts` (or the relevant contract file)                     |
+| Cover a dialect-specific quirk (JSONB indexing, MySQL collation, …)      | The matching `<adapter>/src/__tests__/integration/<dialect>.integration.test.ts`        |
 | Exercise a Kafka/NATS/RabbitMQ feature that has no cross-broker analogue | The broker's `*.integration.test.ts`, alongside the `defineEventBusContract` invocation |

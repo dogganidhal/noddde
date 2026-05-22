@@ -2,8 +2,8 @@
   "extends": "@noddde/typescript-config/base.json",
   "compilerOptions": {
     "noEmit": true,
-    "rootDir": "src"
+    "rootDir": "src",
   },
   "include": ["src"],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules"],
 }

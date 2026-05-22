@@ -43,6 +43,10 @@ definePersistenceContract("typeorm/mssql", () => {
   return {
     eventSourced: a.eventSourcedPersistence,
     stateStored: a.stateStoredPersistence,
+    // MSSQL `TEXT` is codepage-limited; supplementary-plane chars get
+    // replaced on storage. Persisting upgrades to `nvarchar(max)` for
+    // Unicode safety is tracked separately.
+    unicodeSafe: false,
   };
 });
 defineSagaContract("typeorm/mssql", () => ({

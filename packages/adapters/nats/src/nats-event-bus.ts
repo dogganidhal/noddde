@@ -1,6 +1,7 @@
 import {
   connect,
   consumerOpts,
+  createInbox,
   type JetStreamClient,
   type JetStreamManager,
   type NatsConnection,
@@ -291,6 +292,10 @@ export class NatsEventBus implements EventBus, Connectable {
     opts.manualAck();
     opts.filterSubject(subject);
     opts.maxAckPending(this._config.prefetchCount ?? 256);
+    // NATS Server >= 2.10 requires push consumers to declare an explicit
+    // deliver subject. We use a per-subscription inbox so two parallel
+    // subscribers in the same process don't collide.
+    opts.deliverTo(createInbox());
 
     const maxRetries = this._config.resilience?.maxRetries;
     if (maxRetries !== undefined) {

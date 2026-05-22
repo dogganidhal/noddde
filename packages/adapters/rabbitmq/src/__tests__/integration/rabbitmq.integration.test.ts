@@ -182,41 +182,43 @@ describe("RabbitMqEventBus broker-specific behaviour", () => {
   });
 
   it("publisher confirms: dispatch awaits broker acknowledgement", async () => {
+    // We don't subscribe — the goal is to verify dispatch() doesn't resolve
+    // until the broker has acked the publish. Use a raw amqplib connection
+    // to declare the durable queue + binding before the bus connects, then
+    // dispatch via the bus, close the bus, and check the queue has 1
+    // unconsumed message. If dispatch returned before the broker
+    // acknowledged, the message would be lost when the bus connection
+    // closed before the broker durably accepted it.
     const suffix = uniqueSuffix();
     const exchange = `noddde.events.${suffix}`;
     const queuePrefix = `noddde.${suffix}`;
+    const eventName = `Confirmed_${suffix}`;
+    const queueName = `${queuePrefix}.${eventName}`;
+
+    const setupConn = await amqplib.connect(rmq_.url);
+    const setupCh = await setupConn.createChannel();
+    await setupCh.assertExchange(exchange, "topic", { durable: true });
+    await setupCh.assertQueue(queueName, { durable: true });
+    await setupCh.bindQueue(queueName, exchange, eventName);
+    await setupCh.close();
+    await setupConn.close();
 
     const bus = new RabbitMqEventBus({
       url: rmq_.url,
       exchangeName: exchange,
       queuePrefix,
     });
-    bus.on(`Confirmed_${suffix}`, async () => {});
     await bus.connect();
-
-    // Use a raw amqplib consumer that immediately closes its channel to make
-    // sure dispatch() really did get a publish-confirm by the time it
-    // resolves — not just buffered in the local channel.
-    const conn = await amqplib.connect(rmq_.url);
-    const ch = await conn.createChannel();
-    let messageCount = 0;
-    await ch.consume(
-      `${queuePrefix}.Confirmed_${suffix}`,
-      (msg) => {
-        if (msg) {
-          messageCount++;
-          ch.ack(msg);
-        }
-      },
-      { noAck: false },
-    );
-
-    await bus.dispatch({ name: `Confirmed_${suffix}`, payload: {} });
-    await waitFor(() => messageCount >= 1, { timeoutMs: 5_000 });
-    expect(messageCount).toBeGreaterThanOrEqual(1);
-
-    await ch.close();
-    await conn.close();
+    await bus.dispatch({ name: eventName, payload: { confirmed: true } });
     await bus.close();
+
+    // Probe the queue from a fresh connection — if dispatch() really awaited
+    // broker confirmation, the message is still in the durable queue.
+    const probeConn = await amqplib.connect(rmq_.url);
+    const probeCh = await probeConn.createChannel();
+    const { messageCount } = await probeCh.checkQueue(queueName);
+    expect(messageCount).toBeGreaterThanOrEqual(1);
+    await probeCh.close();
+    await probeConn.close();
   });
 });

@@ -24,8 +24,17 @@ export class MySQLLocker implements AggregateLocker {
     const result = await this.db.execute(
       sql`SELECT GET_LOCK(${lockName}, ${timeoutSec}) AS acquired`,
     );
-    const acquired = result.rows?.[0]?.acquired ?? result[0]?.acquired;
-    if (acquired !== 1)
+    // mysql2 returns `[rows, fields]`; drizzle's pg-style result uses `.rows`;
+    // older drivers expose the row array directly. Probe all three shapes so
+    // the locker stays portable across drizzle dialects.
+    const acquired =
+      result.rows?.[0]?.acquired ??
+      result[0]?.[0]?.acquired ??
+      result[0]?.acquired;
+    // GET_LOCK returns 1 (success), 0 (timeout), or NULL (error). mysql2 may
+    // surface the value as a JS `number` or a `string` ("1" / "0") depending
+    // on `typeCast` config — coerce defensively.
+    if (Number(acquired) !== 1)
       throw new LockTimeoutError(aggregateName, aggregateId, timeoutMs ?? 0);
   }
 

@@ -36,7 +36,11 @@ export class PostgresLocker implements AggregateLocker {
         await new Promise((r) => setTimeout(r, 50));
       }
     } else {
-      await (this.prisma as any).$queryRawUnsafe(
+      // `pg_advisory_lock` returns void — $queryRawUnsafe chokes trying to
+      // deserialize a void column ("Failed to deserialize column of type
+      // 'void'"). $executeRawUnsafe doesn't materialise a row set so it
+      // works for both void- and value-returning function calls.
+      await (this.prisma as any).$executeRawUnsafe(
         `SELECT pg_advisory_lock($1::bigint)`,
         hashKey,
       );

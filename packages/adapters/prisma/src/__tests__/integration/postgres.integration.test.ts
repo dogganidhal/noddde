@@ -88,11 +88,13 @@ defineUnitOfWorkContract("prisma/postgres", () => {
 });
 
 defineAdvisoryLockerContract("prisma/postgres", async () => {
-  // Need *two* independent clients/sessions for the lock contract. PrismaClient
-  // multiplexes queries over an internal pool but advisory locks are
-  // session-scoped, so we approximate by spinning up two distinct clients.
-  const a = new PrismaClient({ datasources: { db: { url: pg_.url } } });
-  const b = new PrismaClient({ datasources: { db: { url: pg_.url } } });
+  // Need *two* independent sessions for the lock contract. Prisma multiplexes
+  // queries over an internal pool, so we cap each client to a single
+  // connection (`connection_limit=1`) to guarantee that the lock and the
+  // release land on the same pg session.
+  const pinnedUrl = `${pg_.url}${pg_.url.includes("?") ? "&" : "?"}connection_limit=1`;
+  const a = new PrismaClient({ datasources: { db: { url: pinnedUrl } } });
+  const b = new PrismaClient({ datasources: { db: { url: pinnedUrl } } });
   await a.$connect();
   await b.$connect();
   return {

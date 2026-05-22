@@ -91,7 +91,8 @@ defineUnitOfWorkContract("prisma/mysql", () => {
 });
 
 defineAdvisoryLockerContract("prisma/mysql", async () => {
-  const url = mysqlUrl(mysql_);
+  const raw = mysqlUrl(mysql_);
+  const url = `${raw}${raw.includes("?") ? "&" : "?"}connection_limit=1`;
   const a = new PrismaClient({ datasources: { db: { url } } });
   const b = new PrismaClient({ datasources: { db: { url } } });
   await a.$connect();

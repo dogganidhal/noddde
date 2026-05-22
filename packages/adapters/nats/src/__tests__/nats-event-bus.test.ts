@@ -220,6 +220,7 @@ describe("NatsEventBus", () => {
       maxDeliver: vi.fn((n: number) => {
         maxDeliverCalls.push(n);
       }),
+      deliverTo: vi.fn(),
     };
 
     const mockSub = (async function* () {})();
@@ -448,6 +449,7 @@ describe("NatsEventBus", () => {
       manualAck: vi.fn(),
       filterSubject: vi.fn(),
       maxAckPending: vi.fn(),
+      deliverTo: vi.fn(),
     };
     vi.spyOn(natsModule, "consumerOpts").mockReturnValue(mockOpts as any);
 
@@ -476,6 +478,7 @@ describe("NatsEventBus", () => {
       manualAck: vi.fn(),
       filterSubject: vi.fn(),
       maxAckPending: vi.fn(),
+      deliverTo: vi.fn(),
     };
 
     const mockSub = (async function* () {})();
@@ -511,6 +514,7 @@ describe("NatsEventBus", () => {
       manualAck: vi.fn(),
       filterSubject: vi.fn(),
       maxAckPending: vi.fn(),
+      deliverTo: vi.fn(),
     };
 
     const mockSub = (async function* () {})();
@@ -567,6 +571,7 @@ describe("NatsEventBus", () => {
       manualAck: vi.fn(),
       filterSubject: vi.fn(),
       maxAckPending: vi.fn(),
+      deliverTo: vi.fn(),
     };
     vi.spyOn(natsModule, "consumerOpts").mockReturnValue(mockOpts as any);
 

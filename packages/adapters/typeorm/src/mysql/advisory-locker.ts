@@ -26,7 +26,11 @@ export class MySQLLocker implements AggregateLocker {
       `SELECT GET_LOCK(?, ?) AS acquired`,
       [lockName, timeoutSec],
     );
-    const acquired = result[0]?.acquired;
+    // mysql2 may return BIGINT as a JS `number` or a `string` ("1"/"0")
+    // depending on `typeCast` config — coerce defensively. GET_LOCK can
+    // also return NULL on error, in which case `Number(null)` is 0 and we
+    // correctly treat it as a timeout.
+    const acquired = Number(result[0]?.acquired);
     if (acquired !== 1)
       throw new LockTimeoutError(aggregateName, aggregateId, timeoutMs ?? 0);
   }

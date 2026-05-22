@@ -146,6 +146,30 @@ export class KafkaEventBus implements EventBus, Connectable {
           }
         }
 
+        // Wait for the consumer to be polling for messages before
+        // `connect()` resolves. Without this, `consumer.run()` returns
+        // immediately and the caller can dispatch a message *before* the
+        // consumer's initial offset fetch completes — with the default
+        // `fromBeginning: false`, that first message gets skipped because
+        // the offset reset happens after it was published.
+        //
+        // We listen for the kafkajs `FETCH_START` event rather than
+        // `GROUP_JOIN`: GROUP_JOIN fires after partition assignment, but
+        // before the consumer's initial offset fetch lands, so a
+        // message published right after GROUP_JOIN can still end up
+        // below the consumer's eventual starting position.
+        // `FETCH_START` only fires once the consumer is actually polling,
+        // which is the moment we can guarantee subsequent publishes will
+        // be delivered.
+        let fetchStarted!: () => void;
+        const fetchStartedPromise = new Promise<void>((resolve) => {
+          fetchStarted = resolve;
+        });
+        const unsubscribe = this._consumer.on(
+          this._consumer.events.FETCH_START,
+          () => fetchStarted(),
+        );
+
         await this._consumer.run({
           // Disable auto-commit so offsets are only committed after all handlers
           // complete successfully (at-least-once delivery guarantee).
@@ -177,6 +201,18 @@ export class KafkaEventBus implements EventBus, Connectable {
             this._deliveryCounts.delete(offsetKey);
           },
         });
+
+        // If we subscribed to any topic, wait for the consumer to start
+        // fetching. With no subscribed topics there's nothing to wait
+        // for — kafkajs won't emit FETCH_START at all. Cap at 30s so a
+        // misconfigured broker doesn't hang the process forever.
+        if (this._subscribedTopics.size > 0) {
+          await Promise.race([
+            fetchStartedPromise,
+            new Promise<void>((resolve) => setTimeout(resolve, 30_000)),
+          ]);
+        }
+        unsubscribe();
 
         this._connected = true;
       } finally {
