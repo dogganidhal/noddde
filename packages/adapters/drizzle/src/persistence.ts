@@ -1,5 +1,19 @@
 /* eslint-disable no-unused-vars */
 import { eq, and, asc, gt, isNull, isNotNull, inArray, lt } from "drizzle-orm";
+
+/**
+ * Serializes a `Date` to a string accepted by every dialect we target.
+ *
+ * - SQLite stores it verbatim in a TEXT column (sorts lexicographically the
+ *   same as a timestamp).
+ * - PostgreSQL `TIMESTAMPTZ` parses it as UTC.
+ * - MySQL `TIMESTAMP(3)` rejects the `Z` timezone marker but accepts the
+ *   space-separated ISO-without-zone form (`YYYY-MM-DD HH:MM:SS.fff`),
+ *   which is what we emit.
+ */
+function toDbTimestamp(d: Date): string {
+  return d.toISOString().replace("T", " ").replace("Z", "");
+}
 import {
   ConcurrencyError,
   type Event,
@@ -53,10 +67,11 @@ export class DrizzleEventSourcedAggregatePersistence
           eventName: event.name,
           payload: JSON.stringify(event.payload),
           metadata: JSON.stringify(event.metadata ?? null),
-          createdAt: (event.metadata?.timestamp
-            ? new Date(event.metadata.timestamp)
-            : new Date()
-          ).toISOString(),
+          createdAt: toDbTimestamp(
+            event.metadata?.timestamp
+              ? new Date(event.metadata.timestamp)
+              : new Date(),
+          ),
         })),
       );
     } catch (error: any) {
@@ -206,9 +221,19 @@ export class DrizzleStateStoredAggregatePersistence
           ),
         );
 
-      // Check if no rows were updated (concurrency conflict)
+      // Check if no rows were updated (concurrency conflict). Each
+      // drizzle driver surfaces this on a different property — better-
+      // sqlite3 uses `changes`, node-postgres uses `rowCount`, mysql2
+      // returns a `ResultSetHeader` with `affectedRows`. mysql2 in
+      // particular is wrapped in an array `[ResultSetHeader, ...]` by
+      // drizzle's mysql2 session, so probe both shapes.
       const rowsAffected =
-        result?.rowsAffected ?? result?.changes ?? result?.rowCount ?? 0;
+        result?.rowsAffected ??
+        result?.changes ??
+        result?.rowCount ??
+        result?.affectedRows ??
+        result?.[0]?.affectedRows ??
+        0;
       if (rowsAffected === 0) {
         throw new ConcurrencyError(
           aggregateName,
@@ -239,7 +264,9 @@ export class DrizzleStateStoredAggregatePersistence
 
     if (rows.length === 0) return null;
     const row = rows[0]!;
-    return { state: JSON.parse(row.state), version: row.version };
+    const state =
+      typeof row.state === "string" ? JSON.parse(row.state) : row.state;
+    return { state, version: row.version };
   }
 }
 
@@ -295,7 +322,8 @@ export class DrizzleSagaPersistence implements SagaPersistence {
       .where(and(eq(table.sagaName, sagaName), eq(table.sagaId, sagaId)));
 
     if (rows.length === 0) return undefined;
-    return JSON.parse(rows[0]!.state);
+    const raw = rows[0]!.state;
+    return typeof raw === "string" ? JSON.parse(raw) : raw;
   }
 }
 
@@ -410,8 +438,8 @@ export class DrizzleOutboxStore implements OutboxStore {
         event: JSON.stringify(e.event),
         aggregateName: e.aggregateName ?? null,
         aggregateId: e.aggregateId ?? null,
-        createdAt: e.createdAt.toISOString(),
-        publishedAt: e.publishedAt?.toISOString() ?? null,
+        createdAt: toDbTimestamp(e.createdAt),
+        publishedAt: e.publishedAt ? toDbTimestamp(e.publishedAt) : null,
       })),
     );
   }
@@ -439,7 +467,7 @@ export class DrizzleOutboxStore implements OutboxStore {
     const executor = this.getExecutor();
     await executor
       .update(this.schema.outbox)
-      .set({ publishedAt: new Date().toISOString() })
+      .set({ publishedAt: toDbTimestamp(new Date()) })
       .where(inArray(this.schema.outbox.id, ids));
   }
 
@@ -466,7 +494,7 @@ export class DrizzleOutboxStore implements OutboxStore {
     if (olderThan) {
       condition = and(
         condition,
-        lt(this.schema.outbox.createdAt, olderThan.toISOString()),
+        lt(this.schema.outbox.createdAt, toDbTimestamp(olderThan)),
       )!;
     }
     await executor.delete(this.schema.outbox).where(condition);

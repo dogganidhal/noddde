@@ -6,7 +6,11 @@
     "DATABASE_URL",
     "EVENT_BUS",
     "RABBITMQ_URL",
-    "NATS_URL"
+    "NATS_URL",
+    "INTEGRATION",
+    "CI",
+    "TESTCONTAINERS_HOST_OVERRIDE",
+    "TESTCONTAINERS_RYUK_DISABLED"
   ],
   "tasks": {
     "build": {
@@ -22,6 +26,14 @@
     "test:coverage": {
       "dependsOn": ["^build"],
       "outputs": ["coverage/**"]
+    },
+    "test:integration": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "env": ["INTEGRATION", "CI"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"]
     },
     "dev": {
       "cache": false,

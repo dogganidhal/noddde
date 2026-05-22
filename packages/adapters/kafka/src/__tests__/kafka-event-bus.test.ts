@@ -11,6 +11,18 @@ function makeMockConsumer() {
     run: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn().mockResolvedValue(undefined),
     commitOffsets: vi.fn().mockResolvedValue(undefined),
+    // KafkaEventBus.connect() listens for the FETCH_START event so it
+    // can wait for the consumer to be polling. The mock fires the
+    // listener immediately so unit tests don't hang waiting on a real
+    // fetch — they only assert on synchronous behaviour after `await
+    // connect()`.
+    events: { FETCH_START: "consumer.fetch_start" },
+    on: vi.fn().mockImplementation((_event: string, listener: () => void) => {
+      // Fire on the next tick so connect()'s ready promise resolves
+      // before the 30s timeout race kicks in.
+      queueMicrotask(listener);
+      return () => {};
+    }),
   };
 }
 
@@ -669,6 +681,11 @@ describe("KafkaEventBus error isolation", () => {
       stop: vi.fn().mockResolvedValue(undefined),
       commitOffsets,
       run: vi.fn().mockResolvedValue(undefined),
+      events: { FETCH_START: "consumer.fetch_start" },
+      on: vi.fn().mockImplementation((_event: string, listener: () => void) => {
+        queueMicrotask(listener);
+        return () => {};
+      }),
     };
     const mockKafka = {
       producer: () => mockProducer,

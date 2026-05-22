@@ -24,7 +24,7 @@ export const events = mysqlTable(
     eventName: varchar("event_name", { length: 255 }).notNull(),
     payload: json("payload").notNull(),
     metadata: json("metadata"),
-    createdAt: timestamp("created_at", { mode: "date", fsp: 3 })
+    createdAt: timestamp("created_at", { mode: "string", fsp: 3 })
       .notNull()
       .defaultNow(),
   },
@@ -80,8 +80,8 @@ export const outbox = mysqlTable("noddde_outbox", {
   event: json("event").notNull(),
   aggregateName: varchar("aggregate_name", { length: 255 }),
   aggregateId: varchar("aggregate_id", { length: 255 }),
-  createdAt: timestamp("created_at", { mode: "date", fsp: 3 })
+  createdAt: timestamp("created_at", { mode: "string", fsp: 3 })
     .notNull()
     .defaultNow(),
-  publishedAt: timestamp("published_at", { mode: "date", fsp: 3 }),
+  publishedAt: timestamp("published_at", { mode: "string", fsp: 3 }),
 });

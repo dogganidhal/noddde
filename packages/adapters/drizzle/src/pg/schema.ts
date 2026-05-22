@@ -23,7 +23,7 @@ export const events = pgTable(
     eventName: text("event_name").notNull(),
     payload: jsonb("payload").notNull(),
     metadata: jsonb("metadata"),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
       .notNull()
       .defaultNow(),
   },
@@ -82,8 +82,11 @@ export const outbox = pgTable("noddde_outbox", {
   event: jsonb("event").notNull(),
   aggregateName: text("aggregate_name"),
   aggregateId: text("aggregate_id"),
-  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
     .notNull()
     .defaultNow(),
-  publishedAt: timestamp("published_at", { withTimezone: true, mode: "date" }),
+  publishedAt: timestamp("published_at", {
+    withTimezone: true,
+    mode: "string",
+  }),
 });

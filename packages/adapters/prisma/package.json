@@ -47,8 +47,10 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings 0",
     "prisma:generate": "prisma generate",
+    "prisma:generate:integration": "prisma generate --schema prisma/integration/postgres.prisma && prisma generate --schema prisma/integration/mysql.prisma",
     "test": "prisma generate && vitest run",
     "test:coverage": "prisma generate && vitest run --coverage",
+    "test:integration": "prisma generate && prisma generate --schema prisma/integration/postgres.prisma && prisma generate --schema prisma/integration/mysql.prisma && vitest run --config vitest.integration.config.mts",
     "test:watch": "vitest"
   },
   "dependencies": {
@@ -58,6 +60,7 @@
     "@prisma/client": ">=5.0.0"
   },
   "devDependencies": {
+    "@noddde/testing-integration": "0.0.0",
     "@noddde/typescript-config": "0.0.0",
     "@prisma/client": "^6.5.0",
     "prisma": "^6.5.0",
