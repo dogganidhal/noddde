@@ -1,0 +1,95 @@
+import { afterAll, beforeAll, beforeEach } from "vitest";
+import { DataSource } from "typeorm";
+import {
+  definePersistenceContract,
+  defineSagaContract,
+  defineSnapshotContract,
+  defineOutboxContract,
+  defineUnitOfWorkContract,
+  defineAdvisoryLockerContract,
+  startMssql,
+  type StartedMssql,
+} from "@noddde/testing-integration";
+import { buildAdapter, makeDataSource, truncateAll } from "./helpers";
+import { TypeORMAdvisoryLocker } from "../../advisory-locker";
+
+let mssql_: StartedMssql;
+let ds: DataSource;
+
+beforeAll(async () => {
+  mssql_ = await startMssql();
+  ds = await makeDataSource({
+    type: "mssql",
+    host: mssql_.host,
+    port: mssql_.port,
+    username: mssql_.username,
+    password: mssql_.password,
+    database: mssql_.database,
+    options: { encrypt: false, trustServerCertificate: true },
+  });
+}, 300_000);
+
+afterAll(async () => {
+  await ds?.destroy();
+  await mssql_?.stop();
+});
+
+beforeEach(async () => {
+  await truncateAll(ds);
+});
+
+definePersistenceContract("typeorm/mssql", () => {
+  const a = buildAdapter(ds);
+  return {
+    eventSourced: a.eventSourcedPersistence,
+    stateStored: a.stateStoredPersistence,
+  };
+});
+defineSagaContract("typeorm/mssql", () => ({
+  saga: buildAdapter(ds).sagaPersistence,
+}));
+defineSnapshotContract("typeorm/mssql", () => ({
+  snapshots: buildAdapter(ds).snapshotStore,
+}));
+defineOutboxContract("typeorm/mssql", () => ({
+  outbox: buildAdapter(ds).outboxStore,
+}));
+defineUnitOfWorkContract("typeorm/mssql", () => {
+  const a = buildAdapter(ds);
+  return {
+    eventSourced: a.eventSourcedPersistence,
+    stateStored: a.stateStoredPersistence,
+    uowFactory: a.unitOfWorkFactory,
+  };
+});
+defineAdvisoryLockerContract("typeorm/mssql", async () => {
+  // MSSQL sp_getapplock is session-scoped. Each DataSource is its own pool.
+  const a = await makeDataSource({
+    type: "mssql",
+    host: mssql_.host,
+    port: mssql_.port,
+    username: mssql_.username,
+    password: mssql_.password,
+    database: mssql_.database,
+    options: { encrypt: false, trustServerCertificate: true },
+    pool: { max: 1 },
+  } as any);
+  const b = await makeDataSource({
+    type: "mssql",
+    host: mssql_.host,
+    port: mssql_.port,
+    username: mssql_.username,
+    password: mssql_.password,
+    database: mssql_.database,
+    options: { encrypt: false, trustServerCertificate: true },
+    pool: { max: 1 },
+  } as any);
+  return {
+    lockerA: new TypeORMAdvisoryLocker(a),
+    lockerB: new TypeORMAdvisoryLocker(b),
+    cleanup: async () => {
+      await a.destroy();
+      await b.destroy();
+    },
+  };
+});

@@ -7,10 +7,17 @@ export default defineConfig({
       "@noddde/core": path.resolve(__dirname, "../../core/src/index.ts"),
       "@noddde/engine": path.resolve(__dirname, "../../engine/src/index.ts"),
       "@noddde/nats": path.resolve(__dirname, "src/index.ts"),
+      "@noddde/testing-integration": path.resolve(
+        __dirname,
+        "../../testing-integration/src/index.ts",
+      ),
     },
   },
   test: {
-    include: ["src/__tests__/**/*.test.ts"],
-    exclude: ["src/__tests__/**/*.integration.test.ts", "node_modules/**"],
+    include: ["src/__tests__/**/*.integration.test.ts"],
+    testTimeout: 30_000,
+    hookTimeout: 120_000,
+    pool: "forks",
+    poolOptions: { forks: { singleFork: true } },
   },
 });

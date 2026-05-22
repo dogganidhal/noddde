@@ -7,6 +7,7 @@
     "lint": "turbo lint",
     "test": "turbo test",
     "test:coverage": "turbo test:coverage",
+    "test:integration": "turbo test:integration",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,md}\"",
     "changeset": "changeset",

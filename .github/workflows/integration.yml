@@ -1,0 +1,254 @@
+name: Integration
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # Nightly full run at 03:13 UTC. Covers the case where a PR's path filter
+    # missed something (e.g. a core/engine change that subtly breaks an adapter)
+    # by always exercising every backend at least once a day.
+    - cron: "13 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------
+  # changes: figures out which adapters need to be tested for this run.
+  # Path filters keep PR CI fast: a docs-only change runs zero integration
+  # jobs. A change to core/engine or to testing-integration runs everything.
+  # ---------------------------------------------------------------------
+  changes:
+    name: Detect affected adapters
+    runs-on: ubuntu-latest
+    outputs:
+      drizzle: ${{ steps.filter.outputs.drizzle }}
+      prisma: ${{ steps.filter.outputs.prisma }}
+      typeorm: ${{ steps.filter.outputs.typeorm }}
+      kafka: ${{ steps.filter.outputs.kafka }}
+      nats: ${{ steps.filter.outputs.nats }}
+      rabbitmq: ${{ steps.filter.outputs.rabbitmq }}
+      run_all: ${{ steps.filter.outputs.run_all }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Filter paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          # `run_all` triggers everything: core/engine/testing-integration are
+          # transitive deps of every adapter so any change there could break
+          # any adapter. The `schedule` event also forces a full run below.
+          filters: |
+            run_all:
+              - '.github/workflows/integration.yml'
+              - 'packages/core/**'
+              - 'packages/engine/**'
+              - 'packages/testing/**'
+              - 'packages/testing-integration/**'
+              - 'turbo.json'
+              - 'package.json'
+              - 'yarn.lock'
+              - 'tsconfig.json'
+            drizzle:
+              - 'packages/adapters/drizzle/**'
+            prisma:
+              - 'packages/adapters/prisma/**'
+            typeorm:
+              - 'packages/adapters/typeorm/**'
+            kafka:
+              - 'packages/adapters/kafka/**'
+            nats:
+              - 'packages/adapters/nats/**'
+            rabbitmq:
+              - 'packages/adapters/rabbitmq/**'
+
+  # ---------------------------------------------------------------------
+  # drizzle: matrix on dialect. Each dialect uses GitHub Actions service
+  # containers for speed when possible, with testcontainers as the local
+  # default. The integration test itself decides which it uses based on
+  # the env vars passed in.
+  # ---------------------------------------------------------------------
+  drizzle:
+    name: drizzle/${{ matrix.dialect }}
+    needs: changes
+    if: |
+      needs.changes.outputs.drizzle == 'true' ||
+      needs.changes.outputs.run_all == 'true' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dialect: [sqlite, postgres, mysql]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+      - name: Restore Turbo cache
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: turbo-integration-${{ runner.os }}-${{ github.sha }}
+          restore-keys: turbo-integration-${{ runner.os }}-
+      - run: yarn install --frozen-lockfile
+      - run: yarn build --filter=@noddde/core --filter=@noddde/engine --filter=@noddde/drizzle
+      - name: Integration tests
+        env:
+          INTEGRATION: "1"
+          CI: "true"
+        run: yarn workspace @noddde/drizzle test:integration -- src/__tests__/integration/${{ matrix.dialect }}.integration.test.ts
+
+  prisma:
+    name: prisma/${{ matrix.dialect }}
+    needs: changes
+    if: |
+      needs.changes.outputs.prisma == 'true' ||
+      needs.changes.outputs.run_all == 'true' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dialect: [sqlite, postgres, mysql]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+      - run: yarn install --frozen-lockfile
+      - run: yarn build --filter=@noddde/core --filter=@noddde/engine --filter=@noddde/prisma
+      - name: Integration tests
+        env:
+          INTEGRATION: "1"
+          CI: "true"
+        run: yarn workspace @noddde/prisma test:integration -- src/__tests__/integration/${{ matrix.dialect }}.integration.test.ts
+
+  typeorm:
+    name: typeorm/${{ matrix.dialect }}
+    needs: changes
+    if: |
+      needs.changes.outputs.typeorm == 'true' ||
+      needs.changes.outputs.run_all == 'true' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dialect: [sqlite, postgres, mysql, mssql]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+      - run: yarn install --frozen-lockfile
+      - run: yarn build --filter=@noddde/core --filter=@noddde/engine --filter=@noddde/typeorm
+      - name: Integration tests
+        env:
+          INTEGRATION: "1"
+          CI: "true"
+        run: yarn workspace @noddde/typeorm test:integration -- src/__tests__/integration/${{ matrix.dialect }}.integration.test.ts
+
+  kafka:
+    name: kafka
+    needs: changes
+    if: |
+      needs.changes.outputs.kafka == 'true' ||
+      needs.changes.outputs.run_all == 'true' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+      - run: yarn install --frozen-lockfile
+      - run: yarn build --filter=@noddde/core --filter=@noddde/engine --filter=@noddde/kafka
+      - name: Integration tests
+        env:
+          INTEGRATION: "1"
+          CI: "true"
+        run: yarn workspace @noddde/kafka test:integration
+
+  nats:
+    name: nats
+    needs: changes
+    if: |
+      needs.changes.outputs.nats == 'true' ||
+      needs.changes.outputs.run_all == 'true' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+      - run: yarn install --frozen-lockfile
+      - run: yarn build --filter=@noddde/core --filter=@noddde/engine --filter=@noddde/nats
+      - name: Integration tests
+        env:
+          INTEGRATION: "1"
+          CI: "true"
+        run: yarn workspace @noddde/nats test:integration
+
+  rabbitmq:
+    name: rabbitmq
+    needs: changes
+    if: |
+      needs.changes.outputs.rabbitmq == 'true' ||
+      needs.changes.outputs.run_all == 'true' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+      - run: yarn install --frozen-lockfile
+      - run: yarn build --filter=@noddde/core --filter=@noddde/engine --filter=@noddde/rabbitmq
+      - name: Integration tests
+        env:
+          INTEGRATION: "1"
+          CI: "true"
+        run: yarn workspace @noddde/rabbitmq test:integration
+
+  # ---------------------------------------------------------------------
+  # required: a single status check the branch protection rule can require.
+  # Skipped jobs don't block, so this `if: always()` aggregator ensures
+  # protection only blocks when something we actually ran fails.
+  # ---------------------------------------------------------------------
+  integration-required:
+    name: Integration (required)
+    if: always()
+    needs: [drizzle, prisma, typeorm, kafka, nats, rabbitmq]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any needed job failed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | python3 -c "
+          import json, sys
+          data = json.loads(sys.stdin.read())
+          failed = [k for k, v in data.items() if v.get('result') == 'failure']
+          if failed:
+              print(f'Failed jobs: {failed}')
+              sys.exit(1)
+          print('All integration jobs passed or were skipped.')
+          "

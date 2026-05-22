@@ -1,0 +1,41 @@
+{
+  "name": "@noddde/testing-integration",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Internal integration test toolkit: testcontainers helpers and shared adapter contract suites",
+  "license": "MIT",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./contracts/persistence": "./src/contracts/persistence-contract.ts",
+    "./contracts/outbox": "./src/contracts/outbox-contract.ts",
+    "./contracts/saga": "./src/contracts/saga-contract.ts",
+    "./contracts/snapshot": "./src/contracts/snapshot-contract.ts",
+    "./contracts/unit-of-work": "./src/contracts/unit-of-work-contract.ts",
+    "./contracts/advisory-locker": "./src/contracts/advisory-locker-contract.ts",
+    "./contracts/event-bus": "./src/contracts/event-bus-contract.ts",
+    "./containers": "./src/containers/index.ts"
+  },
+  "sideEffects": false,
+  "scripts": {
+    "lint": "eslint . --max-warnings 0",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@noddde/core": "0.3.9",
+    "@noddde/engine": "0.3.9"
+  },
+  "devDependencies": {
+    "@noddde/typescript-config": "0.0.0",
+    "@testcontainers/kafka": "^10.0.0",
+    "@testcontainers/mssqlserver": "^10.0.0",
+    "@testcontainers/mysql": "^10.0.0",
+    "@testcontainers/postgresql": "^10.0.0",
+    "@testcontainers/rabbitmq": "^10.0.0",
+    "eslint": "^8.56.0",
+    "testcontainers": "^10.0.0",
+    "typescript": "^5.3.3",
+    "vitest": "^4.1.0"
+  }
+}
