@@ -1,5 +1,7 @@
 {
-  "title": "Getting Started",
+  "title": "Get Started",
+  "description": "Install, run the quick start, find your on-ramp",
+  "icon": "rocket",
   "pages": [
     "why-noddde",
     "quick-start",

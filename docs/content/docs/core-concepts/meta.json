@@ -1,5 +1,7 @@
 {
   "title": "Core Concepts",
+  "description": "Messages, IDs, the Decider pattern, CQRS + event sourcing",
+  "icon": "book",
   "pages": [
     "messages-and-types",
     "id-types",

@@ -1,13 +1,15 @@
 {
-  "title": "Running Your Domain",
+  "title": "Runtime & Adapters",
+  "description": "Wiring, infrastructure, persistence and messaging adapters",
+  "icon": "cog",
   "pages": [
     "domain-configuration",
     "infrastructure",
     "logging",
     "observability",
-    "persistence",
     "idempotent-commands",
     "outbox-pattern",
+    "persistence",
     "persistence-adapters",
     "event-bus-adapters"
   ]

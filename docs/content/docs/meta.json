@@ -1,25 +1,15 @@
 {
   "title": "Documentation",
   "pages": [
-    "---Start Here---",
-    "...getting-started",
-    "---Core Concepts---",
-    "...core-concepts",
-    "---Modeling Your Domain---",
-    "...modeling",
-    "---Read Model & Queries---",
-    "...read-model",
-    "---Process Managers---",
-    "...process-managers",
-    "---Running Your Domain---",
-    "...running",
-    "---Testing---",
-    "...testing",
-    "---Patterns & Examples---",
-    "...patterns",
-    "---Integrations---",
-    "...integrations",
-    "---Design Decisions---",
-    "...design-decisions"
+    "getting-started",
+    "core-concepts",
+    "modeling",
+    "process-managers",
+    "read-model",
+    "running",
+    "testing",
+    "patterns",
+    "integrations",
+    "design-decisions"
   ]
 }

@@ -1,9 +1,6 @@
 {
-  "title": "Patterns & Examples",
-  "pages": [
-    "clock-pattern",
-    "auction-domain",
-    "flash-sale",
-    "hotel-booking"
-  ]
+  "title": "Guides & Patterns",
+  "description": "End-to-end examples and recurring patterns",
+  "icon": "compass",
+  "pages": ["clock-pattern", "auction-domain", "flash-sale", "hotel-booking"]
 }

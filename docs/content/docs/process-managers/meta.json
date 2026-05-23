@@ -1,4 +1,6 @@
 {
   "title": "Process Managers",
+  "description": "Sagas and standalone handlers that coordinate across aggregates",
+  "icon": "workflow",
   "pages": ["sagas", "standalone-commands", "standalone-events"]
 }

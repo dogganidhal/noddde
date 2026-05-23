@@ -1,5 +1,7 @@
 {
   "title": "Testing",
+  "description": "Test aggregates, projections, sagas, full domains",
+  "icon": "flask",
   "pages": [
     "overview",
     "testing-aggregates-and-projections",

@@ -1,5 +1,7 @@
 {
-  "title": "Modeling Your Domain",
+  "title": "Domain Modeling",
+  "description": "Aggregates, commands, events, handlers, type inference",
+  "icon": "boxes",
   "pages": [
     "defining-aggregates",
     "command-handlers",
