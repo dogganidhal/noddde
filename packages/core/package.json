@@ -45,6 +45,8 @@
     "build": "tsup",
     "build:watch": "tsup --watch",
     "typecheck": "tsc --noEmit",
+    "typecheck:stress": "tsc --noEmit -p tsconfig.stress.json",
+    "type-perf": "tsx scripts/run-type-perf.ts",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest"
@@ -52,6 +54,7 @@
   "devDependencies": {
     "@noddde/typescript-config": "0.0.0",
     "eslint": "^8.56.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.3.3",
     "vitest": "^4.1.0"
   }

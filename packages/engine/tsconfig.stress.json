@@ -1,0 +1,14 @@
+{
+  "extends": "@noddde/typescript-config/base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@noddde/core": ["../core/src/index.ts"],
+      "@noddde/engine": ["./src/index.ts"]
+    },
+    "module": "esnext",
+    "moduleResolution": "bundler"
+  },
+  "include": ["src/__tests__/stress/**/*.ts"]
+}

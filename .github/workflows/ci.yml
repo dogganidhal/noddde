@@ -53,3 +53,20 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: packages/core/coverage/coverage-final.json,packages/engine/coverage/coverage-final.json,packages/testing/coverage/coverage-final.json,packages/adapters/drizzle/coverage/coverage-final.json,packages/adapters/prisma/coverage/coverage-final.json,packages/adapters/typeorm/coverage/coverage-final.json
           fail_ci_if_error: false
+
+      - name: Type-system stress checks (core)
+        run: yarn workspace @noddde/core typecheck:stress
+
+      - name: Type-system stress checks (engine)
+        run: yarn workspace @noddde/engine typecheck:stress
+
+      - name: Type-system perf sweep (report-only)
+        run: yarn workspace @noddde/core type-perf
+
+      - name: Upload type-perf report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: type-perf-report
+          path: specs/reports/type-perf.md
+          if-no-files-found: warn
