@@ -52,8 +52,7 @@ export function PreWithTitle({
 }: HTMLAttributes<HTMLPreElement> & CodeBlockProps) {
   const language = extractLanguage(children);
   const resolvedTitle =
-    title ??
-    (language ? (LANGUAGE_LABELS[language] ?? language) : undefined);
+    title ?? (language ? LANGUAGE_LABELS[language] ?? language : undefined);
 
   return (
     <FumaCodeBlock {...props} title={resolvedTitle} icon={icon}>
