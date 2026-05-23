@@ -1,13 +1,23 @@
 {
   "title": "Domain Modeling",
-  "description": "Aggregates, commands, events, handlers, type inference",
+  "description": "Write model, read model, process model — everything that defines domain behavior",
   "icon": "boxes",
   "pages": [
+    "---Write model---",
     "defining-aggregates",
     "command-handlers",
     "state-and-events",
     "routing-and-dispatch",
     "type-inference",
-    "event-versioning"
+    "event-versioning",
+    "---Read model---",
+    "[Projections](/docs/read-model/projections)",
+    "[View Persistence](/docs/read-model/view-persistence)",
+    "[Queries](/docs/read-model/queries)",
+    "[Projection Rebuild](/docs/read-model/projection-rebuild)",
+    "---Process model---",
+    "[Sagas](/docs/process-managers/sagas)",
+    "[Standalone Commands](/docs/process-managers/standalone-commands)",
+    "[Standalone Events](/docs/process-managers/standalone-events)"
   ]
 }
