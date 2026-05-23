@@ -21,5 +21,8 @@
     "@noddde/sample-flash-sale": "0.0.1",
     "@noddde/sample-hotel-booking": "0.0.1"
   },
-  "changesets": []
+  "changesets": [
+    "fix-adapter-bugs-from-integration-tests",
+    "v1-0-0-rc"
+  ]
 }
