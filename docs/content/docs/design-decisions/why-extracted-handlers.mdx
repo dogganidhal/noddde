@@ -10,9 +10,9 @@ noddde recommends extracting all handlers -- decide handlers, evolve handlers, s
 ```ts
 // deciders/decide-place-bid.ts
 import type { InferDecideHandler } from "@noddde/core";
-import type { AuctionDef } from "../auction";
+import type { AuctionTypes } from "../auction";
 
-export const decidePlaceBid: InferDecideHandler<AuctionDef, "PlaceBid"> = (
+export const decidePlaceBid: InferDecideHandler<AuctionTypes, "PlaceBid"> = (
   command,
   state,
   { clock },
@@ -25,7 +25,7 @@ The aggregate (or saga, or projection) definition becomes a clean wiring file:
 
 ```ts
 // auction.ts
-export const Auction = defineAggregate<AuctionDef>({
+export const Auction = defineAggregate<AuctionTypes>({
   initialState,
   decide: {
     CreateAuction: decideCreateAuction,
@@ -83,7 +83,7 @@ The aggregate definition becomes a table of contents. You can see at a glance wh
 
 ### Type safety
 
-`InferDecideHandler<Def, "PlaceBid">` derives the full function signature from your `AggregateTypes` bundle. The command is narrowed to the specific variant, the state is typed, and infrastructure is correctly scoped with `FrameworkInfrastructure` merged in. The same pattern applies to all handler kinds:
+`InferDecideHandler<Types, "PlaceBid">` derives the full function signature from your `AggregateTypes` bundle. The command is narrowed to the specific variant, the state is typed, and infrastructure is correctly scoped with `FrameworkInfrastructure` merged in. The same pattern applies to all handler kinds:
 
 | Utility                             | Handler kind                                 |
 | ----------------------------------- | -------------------------------------------- |
@@ -103,7 +103,7 @@ Changes to one handler do not require reading through a large file. Each handler
 For aggregates with 1-2 trivial handlers (e.g., a no-op evolve handler or a simple pass-through command), inline is acceptable:
 
 ```ts
-export const Counter = defineAggregate<CounterDef>({
+export const Counter = defineAggregate<CounterTypes>({
   initialState: { count: 0 },
   decide: {
     Increment: (cmd) => ({

@@ -23,7 +23,7 @@ npx @noddde/cli new project my-app
 
 ## Commands
 
-All generators are under `noddde new` (alias `noddde n`).
+The CLI is split into three command groups: `noddde new` (alias `noddde n`) for scaffolding new modules, `noddde add` (alias `noddde a`) for extending existing aggregates and projections, and `noddde diagram` (alias `noddde d`) for visualizing the flow.
 
 ### `noddde new project <name>`
 
@@ -97,7 +97,7 @@ Generates:
   </Folder>
 </Files>
 
-Decide handlers are typed with `InferDecideHandler<Def, "CommandName">` and evolve handlers with `InferEvolveHandler<Def, "EventName">`. Both are standalone exported functions imported into the aggregate definition. This keeps each handler individually testable and the aggregate definition concise.
+Decide handlers are typed with `InferDecideHandler<Types, "CommandName">` and evolve handlers with `InferEvolveHandler<Types, "EventName">`. Both are standalone exported functions imported into the aggregate definition. This keeps each handler individually testable and the aggregate definition concise.
 
 ### `noddde new projection <name>`
 

@@ -95,7 +95,7 @@ Use `QueryResult` when you need the result type without importing the view type 
 async function handleGetAccount(
   req: Request,
 ): Promise<QueryResult<GetBankAccountByIdQuery>> {
-  return domain.dispatchQuery<GetBankAccountByIdQuery>({
+  return domain.dispatchQuery({
     name: "GetBankAccountById",
     payload: { id: req.params.id },
   });
@@ -215,7 +215,7 @@ export const BankAccountProjection = defineProjection<BankAccountProjectionDef>(
 );
 ```
 
-`InferProjectionQueryHandler` automatically injects `{ views }` into the infrastructure parameter when your `ProjectionTypes` bundle has a `viewStore` field. See [Type Inference Helpers](/docs/modeling/type-inference#inferprojectionqueryhandler-and-inferprojectionqueryhandler) for details.
+`InferProjectionQueryHandler` automatically injects `{ views }` into the infrastructure parameter when your `ProjectionTypes` bundle has a `viewStore` field. See [Type Inference Helpers](/docs/modeling/type-inference#inferprojectioneventhandler-and-inferprojectionqueryhandler) for details.
 
 ### Standalone Query Handlers
 
@@ -316,7 +316,7 @@ The `Domain` class provides `dispatchQuery`, giving you a symmetric API alongsid
 
 ```ts
 // In an HTTP handler, GraphQL resolver, or service layer
-const account = await domain.dispatchQuery<GetBankAccountByIdQuery>({
+const account = await domain.dispatchQuery({
   name: "GetBankAccountById",
   payload: { id: accountId },
 });
@@ -327,7 +327,7 @@ const account = await domain.dispatchQuery<GetBankAccountByIdQuery>({
 ```ts
 app.get("/accounts/:id", async (req, res) => {
   try {
-    const account = await domain.dispatchQuery<GetBankAccountByIdQuery>({
+    const account = await domain.dispatchQuery({
       name: "GetBankAccountById",
       payload: { id: req.params.id },
     });

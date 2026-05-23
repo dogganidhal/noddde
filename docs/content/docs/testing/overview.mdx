@@ -75,7 +75,7 @@ expect(spy.publishedEvents).toContainEqual({
 
 ### Level 3: Integration Tests
 
-Use `defineDomain` from `@noddde/core` and `wireDomain` from `@noddde/engine` directly when you need full control over persistence, custom buses, or production-like wiring.
+For end-to-end coverage that goes through real wiring, drive the runtime directly: `defineDomain` from `@noddde/core` + `wireDomain` from `@noddde/engine` with whichever persistence adapter and event bus match production. Dispatch commands and assert on the resulting state, projection views, or saga reactions exactly as your service would. See [Testing Domains](/docs/testing/testing-domains) for the recommended harness over this layer.
 
 ## The Given-When-Then Pattern
 
@@ -83,7 +83,7 @@ The Decider pattern maps naturally to Given-When-Then:
 
 | Concept        | Given                                   | When           | Then                            |
 | -------------- | --------------------------------------- | -------------- | ------------------------------- |
-| **Aggregate**  | Prior events (replayed through apply)   | Command        | Produced events + new state     |
+| **Aggregate**  | Prior events (replayed through evolve)  | Command        | Produced events + new state     |
 | **Projection** | Prior events (reduced through reducers) | --             | Final view                      |
 | **Saga**       | Prior saga state                        | Incoming event | New state + dispatched commands |
 

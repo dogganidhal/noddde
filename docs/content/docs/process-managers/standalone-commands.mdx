@@ -37,14 +37,16 @@ type StandaloneCommandHandler<
   TCommand extends StandaloneCommand,
 > = (
   command: TCommand,
-  infrastructure: TInfrastructure & CQRSInfrastructure,
+  infrastructure: TInfrastructure &
+    CQRSInfrastructure &
+    FrameworkInfrastructure,
 ) => void | Promise<void>;
 ```
 
-| Parameter        | Description                                                                                  |
-| ---------------- | -------------------------------------------------------------------------------------------- |
-| `command`        | The incoming standalone command                                                              |
-| `infrastructure` | Your domain infrastructure merged with `CQRSInfrastructure` (commandBus, eventBus, queryBus) |
+| Parameter        | Description                                                                                                                       |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `command`        | The incoming standalone command                                                                                                   |
+| `infrastructure` | Your domain infrastructure merged with `CQRSInfrastructure` (commandBus, eventBus, queryBus) and `FrameworkInfrastructure` (`logger`) |
 
 Key differences from aggregate decide handlers:
 

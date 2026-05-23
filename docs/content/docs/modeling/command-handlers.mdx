@@ -1,5 +1,5 @@
 ---
-title: Decide Handlers
+title: Command Handlers
 description: Writing decide handler logic -- validation, returning events, infrastructure access, and type safety
 ---
 
@@ -34,13 +34,19 @@ definition, and derives the event name (`AuthorizeTransaction` →
 
 The recommended pattern is to define each decide handler as a standalone function in its own file, typed with `InferDecideHandler`. This gives you full type inference from the `AggregateTypes` bundle without manually reconstructing parameter types:
 
+<Callout type="info">
+  noddde injects a framework `Logger` into every handler automatically --
+  destructure it from `infrastructure` whenever you need it. See
+  [Logging](/docs/running/logging) for the full interface and configuration.
+</Callout>
+
 ```typescript
 // deciders/decide-create-bank-account.ts
 import type { InferDecideHandler } from "@noddde/core";
-import type { BankAccountDef } from "../bank-account";
+import type { BankAccountTypes } from "../bank-account";
 
 export const decideCreateBankAccount: InferDecideHandler<
-  BankAccountDef,
+  BankAccountTypes,
   "CreateBankAccount"
 > = (command, _state, { logger }) => {
   logger.info(`Creating bank account ${command.targetAggregateId}`);
@@ -75,10 +81,10 @@ The simplest case: the handler returns one event object.
 ```typescript
 // deciders/decide-create-bank-account.ts
 import type { InferDecideHandler } from "@noddde/core";
-import type { BankAccountDef } from "../bank-account";
+import type { BankAccountTypes } from "../bank-account";
 
 export const decideCreateBankAccount: InferDecideHandler<
-  BankAccountDef,
+  BankAccountTypes,
   "CreateBankAccount"
 > = (command, _state, { logger }) => {
   logger.info(`Creating bank account ${command.targetAggregateId}`);
@@ -96,10 +102,10 @@ A handler can return different events depending on the current state. This is ho
 ```typescript
 // deciders/decide-authorize-transaction.ts
 import type { InferDecideHandler } from "@noddde/core";
-import type { BankAccountDef } from "../bank-account";
+import type { BankAccountTypes } from "../bank-account";
 
 export const decideAuthorizeTransaction: InferDecideHandler<
-  BankAccountDef,
+  BankAccountTypes,
   "AuthorizeTransaction"
 > = (command, state, { logger }) => {
   const { amount, merchant } = command.payload;
@@ -139,10 +145,10 @@ Return an array when a single command produces multiple events:
 ```typescript
 // deciders/decide-close-month.ts
 import type { InferDecideHandler } from "@noddde/core";
-import type { BankAccountDef } from "../bank-account";
+import type { BankAccountTypes } from "../bank-account";
 
 export const decideCloseMonth: InferDecideHandler<
-  BankAccountDef,
+  BankAccountTypes,
   "CloseMonth"
 > = (command, state) => {
   const events: BankAccountEvent[] = [];
@@ -176,10 +182,10 @@ Decide handlers are where business rules live. The `state` parameter contains th
 ```typescript
 // deciders/decide-authorize-transaction.ts
 import type { InferDecideHandler } from "@noddde/core";
-import type { BankAccountDef } from "../bank-account";
+import type { BankAccountTypes } from "../bank-account";
 
 export const decideAuthorizeTransaction: InferDecideHandler<
-  BankAccountDef,
+  BankAccountTypes,
   "AuthorizeTransaction"
 > = (command, state) => {
   const { amount, merchant } = command.payload;
@@ -213,9 +219,9 @@ export const decideAuthorizeTransaction: InferDecideHandler<
 ```typescript
 // deciders/decide-place-bid.ts
 import type { InferDecideHandler } from "@noddde/core";
-import type { AuctionDef } from "../auction";
+import type { AuctionTypes } from "../auction";
 
-export const decidePlaceBid: InferDecideHandler<AuctionDef, "PlaceBid"> = (
+export const decidePlaceBid: InferDecideHandler<AuctionTypes, "PlaceBid"> = (
   command,
   state,
   { clock },
@@ -286,7 +292,7 @@ Throw exceptions only for truly unexpected situations -- programming errors, inf
 
 ```typescript
 export const decideAuthorizeTransaction: InferDecideHandler<
-  BankAccountDef,
+  BankAccountTypes,
   "AuthorizeTransaction"
 > = (command, state) => {
   // This should never happen if the system is correct
@@ -316,9 +322,9 @@ The third parameter gives you access to your domain infrastructure. Destructure 
 ```typescript
 // deciders/decide-place-bid.ts
 import type { InferDecideHandler } from "@noddde/core";
-import type { AuctionDef } from "../auction";
+import type { AuctionTypes } from "../auction";
 
-export const decidePlaceBid: InferDecideHandler<AuctionDef, "PlaceBid"> = (
+export const decidePlaceBid: InferDecideHandler<AuctionTypes, "PlaceBid"> = (
   command,
   state,
   { clock },
@@ -344,10 +350,10 @@ When a handler needs several infrastructure services, destructure them all:
 ```typescript
 // deciders/decide-authorize-transaction.ts
 import type { InferDecideHandler } from "@noddde/core";
-import type { BankAccountDef } from "../bank-account";
+import type { BankAccountTypes } from "../bank-account";
 
 export const decideAuthorizeTransaction: InferDecideHandler<
-  BankAccountDef,
+  BankAccountTypes,
   "AuthorizeTransaction"
 > = async (command, state, { fraudService, logger }) => {
   const { amount, merchant } = command.payload;
@@ -386,10 +392,10 @@ Handlers can be asynchronous when they need to call external infrastructure. Mar
 ```typescript
 // deciders/decide-authorize-transaction.ts
 import type { InferDecideHandler } from "@noddde/core";
-import type { BankAccountDef } from "../bank-account";
+import type { BankAccountTypes } from "../bank-account";
 
 export const decideAuthorizeTransaction: InferDecideHandler<
-  BankAccountDef,
+  BankAccountTypes,
   "AuthorizeTransaction"
 > = async (command, state, { fraudService }) => {
   const isSuspicious = await fraudService.evaluate(

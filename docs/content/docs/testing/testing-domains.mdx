@@ -39,12 +39,21 @@ expect(view?.balance).toBe(-100);
 ### Configuration
 
 ```ts
-type TestDomainConfig = {
-  aggregates?: Record<string, Aggregate>; // Aggregate definitions
-  projections?: Record<string, Projection>; // Projection definitions
-  sagas?: Record<string, Saga>; // Saga definitions (optional)
-  infrastructure?: Infrastructure; // Custom infrastructure (optional)
-};
+type TestDomainConfig<TInfrastructure extends Infrastructure = Infrastructure> =
+  {
+    /** Aggregate definitions keyed by name. */
+    aggregates?: Record<string, Aggregate<any>>;
+    /** Projection definitions keyed by name. */
+    projections?: Record<string, Projection<any>>;
+    /** Optional per-projection ViewStoreFactory singletons. */
+    projectionViewStores?: Record<string, { viewStore: ViewStoreFactory }>;
+    /** Saga definitions keyed by name. */
+    sagas?: Record<string, Saga<any, any>>;
+    /** Optional standalone query handlers keyed by query name. */
+    standaloneQueryHandlers?: Record<string, any>;
+    /** Optional custom infrastructure to provide to handlers. */
+    infrastructure?: TInfrastructure;
+  };
 ```
 
 Only specify what you are testing. Everything else is wired automatically:

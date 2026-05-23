@@ -29,7 +29,7 @@ noddde organizes a domain into three sides:
 />
 
 - **Write Side** -- Aggregates receive commands, enforce business rules, and emit events.
-- **Process Side** -- Sagas react to events and dispatch commands across aggregates.
+- **Process Side** -- Sagas react to events and dispatch commands across aggregates, coordinating multi-step workflows that span more than one aggregate (see [Sagas](/docs/process-managers/sagas) for the full pattern).
 - **Read Side** -- Projections consume events, build query-optimized views, and serve queries.
 
 ## The Write Model

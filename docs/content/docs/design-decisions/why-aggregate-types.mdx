@@ -61,14 +61,14 @@ type AggregateTypes = {
 };
 
 // Usage — self-documenting
-type BankAccountDef = {
+type BankAccountTypes = {
   state: BankAccountState;
   events: BankAccountEvent;
   commands: BankAccountCommand;
   infrastructure: BankingInfrastructure;
 };
 
-defineAggregate<BankAccountDef>({
+defineAggregate<BankAccountTypes>({
   /* ... */
 });
 ```
@@ -79,11 +79,11 @@ Benefits:
 - **Single generic parameter** — `defineAggregate<T>` instead of `defineAggregate<A, B, C, D, E>`
 - **Extensible** — Adding a new member does not change the generic parameter count
 - **Reusable** — The type bundle can be referenced from other types (e.g., `InferAggregateState<T>`)
-- **IDE-friendly** — Hovering over `BankAccountDef` shows all four members
+- **IDE-friendly** — Hovering over `BankAccountTypes` shows all four members
 
 ## Trade-offs
 
-- **One extra type declaration** — You need to declare the `type XxxDef = { ... }` bundle
+- **One extra type declaration** — You need to declare the `type XxxTypes = { ... }` bundle
 - **Indirect** — The types are one level removed from the function call
 
 In practice, the extra type declaration serves as a useful summary of the aggregate's type universe — a single place where all the types are collected.
@@ -92,7 +92,7 @@ In practice, the extra type declaration serves as a useful summary of the aggreg
 
 ```ts
 // The bundle declares the aggregate's type universe
-type BankAccountDef = {
+type BankAccountTypes = {
   state: BankAccountState;
   events: BankAccountEvent;
   commands: BankAccountCommand;
@@ -100,7 +100,7 @@ type BankAccountDef = {
 };
 
 // One generic parameter, fully typed
-export const BankAccount = defineAggregate<BankAccountDef>({
+export const BankAccount = defineAggregate<BankAccountTypes>({
   initialState: {
     /* TypeScript knows this must be BankAccountState */
   },

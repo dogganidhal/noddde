@@ -64,7 +64,7 @@ Execute handler
   |  4. commands[name](command, currentState, infrastructure) --> events
   v
 Apply events
-  |  5. For each returned event: newState = apply[event.name](event.payload, state)
+  |  5. For each returned event: newState = evolve[event.name](event.payload, state)
   v
 Persist
   |  6. Event-sourced: append new events to the event stream
@@ -91,12 +91,12 @@ The `targetAggregateId` tells the framework which instance to load. Two commands
 
 ### Step 3: Load Current State
 
-For event-sourced persistence, all past events for this aggregate instance are loaded and replayed through the `apply` handlers to rebuild current state:
+For event-sourced persistence, all past events for this aggregate instance are loaded and replayed through the `evolve` handlers to rebuild current state:
 
 ```
 state = initialState
 for each stored event:
-  state = apply[event.name](event.payload, state)
+  state = evolve[event.name](event.payload, state)
 ```
 
 For state-stored persistence, the latest state snapshot is loaded directly.
@@ -115,10 +115,10 @@ The handler inspects the command and the current state, enforces business invari
 
 ### Step 5: Apply Returned Events
 
-Each returned event is passed through the corresponding `apply` handler to produce a new state:
+Each returned event is passed through the corresponding `evolve` handler to produce a new state:
 
 ```typescript
-newState = apply[event.name](event.payload, currentState);
+newState = evolve[event.name](event.payload, currentState);
 ```
 
 If the decide handler returns multiple events, they are applied sequentially. Each produces a new state that feeds into the next. See [State & Event Application](/docs/modeling/state-and-events) for evolve handler patterns.
@@ -317,8 +317,11 @@ For production systems, you may need a command bus that adds logging, retry logi
 The `EventBus` is the transport mechanism that delivers events from aggregates to projections and sagas after persistence:
 
 ```typescript
-interface EventBus {
+interface EventBus extends Closeable {
+  /** Publishes a single domain event to all subscribers. */
   dispatch<TEvent extends Event>(event: TEvent): Promise<void>;
+  /** Registers an async-capable handler for a given event name. Multiple handlers per name (fan-out). */
+  on(eventName: string, handler: AsyncEventHandler): void;
 }
 ```
 

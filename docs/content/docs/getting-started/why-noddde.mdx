@@ -38,7 +38,7 @@ Differences in approach:
 | Command handler     | Decorated method on a class        | Entry in a typed `decide` map          |
 | Event application   | `this.apply(event)` mutates `this` | `evolve(event, state) => state` (pure) |
 | State changes       | In-place mutation                  | Immutable new state                    |
-| Type safety         | Manual generics on every class     | Inferred from one `Def` type           |
+| Type safety         | Manual generics on every class     | Inferred from one `Types` bundle       |
 | Testing             | Bootstrap a Nest module            | Call functions directly                |
 | Runtime requirement | Nest application + DI container    | None. Engine is opt-in.                |
 
@@ -57,9 +57,9 @@ Differences in practice:
 |                      | Emmett                                                     | noddde                                                                    |
 | -------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------- |
 | Persistence          | Event-sourcing first; EventStoreDB and PostgreSQL adapters | Event-sourced and state-stored aggregates as first-class peers            |
-| Type model           | Commands, events, state declared as separate generics      | One `Def` bundle drives every handler's inference                         |
+| Type model           | Commands, events, state declared as separate generics      | One `Types` bundle drives every handler's inference                       |
 | Composition          | À-la-carte: assemble the pieces you need                   | `defineDomain` + `wireDomain` as a unified orchestrator                   |
-| Sagas / projections  | First-class but wired up externally                        | Defined in the same `Def` ecosystem; saga reactions return commands       |
+| Sagas / projections  | First-class but wired up externally                        | Defined in the same `Types` ecosystem; saga reactions return commands     |
 | Adapters             | EventStoreDB, PostgreSQL, in-memory                        | Drizzle, Prisma, TypeORM, in-memory; pluggable event bus                  |
 | Tracing              | Application-level                                          | Native OpenTelemetry; W3C Trace Context propagated through event metadata |
 | Transactional outbox | Application-level                                          | Built into the engine: outbox store + relay loop                          |
@@ -93,7 +93,7 @@ The most direct prior art for "functional CQRS+ES in TypeScript." Wolkenkit pion
 The shape of noddde is the result of specific tradeoffs, each documented:
 
 - [Why the Decider pattern](/docs/design-decisions/why-decider) — pure functions over `this.apply()` mutation
-- [Why a single `AggregateTypes` bundle](/docs/design-decisions/why-aggregate-types) — one `Def` instead of five generic parameters
+- [Why a single `AggregateTypes` bundle](/docs/design-decisions/why-aggregate-types) — one `Types` bundle instead of five generic parameters
 - [Why infrastructure is a function parameter](/docs/design-decisions/why-injectable-infrastructure) — handlers receive what they need; tests pass the rest
 - [Why commands return events](/docs/design-decisions/why-commands-return-events) — pushing persistence and publishing out of business logic
 - [Why two persistence strategies](/docs/design-decisions/why-two-persistence-strategies) — event-sourced and state-stored, both first-class

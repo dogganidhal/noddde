@@ -284,7 +284,7 @@ const domain = await wireDomain(myDomain, {
       persistence: () => drizzle.eventSourcedPersistence,
       concurrency: {
         strategy: "pessimistic",
-        locker: new DrizzleAdvisoryLocker(db),
+        locker: new DrizzleAdvisoryLocker(db, "pg"),
       },
     },
     // Low-contention: optimistic with retries
@@ -378,7 +378,7 @@ Stores saga instance state in memory, keyed by `(sagaName, sagaId)`.
 
 ## Same Aggregate, Different Strategy
 
-The same aggregate definition works with either persistence strategy. The `defineAggregate` function does not know or care about persistence -- it defines `initialState`, `commands`, and `apply` regardless.
+The same aggregate definition works with either persistence strategy. The `defineAggregate` function does not know or care about persistence -- it defines `initialState`, `decide`, and `evolve` regardless.
 
 This means you can:
 

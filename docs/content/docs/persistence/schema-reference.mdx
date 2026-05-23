@@ -293,8 +293,4 @@ adapter.stateStored("order", { mapper: jsonStateMapper() });
 adapter.stateStored(OrderEntity, { mapper: jsonStateMapper<OrderEntity>() });
 ```
 
-### Migrating from `columns: { ... }`
-
-Earlier releases accepted a `columns` map alongside the table. That field has been removed; pass `{ mapper: jsonStateMapper(...) }` to keep the same on-disk shape, or supply a typed mapper to spread state across dedicated columns. Each adapter spec's `## Migration` section in the repository (`specs/drizzle/`, `specs/prisma/`, `specs/typeorm/`) shows the before/after for every variant.
-
 For background on why the API took this shape, see [Why an Aggregate State Mapper?](/docs/design-decisions/why-state-mapper).

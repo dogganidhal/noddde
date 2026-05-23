@@ -399,11 +399,11 @@ This is useful for building views that span multiple domain concepts, such as an
 
 ## Registering Projections
 
-Projections are registered in the `readModel.projections` map of the domain configuration:
+Projections are registered in the `readModel.projections` map of the domain definition, and their view stores are wired separately in `wireDomain`'s `projections` field:
 
 ```ts
 import { defineDomain } from "@noddde/core";
-import { wireDomain } from "@noddde/engine";
+import { wireDomain, InMemoryViewStoreFactory } from "@noddde/engine";
 
 const bankingDomain = defineDomain({
   writeModel: {
@@ -411,29 +411,30 @@ const bankingDomain = defineDomain({
   },
   readModel: {
     projections: {
-      // ORM-backed factory — enables transactional auto-persistence
-      // and { views } injection into query handlers.
-      AccountBalance: {
-        projection: AccountBalanceProjection,
-        viewStore: new PrismaAccountBalanceViewStoreFactory(prisma),
-      },
-      // In-memory factory — suitable for development and tests.
-      Audit: {
-        projection: AuditProjection,
-        viewStore: new InMemoryViewStoreFactory<AuditView>(),
-      },
-      // Without view store — query-only or uses custom infra.
+      AccountBalance: AccountBalanceProjection,
+      Audit: AuditProjection,
       TransactionHistory: TransactionHistoryProjection,
     },
   },
 });
 
 const domain = await wireDomain(bankingDomain, {
-  /* wiring */
+  projections: {
+    // ORM-backed factory — enables transactional auto-persistence
+    // and { views } injection into query handlers.
+    AccountBalance: {
+      viewStore: new PrismaAccountBalanceViewStoreFactory(prisma),
+    },
+    // In-memory factory — suitable for development and tests.
+    Audit: {
+      viewStore: new InMemoryViewStoreFactory<AuditView>(),
+    },
+    // TransactionHistory omitted — query-only or uses custom infra.
+  },
 });
 ```
 
-The key in the projections map (e.g., `"AccountBalance"`) is the projection's name. It does not need to match the aggregate name. Passing `{ projection, viewStore }` connects the projection to a view store from your infrastructure, enabling automatic view persistence and `{ views }` injection into query handlers.
+The key in the projections map (e.g., `"AccountBalance"`) is the projection's name. It does not need to match the aggregate name. Wiring a `viewStore` factory under `DomainWiring.projections` connects the projection to a view store, enabling automatic view persistence and `{ views }` injection into query handlers.
 
 ## Event Delivery Guarantees
 

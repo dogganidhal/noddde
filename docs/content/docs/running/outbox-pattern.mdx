@@ -59,39 +59,37 @@ Best-effort: outboxStore.markPublishedByEventIds()  <-- cleanup
 
 ## Configuration
 
-Add the `outbox` field to your domain configuration's `infrastructure`:
+Add the `outbox` field as a top-level field in your `wireDomain` configuration:
 
 ```ts
-infrastructure: {
-  outbox: {
-    // Factory for the outbox store (called once during init)
-    store: () => new InMemoryOutboxStore(),
-    // Optional relay options
-    relayOptions: {
-      pollIntervalMs: 1000,  // Default: 1000ms
-      batchSize: 100,        // Default: 100 entries per poll
-    },
+outbox: {
+  // Factory for the outbox store (called once during init)
+  store: () => new InMemoryOutboxStore(),
+  // Optional relay options
+  relayOptions: {
+    pollIntervalMs: 1000,  // Default: 1000ms
+    batchSize: 100,        // Default: 100 entries per poll
   },
-}
+},
 ```
 
-For production, all three [persistence adapter packages](/docs/running/persistence-adapters) (`@noddde/drizzle`, `@noddde/prisma`, `@noddde/typeorm`) include a database-backed `OutboxStore` that participates in the same database transaction as your aggregate persistence:
+For production, all three [persistence adapter packages](/docs/running/persistence-adapters) (`@noddde/drizzle`, `@noddde/prisma`, `@noddde/typeorm`) include a database-backed `OutboxStore` via the adapter's `outboxStore` field. When you wire the domain with a `persistenceAdapter`, the outbox is resolved from the adapter automatically:
 
 ```ts
-// Drizzle (outbox schema table required)
-import { outbox } from "@noddde/drizzle/pg";
-const infra = createDrizzlePersistence(db, {
-  events,
-  aggregateStates,
-  sagaStates,
-  outbox,
-});
-// infra.outboxStore is now available
+// Drizzle: the adapter exposes outboxStore directly
+import { DrizzleAdapter } from "@noddde/drizzle";
+const adapter = new DrizzleAdapter(db);
+// adapter.outboxStore is available
 
-// Prisma / TypeORM (always included)
-const infra = createPrismaPersistence(prisma);
-// or: createTypeORMPersistence(dataSource)
-// infra.outboxStore is always available
+// Prisma
+import { PrismaAdapter } from "@noddde/prisma";
+const prismaAdapter = new PrismaAdapter(prisma);
+// prismaAdapter.outboxStore is available
+
+// TypeORM
+import { TypeORMAdapter } from "@noddde/typeorm";
+const typeormAdapter = new TypeORMAdapter(dataSource);
+// typeormAdapter.outboxStore is available
 ```
 
 ## Relay Lifecycle
@@ -119,8 +117,8 @@ interface OutboxEntry {
   event: Event; // Fully enriched domain event
   aggregateName?: string; // From event metadata
   aggregateId?: string; // From event metadata
-  createdAt: string; // ISO 8601
-  publishedAt: string | null; // null = pending
+  createdAt: Date; // Entry creation timestamp
+  publishedAt: Date | null; // null = pending
 }
 
 interface OutboxStore {

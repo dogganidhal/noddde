@@ -42,7 +42,7 @@ interface BankingInfrastructure {
 }
 ```
 
-This type becomes the `infrastructure` member of your [AggregateTypes](/docs/modeling/aggregates) bundle. Each component declares only what it needs, and `wireDomain` computes the intersection at compile time.
+This type becomes the `infrastructure` member of your [AggregateTypes](/docs/modeling/defining-aggregates) bundle. Each component declares only what it needs, and `wireDomain` computes the intersection at compile time.
 
 ### Scoped Infrastructure: One Interface Per Component
 
@@ -208,9 +208,11 @@ See [Persistence](/docs/running/persistence) for details on persistence strategi
 View stores are provided per-projection, separating runtime concerns from projection definitions:
 
 ```ts
+import { InMemoryViewStoreFactory } from "@noddde/engine";
+
 projections: {
-  BankAccount: { viewStore: (infra) => infra.bankAccountViewRepository },
-  TransactionHistory: { viewStore: () => new InMemoryViewStore() },
+  BankAccount: { viewStore: new PrismaBankAccountViewStoreFactory(prisma) },
+  TransactionHistory: { viewStore: new InMemoryViewStoreFactory() },
 },
 ```
 

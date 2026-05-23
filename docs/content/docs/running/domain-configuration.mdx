@@ -133,6 +133,13 @@ These warnings only appear when the framework itself supplies the default -- not
 
 All fields are optional. Both `wireDomain(definition)` and `wireDomain(definition, {})` use in-memory defaults for everything.
 
+<Callout type="info">
+  A `UnitOfWork` groups multiple persistence operations into a single atomic
+  transaction with deferred event publishing — events emitted during the work
+  are held until the work commits, then dispatched together. See [Unit of
+  Work](/docs/running/persistence#unit-of-work) for the full contract.
+</Callout>
+
 ### Persistence Adapter
 
 The `persistenceAdapter` field accepts a `PersistenceAdapter` instance. When provided, the engine resolves aggregate persistence, saga persistence, unit-of-work, snapshots, outbox, idempotency, and locking from the adapter when not explicitly wired. Explicit wiring always takes precedence over adapter defaults.
@@ -228,20 +235,27 @@ The `concurrency` field accepts string shorthands or object form:
 
 ### Projection Wiring
 
-View stores are configured per-projection in the wiring, separating runtime concerns from the projection definition:
+View stores are configured per-projection in the wiring, separating runtime concerns from the projection definition. Each `viewStore` is a `ViewStoreFactory` — either an instance of a class implementing the interface, or a plain object built with `createViewStoreFactory`:
 
 ```ts
+import { createViewStoreFactory } from "@noddde/core";
+import { InMemoryViewStoreFactory } from "@noddde/engine";
+
 projections: {
   BankAccount: {
-    viewStore: (infra) => infra.bankAccountViewRepository,
+    viewStore: new PrismaBankAccountViewStoreFactory(prisma),
   },
   TransactionHistory: {
-    viewStore: (infra) => new InMemoryViewStore(),
+    viewStore: new InMemoryViewStoreFactory(),
+  },
+  // Or wrap a builder function:
+  Audit: {
+    viewStore: createViewStoreFactory((ctx) => new AuditViewStore(ctx)),
   },
 },
 ```
 
-The `viewStore` factory receives the resolved user infrastructure, allowing you to pull view stores from your infrastructure services.
+The factory's `getForContext(ctx?)` is called per strong-consistency read-modify-write so the view store participates in the active transaction. For eventual-consistency reads and query handlers, the framework calls `getForContext(undefined)` once and caches the result. See [View Persistence](/docs/read-model/view-persistence) for details.
 
 > **Note**: The `Projection.viewStore` field is deprecated. Provide view stores via `DomainWiring.projections` instead. When both are set, the wiring version takes priority.
 
@@ -251,7 +265,7 @@ The `writeModel` section defines how your application processes commands.
 
 ### Registering Aggregates
 
-The `aggregates` map associates names with [aggregate definitions](/docs/modeling/aggregates):
+The `aggregates` map associates names with [aggregate definitions](/docs/modeling/defining-aggregates):
 
 ```ts
 import { BankAccount } from "./aggregate";
@@ -314,18 +328,13 @@ import { TransactionHistoryProjection } from "./transaction-history";
 
 readModel: {
   projections: {
-    // With view store — enables auto-persistence
-    BankAccount: {
-      projection: BankAccountProjection,
-      viewStore: (infra) => infra.bankAccountViewStore,
-    },
-    // Without view store — query-only or manually persisted
+    BankAccount: BankAccountProjection,
     TransactionHistory: TransactionHistoryProjection,
   },
 },
 ```
 
-Each projection entry can be a bare projection definition or an object wrapping the projection with a `viewStore` factory. When a `viewStore` is provided, the engine auto-persists views using the `id` and `reduce` functions in the projection's `on` map. See [View Persistence](/docs/read-model/view-persistence) for details.
+Each entry is a bare projection definition. View stores are wired separately in `wireDomain`'s `projections` field (see [Projection Wiring](#projection-wiring) above). When a `viewStore` factory is wired for a projection, the engine auto-persists views using the `id` and `reduce` functions in the projection's `on` map. See [View Persistence](/docs/read-model/view-persistence) for details.
 
 Each [projection](/docs/read-model/projections) receives events from the `EventBus` and updates its view accordingly. Multiple projections can consume the same events to build different views. The key in the map is the projection name -- used for identification and logging. It does not need to match any aggregate name.
 
@@ -511,7 +520,7 @@ import {
   InMemoryCommandBus,
   InMemoryEventSourcedAggregatePersistence,
   InMemoryQueryBus,
-  InMemoryViewStore,
+  InMemoryViewStoreFactory,
 } from "@noddde/engine";
 import { BankAccount } from "./aggregate";
 import { BankAccountProjection } from "./projection";
@@ -530,12 +539,7 @@ const bankingDomain = defineDomain({
   },
   readModel: {
     projections: {
-      // With view store — engine auto-persists views on each event
-      BankAccount: {
-        projection: BankAccountProjection,
-        viewStore: (infra) => infra.bankAccountViewStore,
-      },
-      // Without view store — query-only or manually persisted
+      BankAccount: BankAccountProjection,
       TransactionHistory: TransactionHistoryProjection,
     },
   },
@@ -552,10 +556,10 @@ const domain = await wireDomain(bankingDomain, {
   },
   projections: {
     BankAccount: {
-      viewStore: (infra) => infra.bankAccountViewRepository,
+      viewStore: new InMemoryViewStoreFactory(),
     },
     TransactionHistory: {
-      viewStore: (infra) => infra.transactionViewRepository,
+      viewStore: new InMemoryViewStoreFactory(),
     },
   },
   buses: () => ({

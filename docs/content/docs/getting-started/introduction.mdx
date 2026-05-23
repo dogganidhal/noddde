@@ -3,16 +3,18 @@ title: Concepts at a Glance
 description: A one-screen summary of the building blocks — aggregates, projections, sagas, and how they fit together
 ---
 
-This page is a quick reference. If you have not run the [Quick Start](/docs/getting-started/quick-start) yet, do that first — the concepts make a lot more sense once you have seen them work.
+This page is a quick reference — the building blocks make a lot more sense once you have seen them work in the [Quick Start](/docs/getting-started/quick-start).
 
-## The five building blocks
+## The building blocks
+
+Three structural concepts — Aggregate, Projection, Saga — and the two message types they pass around: Commands and Events.
 
 ### Aggregate
 
 A consistency boundary. Processes commands, enforces invariants, produces events. Defined as `initialState + decide + evolve`:
 
 ```ts
-const BankAccount = defineAggregate<BankAccountDef>({
+const BankAccount = defineAggregate<BankAccountTypes>({
   initialState: { balance: 0 },
   decide: {
     AuthorizeTransaction: (command, state, infra) => {
