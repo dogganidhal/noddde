@@ -18,6 +18,9 @@ coverage
 # Turbo
 .turbo
 
+# Type-system perf harness fixture output (packages/core/.type-perf/)
+.type-perf
+
 # Vercel
 .vercel
 
