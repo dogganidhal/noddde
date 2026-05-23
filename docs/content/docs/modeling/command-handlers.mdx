@@ -32,44 +32,12 @@ definition, and derives the event name (`AuthorizeTransaction` →
 
 </Callout>
 
-The recommended pattern is to define each decide handler as a standalone function in its own file, typed with `InferDecideHandler`. This gives you full type inference from the `AggregateTypes` bundle without manually reconstructing parameter types:
+We recommend extracting each decide handler to its own file typed with `InferDecideHandler` -- see [Why Extracted Handlers](/docs/design-decisions/why-extracted-handlers). The examples below use that pattern.
 
 <Callout type="info">
   noddde injects a framework `Logger` into every handler automatically --
   destructure it from `infrastructure` whenever you need it. See
   [Logging](/docs/running/logging) for the full interface and configuration.
-</Callout>
-
-```typescript
-// deciders/decide-create-bank-account.ts
-import type { InferDecideHandler } from "@noddde/core";
-import type { BankAccountTypes } from "../bank-account";
-
-export const decideCreateBankAccount: InferDecideHandler<
-  BankAccountTypes,
-  "CreateBankAccount"
-> = (command, _state, { logger }) => {
-  logger.info(`Creating bank account ${command.targetAggregateId}`);
-  return {
-    name: "BankAccountCreated",
-    payload: { id: command.targetAggregateId },
-  };
-};
-```
-
-The handler is then referenced by name in the aggregate definition:
-
-```typescript
-decide: {
-  CreateBankAccount: decideCreateBankAccount,
-  AuthorizeTransaction: decideAuthorizeTransaction,
-},
-```
-
-<Callout type="info">
-  For simple handlers with minimal logic, you can define them inline directly in
-  the `decide` map. But extracted handlers are preferred as they are
-  independently testable and keep the aggregate definition concise.
 </Callout>
 
 ## Returning Events

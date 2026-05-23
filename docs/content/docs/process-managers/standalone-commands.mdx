@@ -177,16 +177,6 @@ standaloneCommandHandlers: {
 },
 ```
 
-## Standalone vs Aggregate Commands
-
-| Aspect                           | Aggregate Command                      | Standalone Command                   |
-| -------------------------------- | -------------------------------------- | ------------------------------------ |
-| Has `targetAggregateId`          | Yes                                    | No                                   |
-| Handler receives state           | Yes                                    | No                                   |
-| Handler returns events           | Yes (one or more)                      | No (returns void)                    |
-| Has access to CQRSInfrastructure | No (only domain infrastructure)        | Yes (commandBus, eventBus, queryBus) |
-| Purpose                          | Domain logic within a single aggregate | Cross-aggregate orchestration        |
-
 ## Guidelines
 
 - Use standalone commands for **orchestration**, not for domain logic. Business rules and invariants should live in aggregate decide handlers where they have access to consistent state.

@@ -9,36 +9,7 @@ noddde models aggregates as pure function Deciders — `initialState` + `decide`
 
 ## The Problem
 
-Traditional DDD frameworks model aggregates as classes:
-
-```ts
-// Traditional OOP approach (NOT how noddde works)
-class BankAccount extends AggregateRoot {
-  private balance = 0;
-
-  @CommandHandler
-  authorizeTransaction(command: AuthorizeTransaction) {
-    if (this.balance < command.amount) {
-      this.apply(new TransactionDeclined(command));
-    } else {
-      this.apply(new TransactionAuthorized(command));
-    }
-  }
-
-  @EventSourcingHandler
-  onTransactionAuthorized(event: TransactionAuthorized) {
-    this.balance -= event.amount;
-  }
-}
-```
-
-This approach has several problems:
-
-- Requires a base class (`AggregateRoot`) — couples your domain to the framework
-- Uses `this.apply()` to dispatch events — mixes decision-making with side effects
-- Mutates internal state — harder to reason about
-- Requires decorators — TypeScript decorators have changed across versions
-- Testing requires constructing the class, potentially with its base class dependencies
+Traditional DDD frameworks model aggregates as classes that extend a base `AggregateRoot`, mutate private state via `this`, and use decorators like `@CommandHandler` / `@EventSourcingHandler` to wire methods. This couples your domain to the framework, mixes decision-making with state mutation, and makes testing require full class instantiation. See [The Decider Pattern — OOP vs Decider](/docs/core-concepts/decider-pattern#decider-vs-oop-aggregates) for the full side-by-side comparison.
 
 ## Alternatives Considered
 
@@ -84,26 +55,4 @@ Benefits:
 
 ## Example
 
-The same authorization logic, comparing approaches:
-
-```ts
-// OOP: mutates state, calls this.apply()
-class BankAccount extends AggregateRoot {
-  authorizeTransaction(cmd) {
-    if (this.balance < cmd.amount) this.apply(new TransactionDeclined(cmd));
-    else this.apply(new TransactionAuthorized(cmd));
-  }
-}
-
-// Decider: pure function, returns events
-decide: {
-  AuthorizeTransaction: (cmd, state) => {
-    if (state.availableBalance < cmd.payload.amount) {
-      return { name: "TransactionDeclined", payload: { ... } };
-    }
-    return { name: "TransactionAuthorized", payload: { ... } };
-  },
-},
-```
-
-The Decider version is shorter, testable without framework setup, and makes the decision flow explicit.
+For a worked side-by-side of an OOP `BankAccount` class and the equivalent Decider definition, see [The Decider Pattern — OOP vs Decider](/docs/core-concepts/decider-pattern#decider-vs-oop-aggregates). The Decider version is shorter, testable without framework setup, and makes the decision flow explicit.

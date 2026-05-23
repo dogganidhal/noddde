@@ -148,11 +148,7 @@ return {
 
 ## Defining a Saga with defineSaga
 
-Use `defineSaga` -- an identity function that provides full type inference. The recommended pattern is to extract each `on` entry into its own file, typed with `InferSagaOnEntry`, then import them into the saga definition. This keeps handlers focused, testable, and easy to navigate.
-
-### Extracted on-entries (recommended)
-
-Each on-entry lives in its own file inside an `on-entries/` directory. The `InferSagaOnEntry` helper derives the exact `{ id, handle }` type from your `SagaTypes` bundle and an event name -- no manual type reconstruction needed.
+Use `defineSaga` -- an identity function that provides full type inference. We recommend extracting each `on` entry to its own file typed with `InferSagaOnEntry` -- see [Why Extracted Handlers](/docs/design-decisions/why-extracted-handlers). The examples in this section use that pattern.
 
 ```ts title="on-entries/on-order-placed.ts"
 import type { InferSagaOnEntry } from "@noddde/core";
@@ -283,36 +279,6 @@ export const OrderFulfillmentSaga = defineSaga<OrderFulfillmentSagaDef>({
   },
 });
 ```
-
-### Inline on-entries
-
-For simple sagas or entries that are just a few lines, inline handlers are still valid:
-
-```ts
-export const OrderFulfillmentSaga = defineSaga<OrderFulfillmentSagaDef>({
-  initialState: {
-    /* ... */
-  },
-  startedBy: ["OrderPlaced"],
-  on: {
-    // Inline is fine for trivial entries
-    OrderConfirmed: {
-      id: (event) => event.payload.orderId,
-      handle: (_event, state) => ({ state }),
-    },
-    // But extract complex entries to separate files
-    OrderPlaced: onOrderPlaced,
-    PaymentCompleted: onPaymentCompleted,
-  },
-});
-```
-
-<Callout type="info">
-  Inline handlers work for trivial cases, but extracted handlers with
-  `InferSagaOnEntry` are the recommended pattern. Each handler gets its own
-  file, its own tests, and a single type annotation that validates the entire
-  shape.
-</Callout>
 
 ## The `on` Map
 

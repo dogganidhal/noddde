@@ -71,13 +71,7 @@ Benefits:
 
 ## When to Use Each
 
-| Use Event Sourcing When...      | Use State Storage When...           |
-| ------------------------------- | ----------------------------------- |
-| You need an audit trail         | You only need current state         |
-| You want temporal queries       | You have simple CRUD operations     |
-| You plan to rebuild projections | Storage growth is a concern         |
-| Events drive other systems      | Simplicity is the priority          |
-| You need debugging capabilities | Performance is critical (O(1) load) |
+For the per-strategy decision matrix, see [Persistence — Decision Matrix](/docs/running/persistence#decision-matrix).
 
 ## Example
 

@@ -60,11 +60,7 @@ This follows the same pattern as `AggregateTypes` in [defining aggregates](/docs
 
 ## Defining a Projection
 
-Use `defineProjection` to create a projection with full type inference. The recommended pattern is to extract event handlers and query handlers into separate files, typed with `InferProjectionEventHandler` and `InferProjectionQueryHandler`, then import them into the projection definition.
-
-### Extracted handlers (recommended)
-
-Each event handler lives in its own file inside an `on-entries/` directory, and each query handler in a `query-handlers/` directory. The `Infer*` helpers derive the exact type from your `ProjectionTypes` bundle and an event/query name.
+Use `defineProjection` to create a projection with full type inference. We recommend extracting each event handler and query handler to its own file, typed with `InferProjectionEventHandler` and `InferProjectionQueryHandler` -- see [Why Extracted Handlers](/docs/design-decisions/why-extracted-handlers). The examples in this section use that pattern.
 
 ```ts title="types.ts"
 import type { ViewStore, DefineQueries } from "@noddde/core";
@@ -175,40 +171,6 @@ export const BankAccountProjection = defineProjection<BankAccountProjectionDef>(
   },
 );
 ```
-
-### Inline handlers
-
-For simple projections, inline handlers are still valid:
-
-```ts
-export const BankAccountProjection = defineProjection<BankAccountProjectionDef>(
-  {
-    on: {
-      // Inline is fine for trivial reducers
-      BankAccountCreated: {
-        id: (event) => event.payload.id,
-        reduce: (event) => ({
-          id: event.payload.id,
-          balance: 0,
-          transactions: [],
-        }),
-      },
-      // But extract complex handlers to separate files
-      TransactionProcessed: onTransactionProcessed,
-    },
-    queryHandlers: {
-      GetBankAccountById: handleGetBankAccountById,
-    },
-  },
-);
-```
-
-<Callout type="info">
-  Inline handlers work for trivial cases, but extracted handlers with
-  `InferProjectionEventHandler` and `InferProjectionQueryHandler` are the
-  recommended pattern. Each handler gets its own file, its own tests, and a
-  single type annotation that validates the entire shape.
-</Callout>
 
 `defineProjection` is an identity function -- it returns the same object you pass in, but with full type inference applied. The framework uses the `ProjectionTypes` bundle to narrow event types inside each handler and validate query handler return types.
 

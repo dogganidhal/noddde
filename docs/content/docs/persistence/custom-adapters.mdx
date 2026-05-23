@@ -49,20 +49,9 @@ These are the interfaces your adapter needs to implement depending on which feat
 
 ```ts
 type UnitOfWorkFactory = () => UnitOfWork;
-
-interface UnitOfWork {
-  /** Buffer a write operation for deferred execution. */
-  enlist(operation: () => Promise<void>): void;
-  /** Schedule events for publishing after commit. */
-  deferPublish(...events: Event[]): void;
-  /** Execute all operations atomically, return deferred events. */
-  commit(): Promise<Event[]>;
-  /** Discard all operations and events. */
-  rollback(): Promise<void>;
-}
 ```
 
-The UnitOfWork is the core of transactional guarantees. Each command dispatch gets a fresh instance. Your `commit()` must wrap all enlisted operations in a database transaction and return the deferred events for post-commit publishing.
+A `UnitOfWorkFactory` returns a fresh `UnitOfWork` per command dispatch -- your `commit()` must wrap all enlisted operations in a database transaction and return the deferred events for post-commit publishing. For the full `UnitOfWork` contract and the buffering / commit / publish lifecycle, see [Persistence — Unit of Work](/docs/running/persistence#unit-of-work).
 
 ### `EventSourcedAggregatePersistence`
 

@@ -33,43 +33,9 @@ Three things are deliberately absent from this signature:
 
 These constraints exist because evolve handlers run in two contexts: during command processing (applying freshly produced events) and during event replay (reconstructing state from stored events). If they had side effects, replaying events would re-trigger those side effects -- sending duplicate emails, double-writing to databases. Purity ensures that replay is safe and produces the same state every time.
 
-The recommended pattern is to extract each evolve handler into its own file using `InferEvolveHandler`, which derives the full function type from your `AggregateTypes` bundle:
+We recommend extracting each evolve handler to its own file typed with `InferEvolveHandler` -- see [Why Extracted Handlers](/docs/design-decisions/why-extracted-handlers). The examples in the rest of this page use that pattern.
 
-```typescript
-// evolvers/evolve-transaction-authorized.ts
-import type { InferEvolveHandler } from "@noddde/core";
-import type { BankAccountTypes } from "../bank-account";
-
-export const evolveTransactionAuthorized: InferEvolveHandler<
-  BankAccountTypes,
-  "TransactionAuthorized"
-> = (event, state) => ({
-  ...state,
-  availableBalance: state.availableBalance - event.amount,
-  transactions: [
-    ...state.transactions,
-    { ...event, status: "pending" as const },
-  ],
-});
-```
-
-The handler is then referenced by name in the aggregate definition:
-
-```typescript
-evolve: {
-  TransactionAuthorized: evolveTransactionAuthorized,
-  TransactionDeclined: evolveTransactionDeclined,
-  // ...
-},
-```
-
-<Callout type="info">
-  For simple handlers, you can define them inline in the `evolve` map. But
-  extracted handlers are preferred -- each can be tested in isolation and the
-  aggregate definition stays concise.
-</Callout>
-
-For a deeper discussion, see [Why Are Evolve Handlers Pure?](/docs/design-decisions/why-pure-apply-handlers).
+For a deeper discussion of why evolve handlers are pure, see [Why Are Evolve Handlers Pure?](/docs/design-decisions/why-pure-apply-handlers).
 
 ## Designing Initial State
 
