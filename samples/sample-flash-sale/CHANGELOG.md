@@ -1,5 +1,17 @@
 # @noddde/sample-flash-sale
 
+## 0.0.2-rc.0
+
+### Patch Changes
+
+- Updated dependencies [830bcec]
+- Updated dependencies [e03a054]
+  - @noddde/typeorm@1.0.0-rc.0
+  - @noddde/nats@1.0.0-rc.0
+  - @noddde/core@1.0.0-rc.0
+  - @noddde/engine@1.0.0-rc.0
+  - @noddde/testing@1.0.0-rc.0
+
 ## 0.0.1
 
 ### Patch Changes
