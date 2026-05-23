@@ -56,11 +56,11 @@ The `Booking` aggregate is the most instructive of the three. Its status field i
 ```ts
 // deciders/decide-request-payment.ts
 import type { InferDecideHandler } from "@noddde/core";
-import type { BookingDef } from "../booking";
+import type { BookingTypes } from "../booking";
 
 // Transition: pending → awaiting_payment
 export const decideRequestPayment: InferDecideHandler<
-  BookingDef,
+  BookingTypes,
   "RequestPayment"
 > = (command, state) => {
   if (state.status !== "pending") {
@@ -81,11 +81,11 @@ export const decideRequestPayment: InferDecideHandler<
 ```ts
 // deciders/decide-complete-payment.ts
 import type { InferDecideHandler } from "@noddde/core";
-import type { BookingDef } from "../booking";
+import type { BookingTypes } from "../booking";
 
 // Transition: awaiting_payment → (transactionId recorded)
 export const decideCompletePayment: InferDecideHandler<
-  BookingDef,
+  BookingTypes,
   "CompletePayment"
 > = (command, state, { clock }) => {
   if (state.status !== "awaiting_payment") {
@@ -104,17 +104,17 @@ export const decideCompletePayment: InferDecideHandler<
 };
 ```
 
-The remaining decide handlers (`FailPayment`, `RefundPayment`, `CreateBooking`, `ConfirmBooking`, `CancelBooking`, `ModifyBooking`) follow the same pattern — each in its own file, each typed with `InferDecideHandler<BookingDef, "CommandName">`.
+The remaining decide handlers (`FailPayment`, `RefundPayment`, `CreateBooking`, `ConfirmBooking`, `CancelBooking`, `ModifyBooking`) follow the same pattern — each in its own file, each typed with `InferDecideHandler<BookingTypes, "CommandName">`.
 
 #### Evolve handlers (extracted)
 
 ```ts
 // evolvers/evolve-payment-requested.ts
 import type { InferEvolveHandler } from "@noddde/core";
-import type { BookingDef } from "../booking";
+import type { BookingTypes } from "../booking";
 
 export const evolvePaymentRequested: InferEvolveHandler<
-  BookingDef,
+  BookingTypes,
   "PaymentRequested"
 > = (event, state) => ({
   ...state,
@@ -126,10 +126,10 @@ export const evolvePaymentRequested: InferEvolveHandler<
 ```ts
 // evolvers/evolve-payment-failed.ts
 import type { InferEvolveHandler } from "@noddde/core";
-import type { BookingDef } from "../booking";
+import type { BookingTypes } from "../booking";
 
 export const evolvePaymentFailed: InferEvolveHandler<
-  BookingDef,
+  BookingTypes,
   "PaymentFailed"
 > = (_event, state) => ({
   ...state,
@@ -148,14 +148,14 @@ The aggregate definition imports all handlers and wires them. This file contains
 // booking.ts
 import { defineAggregate } from "@noddde/core";
 
-type BookingDef = {
+type BookingTypes = {
   state: BookingState;
   events: BookingEvent;
   commands: BookingCommand;
   infrastructure: HotelInfrastructure;
 };
 
-export const Booking = defineAggregate<BookingDef>({
+export const Booking = defineAggregate<BookingTypes>({
   initialState: initialBookingState,
 
   decide: {

@@ -37,7 +37,7 @@ expect(result.state.availableBalance).toBe(500);
 
 | Method                       | Purpose                                                                                           |
 | ---------------------------- | ------------------------------------------------------------------------------------------------- |
-| `.given(...events)`          | Prior events to replay through `apply` handlers. Can be called multiple times; events accumulate. |
+| `.given(...events)`          | Prior events to replay through `evolve` handlers. Can be called multiple times; events accumulate. |
 | `.when(command)`             | The command to execute. Required before `.execute()`.                                             |
 | `.withInfrastructure(infra)` | Custom infrastructure for the handler. Defaults to `{}`.                                          |
 | `.execute()`                 | Runs the test and returns the result. Always async.                                               |
@@ -379,7 +379,5 @@ expect(newView.balance).toBe(100);
 
 ## Next Steps
 
-- [Testing Sagas](/docs/testing/testing-sagas) -- `testSaga` for workflow testing
+- [Testing Sagas](/docs/testing/testing-sagas) -- `testSaga` for workflow testing once you have aggregate and projection tests in place
 - [Testing Domains](/docs/testing/testing-domains) -- `testDomain` for slice tests with aggregates and projections together
-- [Defining Aggregates](/docs/modeling/defining-aggregates) -- Aggregate definition reference
-- [Defining Projections](/docs/read-model/defining-projections) -- Projection definition reference

@@ -1,5 +1,7 @@
 {
   "title": "Design Decisions",
+  "description": "The why behind each tradeoff — one page each",
+  "icon": "lightbulb",
   "pages": [
     "why-decider",
     "why-aggregate-types",

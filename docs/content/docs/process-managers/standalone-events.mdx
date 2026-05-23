@@ -19,13 +19,16 @@ Standalone event handlers use the `EventHandler` type from `@noddde/core`:
 type EventHandler<
   TEvent extends Event,
   TInfrastructure extends Infrastructure,
-> = (event: TEvent, infrastructure: TInfrastructure) => void | Promise<void>;
+> = (
+  event: TEvent,
+  infrastructure: TInfrastructure & FrameworkInfrastructure,
+) => void | Promise<void>;
 ```
 
-| Parameter        | Description                                                  |
-| ---------------- | ------------------------------------------------------------ |
-| `event`          | The full event object (name, payload, and optional metadata) |
-| `infrastructure` | Your domain infrastructure (repositories, services, etc.)    |
+| Parameter        | Description                                                                                          |
+| ---------------- | ---------------------------------------------------------------------------------------------------- |
+| `event`          | The full event object (name, payload, and optional metadata)                                         |
+| `infrastructure` | Your domain infrastructure merged with `FrameworkInfrastructure` (`logger`) — repositories, services, etc. |
 
 Key characteristics:
 

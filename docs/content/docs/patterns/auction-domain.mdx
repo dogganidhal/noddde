@@ -89,15 +89,15 @@ The recommended pattern extracts decide handlers and evolve handlers into separa
 
 ### Decide handlers (extracted)
 
-Each decide handler is a standalone, independently testable function. The type is inferred from the aggregate's type bundle (`AuctionDef`) and the command name.
+Each decide handler is a standalone, independently testable function. The type is inferred from the aggregate's type bundle (`AuctionTypes`) and the command name.
 
 ```ts
 // deciders/decide-create-auction.ts
 import type { InferDecideHandler } from "@noddde/core";
-import type { AuctionDef } from "../auction";
+import type { AuctionTypes } from "../auction";
 
 export const decideCreateAuction: InferDecideHandler<
-  AuctionDef,
+  AuctionTypes,
   "CreateAuction"
 > = (command) => ({
   name: "AuctionCreated",
@@ -108,9 +108,9 @@ export const decideCreateAuction: InferDecideHandler<
 ```ts
 // deciders/decide-place-bid.ts
 import type { InferDecideHandler } from "@noddde/core";
-import type { AuctionDef } from "../auction";
+import type { AuctionTypes } from "../auction";
 
-export const decidePlaceBid: InferDecideHandler<AuctionDef, "PlaceBid"> = (
+export const decidePlaceBid: InferDecideHandler<AuctionTypes, "PlaceBid"> = (
   command,
   state,
   { clock },
@@ -160,10 +160,10 @@ Evolve handlers are also extracted. They are pure functions — no infrastructur
 ```ts
 // evolvers/evolve-auction-created.ts
 import type { InferEvolveHandler } from "@noddde/core";
-import type { AuctionDef } from "../auction";
+import type { AuctionTypes } from "../auction";
 
 export const evolveAuctionCreated: InferEvolveHandler<
-  AuctionDef,
+  AuctionTypes,
   "AuctionCreated"
 > = (event) => ({
   item: event.item,
@@ -178,9 +178,9 @@ export const evolveAuctionCreated: InferEvolveHandler<
 ```ts
 // evolvers/evolve-bid-placed.ts
 import type { InferEvolveHandler } from "@noddde/core";
-import type { AuctionDef } from "../auction";
+import type { AuctionTypes } from "../auction";
 
-export const evolveBidPlaced: InferEvolveHandler<AuctionDef, "BidPlaced"> = (
+export const evolveBidPlaced: InferEvolveHandler<AuctionTypes, "BidPlaced"> = (
   event,
   state,
 ) => ({
@@ -193,10 +193,10 @@ export const evolveBidPlaced: InferEvolveHandler<AuctionDef, "BidPlaced"> = (
 ```ts
 // evolvers/evolve-bid-rejected.ts
 import type { InferEvolveHandler } from "@noddde/core";
-import type { AuctionDef } from "../auction";
+import type { AuctionTypes } from "../auction";
 
 export const evolveBidRejected: InferEvolveHandler<
-  AuctionDef,
+  AuctionTypes,
   "BidRejected"
 > = (_event, state) => state; // No state change
 ```
@@ -211,14 +211,14 @@ The aggregate definition imports all handlers and wires them together. This file
 // auction.ts
 import { defineAggregate } from "@noddde/core";
 
-type AuctionDef = {
+type AuctionTypes = {
   state: AuctionState;
   events: AuctionEvent;
   commands: AuctionCommand;
   infrastructure: AuctionInfrastructure;
 };
 
-export const Auction = defineAggregate<AuctionDef>({
+export const Auction = defineAggregate<AuctionTypes>({
   initialState: initialAuctionState,
 
   decide: {

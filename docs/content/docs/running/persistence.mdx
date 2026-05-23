@@ -284,7 +284,7 @@ const domain = await wireDomain(myDomain, {
       persistence: () => drizzle.eventSourcedPersistence,
       concurrency: {
         strategy: "pessimistic",
-        locker: new DrizzleAdvisoryLocker(db),
+        locker: new DrizzleAdvisoryLocker(db, "pg"),
       },
     },
     // Low-contention: optimistic with retries
@@ -378,7 +378,7 @@ Stores saga instance state in memory, keyed by `(sagaName, sagaId)`.
 
 ## Same Aggregate, Different Strategy
 
-The same aggregate definition works with either persistence strategy. The `defineAggregate` function does not know or care about persistence -- it defines `initialState`, `commands`, and `apply` regardless.
+The same aggregate definition works with either persistence strategy. The `defineAggregate` function does not know or care about persistence -- it defines `initialState`, `decide`, and `evolve` regardless.
 
 This means you can:
 
@@ -619,8 +619,5 @@ For database-backed unit of work implementations using real transactions, see th
 
 ## Next Steps
 
-- [Idempotent Commands](/docs/running/idempotent-commands) -- Preventing duplicate command execution
-- [Outbox Pattern](/docs/running/outbox-pattern) -- Guaranteeing at-least-once event delivery after commit
-- [Persistence Adapters](/docs/running/persistence-adapters) -- Production persistence using Drizzle, Prisma, or TypeORM
-- [Infrastructure](/docs/running/infrastructure) -- The full infrastructure provider system
-- [CQRS and Event Sourcing](/docs/core-concepts/cqrs-and-event-sourcing) -- Conceptual foundation
+- [Persistence Adapters](/docs/running/persistence-adapters) -- Move from in-memory to production using Drizzle, Prisma, or TypeORM
+- [Drizzle](/docs/persistence/drizzle), [Prisma](/docs/persistence/prisma), or [TypeORM](/docs/persistence/typeorm) -- Per-adapter setup for whichever ORM your project uses

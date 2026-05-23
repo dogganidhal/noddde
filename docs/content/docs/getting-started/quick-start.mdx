@@ -84,8 +84,8 @@ interface BankAccountState {
   }>;
 }
 
-// 4. The Def bundle — drives all type inference
-type BankAccountDef = {
+// 4. The Types bundle — drives all type inference
+type BankAccountTypes = {
   state: BankAccountState;
   events: BankAccountEvent;
   commands: BankAccountCommand;
@@ -93,7 +93,7 @@ type BankAccountDef = {
 };
 
 // 5. The aggregate — initialState + decide + evolve
-const BankAccount = defineAggregate<BankAccountDef>({
+const BankAccount = defineAggregate<BankAccountTypes>({
   initialState: { balance: 0, availableBalance: 0, transactions: [] },
 
   decide: {
@@ -184,7 +184,7 @@ Run it:
 npx tsx account.ts
 ```
 
-The first command creates the account; the second is declined (zero available balance) and recorded as a `TransactionDeclined` event. Change `amount: 100` to `amount: 0` to see it authorized instead.
+The first command creates the account. The second is declined because the account has no balance, and the framework records a `TransactionDeclined` event. Try changing the merchant or the amount to see how the same command shape flows through `decide` and produces different events.
 
 That is the full shape: one Def per aggregate, `decide` produces events from state, `evolve` folds events back into state.
 
@@ -248,12 +248,12 @@ interface BankAccountState {
 }
 ```
 
-### 4. The `Def` bundle
+### 4. The `Types` bundle
 
 One type that ties state, events, commands, and any custom infrastructure together. This single type replaces five positional generic parameters elsewhere in the framework. See [Why AggregateTypes Bundle](/docs/design-decisions/why-aggregate-types).
 
 ```ts
-type BankAccountDef = {
+type BankAccountTypes = {
   state: BankAccountState;
   events: BankAccountEvent;
   commands: BankAccountCommand;
@@ -266,7 +266,7 @@ type BankAccountDef = {
 Three things: `initialState`, a `decide` map (command name → handler returning events), and an `evolve` map (event name → pure state transition).
 
 ```ts
-const BankAccount = defineAggregate<BankAccountDef>({
+const BankAccount = defineAggregate<BankAccountTypes>({
   initialState: {
     /* ... */
   },

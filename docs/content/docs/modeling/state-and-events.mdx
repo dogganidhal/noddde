@@ -1,6 +1,6 @@
 ---
-title: State Design & Event Application
-description: Designing aggregate state for decision-making and writing pure evolve handlers that evolve state in response to events.
+title: State & Events
+description: Designing aggregate state for decision-making and writing pure evolve handlers that fold events back into state.
 ---
 
 State design and event application are two sides of the same coin. The shape of your aggregate state determines what decisions your decide handlers can make, and the evolve handlers are the mechanism that keeps that state in sync with the event stream. This page covers both topics together.
@@ -33,50 +33,16 @@ Three things are deliberately absent from this signature:
 
 These constraints exist because evolve handlers run in two contexts: during command processing (applying freshly produced events) and during event replay (reconstructing state from stored events). If they had side effects, replaying events would re-trigger those side effects -- sending duplicate emails, double-writing to databases. Purity ensures that replay is safe and produces the same state every time.
 
-The recommended pattern is to extract each evolve handler into its own file using `InferEvolveHandler`, which derives the full function type from your `AggregateTypes` bundle:
+We recommend extracting each evolve handler to its own file typed with `InferEvolveHandler` -- see [Why Extracted Handlers](/docs/design-decisions/why-extracted-handlers). The examples in the rest of this page use that pattern.
 
-```typescript
-// evolvers/evolve-transaction-authorized.ts
-import type { InferEvolveHandler } from "@noddde/core";
-import type { BankAccountDef } from "../bank-account";
-
-export const evolveTransactionAuthorized: InferEvolveHandler<
-  BankAccountDef,
-  "TransactionAuthorized"
-> = (event, state) => ({
-  ...state,
-  availableBalance: state.availableBalance - event.amount,
-  transactions: [
-    ...state.transactions,
-    { ...event, status: "pending" as const },
-  ],
-});
-```
-
-The handler is then referenced by name in the aggregate definition:
-
-```typescript
-evolve: {
-  TransactionAuthorized: evolveTransactionAuthorized,
-  TransactionDeclined: evolveTransactionDeclined,
-  // ...
-},
-```
-
-<Callout type="info">
-  For simple handlers, you can define them inline in the `evolve` map. But
-  extracted handlers are preferred -- each can be tested in isolation and the
-  aggregate definition stays concise.
-</Callout>
-
-For a deeper discussion, see [Why Are Evolve Handlers Pure?](/docs/design-decisions/why-pure-apply-handlers).
+For a deeper discussion of why evolve handlers are pure, see [Why Are Evolve Handlers Pure?](/docs/design-decisions/why-pure-apply-handlers).
 
 ## Designing Initial State
 
 Every aggregate declares an `initialState` -- the state a brand-new instance starts with before any events have been applied. When the framework loads an aggregate for the first time (or when there are no stored events), this is what the decide handler receives as `state`.
 
 ```typescript
-export const BankAccount = defineAggregate<BankAccountDef>({
+export const BankAccount = defineAggregate<BankAccountTypes>({
   initialState: {
     balance: 0,
     availableBalance: 0,
@@ -118,10 +84,10 @@ Override specific fields while preserving the rest:
 ```typescript
 // evolvers/evolve-transaction-authorized.ts
 import type { InferEvolveHandler } from "@noddde/core";
-import type { BankAccountDef } from "../bank-account";
+import type { BankAccountTypes } from "../bank-account";
 
 export const evolveTransactionAuthorized: InferEvolveHandler<
-  BankAccountDef,
+  BankAccountTypes,
   "TransactionAuthorized"
 > = (event, state) => ({
   ...state,
@@ -148,10 +114,10 @@ When updating a specific item inside a collection, use `map` to produce a new ar
 ```typescript
 // evolvers/evolve-transaction-processed.ts
 import type { InferEvolveHandler } from "@noddde/core";
-import type { BankAccountDef } from "../bank-account";
+import type { BankAccountTypes } from "../bank-account";
 
 export const evolveTransactionProcessed: InferEvolveHandler<
-  BankAccountDef,
+  BankAccountTypes,
   "TransactionProcessed"
 > = (event, state) => ({
   ...state,
@@ -211,10 +177,10 @@ These handlers simply return the existing state:
 ```typescript
 // evolvers/evolve-bid-rejected.ts
 import type { InferEvolveHandler } from "@noddde/core";
-import type { AuctionDef } from "../auction";
+import type { AuctionTypes } from "../auction";
 
 export const evolveBidRejected: InferEvolveHandler<
-  AuctionDef,
+  AuctionTypes,
   "BidRejected"
 > = (_event, state) => state;
 ```
@@ -236,7 +202,7 @@ The most important thing to understand about evolve handlers is how state accumu
 ```typescript
 // evolvers/evolve-bank-account-created.ts
 export const evolveBankAccountCreated: InferEvolveHandler<
-  BankAccountDef,
+  BankAccountTypes,
   "BankAccountCreated"
 > = (_event, _state) => ({
   balance: 0,
@@ -258,7 +224,7 @@ This handler ignores both the event and prior state, returning a clean initial s
 ```typescript
 // evolvers/evolve-transaction-authorized.ts
 export const evolveTransactionAuthorized: InferEvolveHandler<
-  BankAccountDef,
+  BankAccountTypes,
   "TransactionAuthorized"
 > = (event, state) => ({
   ...state,
@@ -312,7 +278,7 @@ The same handler runs again with a new event. Both transactions are now pending.
 ```typescript
 // evolvers/evolve-transaction-processed.ts
 export const evolveTransactionProcessed: InferEvolveHandler<
-  BankAccountDef,
+  BankAccountTypes,
   "TransactionProcessed"
 > = (event, state) => ({
   ...state,
@@ -357,7 +323,7 @@ Both `balance` and `availableBalance` are stored because they are needed for aut
 
 ```typescript
 export const decideAuthorizeTransaction: InferDecideHandler<
-  BankAccountDef,
+  BankAccountTypes,
   "AuthorizeTransaction"
 > = (command, state) => {
   if (state.availableBalance < command.payload.amount) {
@@ -403,7 +369,7 @@ The ID is always available in the command object:
 
 ```typescript
 export const decideCreateBankAccount: InferDecideHandler<
-  BankAccountDef,
+  BankAccountTypes,
   "CreateBankAccount"
 > = (command, _state) => ({
   name: "BankAccountCreated",
@@ -425,7 +391,7 @@ Quick reference for the most frequent evolve handler shapes, shown as extracted 
 
 ```typescript
 export const evolveTransactionAuthorized: InferEvolveHandler<
-  BankAccountDef,
+  BankAccountTypes,
   "TransactionAuthorized"
 > = (event, state) => ({
   ...state,
@@ -440,7 +406,7 @@ export const evolveTransactionAuthorized: InferEvolveHandler<
 
 ```typescript
 export const evolveTransactionProcessed: InferEvolveHandler<
-  BankAccountDef,
+  BankAccountTypes,
   "TransactionProcessed"
 > = (event, state) => ({
   ...state,
@@ -453,7 +419,7 @@ export const evolveTransactionProcessed: InferEvolveHandler<
 ### Incrementing a Counter
 
 ```typescript
-export const evolveBidPlaced: InferEvolveHandler<AuctionDef, "BidPlaced"> = (
+export const evolveBidPlaced: InferEvolveHandler<AuctionTypes, "BidPlaced"> = (
   event,
   state,
 ) => ({
@@ -469,7 +435,7 @@ For creation events that set the entire state from the event payload:
 
 ```typescript
 export const evolveBankAccountCreated: InferEvolveHandler<
-  BankAccountDef,
+  BankAccountTypes,
   "BankAccountCreated"
 > = (_event, _state) => ({
   balance: 0,

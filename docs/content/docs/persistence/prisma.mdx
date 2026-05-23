@@ -1,0 +1,181 @@
+---
+title: Prisma Adapter
+description: Production-ready persistence using Prisma with any database Prisma supports.
+---
+
+The `@noddde/prisma` package implements all persistence interfaces and `UnitOfWork` using Prisma's interactive transactions. Built-in Prisma models cover every store; you copy them into your `schema.prisma`.
+
+## Installation
+
+```bash
+yarn add @noddde/prisma @prisma/client
+yarn add -D prisma
+```
+
+## Schema Setup
+
+Copy the three model definitions from the package's Prisma schema into your own `schema.prisma`:
+
+```prisma
+model NodddeEvent {
+  id             Int      @id @default(autoincrement())
+  aggregateName  String   @map("aggregate_name")
+  aggregateId    String   @map("aggregate_id")
+  sequenceNumber Int      @map("sequence_number")
+  eventName      String   @map("event_name")
+  payload        String
+  metadata       String?
+  createdAt      DateTime @map("created_at")
+
+  @@unique([aggregateName, aggregateId, sequenceNumber])
+  @@map("noddde_events")
+}
+
+model NodddeAggregateState {
+  aggregateName String @map("aggregate_name")
+  aggregateId   String @map("aggregate_id")
+  state         String
+  version       Int    @default(0)
+
+  @@id([aggregateName, aggregateId])
+  @@map("noddde_aggregate_states")
+}
+
+model NodddeSagaState {
+  sagaName String @map("saga_name")
+  sagaId   String @map("saga_id")
+  state    String
+
+  @@id([sagaName, sagaId])
+  @@map("noddde_saga_states")
+}
+
+model NodddeSnapshot {
+  aggregateName String @map("aggregate_name")
+  aggregateId   String @map("aggregate_id")
+  state         String
+  version       Int    @default(0)
+
+  @@id([aggregateName, aggregateId])
+  @@map("noddde_snapshots")
+}
+
+// Only needed if using the outbox pattern
+model NodddeOutbox {
+  id            String    @id
+  event         String
+  aggregateName String?   @map("aggregate_name")
+  aggregateId   String?   @map("aggregate_id")
+  createdAt     DateTime  @map("created_at")
+  publishedAt   DateTime? @map("published_at")
+
+  @@map("noddde_outbox")
+}
+```
+
+Then run `prisma generate` and your preferred migration command.
+
+## Configuration
+
+```ts
+import { PrismaClient } from "@prisma/client";
+import { PrismaAdapter } from "@noddde/prisma";
+import { everyNEvents } from "@noddde/core";
+import { defineDomain } from "@noddde/core";
+import { wireDomain } from "@noddde/engine";
+
+const prisma = new PrismaClient();
+const adapter = new PrismaAdapter(prisma);
+
+const bankingDomain = defineDomain({
+  writeModel: { aggregates: { BankAccount } },
+  readModel: { projections: { BankAccount: BankAccountProjection } },
+});
+
+const domain = await wireDomain(bankingDomain, {
+  persistenceAdapter: adapter,
+  aggregates: {
+    BankAccount: {
+      persistence: "event-sourced",
+      snapshots: { strategy: everyNEvents(100) },
+    },
+  },
+});
+```
+
+The Prisma adapter uses built-in Prisma models (NodddeEvent, NodddeAggregateState, etc.) for all stores. No configuration needed beyond the PrismaClient instance.
+
+## How Prisma Transactions Work
+
+The Prisma adapter uses interactive transactions via `prisma.$transaction(async (tx) => { ... })`. When a unit of work commits, it sets `txStore.current` to the transactional client `tx`, and all persistence classes route their queries through it. Prisma automatically rolls back the transaction if any operation throws.
+
+## Per-Aggregate State Tables
+
+Pass the camelCase Prisma model delegate name and a `PrismaStateMapper`. The framework writes the `aggregateIdField` and `versionField`; the mapper owns the rest of the row.
+
+### Typed columns (recommended)
+
+```ts
+import type { PrismaStateMapper } from "@noddde/prisma";
+import type { Prisma } from "@prisma/client";
+
+type OrderState = {
+  customerId: string;
+  total: number;
+  status: "open" | "paid" | "cancelled";
+};
+
+const orderMapper: PrismaStateMapper<
+  OrderState,
+  Prisma.OrderUncheckedCreateInput
+> = {
+  aggregateIdField: "aggregateId",
+  versionField: "version",
+  toRow: (s) => ({
+    customerId: s.customerId,
+    total: s.total,
+    status: s.status,
+  }),
+  fromRow: (r) => ({
+    customerId: r.customerId!,
+    total: r.total!,
+    status: r.status as OrderState["status"],
+  }),
+};
+
+const adapter = new PrismaAdapter(prisma);
+
+const domain = await wireDomain(definition, {
+  persistenceAdapter: adapter,
+  aggregates: {
+    Order: { persistence: adapter.stateStored("order", { mapper: orderMapper }) },
+  },
+});
+```
+
+The Prisma adapter validates that the model exists at creation time and throws a clear error if `prisma.order` is not generated.
+
+### Opaque JSON via `jsonStateMapper`
+
+```ts
+import { jsonStateMapper } from "@noddde/prisma";
+
+adapter.stateStored("order", { mapper: jsonStateMapper() });
+
+// With non-conventional field names:
+adapter.stateStored("customOrder", {
+  mapper: jsonStateMapper({
+    aggregateIdField: "id",
+    stateField: "data",
+    versionField: "rev",
+  }),
+});
+```
+
+For pessimistic concurrency, pass the `dialect` option since PrismaClient does not expose the database provider at runtime:
+
+```ts
+const adapter = new PrismaAdapter(prisma, { dialect: "postgresql" });
+```
+
+For more on the trade-offs, see [Why an Aggregate State Mapper?](/docs/design-decisions/why-state-mapper).

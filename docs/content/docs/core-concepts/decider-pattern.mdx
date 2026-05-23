@@ -318,43 +318,7 @@ This bundle is passed as a single generic parameter to `defineAggregate<BankAcco
 
 ### Infrastructure Injection
 
-The Decider pattern in its pure form has no concept of side effects. But real-world domain logic sometimes needs external information — the current time, a random ID generator, or a third-party service check. noddde handles this through the `infrastructure` field in the types bundle:
-
-```typescript
-type Clock = { now(): Date };
-
-type AuctionTypes = {
-  state: AuctionState;
-  commands: AuctionCommand;
-  events: AuctionEvent;
-  infrastructure: { clock: Clock };
-};
-
-const Auction = defineAggregate<AuctionTypes>({
-  initialState: {
-    /* ... */
-  },
-
-  decide: {
-    PlaceBid: (command, state, { clock }) => {
-      const now = clock.now();
-      if (now > state.endTime) {
-        return {
-          name: "BidRejected",
-          payload: { reason: "Auction has ended" },
-        };
-      }
-      // ... rest of bid logic
-    },
-  },
-
-  evolve: {
-    // ... evolve handlers (no infrastructure — always pure)
-  },
-});
-```
-
-Infrastructure is passed to decide handlers but never to evolve handlers. This is by design: evolve handlers must be pure because they are used to replay events during state reconstruction. If evolve handlers depended on infrastructure, replaying the same events could produce different states depending on external conditions, which would break the event sourcing guarantee.
+The Decider pattern in its pure form has no concept of side effects. noddde adds an `infrastructure` field to the types bundle that is injected into decide handlers (for clocks, ID generators, external services) -- but **never** into evolve handlers, which must stay pure so event replay is deterministic. See [Why Are Evolve Handlers Pure?](/docs/design-decisions/why-pure-apply-handlers) for the rationale.
 
 ## Summary
 

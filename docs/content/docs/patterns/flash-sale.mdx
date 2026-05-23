@@ -136,6 +136,7 @@ import {
   InMemoryCommandBus,
   InMemoryQueryBus,
 } from "@noddde/engine";
+import { TypeORMAdapter } from "@noddde/typeorm";
 import { NatsEventBus } from "@noddde/nats";
 
 const flashSaleDomain = defineDomain({
@@ -143,9 +144,12 @@ const flashSaleDomain = defineDomain({
   readModel: { projections: {} },
 });
 
+const adapter = new TypeORMAdapter(dataSource);
+
 const domain = await wireDomain(flashSaleDomain, {
+  persistenceAdapter: adapter,
   aggregates: {
-    persistence: () => drizzleInfra.eventSourcedPersistence,
+    persistence: "event-sourced",
     concurrency: { maxRetries: 5 },
   },
   buses: () => ({
@@ -158,7 +162,6 @@ const domain = await wireDomain(flashSaleDomain, {
     }),
     queryBus: new InMemoryQueryBus(),
   }),
-  unitOfWork: () => drizzleInfra.unitOfWorkFactory,
 });
 ```
 
@@ -197,4 +200,4 @@ Requires Docker running (Testcontainers spins up PostgreSQL and NATS automatical
 - **Rejection events** — `PurchaseRejected` is a domain event, not an exception. The aggregate records what happened.
 - **Distributed event bus** — `@noddde/nats` with JetStream durable subscriptions
 - **Testcontainers** — real PostgreSQL + NATS containers, no external setup
-- **Drizzle adapter** — `createDrizzlePersistence` with PostgreSQL schema
+- **TypeORM adapter** — `new TypeORMAdapter(dataSource)` with PostgreSQL

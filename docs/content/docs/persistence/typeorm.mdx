@@ -1,0 +1,138 @@
+---
+title: TypeORM Adapter
+description: Production-ready persistence using TypeORM with PostgreSQL, MySQL, SQLite, or MSSQL.
+---
+
+The `@noddde/typeorm` package implements all persistence interfaces and `UnitOfWork` using TypeORM's `EntityManager.transaction()`. It is the only adapter that supports MSSQL.
+
+## Installation
+
+```bash
+yarn add @noddde/typeorm typeorm reflect-metadata
+# Plus your database driver, e.g.:
+yarn add pg
+```
+
+## Schema Setup
+
+The package exports TypeORM entity classes decorated with `@Entity`, `@Column`, etc. Register them in your `DataSource` configuration:
+
+```ts
+import {
+  NodddeEventEntity,
+  NodddeAggregateStateEntity,
+  NodddeSagaStateEntity,
+  NodddeSnapshotEntity,
+  NodddeOutboxEntryEntity, // only needed if using the outbox pattern
+} from "@noddde/typeorm";
+
+const dataSource = new DataSource({
+  type: "postgres",
+  url: process.env.DATABASE_URL,
+  entities: [
+    NodddeEventEntity,
+    NodddeAggregateStateEntity,
+    NodddeSagaStateEntity,
+    NodddeSnapshotEntity,
+    NodddeOutboxEntryEntity,
+  ],
+  synchronize: true, // use migrations in production
+});
+await dataSource.initialize();
+```
+
+For production, use TypeORM migrations instead of `synchronize: true`.
+
+## Configuration
+
+```ts
+import { TypeORMAdapter } from "@noddde/typeorm";
+import { everyNEvents } from "@noddde/core";
+import { defineDomain } from "@noddde/core";
+import { wireDomain } from "@noddde/engine";
+
+const adapter = new TypeORMAdapter(dataSource);
+
+const bankingDomain = defineDomain({
+  writeModel: { aggregates: { BankAccount } },
+  readModel: { projections: { BankAccount: BankAccountProjection } },
+});
+
+const domain = await wireDomain(bankingDomain, {
+  persistenceAdapter: adapter,
+  aggregates: {
+    BankAccount: {
+      persistence: "event-sourced",
+      snapshots: { strategy: everyNEvents(100) },
+    },
+  },
+});
+```
+
+The TypeORM adapter uses built-in entity classes for all stores. The database type is auto-detected from `dataSource.options.type` for advisory locking support.
+
+## How TypeORM Transactions Work
+
+The TypeORM adapter uses `dataSource.manager.transaction()` to wrap operations. When a unit of work commits, it sets `txStore.current` to the transactional `EntityManager`, and all persistence classes use it for their repository operations.
+
+## Per-Aggregate State Tables
+
+Pass the TypeORM entity class and a `TypeORMStateMapper`. The framework writes the `aggregateIdField` and `versionField`; the mapper owns the rest of the entity properties.
+
+### Typed columns (recommended)
+
+```ts
+import type { TypeORMStateMapper } from "@noddde/typeorm";
+import { OrderTypedEntity } from "./entities"; // your own TypeORM entity
+
+type OrderState = {
+  customerId: string;
+  total: number;
+  status: "open" | "paid" | "cancelled";
+};
+
+const orderMapper: TypeORMStateMapper<OrderState, OrderTypedEntity> = {
+  aggregateIdField: "aggregateId",
+  versionField: "version",
+  toRow: (s) => ({
+    customerId: s.customerId,
+    total: s.total,
+    status: s.status,
+  }),
+  fromRow: (r) => ({
+    customerId: r.customerId!,
+    total: r.total!,
+    status: r.status!,
+  }),
+};
+
+const adapter = new TypeORMAdapter(dataSource);
+
+const domain = await wireDomain(definition, {
+  persistenceAdapter: adapter,
+  aggregates: {
+    Order: {
+      persistence: adapter.stateStored(OrderTypedEntity, { mapper: orderMapper }),
+    },
+  },
+});
+```
+
+### Opaque JSON via `jsonStateMapper`
+
+```ts
+import { jsonStateMapper } from "@noddde/typeorm";
+
+adapter.stateStored(OrderEntity, { mapper: jsonStateMapper<OrderEntity>() });
+
+// With non-conventional property names:
+adapter.stateStored(CustomOrderEntity, {
+  mapper: jsonStateMapper<CustomOrderEntity>({
+    aggregateIdField: "id",
+    stateField: "data",
+    versionField: "rev",
+  }),
+});
+```
+
+For more on the trade-offs, see [Why an Aggregate State Mapper?](/docs/design-decisions/why-state-mapper).

@@ -115,7 +115,7 @@ Bundle the state, events, commands, and infrastructure into a single `AggregateT
 ```typescript
 import { Infrastructure } from "@noddde/core";
 
-type BankAccountDef = {
+type BankAccountTypes = {
   state: BankAccountState;
   events: BankAccountEvent;
   commands: BankAccountCommand;
@@ -138,10 +138,10 @@ Each decide handler lives in its own file and is typed with `InferDecideHandler<
 ```typescript
 // deciders/decide-create-bank-account.ts
 import type { InferDecideHandler } from "@noddde/core";
-import type { BankAccountDef } from "../bank-account";
+import type { BankAccountTypes } from "../bank-account";
 
 export const decideCreateBankAccount: InferDecideHandler<
-  BankAccountDef,
+  BankAccountTypes,
   "CreateBankAccount"
 > = (command) => ({
   name: "BankAccountCreated",
@@ -152,10 +152,10 @@ export const decideCreateBankAccount: InferDecideHandler<
 ```typescript
 // deciders/decide-authorize-transaction.ts
 import type { InferDecideHandler } from "@noddde/core";
-import type { BankAccountDef } from "../bank-account";
+import type { BankAccountTypes } from "../bank-account";
 
 export const decideAuthorizeTransaction: InferDecideHandler<
-  BankAccountDef,
+  BankAccountTypes,
   "AuthorizeTransaction"
 > = (command, state) => {
   const { amount, merchant } = command.payload;
@@ -191,10 +191,10 @@ Each evolve handler lives in its own file and is typed with `InferEvolveHandler<
 ```typescript
 // evolvers/evolve-bank-account-created.ts
 import type { InferEvolveHandler } from "@noddde/core";
-import type { BankAccountDef } from "../bank-account";
+import type { BankAccountTypes } from "../bank-account";
 
 export const evolveBankAccountCreated: InferEvolveHandler<
-  BankAccountDef,
+  BankAccountTypes,
   "BankAccountCreated"
 > = (_event, _state) => ({
   balance: 0,
@@ -206,10 +206,10 @@ export const evolveBankAccountCreated: InferEvolveHandler<
 ```typescript
 // evolvers/evolve-transaction-authorized.ts
 import type { InferEvolveHandler } from "@noddde/core";
-import type { BankAccountDef } from "../bank-account";
+import type { BankAccountTypes } from "../bank-account";
 
 export const evolveTransactionAuthorized: InferEvolveHandler<
-  BankAccountDef,
+  BankAccountTypes,
   "TransactionAuthorized"
 > = (event, state) => ({
   ...state,
@@ -237,7 +237,7 @@ import { evolveTransactionAuthorized } from "./evolvers/evolve-transaction-autho
 import { evolveTransactionDeclined } from "./evolvers/evolve-transaction-declined";
 import { evolveTransactionProcessed } from "./evolvers/evolve-transaction-processed";
 
-export const BankAccount = defineAggregate<BankAccountDef>({
+export const BankAccount = defineAggregate<BankAccountTypes>({
   initialState: {
     balance: 0,
     availableBalance: 0,
@@ -311,7 +311,7 @@ interface AuctionState {
   highestBid: { bidderId: string; amount: number } | null;
 }
 
-export type AuctionDef = {
+export type AuctionTypes = {
   state: AuctionState;
   events: AuctionEvent;
   commands: AuctionCommand;
@@ -324,9 +324,9 @@ The `PlaceBid` handler destructures `{ clock }` from the infrastructure paramete
 ```typescript
 // deciders/decide-place-bid.ts
 import type { InferDecideHandler } from "@noddde/core";
-import type { AuctionDef } from "../auction";
+import type { AuctionTypes } from "../auction";
 
-export const decidePlaceBid: InferDecideHandler<AuctionDef, "PlaceBid"> = (
+export const decidePlaceBid: InferDecideHandler<AuctionTypes, "PlaceBid"> = (
   command,
   state,
   { clock },
@@ -376,7 +376,7 @@ import { evolveBidPlaced } from "./evolvers/evolve-bid-placed";
 import { evolveBidRejected } from "./evolvers/evolve-bid-rejected";
 import { evolveAuctionClosed } from "./evolvers/evolve-auction-closed";
 
-export const Auction = defineAggregate<AuctionDef>({
+export const Auction = defineAggregate<AuctionTypes>({
   initialState: {
     item: "",
     startingPrice: 0,

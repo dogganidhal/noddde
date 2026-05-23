@@ -1,0 +1,296 @@
+---
+title: Database Schema Reference
+description: The shared logical schema used by all noddde adapters, with per-dialect DDL.
+---
+
+All adapters use the same logical schema. You are responsible for creating these tables using your ORM's migration tooling (Drizzle Kit, Prisma Migrate, TypeORM migrations) or raw SQL.
+
+## Tables Overview
+
+| Table                     | Purpose                 | Key                                          | Required                                                    |
+| ------------------------- | ----------------------- | -------------------------------------------- | ----------------------------------------------------------- |
+| `noddde_events`           | Event streams           | Auto-increment `id`                          | If using event-sourced aggregates                           |
+| `noddde_aggregate_states` | State snapshots         | Composite (`aggregate_name`, `aggregate_id`) | If using state-stored aggregates                            |
+| `noddde_saga_states`      | Saga state              | Composite (`saga_name`, `saga_id`)           | If using sagas                                              |
+| `noddde_snapshots`        | Event-sourced snapshots | Composite (`aggregate_name`, `aggregate_id`) | Optional (performance optimization)                         |
+| `noddde_outbox`           | Transactional outbox    | `id` (string)                                | If using the [outbox pattern](/docs/running/outbox-pattern) |
+
+<Callout type="info">
+  The `noddde_aggregate_states` table is a **shared** table for all state-stored
+  aggregates. If you need dedicated per-aggregate tables (e.g., for direct SQL
+  queries), see [Per-Aggregate Dedicated State
+  Tables](#per-aggregate-dedicated-state-tables) below.
+</Callout>
+
+States and event payloads are serialized as JSON strings (or native JSON types where supported), making the schema database-agnostic.
+
+## Dialect Type Mapping
+
+| Column type        | PostgreSQL               | MySQL                     | SQLite            | MSSQL                      |
+| ------------------ | ------------------------ | ------------------------- | ----------------- | -------------------------- |
+| Auto-increment     | `SERIAL`                 | `INT AUTO_INCREMENT`      | `INTEGER`         | `INT IDENTITY`             |
+| String             | `TEXT`                   | `VARCHAR(255)`            | `TEXT`            | `NVARCHAR(255)`            |
+| Integer            | `INTEGER`                | `INT`                     | `INTEGER`         | `INT`                      |
+| JSON payload       | `JSONB`                  | `JSON`                    | `TEXT`            | `NVARCHAR(MAX)`            |
+| JSON metadata      | `JSONB` (nullable)       | `JSON` (nullable)         | `TEXT` (nullable) | `NVARCHAR(MAX)` (nullable) |
+| Timestamp          | `TIMESTAMPTZ`            | `TIMESTAMP(3)`            | `TEXT` (ISO 8601) | `DATETIME2`                |
+| Nullable timestamp | `TIMESTAMPTZ` (nullable) | `TIMESTAMP(3)` (nullable) | `TEXT` (nullable) | `DATETIME2` (nullable)     |
+
+## PostgreSQL
+
+```sql
+CREATE TABLE IF NOT EXISTS noddde_events (
+  id              SERIAL PRIMARY KEY,
+  aggregate_name  TEXT NOT NULL,
+  aggregate_id    TEXT NOT NULL,
+  sequence_number INTEGER NOT NULL,
+  event_name      TEXT NOT NULL,
+  payload         JSONB NOT NULL,
+  metadata        JSONB,                              -- event metadata envelope (nullable for backcompat)
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()   -- populated from event.metadata.timestamp
+);
+CREATE UNIQUE INDEX IF NOT EXISTS noddde_events_stream_version_idx
+  ON noddde_events (aggregate_name, aggregate_id, sequence_number);
+
+CREATE TABLE IF NOT EXISTS noddde_aggregate_states (
+  aggregate_name TEXT NOT NULL,
+  aggregate_id   TEXT NOT NULL,
+  state          JSONB NOT NULL,
+  version        INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (aggregate_name, aggregate_id)
+);
+
+CREATE TABLE IF NOT EXISTS noddde_saga_states (
+  saga_name TEXT NOT NULL,
+  saga_id   TEXT NOT NULL,
+  state     JSONB NOT NULL,
+  PRIMARY KEY (saga_name, saga_id)
+);
+
+CREATE TABLE IF NOT EXISTS noddde_snapshots (
+  aggregate_name TEXT NOT NULL,
+  aggregate_id   TEXT NOT NULL,
+  state          JSONB NOT NULL,
+  version        INTEGER NOT NULL,
+  PRIMARY KEY (aggregate_name, aggregate_id)
+);
+
+CREATE TABLE IF NOT EXISTS noddde_outbox (
+  id             TEXT PRIMARY KEY,
+  event          JSONB NOT NULL,
+  aggregate_name TEXT,
+  aggregate_id   TEXT,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  published_at   TIMESTAMPTZ
+);
+```
+
+## MySQL
+
+```sql
+CREATE TABLE IF NOT EXISTS noddde_events (
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  aggregate_name  VARCHAR(255) NOT NULL,
+  aggregate_id    VARCHAR(255) NOT NULL,
+  sequence_number INT NOT NULL,
+  event_name      VARCHAR(255) NOT NULL,
+  payload         JSON NOT NULL,
+  metadata        JSON,
+  created_at      TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE INDEX noddde_events_stream_version_idx (aggregate_name, aggregate_id, sequence_number)
+);
+
+CREATE TABLE IF NOT EXISTS noddde_aggregate_states (
+  aggregate_name VARCHAR(255) NOT NULL,
+  aggregate_id   VARCHAR(255) NOT NULL,
+  state          TEXT NOT NULL,
+  version        INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (aggregate_name, aggregate_id)
+);
+
+CREATE TABLE IF NOT EXISTS noddde_saga_states (
+  saga_name VARCHAR(255) NOT NULL,
+  saga_id   VARCHAR(255) NOT NULL,
+  state     TEXT NOT NULL,
+  PRIMARY KEY (saga_name, saga_id)
+);
+
+CREATE TABLE IF NOT EXISTS noddde_snapshots (
+  aggregate_name VARCHAR(255) NOT NULL,
+  aggregate_id   VARCHAR(255) NOT NULL,
+  state          TEXT NOT NULL,
+  version        INT NOT NULL,
+  PRIMARY KEY (aggregate_name, aggregate_id)
+);
+
+CREATE TABLE IF NOT EXISTS noddde_outbox (
+  id             VARCHAR(255) PRIMARY KEY,
+  event          JSON NOT NULL,
+  aggregate_name VARCHAR(255),
+  aggregate_id   VARCHAR(255),
+  created_at     TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  published_at   TIMESTAMP(3)
+);
+```
+
+## SQLite
+
+```sql
+CREATE TABLE IF NOT EXISTS noddde_events (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  aggregate_name  TEXT NOT NULL,
+  aggregate_id    TEXT NOT NULL,
+  sequence_number INTEGER NOT NULL,
+  event_name      TEXT NOT NULL,
+  payload         TEXT NOT NULL,                -- JSON stored as text
+  metadata        TEXT,                         -- JSON stored as text
+  created_at      TEXT NOT NULL                 -- ISO 8601 string (SQLite has no native timestamp)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS noddde_events_stream_version_idx
+  ON noddde_events (aggregate_name, aggregate_id, sequence_number);
+
+CREATE TABLE IF NOT EXISTS noddde_aggregate_states (
+  aggregate_name TEXT NOT NULL,
+  aggregate_id   TEXT NOT NULL,
+  state          TEXT NOT NULL,
+  version        INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (aggregate_name, aggregate_id)
+);
+
+CREATE TABLE IF NOT EXISTS noddde_saga_states (
+  saga_name TEXT NOT NULL,
+  saga_id   TEXT NOT NULL,
+  state     TEXT NOT NULL,
+  PRIMARY KEY (saga_name, saga_id)
+);
+
+CREATE TABLE IF NOT EXISTS noddde_snapshots (
+  aggregate_name TEXT NOT NULL,
+  aggregate_id   TEXT NOT NULL,
+  state          TEXT NOT NULL,
+  version        INTEGER NOT NULL,
+  PRIMARY KEY (aggregate_name, aggregate_id)
+);
+
+CREATE TABLE IF NOT EXISTS noddde_outbox (
+  id             TEXT PRIMARY KEY,
+  event          TEXT NOT NULL,
+  aggregate_name TEXT,
+  aggregate_id   TEXT,
+  created_at     TEXT NOT NULL,
+  published_at   TEXT
+);
+```
+
+## MSSQL
+
+```sql
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='noddde_events' AND xtype='U')
+CREATE TABLE noddde_events (
+  id              INT IDENTITY(1,1) PRIMARY KEY,
+  aggregate_name  NVARCHAR(255) NOT NULL,
+  aggregate_id    NVARCHAR(255) NOT NULL,
+  sequence_number INT NOT NULL,
+  event_name      NVARCHAR(255) NOT NULL,
+  payload         NVARCHAR(MAX) NOT NULL,
+  metadata        NVARCHAR(MAX),
+  created_at      DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+);
+CREATE UNIQUE INDEX noddde_events_stream_version_idx
+  ON noddde_events (aggregate_name, aggregate_id, sequence_number);
+
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='noddde_aggregate_states' AND xtype='U')
+CREATE TABLE noddde_aggregate_states (
+  aggregate_name NVARCHAR(255) NOT NULL,
+  aggregate_id   NVARCHAR(255) NOT NULL,
+  state          NVARCHAR(MAX) NOT NULL,
+  version        INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (aggregate_name, aggregate_id)
+);
+
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='noddde_saga_states' AND xtype='U')
+CREATE TABLE noddde_saga_states (
+  saga_name NVARCHAR(255) NOT NULL,
+  saga_id   NVARCHAR(255) NOT NULL,
+  state     NVARCHAR(MAX) NOT NULL,
+  PRIMARY KEY (saga_name, saga_id)
+);
+
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='noddde_snapshots' AND xtype='U')
+CREATE TABLE noddde_snapshots (
+  aggregate_name NVARCHAR(255) NOT NULL,
+  aggregate_id   NVARCHAR(255) NOT NULL,
+  state          NVARCHAR(MAX) NOT NULL,
+  version        INT NOT NULL,
+  PRIMARY KEY (aggregate_name, aggregate_id)
+);
+
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='noddde_outbox' AND xtype='U')
+CREATE TABLE noddde_outbox (
+  id             NVARCHAR(255) PRIMARY KEY,
+  event          NVARCHAR(MAX) NOT NULL,
+  aggregate_name NVARCHAR(255),
+  aggregate_id   NVARCHAR(255),
+  created_at     DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+  published_at   DATETIME2
+);
+```
+
+## Per-Aggregate Dedicated State Tables
+
+By default, all state-stored aggregates share the `noddde_aggregate_states` table. For aggregates where you need direct SQL queries on domain fields — or want to fit an existing schema — create a dedicated table and use the adapter's `stateStored()` helper with a state mapper.
+
+The framework writes the `aggregateId` and `version` columns; the mapper owns the rest. Use a typed mapper for one column per state field, or `jsonStateMapper(...)` for opaque-JSON parity with the legacy behavior.
+
+### Typed columns (recommended)
+
+```sql
+-- Dedicated table with one column per state field
+CREATE TABLE IF NOT EXISTS orders (
+  aggregate_id TEXT PRIMARY KEY,
+  version      INTEGER NOT NULL DEFAULT 0,
+  customer_id  TEXT NOT NULL,
+  total_cents  INTEGER NOT NULL,
+  status       TEXT NOT NULL
+);
+```
+
+Each adapter accepts its own table reference format (Drizzle table object, Prisma model name, TypeORM entity class) plus a `mapper` option:
+
+```ts
+// Drizzle
+adapter.stateStored(orders, { mapper: orderMapper });
+
+// Prisma
+adapter.stateStored("order", { mapper: orderMapper });
+
+// TypeORM
+adapter.stateStored(OrderEntity, { mapper: orderMapper });
+```
+
+See the Drizzle, Prisma, and TypeORM "Per-Aggregate State Tables" sections above for full mapper examples.
+
+### Opaque JSON
+
+For the previous opaque-JSON behavior, use `jsonStateMapper(...)`:
+
+```sql
+CREATE TABLE IF NOT EXISTS orders (
+  aggregate_id TEXT PRIMARY KEY,
+  state        JSONB NOT NULL,       -- or TEXT for MySQL/SQLite
+  version      INTEGER NOT NULL DEFAULT 0
+);
+```
+
+```ts
+// Drizzle
+adapter.stateStored(orders, { mapper: jsonStateMapper(orders) });
+
+// Prisma
+adapter.stateStored("order", { mapper: jsonStateMapper() });
+
+// TypeORM
+adapter.stateStored(OrderEntity, { mapper: jsonStateMapper<OrderEntity>() });
+```
+
+For background on why the API took this shape, see [Why an Aggregate State Mapper?](/docs/design-decisions/why-state-mapper).

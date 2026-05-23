@@ -170,12 +170,12 @@ type InferAggregateID<T extends AggregateTypes> =
 import { InferAggregateID } from "@noddde/core";
 
 // Using the AggregateTypes bundle directly
-type BankAccountId = InferAggregateID<BankAccountDef>;
+type BankAccountId = InferAggregateID<BankAccountTypes>;
 // string (default)
 
 // With a custom ID type
 type BrandedId = string & { __brand: "AuctionId" };
-type AuctionDef = {
+type AuctionTypes = {
   state: AuctionState;
   events: AuctionEvent;
   commands: DefineCommands<
@@ -187,7 +187,7 @@ type AuctionDef = {
   infrastructure: {};
 };
 
-type AuctionId = InferAggregateID<AuctionDef>;
+type AuctionId = InferAggregateID<AuctionTypes>;
 // string & { __brand: "AuctionId" }
 ```
 
@@ -198,7 +198,7 @@ type AuctionId = InferAggregateID<AuctionDef>;
 - **Cross-aggregate references**: Type references between aggregates
 
 ```typescript
-type AccountId = InferAggregateID<BankAccountDef>;
+type AccountId = InferAggregateID<BankAccountTypes>;
 
 interface BankAccountRepository {
   getById(id: AccountId): Promise<BankAccountView>;
@@ -255,7 +255,7 @@ Types an extracted aggregate decide handler:
 ```typescript
 import type { InferDecideHandler } from "@noddde/core";
 
-type BookingDef = {
+type BookingTypes = {
   state: BookingState;
   events: BookingEvent;
   commands: BookingCommand;
@@ -273,7 +273,7 @@ export const decideConfirmBooking = (
 
 // After: one annotation, full inference
 export const decideConfirmBooking: InferDecideHandler<
-  BookingDef,
+  BookingTypes,
   "ConfirmBooking"
 > = (command, state, { clock }) => {
   /* ... */
@@ -288,7 +288,7 @@ Types an extracted aggregate evolve handler (event reducer):
 import type { InferEvolveHandler } from "@noddde/core";
 
 export const evolveBookingConfirmed: InferEvolveHandler<
-  BookingDef,
+  BookingTypes,
   "BookingConfirmed"
 > = (payload, state) => ({
   ...state,

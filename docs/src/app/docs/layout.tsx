@@ -1,5 +1,7 @@
 import { DocsLayout } from "fumadocs-ui/layouts/docs";
 import { source } from "@/lib/source";
+import { VersionBadge } from "@/components/version-badge";
+import { SidebarSectionLabel } from "@/components/sidebar-separator";
 import Image from "next/image";
 import type { ReactNode } from "react";
 
@@ -7,6 +9,10 @@ export default function Layout({ children }: { children: ReactNode }) {
   return (
     <DocsLayout
       tree={source.pageTree}
+      sidebar={{
+        defaultOpenLevel: 0,
+        components: { Separator: SidebarSectionLabel },
+      }}
       nav={{
         title: (
           <div className="flex items-center gap-2">
@@ -27,6 +33,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             <span className="font-semibold">noddde</span>
           </div>
         ),
+        children: <VersionBadge />,
       }}
       links={[
         {

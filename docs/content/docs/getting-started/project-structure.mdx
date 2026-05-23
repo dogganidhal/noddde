@@ -108,10 +108,10 @@ Each aggregate owns its type unions. The aggregate file imports event payloads f
 ```ts
 // deciders/decide-create-hotel-booking.ts
 import type { InferDecideHandler } from "@noddde/core";
-import type { HotelBookingDef } from "../hotel-booking.js";
+import type { HotelBookingTypes } from "../hotel-booking.js";
 
 export const decideCreateHotelBooking: InferDecideHandler<
-  HotelBookingDef,
+  HotelBookingTypes,
   "CreateHotelBooking"
 > = (command, _state) => ({
   name: "HotelBookingCreated" as const,
@@ -120,10 +120,10 @@ export const decideCreateHotelBooking: InferDecideHandler<
 
 // evolvers/evolve-hotel-booking-created.ts
 import type { InferEvolveHandler } from "@noddde/core";
-import type { HotelBookingDef } from "../hotel-booking.js";
+import type { HotelBookingTypes } from "../hotel-booking.js";
 
 export const evolveHotelBookingCreated: InferEvolveHandler<
-  HotelBookingDef,
+  HotelBookingTypes,
   "HotelBookingCreated"
 > = (payload, state) => ({
   ...state,
@@ -131,11 +131,11 @@ export const evolveHotelBookingCreated: InferEvolveHandler<
 });
 
 // hotel-booking.ts
-export type HotelBookingDef = {
+export type HotelBookingTypes = {
   /* ... */
 };
 
-export const HotelBooking = defineAggregate<HotelBookingDef>({
+export const HotelBooking = defineAggregate<HotelBookingTypes>({
   decide: { CreateHotelBooking: decideCreateHotelBooking },
   evolve: { HotelBookingCreated: evolveHotelBookingCreated },
   // ...

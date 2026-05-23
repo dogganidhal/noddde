@@ -1,4 +1,6 @@
 {
-  "title": "Read Model & Queries",
+  "title": "Read Model",
+  "description": "Projections, view persistence, queries, rebuilds",
+  "icon": "eye",
   "pages": ["projections", "view-persistence", "queries", "projection-rebuild"]
 }

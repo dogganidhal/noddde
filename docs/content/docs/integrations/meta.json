@@ -1,4 +1,6 @@
 {
   "title": "Integrations",
+  "description": "Framework integrations: NestJS and more",
+  "icon": "plug",
   "pages": ["nestjs"]
 }
