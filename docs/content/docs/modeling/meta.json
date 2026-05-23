@@ -12,7 +12,6 @@
     "event-versioning",
     "---Read model---",
     "[Projections](/docs/read-model/projections)",
-    "[View Persistence](/docs/read-model/view-persistence)",
     "[Queries](/docs/read-model/queries)",
     "[Projection Rebuild](/docs/read-model/projection-rebuild)",
     "---Process model---",

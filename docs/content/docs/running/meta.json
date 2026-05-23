@@ -1,6 +1,6 @@
 {
-  "title": "Runtime & Adapters",
-  "description": "Wiring, infrastructure, persistence and messaging adapters",
+  "title": "Runtime",
+  "description": "Wiring, infrastructure, observability, and resilience",
   "icon": "cog",
   "pages": [
     "domain-configuration",
@@ -9,8 +9,6 @@
     "observability",
     "idempotent-commands",
     "outbox-pattern",
-    "persistence",
-    "persistence-adapters",
     "event-bus-adapters"
   ]
 }

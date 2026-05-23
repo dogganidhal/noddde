@@ -1,0 +1,191 @@
+---
+title: Drizzle Adapter
+description: Production-ready persistence using Drizzle ORM with PostgreSQL, MySQL, or SQLite.
+---
+
+The `@noddde/drizzle` package implements all persistence interfaces and `UnitOfWork` using Drizzle ORM's native transaction mechanism. The adapter auto-infers the dialect from your Drizzle `db` instance.
+
+## Installation
+
+```bash
+yarn add @noddde/drizzle drizzle-orm
+# Plus your database driver, e.g.:
+yarn add better-sqlite3  # or: pg, mysql2
+```
+
+## Schema Setup
+
+The package exports convenience table definitions for each Drizzle dialect. Import from the sub-path matching your database:
+
+```ts
+// SQLite
+import {
+  events,
+  aggregateStates,
+  sagaStates,
+  snapshots,
+  outbox,
+} from "@noddde/drizzle/sqlite";
+
+// PostgreSQL (uses serial PK, jsonb for payloads)
+import {
+  events,
+  aggregateStates,
+  sagaStates,
+  snapshots,
+  outbox,
+} from "@noddde/drizzle/pg";
+
+// MySQL (uses int auto-increment, varchar(255), json)
+import {
+  events,
+  aggregateStates,
+  sagaStates,
+  snapshots,
+  outbox,
+} from "@noddde/drizzle/mysql";
+```
+
+You can also define your own tables matching the expected column structure -- the adapter does not require using the provided schemas.
+
+## Configuration
+
+```ts
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { DrizzleAdapter } from "@noddde/drizzle";
+import { everyNEvents } from "@noddde/core";
+import { defineDomain } from "@noddde/core";
+import { wireDomain } from "@noddde/engine";
+
+const db = drizzle(new Database("app.db"));
+const adapter = new DrizzleAdapter(db);
+
+const bankingDomain = defineDomain({
+  writeModel: { aggregates: { BankAccount } },
+  readModel: { projections: { BankAccount: BankAccountProjection } },
+});
+
+const domain = await wireDomain(bankingDomain, {
+  persistenceAdapter: adapter,
+  aggregates: {
+    BankAccount: {
+      persistence: "event-sourced",
+      snapshots: { strategy: everyNEvents(100) },
+    },
+  },
+});
+```
+
+The adapter auto-infers the dialect from the Drizzle `db` instance and selects the correct pre-built schemas (PostgreSQL, MySQL, or SQLite). No schema imports or table config needed.
+
+## How Drizzle Transactions Work
+
+The adapter detects the dialect automatically. For SQLite (sync drivers like `better-sqlite3`), it uses explicit `BEGIN`/`COMMIT`/`ROLLBACK` SQL statements. For PostgreSQL and MySQL, it uses the native `db.transaction()` callback, which ensures connection affinity in pooled environments.
+
+The persistence classes and `UnitOfWork` share a transaction store. When a transaction is active, all queries automatically route through it.
+
+## Advanced Configuration
+
+For custom table overrides, pass a config object as the second argument:
+
+```ts
+import { DrizzleAdapter } from "@noddde/drizzle";
+import { myEvents, mySagas } from "./schema"; // your own Drizzle tables
+
+const db = drizzle(pool);
+const adapter = new DrizzleAdapter(db, {
+  tables: { eventStore: myEvents, sagaStore: mySagas },
+});
+```
+
+Custom tables override the auto-resolved ones for that specific store. Tables you don't override use the built-in schemas for the detected dialect.
+
+## Per-Aggregate State Tables
+
+By default, all state-stored aggregates share a single `noddde_aggregate_states` table, discriminated by an `aggregate_name` column. For production workloads, you may want each aggregate to have its own dedicated table — either to query domain fields directly, add database-level constraints, or fit an existing schema.
+
+The `stateStored()` helper takes a Drizzle table and a required `DrizzleStateMapper`. The framework writes the `aggregateId` and `version` columns itself; the mapper owns the rest of the row.
+
+### Typed columns (recommended)
+
+Define a `DrizzleStateMapper` with one column per state field, then wire it via `stateStored()`:
+
+```ts
+import type { DrizzleStateMapper } from "@noddde/drizzle";
+import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+
+type OrderState = {
+  customerId: string;
+  total: number;
+  status: "open" | "paid" | "cancelled";
+};
+
+const orders = sqliteTable("orders", {
+  aggregateId: text("aggregate_id").primaryKey(),
+  version: integer("version").notNull().default(0),
+  customerId: text("customer_id").notNull(),
+  total: integer("total_cents").notNull(),
+  status: text("status").$type<OrderState["status"]>().notNull(),
+});
+
+const orderMapper: DrizzleStateMapper<OrderState, typeof orders> = {
+  aggregateIdColumn: orders.aggregateId,
+  versionColumn: orders.version,
+  toRow: (s) => ({
+    customerId: s.customerId,
+    total: s.total,
+    status: s.status,
+  }),
+  fromRow: (r) => ({
+    customerId: r.customerId!,
+    total: r.total!,
+    status: r.status!,
+  }),
+};
+
+const adapter = new DrizzleAdapter(db);
+
+const domain = await wireDomain(definition, {
+  persistenceAdapter: adapter,
+  aggregates: {
+    Order: { persistence: adapter.stateStored(orders, { mapper: orderMapper }) },
+  },
+});
+```
+
+The mapper's `toRow` / `fromRow` are pure and lossless: `fromRow(toRow(state))` must equal `state`. The framework calls `toRow` once per save and `fromRow` once per loaded row, then merges in the id and version columns.
+
+### Opaque JSON via `jsonStateMapper`
+
+When you want a dedicated table without per-field columns — for instance, to share a schema with another service — use `jsonStateMapper(table)`:
+
+```ts
+import { jsonStateMapper } from "@noddde/drizzle";
+
+const orders = sqliteTable("orders", {
+  aggregateId: text("aggregate_id").primaryKey(),
+  state: text("state").notNull(),
+  version: integer("version").notNull().default(0),
+});
+
+adapter.stateStored(orders, { mapper: jsonStateMapper(orders) });
+```
+
+`jsonStateMapper` resolves columns by JS-key convention (`aggregateId`, `state`, `version`). For non-conventional names, pass overrides:
+
+```ts
+adapter.stateStored(customOrders, {
+  mapper: jsonStateMapper(customOrders, {
+    aggregateIdColumn: customOrders.id,
+    stateColumn: customOrders.data,
+    versionColumn: customOrders.rev,
+  }),
+});
+```
+
+If a required column is missing and no override is provided, `jsonStateMapper` throws at call time with a clear error listing the missing keys.
+
+The `stateStored()` method returns a `StateStoredAggregatePersistence` that shares the adapter's transaction store, so dedicated tables participate in the same UoW transactions as the shared stores.
+
+For more on the trade-offs, see [Why an Aggregate State Mapper?](/docs/design-decisions/why-state-mapper).

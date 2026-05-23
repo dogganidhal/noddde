@@ -45,6 +45,10 @@ import {
   Hammer,
   Flame,
   Hotel,
+  Droplets,
+  Triangle,
+  Table,
+  Wrench,
   type LucideIcon,
 } from "lucide-react";
 
@@ -59,6 +63,7 @@ const FOLDER_ICONS: Record<string, LucideIcon> = {
   compass: Compass,
   plug: Plug,
   lightbulb: Lightbulb,
+  database: Database,
 };
 
 const ITEM_ICONS: Record<string, LucideIcon> = {
@@ -103,6 +108,12 @@ const ITEM_ICONS: Record<string, LucideIcon> = {
   "/docs/testing/testing-aggregates-and-projections": CheckCircle2,
   "/docs/testing/testing-sagas": CheckCheck,
   "/docs/testing/testing-domains": TestTube2,
+
+  "/docs/persistence/drizzle": Droplets,
+  "/docs/persistence/prisma": Triangle,
+  "/docs/persistence/typeorm": Boxes,
+  "/docs/persistence/schema-reference": Table,
+  "/docs/persistence/custom-adapters": Wrench,
 
   "/docs/patterns/clock-pattern": Clock,
   "/docs/patterns/auction-domain": Hammer,

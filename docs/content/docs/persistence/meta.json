@@ -1,0 +1,18 @@
+{
+  "title": "Persistence",
+  "description": "Storing aggregates, views, sagas, snapshots, and outbox events",
+  "icon": "database",
+  "pages": [
+    "---Concepts---",
+    "[Write-side persistence](/docs/running/persistence)",
+    "[View persistence](/docs/read-model/view-persistence)",
+    "---Adapters---",
+    "[Adapters overview](/docs/running/persistence-adapters)",
+    "drizzle",
+    "prisma",
+    "typeorm",
+    "---Reference---",
+    "schema-reference",
+    "custom-adapters"
+  ]
+}
