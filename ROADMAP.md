@@ -2,7 +2,7 @@
 
 Where noddde is headed: what is shipped, what is required for v1.0, and our vision for distributed TypeScript domains.
 
-**Current Status:** Pre-1.0. The core Decider pattern, type-inference engine, persistence adapters, distributed event buses, observability, projection rebuild, and per-handler error isolation are all shipped. Type-system stress testing is the last remaining v1.0 Release Candidate item.
+**Current Status:** Pre-1.0. The core Decider pattern, type-inference engine, persistence adapters, distributed event buses, observability, projection rebuild, per-handler error isolation, and type-system stress testing are all shipped. All v1.0 Release Candidate items are complete — preparing for v1.0 GA.
 
 ---
 
@@ -33,8 +33,8 @@ _These items must be completed to guarantee state consistency and developer ergo
   - `Domain.shutdown()` drains in-flight commands, waits for active Sagas/Outbox relays to finish, and auto-closes infrastructure implementing `Closeable`.
 - [x] **The CLI & "Golden Path" Scaffolding**
   - `@noddde/cli` with 5 commands: `new project`, `new domain`, `new aggregate`, `new projection`, `new saga`. Project-aware generators auto-place files in the correct layered structure. Extracted handlers (command-handlers, query-handlers, view-reducers, transition-handlers) keep files focused as domains grow.
-- [ ] **Type System Stress Testing**
-  - Formal benchmarks for the type inference bundles to ensure IDE performance and TS compilation remain instant even with large domains.
+- [x] **Type System Stress Testing**
+  - Synthetic-fixture perf harness (`packages/core/scripts/run-type-perf.ts`) measures `tsc --extendedDiagnostics` Instantiations / Memory / Total time at N=10/50/100 aggregates and writes a baseline report to [`specs/reports/type-perf.md`](./specs/reports/type-perf.md). Paired with handwritten `expectTypeOf` correctness tests for `Infer*Map*` composition (core) and `InferDomain` narrowing (engine), enforced by `typecheck:stress` in CI. Report-only at first; thresholds will land once a multi-run baseline stabilises.
 - [x] **Projection Rebuild API**
   - `Domain.rebuildProjection(name, options?)` detaches the projection's live subscriptions, truncates its view store, and replays the entire event log through its `on` map handlers — with typed projection-name inference, 5 typed error classes, and an `EventReader` capability adapters opt into via `PersistenceAdapter.eventReader` or by structurally implementing `read()` on their event-sourced persistence.
 
