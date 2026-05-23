@@ -1,7 +1,7 @@
 import { docs, meta } from "collections/server";
 import { toFumadocsSource } from "fumadocs-mdx/runtime/server";
 import { loader } from "fumadocs-core/source";
-import { createElement } from "react";
+import { createElement, type ComponentType } from "react";
 import {
   Rocket,
   BookOpen,
@@ -45,14 +45,19 @@ import {
   Hammer,
   Flame,
   Hotel,
-  Droplets,
-  Triangle,
   Table,
   Wrench,
-  type LucideIcon,
 } from "lucide-react";
+import {
+  DrizzleIcon,
+  PrismaIcon,
+  TypeOrmIcon,
+  NestJsIcon,
+} from "@/components/brand-icons";
 
-const FOLDER_ICONS: Record<string, LucideIcon> = {
+type IconComponent = ComponentType<{ className?: string }>;
+
+const FOLDER_ICONS: Record<string, IconComponent> = {
   rocket: Rocket,
   book: BookOpen,
   boxes: Boxes,
@@ -66,7 +71,7 @@ const FOLDER_ICONS: Record<string, LucideIcon> = {
   database: Database,
 };
 
-const ITEM_ICONS: Record<string, LucideIcon> = {
+const ITEM_ICONS: Record<string, IconComponent> = {
   "/docs/getting-started/why-noddde": HelpCircle,
   "/docs/getting-started/quick-start": PlayCircle,
   "/docs/getting-started/introduction": MapIcon,
@@ -109,9 +114,9 @@ const ITEM_ICONS: Record<string, LucideIcon> = {
   "/docs/testing/testing-sagas": CheckCheck,
   "/docs/testing/testing-domains": TestTube2,
 
-  "/docs/persistence/drizzle": Droplets,
-  "/docs/persistence/prisma": Triangle,
-  "/docs/persistence/typeorm": Boxes,
+  "/docs/persistence/drizzle": DrizzleIcon,
+  "/docs/persistence/prisma": PrismaIcon,
+  "/docs/persistence/typeorm": TypeOrmIcon,
   "/docs/persistence/schema-reference": Table,
   "/docs/persistence/custom-adapters": Wrench,
 
@@ -120,10 +125,10 @@ const ITEM_ICONS: Record<string, LucideIcon> = {
   "/docs/patterns/flash-sale": Flame,
   "/docs/patterns/hotel-booking": Hotel,
 
-  "/docs/integrations/nestjs": Boxes,
+  "/docs/integrations/nestjs": NestJsIcon,
 };
 
-function renderIcon(Icon: LucideIcon) {
+function renderIcon(Icon: IconComponent) {
   return createElement(Icon, { className: "size-4" });
 }
 
