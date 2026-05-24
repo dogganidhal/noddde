@@ -1,0 +1,34 @@
+---
+title: In-Memory Event Bus
+description: In-process EventEmitter event bus for development, testing, and single-process deployments.
+---
+
+The in-memory event bus is the default implementation shipped with `@noddde/engine` and requires no external broker.
+
+The default event bus, included in `@noddde/engine`. No external dependencies required.
+
+```ts
+import { EventEmitterEventBus } from "@noddde/engine";
+
+const eventBus = new EventEmitterEventBus();
+```
+
+This is the right choice for development, testing, and single-process deployments. Events are dispatched synchronously within the same process — there is no network I/O, no serialization, and no delivery guarantee beyond the process boundary.
+
+## Configuration
+
+```ts
+import { EventEmitterEventBus } from "@noddde/engine";
+
+const eventBus = new EventEmitterEventBus({
+  // logger: myCustomLogger,      // optional — defaults to NodddeLogger("warn", "noddde:ee-event-bus")
+  // instrumentation: myInstrumentation, // optional — defaults to a no-op Instrumentation(null)
+});
+```
+
+| Option            | Type              | Required | Default                                       | Description                                                                                           |
+| ----------------- | ----------------- | -------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `logger`          | `Logger`          | No       | `NodddeLogger("warn", "noddde:ee-event-bus")` | Framework logger for structured per-handler error logs                                                |
+| `instrumentation` | `Instrumentation` | No       | `new Instrumentation(null)`                   | OTel instrumentation used to enrich error logs with `traceId`/`spanId` when an active span is present |
+
+Both fields are optional and the bare `new EventEmitterEventBus()` form remains supported.

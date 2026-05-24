@@ -8,7 +8,6 @@
     "logging",
     "observability",
     "idempotent-commands",
-    "outbox-pattern",
-    "event-bus-adapters"
+    "outbox-pattern"
   ]
 }

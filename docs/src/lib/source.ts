@@ -53,6 +53,9 @@ import {
   PrismaIcon,
   TypeOrmIcon,
   NestJsIcon,
+  KafkaIcon,
+  NatsIcon,
+  RabbitMqIcon,
 } from "@/components/brand-icons";
 
 type IconComponent = ComponentType<{ className?: string }>;
@@ -69,6 +72,7 @@ const FOLDER_ICONS: Record<string, IconComponent> = {
   plug: Plug,
   lightbulb: Lightbulb,
   database: Database,
+  radio: Radio,
 };
 
 const ITEM_ICONS: Record<string, IconComponent> = {
@@ -119,6 +123,12 @@ const ITEM_ICONS: Record<string, IconComponent> = {
   "/docs/persistence/typeorm": TypeOrmIcon,
   "/docs/persistence/schema-reference": Table,
   "/docs/persistence/custom-adapters": Wrench,
+
+  "/docs/event-bus/in-memory": MessageSquare,
+  "/docs/event-bus/kafka": KafkaIcon,
+  "/docs/event-bus/nats": NatsIcon,
+  "/docs/event-bus/rabbitmq": RabbitMqIcon,
+  "/docs/event-bus/custom-event-bus": Wrench,
 
   "/docs/patterns/clock-pattern": Clock,
   "/docs/patterns/auction-domain": Hammer,
