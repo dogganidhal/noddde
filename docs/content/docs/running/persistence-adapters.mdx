@@ -37,7 +37,7 @@ For SQLite or any dialect without advisory lock support, use `InMemoryAggregateL
 
 Each package exports a class-based adapter that implements the `PersistenceAdapter` interface from `@noddde/core`. Pass it to `wireDomain` via the `persistenceAdapter` property and the engine resolves all persistence concerns automatically:
 
-```ts
+```ts title="main.ts"
 import { DrizzleAdapter } from "@noddde/drizzle";
 import { wireDomain } from "@noddde/engine";
 

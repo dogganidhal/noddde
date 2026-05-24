@@ -27,7 +27,7 @@ On the other hand, state-stored-only frameworks cannot provide audit trails, eve
 
 The same aggregate definition works with either strategy:
 
-```ts
+```ts title="bank-account/bank-account.ts"
 // This aggregate works with EITHER persistence strategy
 export const BankAccount = defineAggregate<BankAccountTypes>({
   initialState: { ... },
@@ -38,7 +38,7 @@ export const BankAccount = defineAggregate<BankAccountTypes>({
 
 The choice is made at wiring time:
 
-```ts
+```ts title="main.ts"
 import { wireDomain } from "@noddde/engine";
 
 // Event sourcing — store events, replay on load
@@ -75,7 +75,7 @@ For the per-strategy decision matrix, see [Persistence — Decision Matrix](/doc
 
 ## Example
 
-```ts
+```ts title="main.ts"
 import { defineDomain } from "@noddde/core";
 import { wireDomain } from "@noddde/engine";
 

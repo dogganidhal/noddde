@@ -7,7 +7,7 @@ Implement the `EventBus` interface to integrate any transport that isn't covered
 
 You can implement the `EventBus` interface directly for any message transport. If your bus needs an async connection step, also implement `Connectable` — the Domain will auto-call `connect()` during wiring:
 
-```ts
+```ts title="adapters/redis-event-bus.ts"
 import type {
   EventBus,
   AsyncEventHandler,

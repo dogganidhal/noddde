@@ -21,7 +21,7 @@ Traditional DDD frameworks model aggregates as classes that extend a base `Aggre
 
 The Decider pattern treats an aggregate as three pure components:
 
-```ts
+```ts title="bank-account/bank-account.ts"
 const BankAccount = defineAggregate<BankAccountTypes>({
   initialState: { balance: 0, transactions: [] },
   decide: {

@@ -9,7 +9,7 @@ noddde provides five type-level helpers that extract specific types from an aggr
 
 All five helpers are exported from `@noddde/core`:
 
-```typescript
+```typescript title="usage.ts"
 import {
   InferAggregateID,
   InferAggregateState,
@@ -23,14 +23,14 @@ import {
 
 Extracts the state type from an `Aggregate` instance.
 
-```typescript
+```typescript title="packages/core/src/ddd/infer-aggregate.ts"
 type InferAggregateState<T extends Aggregate> =
   T extends Aggregate<infer U> ? U["state"] : never;
 ```
 
 ### Usage
 
-```typescript
+```typescript title="usage.ts"
 import { InferAggregateState } from "@noddde/core";
 import { BankAccount } from "./bank-account";
 
@@ -54,7 +54,7 @@ type BankAccountState = InferAggregateState<typeof BankAccount>;
 - **Projections**: Type your read model transformations against the source aggregate state
 - **API responses**: Derive response types from aggregate state without duplicating the interface
 
-```typescript
+```typescript title="__tests__/bank-account.test.ts"
 // In a test file
 import { InferAggregateState } from "@noddde/core";
 import { BankAccount } from "./bank-account";
@@ -70,14 +70,14 @@ function assertState(actual: State, expected: Partial<State>) {
 
 Extracts the event union type from an `Aggregate` instance.
 
-```typescript
+```typescript title="packages/core/src/ddd/infer-aggregate.ts"
 type InferAggregateEvents<T extends Aggregate> =
   T extends Aggregate<infer U> ? U["events"] : never;
 ```
 
 ### Usage
 
-```typescript
+```typescript title="usage.ts"
 import { InferAggregateEvents } from "@noddde/core";
 import { BankAccount } from "./bank-account";
 
@@ -94,7 +94,7 @@ type BankAccountEvent = InferAggregateEvents<typeof BankAccount>;
 - **Event bus subscribers**: Ensure subscribers handle the correct event shapes
 - **Narrowing**: Use discriminated union narrowing on the `name` field
 
-```typescript
+```typescript title="handle-event.ts"
 type BankEvent = InferAggregateEvents<typeof BankAccount>;
 
 function handleEvent(event: BankEvent) {
@@ -115,14 +115,14 @@ function handleEvent(event: BankEvent) {
 
 Extracts the command union type from an `Aggregate` instance.
 
-```typescript
+```typescript title="packages/core/src/ddd/infer-aggregate.ts"
 type InferAggregateCommands<T extends Aggregate> =
   T extends Aggregate<infer U> ? U["commands"] : never;
 ```
 
 ### Usage
 
-```typescript
+```typescript title="usage.ts"
 import { InferAggregateCommands } from "@noddde/core";
 import { BankAccount } from "./bank-account";
 
@@ -138,7 +138,7 @@ type BankAccountCommand = InferAggregateCommands<typeof BankAccount>;
 - **Command factories**: Build helper functions that construct valid commands
 - **Validation**: Ensure incoming requests match the expected command structure
 
-```typescript
+```typescript title="command-factory.ts"
 type BankCommand = InferAggregateCommands<typeof BankAccount>;
 
 // A typed command factory
@@ -159,14 +159,14 @@ function authorizeTransaction(
 
 Extracts the type of `targetAggregateId` from the aggregate's command types. This operates on the `AggregateTypes` bundle rather than the `Aggregate` instance.
 
-```typescript
+```typescript title="packages/core/src/ddd/infer-aggregate.ts"
 type InferAggregateID<T extends AggregateTypes> =
   T["commands"]["targetAggregateId"];
 ```
 
 ### Usage
 
-```typescript
+```typescript title="usage.ts"
 import { InferAggregateID } from "@noddde/core";
 
 // Using the AggregateTypes bundle directly
@@ -197,7 +197,7 @@ type AuctionId = InferAggregateID<AuctionTypes>;
 - **URL parameters**: Ensure route handlers parse the correct ID type
 - **Cross-aggregate references**: Type references between aggregates
 
-```typescript
+```typescript title="bank-account-repository.ts"
 type AccountId = InferAggregateID<BankAccountTypes>;
 
 interface BankAccountRepository {
@@ -212,14 +212,14 @@ Note that `InferAggregateID` takes an `AggregateTypes` bundle (the type you pass
 
 Extracts the infrastructure type from an `Aggregate` instance.
 
-```typescript
+```typescript title="packages/core/src/ddd/infer-aggregate.ts"
 type InferAggregateInfrastructure<T extends Aggregate> =
   T extends Aggregate<infer U> ? U["infrastructure"] : never;
 ```
 
 ### Usage
 
-```typescript
+```typescript title="usage.ts"
 import { InferAggregateInfrastructure } from "@noddde/core";
 import { Auction } from "./auction";
 
@@ -232,7 +232,7 @@ type AuctionInfra = InferAggregateInfrastructure<typeof Auction>;
 - **Test setup**: Know exactly which infrastructure services to mock
 - **Infrastructure factories**: Type helper functions that build the infrastructure object for a specific aggregate
 
-```typescript
+```typescript title="__tests__/test-infrastructure.ts"
 type AuctionInfra = InferAggregateInfrastructure<typeof Auction>;
 
 function createTestInfrastructure(): AuctionInfra {
@@ -252,7 +252,7 @@ When you extract decide handlers, evolve handlers, saga handlers, or projection 
 
 Types an extracted aggregate decide handler:
 
-```typescript
+```typescript title="booking/deciders/decide-confirm-booking.ts"
 import type { InferDecideHandler } from "@noddde/core";
 
 type BookingTypes = {
@@ -284,7 +284,7 @@ export const decideConfirmBooking: InferDecideHandler<
 
 Types an extracted aggregate evolve handler (event reducer):
 
-```typescript
+```typescript title="booking/evolvers/evolve-booking-confirmed.ts"
 import type { InferEvolveHandler } from "@noddde/core";
 
 export const evolveBookingConfirmed: InferEvolveHandler<
@@ -301,7 +301,7 @@ export const evolveBookingConfirmed: InferEvolveHandler<
 
 Type extracted saga handlers. `InferSagaEventHandler` types just the handler function; `InferSagaOnEntry` types the full `{ id, handle }` bundle:
 
-```typescript
+```typescript title="order-fulfillment/on-entries/on-order-placed.ts"
 import type { InferSagaOnEntry } from "@noddde/core";
 
 export const onOrderPlaced: InferSagaOnEntry<FulfillmentDef, "OrderPlaced"> = {
@@ -317,7 +317,7 @@ export const onOrderPlaced: InferSagaOnEntry<FulfillmentDef, "OrderPlaced"> = {
 
 Type extracted projection handlers:
 
-```typescript
+```typescript title="revenue/projection-handlers.ts"
 import type {
   InferProjectionEventHandler,
   InferProjectionQueryHandler,
@@ -346,7 +346,7 @@ export const queryDailyRevenue: InferProjectionQueryHandler<
 
 Computes the full infrastructure type for a projection's query handlers, conditionally including `{ views }`:
 
-```typescript
+```typescript title="usage.ts"
 import type { InferProjectionQueryInfrastructure } from "@noddde/core";
 
 type Infra = InferProjectionQueryInfrastructure<RevenueDef>;
@@ -375,7 +375,7 @@ type Infra = InferProjectionQueryInfrastructure<RevenueDef>;
 
 These are used internally by `wireDomain` to compute the typed dispatch constraints. You can also use them directly:
 
-```ts
+```ts title="usage.ts"
 import type {
   InferAggregateMapCommands,
   InferProjectionMapQueries,
@@ -408,7 +408,7 @@ Definition-level helpers work with `typeof YourAggregate` (the value returned by
 
 You can combine these helpers to build comprehensive utility types:
 
-```typescript
+```typescript title="bank-account-types.ts"
 import {
   InferAggregateState,
   InferAggregateEvents,

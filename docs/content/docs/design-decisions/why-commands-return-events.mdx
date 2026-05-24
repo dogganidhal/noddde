@@ -7,7 +7,7 @@ description: Why decide handlers return events instead of calling eventBus.dispa
 
 In noddde, decide handlers return the event(s) they produce as a return value. The framework handles persistence and publishing.
 
-```ts
+```ts title="bank-account/bank-account.ts"
 decide: {
   AuthorizeTransaction: (command, state, infra) => {
     return { name: "TransactionAuthorized", payload: { ... } };
@@ -19,7 +19,7 @@ decide: {
 
 In many frameworks, decide handlers call `this.apply()` or `eventBus.dispatch()` directly:
 
-```ts
+```ts title="bank-account-traditional.ts"
 // Traditional approach (NOT how noddde works)
 class BankAccount {
   authorizeTransaction(command, eventBus) {
@@ -47,7 +47,7 @@ This creates problems:
 
 Returning events makes the handler a pure decision function:
 
-```ts
+```ts title="bank-account/bank-account.ts"
 // The handler only decides WHAT happened
 decide: {
   AuthorizeTransaction: (command, state) => {
@@ -82,7 +82,7 @@ These limitations are intentional — they enforce the Decider pattern where eac
 
 ## Example
 
-```ts
+```ts title="bank-account/bank-account.ts"
 // Handler returns single event
 decide: {
   CreateBankAccount: (command) => ({

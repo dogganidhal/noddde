@@ -7,7 +7,7 @@ You can implement your own adapter for any database driver -- no ORM required. A
 
 ## The `PersistenceAdapter` Interface
 
-```ts
+```ts title="packages/core/src/persistence/persistence-adapter.ts"
 import type {
   PersistenceAdapter,
   EventSourcedAggregatePersistence,
@@ -47,7 +47,7 @@ These are the interfaces your adapter needs to implement depending on which feat
 
 ### `UnitOfWorkFactory` (required)
 
-```ts
+```ts title="packages/core/src/persistence/unit-of-work.ts"
 type UnitOfWorkFactory = () => UnitOfWork;
 ```
 
@@ -55,7 +55,7 @@ A `UnitOfWorkFactory` returns a fresh `UnitOfWork` per command dispatch -- your 
 
 ### `EventSourcedAggregatePersistence`
 
-```ts
+```ts title="packages/core/src/persistence/event-sourced-aggregate-persistence.ts"
 interface EventSourcedAggregatePersistence {
   save(
     aggregateName: string,
@@ -71,7 +71,7 @@ Appends events to an aggregate stream. `save()` must enforce optimistic concurre
 
 ### `StateStoredAggregatePersistence`
 
-```ts
+```ts title="packages/core/src/persistence/state-stored-aggregate-persistence.ts"
 interface StateStoredAggregatePersistence {
   save(
     aggregateName: string,
@@ -90,7 +90,7 @@ Stores the latest aggregate state as a JSON snapshot. `save()` must enforce opti
 
 ### `SagaPersistence`
 
-```ts
+```ts title="packages/core/src/persistence/saga-persistence.ts"
 interface SagaPersistence {
   save(sagaName: string, sagaId: string, state: any): Promise<void>;
   load(sagaName: string, sagaId: string): Promise<any | undefined | null>;
@@ -101,7 +101,7 @@ Simple key-value persistence for saga workflow state. No concurrency control req
 
 ### `SnapshotStore` (optional)
 
-```ts
+```ts title="packages/core/src/persistence/snapshot-store.ts"
 interface SnapshotStore {
   load(aggregateName: string, aggregateId: string): Promise<Snapshot | null>;
   save(
@@ -117,7 +117,7 @@ Caches aggregate state at a point in time so event replay can start from the sna
 
 ### `OutboxStore` (optional)
 
-```ts
+```ts title="packages/core/src/edd/outbox-store.ts"
 interface OutboxStore {
   save(entries: OutboxEntry[]): Promise<void>;
   loadUnpublished(batchSize?: number): Promise<OutboxEntry[]>;
@@ -131,7 +131,7 @@ Transactional outbox for guaranteed at-least-once event delivery. `save()` is ca
 
 ### `AggregateLocker` (optional)
 
-```ts
+```ts title="packages/core/src/persistence/aggregate-locker.ts"
 interface AggregateLocker {
   acquire(
     aggregateName: string,
@@ -154,13 +154,17 @@ This walkthrough builds a custom adapter using the MongoDB native driver (`mongo
   image pre-configured as a single-node replica set.
 </Callout>
 
-### Step 1: Create the UnitOfWork
+<Steps>
+
+<Step>
+
+### Create the UnitOfWork
 
 The UoW is the only required piece. It wraps all enlisted operations in a database transaction so that aggregate persistence, outbox writes, and any other enlisted operations commit or fail atomically.
 
 In MongoDB, this maps to a `ClientSession` with an active transaction:
 
-```ts
+```ts title="adapters/mongo-persistence.ts"
 import { MongoClient, type ClientSession } from "mongodb";
 import type { UnitOfWork, UnitOfWorkFactory, Event } from "@noddde/core";
 
@@ -227,11 +231,15 @@ class MongoUnitOfWork implements UnitOfWork {
 
 The key pattern: a **session store** holds a mutable reference to the active MongoDB session. All persistence classes read from it so their operations participate in the same transaction.
 
-### Step 2: Implement Persistence Classes
+</Step>
+
+<Step>
+
+### Implement Persistence Classes
 
 Each persistence class reads `sessionStore.current` to pass the active session to MongoDB operations. When no UoW is active (e.g., read-only `load()` calls), it falls back to a sessionless call.
 
-```ts
+```ts title="adapters/mongo-persistence.ts"
 import type { Db, Collection } from "mongodb";
 import { ConcurrencyError } from "@noddde/core";
 import type { EventSourcedAggregatePersistence, Event } from "@noddde/core";
@@ -312,7 +320,7 @@ class MongoEventSourcedPersistence implements EventSourcedAggregatePersistence {
 
 For optimistic concurrency in `StateStoredAggregatePersistence`, use a `findOneAndUpdate` with a version filter:
 
-```ts
+```ts title="adapters/mongo-persistence.ts"
 import type { StateStoredAggregatePersistence } from "@noddde/core";
 
 class MongoStateStoredPersistence implements StateStoredAggregatePersistence {
@@ -378,11 +386,15 @@ class MongoStateStoredPersistence implements StateStoredAggregatePersistence {
 }
 ```
 
-### Step 3: Assemble the Adapter
+</Step>
+
+<Step>
+
+### Assemble the Adapter
 
 All persistence classes share a single `sessionStore` so they participate in the same transaction:
 
-```ts
+```ts title="adapters/mongo-persistence.ts"
 import type { PersistenceAdapter } from "@noddde/core";
 import { MongoClient, type Db } from "mongodb";
 
@@ -434,9 +446,13 @@ class MongoAdapter implements PersistenceAdapter {
 }
 ```
 
-### Step 4: Wire It Up
+</Step>
 
-```ts
+<Step>
+
+### Wire It Up
+
+```ts title="main.ts"
 import { defineDomain } from "@noddde/core";
 import { wireDomain } from "@noddde/engine";
 import { MongoClient } from "mongodb";
@@ -455,6 +471,10 @@ const domain = await wireDomain(
   { persistenceAdapter: adapter },
 );
 ```
+
+</Step>
+
+</Steps>
 
 ## Key Implementation Rules
 

@@ -7,7 +7,7 @@ description: Why noddde requires evolve handlers to be pure functions with no in
 
 Evolve handlers in noddde are pure functions that receive only the event payload and current state, returning the new state. They have no access to infrastructure, no async capability, and must produce no side effects.
 
-```ts
+```ts title="types.ts"
 type EvolveHandler<TEvent extends Event, TState> = (
   event: TEvent["payload"],
   state: TState,
@@ -18,7 +18,7 @@ type EvolveHandler<TEvent extends Event, TState> = (
 
 If evolve handlers could access infrastructure (databases, APIs, time), event replay becomes non-deterministic:
 
-```ts
+```ts title="bank-account/evolve-impure.ts"
 // Dangerous: evolve handler with side effects (NOT how noddde works)
 evolve: {
   TransactionAuthorized: (event, state, { exchangeRateService }) => {
@@ -54,7 +54,7 @@ This guarantee is foundational to event sourcing:
 
 If your state transition needs external data, capture it in the **event payload** at decision time (in the decide handler), not at replay time (in the evolve handler):
 
-```ts
+```ts title="bank-account/bank-account.ts"
 // Decide handler captures all needed data AT DECISION TIME
 decide: {
   AuthorizeTransaction: (command, state, { exchangeRateService }) => {
@@ -89,7 +89,7 @@ The decide handler is allowed to be impure (it has infrastructure access). The e
 
 ## Example
 
-```ts
+```ts title="bank-account/bank-account.ts"
 // Pure evolve handler — same inputs always produce same outputs
 evolve: {
   TransactionAuthorized: (event, state) => ({

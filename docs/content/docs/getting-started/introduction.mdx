@@ -13,7 +13,7 @@ Three structural concepts — Aggregate, Projection, Saga — and the two messag
 
 A consistency boundary. Processes commands, enforces invariants, produces events. Defined as `initialState + decide + evolve`:
 
-```ts
+```ts title="bank-account/bank-account.ts"
 const BankAccount = defineAggregate<BankAccountTypes>({
   initialState: { balance: 0 },
   decide: {
@@ -35,7 +35,7 @@ const BankAccount = defineAggregate<BankAccountTypes>({
 
 Imperative. The thing the user is asking the aggregate to do.
 
-```ts
+```ts title="bank-account/commands/index.ts"
 type BankAccountCommand = DefineCommands<{
   CreateBankAccount: void;
   AuthorizeTransaction: { amount: number; merchant: string };
@@ -48,7 +48,7 @@ Carries a `name`, a `targetAggregateId`, and an optional `payload`. → [Message
 
 Past-tense fact. The thing that actually happened.
 
-```ts
+```ts title="event-model/index.ts"
 type BankAccountEvent = DefineEvents<{
   BankAccountCreated: { id: string };
   TransactionAuthorized: { id: string; amount: number; merchant: string };
@@ -61,7 +61,7 @@ Immutable. Persisted. Replayed by `evolve` to rebuild state on load.
 
 The query side of CQRS. Builds read-optimized views from event streams.
 
-```ts
+```ts title="bank-account-projection/bank-account-projection.ts"
 const BankAccountProjection = defineProjection<BankAccountProjectionDef>({
   on: {
     TransactionAuthorized: {
@@ -83,7 +83,7 @@ const BankAccountProjection = defineProjection<BankAccountProjectionDef>({
 
 Process manager. Listens to events, emits commands. The structural inverse of an aggregate.
 
-```ts
+```ts title="order-fulfillment/saga.ts"
 const OrderFulfillmentSaga = defineSaga<OrderFulfillmentSagaDef>({
   initialState: { status: null },
   startedBy: ["OrderPlaced"],
@@ -105,7 +105,7 @@ const OrderFulfillmentSaga = defineSaga<OrderFulfillmentSagaDef>({
 
 `defineDomain` captures the structure; `wireDomain` plugs in infrastructure:
 
-```ts
+```ts title="domain.ts"
 const myDomain = defineDomain({
   writeModel: { aggregates: { BankAccount } },
   readModel: { projections: { BankAccount: BankAccountProjection } },

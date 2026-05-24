@@ -21,7 +21,7 @@ The auction domain models a simple auction that supports:
 
 ## Events
 
-```ts
+```ts title="event-model/index.ts"
 import { DefineEvents } from "@noddde/core";
 
 export type AuctionEvent = DefineEvents<{
@@ -36,7 +36,7 @@ Note `BidRejected` — this is a rejection event, not an exception. The domain e
 
 ## Commands
 
-```ts
+```ts title="auction/commands/index.ts"
 import { DefineCommands } from "@noddde/core";
 
 export type AuctionCommand = DefineCommands<{
@@ -48,7 +48,7 @@ export type AuctionCommand = DefineCommands<{
 
 ## State
 
-```ts
+```ts title="auction/state.ts"
 export interface AuctionState {
   item: string;
   startingPrice: number;
@@ -65,7 +65,7 @@ export interface AuctionState {
 
 The auction needs to check the current time. Instead of calling `new Date()` directly (which would be non-deterministic), we inject a `Clock`:
 
-```ts
+```ts title="infrastructure/index.ts"
 export interface Clock {
   now(): Date;
 }
@@ -91,8 +91,7 @@ The recommended pattern extracts decide handlers and evolve handlers into separa
 
 Each decide handler is a standalone, independently testable function. The type is inferred from the aggregate's type bundle (`AuctionTypes`) and the command name.
 
-```ts
-// deciders/decide-create-auction.ts
+```ts title="auction/deciders/decide-create-auction.ts"
 import type { InferDecideHandler } from "@noddde/core";
 import type { AuctionTypes } from "../auction";
 
@@ -105,8 +104,7 @@ export const decideCreateAuction: InferDecideHandler<
 });
 ```
 
-```ts
-// deciders/decide-place-bid.ts
+```ts title="auction/deciders/decide-place-bid.ts"
 import type { InferDecideHandler } from "@noddde/core";
 import type { AuctionTypes } from "../auction";
 
@@ -157,8 +155,7 @@ The `CloseAuction` handler follows the same pattern. Each file imports only `Inf
 
 Evolve handlers are also extracted. They are pure functions — no infrastructure access, no async.
 
-```ts
-// evolvers/evolve-auction-created.ts
+```ts title="auction/evolvers/evolve-auction-created.ts"
 import type { InferEvolveHandler } from "@noddde/core";
 import type { AuctionTypes } from "../auction";
 
@@ -175,8 +172,7 @@ export const evolveAuctionCreated: InferEvolveHandler<
 });
 ```
 
-```ts
-// evolvers/evolve-bid-placed.ts
+```ts title="auction/evolvers/evolve-bid-placed.ts"
 import type { InferEvolveHandler } from "@noddde/core";
 import type { AuctionTypes } from "../auction";
 
@@ -190,8 +186,7 @@ export const evolveBidPlaced: InferEvolveHandler<AuctionTypes, "BidPlaced"> = (
 });
 ```
 
-```ts
-// evolvers/evolve-bid-rejected.ts
+```ts title="auction/evolvers/evolve-bid-rejected.ts"
 import type { InferEvolveHandler } from "@noddde/core";
 import type { AuctionTypes } from "../auction";
 
@@ -207,8 +202,7 @@ The `AuctionClosed` evolve handler follows the same pattern.
 
 The aggregate definition imports all handlers and wires them together. This file is thin — it contains no business logic, only composition.
 
-```ts
-// auction.ts
+```ts title="auction/auction.ts"
 import { defineAggregate } from "@noddde/core";
 
 type AuctionTypes = {
@@ -254,7 +248,7 @@ Instead of throwing `new Error("Auction is closed")`, the handler returns a `Bid
 
 `BidRejected` does not change state:
 
-```ts
+```ts title="auction/evolvers/evolve-bid-rejected.ts"
 BidRejected: (_event, state) => state,
 ```
 
@@ -266,7 +260,7 @@ The aggregate records that the bid happened (as an event) but the state remains 
 
 ## Running the Example
 
-```ts
+```ts title="main.ts"
 import { defineDomain } from "@noddde/core";
 import { wireDomain } from "@noddde/engine";
 

@@ -13,7 +13,7 @@ For the conceptual foundation of event sourcing and CQRS, see [CQRS and Event So
 
 With event sourcing, events are the source of truth. State is ephemeral -- derived on every load by replaying the complete event history through the aggregate's evolve handlers.
 
-```ts
+```ts title="packages/core/src/persistence/event-sourced-aggregate-persistence.ts"
 interface EventSourcedAggregatePersistence {
   save(
     aggregateName: string,
@@ -34,7 +34,7 @@ Each aggregate instance has its own event stream, identified by the combination 
 
 With state storage, the current state is saved directly. No event replay is needed -- the loaded state is used as-is.
 
-```ts
+```ts title="packages/core/src/persistence/state-stored-aggregate-persistence.ts"
 interface StateStoredAggregatePersistence {
   save(
     aggregateName: string,
@@ -60,7 +60,7 @@ For long-lived aggregates with large event streams, replaying every event on eac
 
 Snapshots are not the source of truth — the event stream is. Deleting all snapshots is safe; the engine falls back to full replay.
 
-```ts
+```ts title="packages/core/src/persistence/snapshot-store.ts"
 interface Snapshot {
   state: any;
   version: number; // event stream version at snapshot time
@@ -83,7 +83,7 @@ interface SnapshotStore {
 
 A `SnapshotStrategy` is a pure function that decides whether to take a snapshot after each command. The built-in `everyNEvents` factory covers the common case:
 
-```ts
+```ts title="main.ts"
 import { everyNEvents } from "@noddde/core";
 
 // Snapshot every 100 events
@@ -92,7 +92,7 @@ const strategy = everyNEvents(100);
 
 You can also write custom strategies:
 
-```ts
+```ts title="infrastructure/snapshot-strategy.ts"
 import type { SnapshotStrategy } from "@noddde/core";
 
 const customStrategy: SnapshotStrategy = ({ version, eventsSinceSnapshot }) => {
@@ -105,7 +105,7 @@ const customStrategy: SnapshotStrategy = ({ version, eventsSinceSnapshot }) => {
 
 With `wireDomain`, snapshots are configured as part of the aggregate wiring -- either globally or per-aggregate:
 
-```ts
+```ts title="main.ts"
 import {
   wireDomain,
   InMemoryEventSourcedAggregatePersistence,
@@ -148,7 +148,7 @@ Both `store` and `strategy` must be present in the `snapshots` object for snapsh
 
 When a snapshot exists, the engine only needs events that occurred after it. If the persistence implementation also implements `PartialEventLoad`, the engine uses `loadAfterVersion()` to avoid loading the full event stream:
 
-```ts
+```ts title="packages/core/src/persistence/partial-event-load.ts"
 interface PartialEventLoad {
   loadAfterVersion(
     aggregateName: string,
@@ -168,7 +168,7 @@ Snapshots are saved **after** the unit of work commits, as a best-effort operati
 
 Sagas are always state-stored. The `SagaPersistence` interface mirrors the state-stored aggregate interface:
 
-```ts
+```ts title="packages/core/src/persistence/saga-persistence.ts"
 interface SagaPersistence {
   save(sagaName: string, sagaId: ID, state: any): Promise<void>;
   load(sagaName: string, sagaId: ID): Promise<any>;
@@ -183,7 +183,7 @@ Required when using sagas (`processModel`) in your [domain configuration](/docs/
 
 Provide persistence via the `aggregates` field in `wireDomain`:
 
-```ts
+```ts title="main.ts"
 import {
   wireDomain,
   InMemoryEventSourcedAggregatePersistence,
@@ -202,7 +202,7 @@ const domain = await wireDomain(bankingDomain, {
 
 For per-aggregate persistence, provide each aggregate name mapped to its own wiring. All registered aggregates must have an entry:
 
-```ts
+```ts title="main.ts"
 const domain = await wireDomain(myDomain, {
   aggregates: {
     Order: {
@@ -227,7 +227,7 @@ When `concurrency` is omitted, no retry logic or locking is applied. The version
 
 This is appropriate for low-contention scenarios and works with every database dialect supported by your ORM adapter.
 
-```ts
+```ts title="main.ts"
 const domain = await wireDomain(myDomain, {
   aggregates: {
     persistence: () => new InMemoryEventSourcedAggregatePersistence(),
@@ -240,7 +240,7 @@ const domain = await wireDomain(myDomain, {
 
 Opt into automatic retries by setting `maxRetries`. On `ConcurrencyError`, the domain re-executes the full load->execute->save cycle against the latest state, up to `maxRetries` times. If all retries are exhausted, `ConcurrencyError` propagates.
 
-```ts
+```ts title="main.ts"
 const domain = await wireDomain(myDomain, {
   aggregates: {
     persistence: () => new InMemoryEventSourcedAggregatePersistence(),
@@ -257,7 +257,7 @@ Decide handlers may be called multiple times during retry and should be side-eff
 
 For high-contention aggregates where retries waste work, pessimistic locking serializes access by acquiring an exclusive lock before loading the aggregate.
 
-```ts
+```ts title="main.ts"
 import { InMemoryAggregateLocker } from "@noddde/engine";
 
 const domain = await wireDomain(myDomain, {
@@ -276,7 +276,7 @@ const domain = await wireDomain(myDomain, {
 
 Different aggregates can use different concurrency strategies:
 
-```ts
+```ts title="main.ts"
 const domain = await wireDomain(myDomain, {
   aggregates: {
     // High-contention: pessimistic locking
@@ -327,7 +327,7 @@ The `@noddde/engine` package includes in-memory implementations that require no 
 
 ### InMemoryEventSourcedAggregatePersistence
 
-```ts
+```ts title="main.ts"
 import { InMemoryEventSourcedAggregatePersistence } from "@noddde/engine";
 
 const persistence = new InMemoryEventSourcedAggregatePersistence();
@@ -337,7 +337,7 @@ Stores event streams in memory, keyed by `(aggregateName, aggregateId)`. Also im
 
 ### InMemorySnapshotStore
 
-```ts
+```ts title="main.ts"
 import { InMemorySnapshotStore } from "@noddde/engine";
 
 const snapshotStore = new InMemorySnapshotStore();
@@ -347,7 +347,7 @@ Stores aggregate state snapshots in memory, keyed by `(aggregateName, aggregateI
 
 ### InMemoryStateStoredAggregatePersistence
 
-```ts
+```ts title="main.ts"
 import { InMemoryStateStoredAggregatePersistence } from "@noddde/engine";
 
 const persistence = new InMemoryStateStoredAggregatePersistence();
@@ -357,7 +357,7 @@ Stores aggregate state snapshots in memory, keyed by `(aggregateName, aggregateI
 
 ### InMemoryIdempotencyStore
 
-```ts
+```ts title="main.ts"
 import { InMemoryIdempotencyStore } from "@noddde/engine";
 
 const store = new InMemoryIdempotencyStore(); // no TTL
@@ -368,7 +368,7 @@ Stores processed command records in memory, keyed by `commandId`. When `ttlMs` i
 
 ### InMemorySagaPersistence
 
-```ts
+```ts title="main.ts"
 import { InMemorySagaPersistence } from "@noddde/engine";
 
 const persistence = new InMemorySagaPersistence();
@@ -420,7 +420,7 @@ The strategy is a configuration choice, not a modeling choice.
 
 The persistence interfaces are deliberately minimal -- `save` and `load` are the only two operations. This makes it straightforward to implement for any storage backend:
 
-```ts
+```ts title="adapters/postgres-event-store.ts"
 import {
   Event,
   EventSourcedAggregatePersistence,
@@ -524,7 +524,7 @@ If persistence fails, no events are published. This prevents inconsistencies bet
 
 Every `dispatchCommand` call is automatically wrapped in its own unit of work. No configuration needed:
 
-```ts
+```ts title="main.ts"
 // This is already wrapped in a unit of work
 await domain.dispatchCommand({
   name: "CreateBankAccount",
@@ -537,7 +537,7 @@ await domain.dispatchCommand({
 
 Use `domain.withUnitOfWork()` to group multiple commands into a single atomic boundary:
 
-```ts
+```ts title="main.ts"
 await domain.withUnitOfWork(async () => {
   await domain.dispatchCommand({
     name: "DebitAccount",
@@ -558,7 +558,7 @@ If any command within the unit of work throws, all buffered persistence operatio
 
 `withUnitOfWork()` returns the value from its callback:
 
-```ts
+```ts title="main.ts"
 const accountId = await domain.withUnitOfWork(async () => {
   const id = await domain.dispatchCommand(createAccountCommand);
   await domain.dispatchCommand(initialDepositCommand);
@@ -584,7 +584,7 @@ This ensures that saga state transitions and the commands they trigger are alway
 
 ### The UnitOfWork Interface
 
-```ts
+```ts title="packages/core/src/persistence/unit-of-work.ts"
 interface UnitOfWork {
   enlist(operation: () => Promise<void>): void;
   deferPublish(...events: Event[]): void;
@@ -604,7 +604,7 @@ A UnitOfWork is single-use: after `commit()` or `rollback()`, further calls thro
 
 By default, the domain uses `InMemoryUnitOfWork`. For production use with a database, provide a custom `unitOfWork` factory in [domain wiring](/docs/running/domain-configuration):
 
-```ts
+```ts title="main.ts"
 const domain = await wireDomain(bankingDomain, {
   aggregates: {
     persistence: () => new PostgresEventStore(),

@@ -32,7 +32,7 @@ The flow works as follows: a command arrives, and `decide` examines the current 
 
 Here is a Decider for a simple counter, expressed as plain TypeScript:
 
-```typescript
+```typescript title="counter.ts"
 // The state
 type CounterState = { value: number };
 
@@ -78,7 +78,7 @@ Most DDD frameworks model aggregates as classes with methods that mutate interna
 
 In a traditional OOP framework, you might write something like this:
 
-```typescript
+```typescript title="bank-account-aggregate.ts"
 // Typical OOP aggregate (NOT noddde)
 class BankAccountAggregate extends AggregateRoot {
   private balance: number = 0;
@@ -117,7 +117,7 @@ This approach has several characteristics:
 
 Here is the same domain expressed as a noddde Decider:
 
-```typescript
+```typescript title="bank-account.ts"
 import { defineAggregate, DefineCommands, DefineEvents } from "@noddde/core";
 
 type BankingCommand = DefineCommands<{
@@ -211,7 +211,7 @@ The differences are significant:
 
 Because `decide` and `evolve` are pure functions, testing them requires no setup:
 
-```typescript
+```typescript title="__tests__/authorize-transaction.test.ts"
 import { describe, it, expect } from "vitest";
 
 describe("AuthorizeTransaction", () => {
@@ -252,7 +252,7 @@ No aggregate instantiation, no event store setup, no mock buses. Just function i
 
 Deciders are plain objects. You can combine them, transform them, or wrap them without inheritance hierarchies. For example, you could write a function that adds logging to any aggregate:
 
-```typescript
+```typescript title="with-logging.ts"
 function withLogging<T extends AggregateTypes>(
   aggregate: Aggregate<T>,
 ): Aggregate<T> {
@@ -291,7 +291,7 @@ noddde's `defineAggregate` function maps directly to the three components of a D
 
 The `defineAggregate` function takes a configuration object and returns it with full type inference. It does not add behavior or register anything — it is an identity function that exists solely to provide type checking:
 
-```typescript
+```typescript title="packages/core/src/ddd/aggregate-root.ts"
 export function defineAggregate<T extends AggregateTypes>(
   config: Aggregate<T>,
 ): Aggregate<T> {
@@ -305,7 +305,7 @@ This means the framework has zero runtime overhead in the aggregate definition. 
 
 Rather than passing five positional generic parameters, noddde uses a single types bundle that names each type in the aggregate's type universe:
 
-```typescript
+```typescript title="bank-account/bank-account.ts"
 type BankAccountTypes = {
   state: BankAccountState; // The aggregate's state shape
   commands: BankingCommand; // The discriminated union of commands

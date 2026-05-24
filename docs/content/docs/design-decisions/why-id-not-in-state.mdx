@@ -7,7 +7,7 @@ description: Why noddde keeps the aggregate identifier on commands rather than i
 
 In noddde, the aggregate identifier lives on the command as `targetAggregateId`, not inside the aggregate's state object.
 
-```ts
+```ts title="bank-account/state.ts"
 // The ID is on the command
 { name: "CreateBankAccount", targetAggregateId: "acc-123" }
 
@@ -23,7 +23,7 @@ interface BankAccountState {
 
 If the ID is part of aggregate state, `initialState` becomes awkward:
 
-```ts
+```ts title="bank-account/state-with-id.ts"
 // Problematic: what goes in the id field?
 initialState: {
   id: ???,         // Empty string? null? placeholder?
@@ -55,7 +55,7 @@ Keeping the ID on commands:
 
 When a decide handler needs the aggregate ID (e.g., to include it in event payloads), it reads it from the command:
 
-```ts
+```ts title="bank-account/bank-account.ts"
 decide: {
   CreateBankAccount: (command) => ({
     name: "BankAccountCreated",
@@ -71,7 +71,7 @@ decide: {
 
 ## Example
 
-```ts
+```ts title="bank-account/bank-account.ts"
 // Commands carry the ID
 await domain.dispatchCommand({
   name: "AuthorizeTransaction",

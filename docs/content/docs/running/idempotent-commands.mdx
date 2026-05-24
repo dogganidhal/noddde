@@ -7,7 +7,7 @@ In distributed systems, commands may be delivered more than once — network ret
 
 ## Quick Example
 
-```ts
+```ts title="main.ts"
 // First dispatch — processes normally, events persisted and published
 await domain.dispatchCommand({
   name: "Transfer",
@@ -52,7 +52,7 @@ After successful execution, the `commandId` is recorded in the same [unit of wor
 
 The `commandId` is an optional field on the base `Command` interface:
 
-```ts
+```ts title="packages/core/src/cqrs/command.ts"
 interface Command {
   name: string;
   payload?: any;
@@ -64,7 +64,7 @@ Since `AggregateCommand` extends `Command`, the field is available on all aggreg
 
 When using `DefineCommands` to build command unions, the `commandId` field is not part of the generated types (it is a framework concern, not a domain modeling concern). Pass it at dispatch time:
 
-```ts
+```ts title="main.ts"
 // Inline — TypeScript infers the full type including commandId
 await domain.dispatchCommand({
   name: "CreateAccount",
@@ -81,7 +81,7 @@ await domain.dispatchCommand({ ...cmd, commandId: requestId });
 
 Add an `idempotency` factory to your [domain wiring](/docs/running/domain-configuration):
 
-```ts
+```ts title="main.ts"
 import { wireDomain, InMemoryIdempotencyStore } from "@noddde/engine";
 
 const domain = await wireDomain(bankingDomain, {
@@ -96,14 +96,14 @@ Without `idempotency` configured, the `commandId` field is ignored and all comma
 
 The `InMemoryIdempotencyStore` accepts an optional `ttlMs` parameter. When set, `exists()` performs lazy cleanup: if a record has expired, it is deleted and the command is treated as new.
 
-```ts
+```ts title="main.ts"
 // Records auto-expire after 24 hours on exists() checks
 const store = new InMemoryIdempotencyStore(24 * 60 * 60 * 1000);
 ```
 
 For explicit batch cleanup (e.g., on a timer), call `removeExpired()`:
 
-```ts
+```ts title="main.ts"
 // Remove all records older than 1 hour
 await store.removeExpired(60 * 60 * 1000);
 ```
@@ -112,7 +112,7 @@ Without a `ttlMs`, records persist indefinitely until explicitly removed.
 
 ## The IdempotencyStore Interface
 
-```ts
+```ts title="packages/core/src/cqrs/idempotency-store.ts"
 interface IdempotencyRecord {
   commandId: ID;
   aggregateName: string;

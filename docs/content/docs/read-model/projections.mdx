@@ -44,7 +44,7 @@ Command --> Aggregate --> Events --> EventBus --> Projection on Handlers --> Vie
 
 Every projection is parameterized by a `ProjectionTypes` bundle -- a single named type that captures the projection's type universe:
 
-```ts
+```ts title="types.ts"
 type MyProjectionDef = {
   events: MyEvent; // The event union this projection handles
   queries: MyQuery; // The query union this projection answers
@@ -268,7 +268,7 @@ Query handlers are optional. A projection may handle events (updating a view) wi
 
 noddde provides `Infer*` helpers at two levels. The handler-level helpers are the most commonly used -- they type extracted event handlers and query handlers in separate files:
 
-```ts
+```ts title="usage.ts"
 import type {
   InferProjectionEventHandler,
   InferProjectionQueryHandler,
@@ -289,7 +289,7 @@ type QHandler = InferProjectionQueryHandler<
 
 Definition-level helpers extract types from the built projection:
 
-```ts
+```ts title="usage.ts"
 import type {
   InferProjectionView,
   InferProjectionEvents,
@@ -348,7 +348,7 @@ Both projections consume the same `TransactionProcessed` event but build entirel
 
 A projection is not limited to events from a single aggregate. A single projection can consume events from multiple aggregate types by using a union in the `events` field:
 
-```ts
+```ts title="activity-feed/types.ts"
 type CrossDomainProjectionDef = {
   events: BankAccountEvent | AuditEvent;
   queries: ActivityQuery;
@@ -363,7 +363,7 @@ This is useful for building views that span multiple domain concepts, such as an
 
 Projections are registered in the `readModel.projections` map of the domain definition, and their view stores are wired separately in `wireDomain`'s `projections` field:
 
-```ts
+```ts title="main.ts"
 import { defineDomain } from "@noddde/core";
 import { wireDomain, InMemoryViewStoreFactory } from "@noddde/engine";
 
@@ -417,7 +417,7 @@ The `EventBus` implementation determines delivery guarantees:
 
 Because reducers are pure functions, testing them is straightforward -- call the function with inputs and assert the output. With extracted handlers, you can import and test each handler independently:
 
-```ts
+```ts title="__tests__/bank-account-projection.test.ts"
 import { describe, it, expect } from "vitest";
 import { onBankAccountCreated } from "./on-entries/on-bank-account-created";
 import { onTransactionProcessed } from "./on-entries/on-transaction-processed";
@@ -465,7 +465,7 @@ noddde provides **view stores** — typed persistence interfaces for per-entity 
 
 A `ViewStore<TView>` provides `save(viewId, view)` and `load(viewId)` methods. You can extend it with custom query methods for advanced filtering:
 
-```ts
+```ts title="bank-account/types.ts"
 import type { ViewStore } from "@noddde/core";
 
 interface BankAccountViewStore extends ViewStore<BankAccountView> {
@@ -477,7 +477,7 @@ interface BankAccountViewStore extends ViewStore<BankAccountView> {
 
 To enable automatic view persistence, provide an `id` function inside each relevant `on` entry. The `id` function extracts the view instance ID from the event so the engine knows which view to load and update:
 
-```ts
+```ts title="bank-account/projection.ts"
 on: {
   BankAccountCreated: {
     id: (event) => event.payload.id,  // view instance ID
@@ -530,7 +530,7 @@ Projections support two consistency modes via the `consistency` field:
 - **`"eventual"`** (default): Views are updated asynchronously after the command's unit of work is committed and events are dispatched via the event bus.
 - **`"strong"`**: View updates are enlisted in the same unit of work as the originating command. If the command fails, view updates are rolled back atomically.
 
-```ts
+```ts title="projection.ts"
 const projection = defineProjection<Def>({
   // ...
   consistency: "strong",
@@ -543,7 +543,7 @@ For more details, see [View Persistence](/docs/read-model/view-persistence).
 
 A projection is a function of the event log. When you fix a reducer bug, add a field, or migrate the view schema, the views drift from the log — `Domain.rebuildProjection("<name>")` truncates the view store and replays every persisted event through the projection's `on` map handlers, restoring the views to a state derived solely from the event log.
 
-```ts
+```ts title="ops/rebuild.ts"
 const result = await domain.rebuildProjection("AccountBalance");
 // { eventsRead, eventsApplied, viewsDeleted, durationMs, projectionName }
 ```

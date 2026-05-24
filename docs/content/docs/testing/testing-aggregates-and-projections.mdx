@@ -9,7 +9,7 @@ Aggregates and projections share a similar testing shape: replay events, then as
 
 The primary harness for testing decide handlers. It replays given events through `evolve` handlers to build state, executes the decide handler, and returns the produced events and resulting state.
 
-```ts
+```ts title="__tests__/bank-account.test.ts"
 import { testAggregate } from "@noddde/testing";
 
 const result = await testAggregate(BankAccount)
@@ -35,16 +35,16 @@ expect(result.state.availableBalance).toBe(500);
 
 ### Builder API
 
-| Method                       | Purpose                                                                                           |
-| ---------------------------- | ------------------------------------------------------------------------------------------------- |
+| Method                       | Purpose                                                                                            |
+| ---------------------------- | -------------------------------------------------------------------------------------------------- |
 | `.given(...events)`          | Prior events to replay through `evolve` handlers. Can be called multiple times; events accumulate. |
-| `.when(command)`             | The command to execute. Required before `.execute()`.                                             |
-| `.withInfrastructure(infra)` | Custom infrastructure for the handler. Defaults to `{}`.                                          |
-| `.execute()`                 | Runs the test and returns the result. Always async.                                               |
+| `.when(command)`             | The command to execute. Required before `.execute()`.                                              |
+| `.withInfrastructure(infra)` | Custom infrastructure for the handler. Defaults to `{}`.                                           |
+| `.execute()`                 | Runs the test and returns the result. Always async.                                                |
 
 ### Result Shape
 
-```ts
+```ts title="aggregate-test-result.ts"
 type AggregateTestResult<TState, TEvents> = {
   events: TEvents[]; // Events produced by the decide handler
   state: TState; // State after applying produced events
@@ -58,7 +58,7 @@ The harness **never throws** -- errors are always captured in `result.error`.
 
 When no `.given()` is called, the command runs against `aggregate.initialState`:
 
-```ts
+```ts title="__tests__/bank-account-create.test.ts"
 const result = await testAggregate(BankAccount)
   .when({
     name: "CreateBankAccount",
@@ -73,7 +73,7 @@ expect(result.events[0].name).toBe("BankAccountCreated");
 
 When a decide handler throws (e.g., validation failure), the error is captured:
 
-```ts
+```ts title="__tests__/bank-account-rejection.test.ts"
 const result = await testAggregate(BankAccount)
   .given({ name: "AccountCreated", payload: { id: "acc-1" } })
   .when({
@@ -92,7 +92,7 @@ expect(result.events).toEqual([]);
 
 Pass infrastructure via `.withInfrastructure()`. This is how you inject clocks, loggers, or any domain-specific dependency:
 
-```ts
+```ts title="__tests__/bank-account-with-infrastructure.test.ts"
 const result = await testAggregate(BankAccount)
   .given({ name: "AccountCreated", payload: { id: "acc-1" } })
   .when({
@@ -109,7 +109,7 @@ const result = await testAggregate(BankAccount)
 
 For infrastructure with multiple members, create a reusable mock factory to keep tests concise:
 
-```ts
+```ts title="__tests__/helpers/mock-infrastructure.ts"
 function createMockBankingInfrastructure() {
   return {
     logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
@@ -131,7 +131,7 @@ const result = await testAggregate(BankAccount)
 
 When a decide handler returns an array of events, all are captured and applied:
 
-```ts
+```ts title="__tests__/bank-account-batch.test.ts"
 const result = await testAggregate(BankAccount)
   .given(
     { name: "AccountCreated", payload: { id: "acc-1" } },
@@ -153,7 +153,7 @@ expect(result.events).toHaveLength(3);
 
 A standalone pure function for replaying events through evolve handlers. Useful when you need to reconstruct state without executing a command:
 
-```ts
+```ts title="__tests__/bank-account-evolve.test.ts"
 import { evolveAggregate } from "@noddde/testing";
 
 const state = evolveAggregate(BankAccount, [
@@ -173,7 +173,7 @@ expect(state.balance).toBe(300);
 
 You can also pass a custom starting state:
 
-```ts
+```ts title="__tests__/bank-account-evolve-custom-start.test.ts"
 const state = evolveAggregate(
   BankAccount,
   [{ name: "DepositMade", payload: { amount: 50 } }],
@@ -187,7 +187,7 @@ expect(state.balance).toBe(150);
 
 Since handlers are extracted to standalone functions, you can import and call them directly without going through the aggregate object:
 
-```ts
+```ts title="__tests__/direct-handler.test.ts"
 // Decide handler — import the extracted function
 import { decideAuthorizeTransaction } from "./deciders/decide-authorize-transaction";
 
@@ -207,7 +207,7 @@ The harness is recommended for most tests because it manages state reconstructio
 
 Projections build read models from event streams. The `testProjection` harness replays events through the projection's reducers and returns the final view.
 
-```ts
+```ts title="__tests__/bank-account-projection.test.ts"
 import { testProjection } from "@noddde/testing";
 
 const result = await testProjection(BankAccountProjection)
@@ -238,7 +238,7 @@ expect(result.view.transactions).toHaveLength(2);
 
 ### Result Shape
 
-```ts
+```ts title="projection-test-result.ts"
 type ProjectionTestResult<TView> = {
   view: TView; // Final view after all events
   error?: Error; // Captured error (if a reducer threw)
@@ -249,7 +249,7 @@ type ProjectionTestResult<TView> = {
 
 Control the starting state of the projection. This is useful when testing incremental updates rather than building from scratch:
 
-```ts
+```ts title="__tests__/bank-account-projection-initial-view.test.ts"
 const result = await testProjection(BankAccountProjection)
   .initialView({
     id: "acc-1",
@@ -269,8 +269,7 @@ expect(result.view.balance).toBe(800);
 
 When `.initialView()` is not called, the first reducer invocation receives `undefined` as the view. This matches real projection behavior when the first event arrives. Design your reducers to handle this:
 
-```ts
-// on-entries/on-account-created.ts
+```ts title="bank-account/on-entries/on-account-created.ts"
 export const onAccountCreated: InferProjectionEventHandler<
   Def,
   "AccountCreated"
@@ -295,7 +294,7 @@ export const onDepositMade: InferProjectionEventHandler<Def, "DepositMade"> = {
 
 Build a complete view from scratch by providing all events in order:
 
-```ts
+```ts title="__tests__/bank-account-projection-full-stream.test.ts"
 const result = await testProjection(BankAccountProjection)
   .given(
     { name: "BankAccountCreated", payload: { id: "acc-1" } },
@@ -319,8 +318,7 @@ expect(result.view.transactions).toHaveLength(1);
 
 Projection reducers receive the **full event object** (`{ name, payload }`), not just the payload. The event type is narrowed by name:
 
-```ts
-// on-entries/on-account-created.ts
+```ts title="bank-account/on-entries/on-account-created.ts"
 export const onAccountCreated: InferProjectionEventHandler<
   Def,
   "AccountCreated"
@@ -338,7 +336,7 @@ This is consistent with the runtime behavior in `@noddde/engine` and different f
 
 Reducers can be async. The harness awaits each one sequentially:
 
-```ts
+```ts title="__tests__/async-projection.test.ts"
 const result = await testProjection(AsyncProjection)
   .given({ name: "DataFetched", payload: { url: "https://example.com" } })
   .execute();
@@ -350,7 +348,7 @@ expect(result.view.fetched).toBe(true);
 
 If a reducer throws, the error is captured in the result:
 
-```ts
+```ts title="__tests__/strict-projection.test.ts"
 const result = await testProjection(StrictProjection)
   .given({ name: "InvalidEvent", payload: { bad: true } })
   .execute();
@@ -363,7 +361,7 @@ expect(result.error!.message).toContain("invalid");
 
 Since projection event handlers are extracted to standalone functions, import and call them directly:
 
-```ts
+```ts title="__tests__/direct-reducer.test.ts"
 import { onTransactionProcessed } from "./on-entries/on-transaction-processed";
 
 const newView = onTransactionProcessed.reduce(

@@ -11,7 +11,7 @@ Evolve handlers are the functions that update aggregate state when an event occu
 
 The `EvolveHandler` type signature:
 
-```typescript
+```typescript title="packages/core/src/ddd/handlers.ts"
 type EvolveHandler<TEvent extends Event, TState> = (
   event: TEvent["payload"],
   state: TState,
@@ -41,7 +41,7 @@ For a deeper discussion of why evolve handlers are pure, see [Why Are Evolve Han
 
 Every aggregate declares an `initialState` -- the state a brand-new instance starts with before any events have been applied. When the framework loads an aggregate for the first time (or when there are no stored events), this is what the decide handler receives as `state`.
 
-```typescript
+```typescript title="bank-account/bank-account.ts"
 export const BankAccount = defineAggregate<BankAccountTypes>({
   initialState: {
     balance: 0,
@@ -61,7 +61,7 @@ Guidelines for a good initial state:
 - Use **`null`** for optional reference-type fields that genuinely have no value yet.
 - Use **`as const`** for status fields when TypeScript needs help narrowing a literal type.
 
-```typescript
+```typescript title="auction/auction.ts"
 initialState: {
   status: "pending" as const,
   highestBid: null as { bidderId: string; amount: number } | null,
@@ -81,8 +81,7 @@ Evolve handlers must return a **new state object**. Never mutate the existing st
 
 Override specific fields while preserving the rest:
 
-```typescript
-// evolvers/evolve-transaction-authorized.ts
+```typescript title="bank-account/evolvers/evolve-transaction-authorized.ts"
 import type { InferEvolveHandler } from "@noddde/core";
 import type { BankAccountTypes } from "../bank-account";
 
@@ -111,8 +110,7 @@ This creates a new object with all existing state fields, but with `availableBal
 
 When updating a specific item inside a collection, use `map` to produce a new array and spread to produce a new item:
 
-```typescript
-// evolvers/evolve-transaction-processed.ts
+```typescript title="bank-account/evolvers/evolve-transaction-processed.ts"
 import type { InferEvolveHandler } from "@noddde/core";
 import type { BankAccountTypes } from "../bank-account";
 
@@ -136,7 +134,7 @@ Here `map` creates a new array, and only the matching transaction is replaced wi
 
 Use spread to append to an array rather than `push`:
 
-```typescript
+```typescript title="bank-account/evolvers/evolve-transaction-authorized.ts"
 transactions: [
   ...state.transactions,
   { ...event, status: "pending" as const },
@@ -147,7 +145,7 @@ transactions: [
 
 Use `map` to transform a specific item rather than direct index assignment:
 
-```typescript
+```typescript title="bank-account/evolvers/evolve-transaction-processed.ts"
 transactions: state.transactions.map((t) =>
   t.id === event.id ? { ...t, status: "processed" as const } : t,
 ),
@@ -157,7 +155,7 @@ transactions: state.transactions.map((t) =>
 
 Never mutate state in place:
 
-```typescript
+```typescript title="anti-pattern-mutation.ts"
 // WRONG: mutates state directly
 TransactionAuthorized: (event, state) => {
   state.availableBalance -= event.amount;
@@ -174,8 +172,7 @@ Some events do not change the aggregate state. For example, a `TransactionDeclin
 
 These handlers simply return the existing state:
 
-```typescript
-// evolvers/evolve-bid-rejected.ts
+```typescript title="auction/evolvers/evolve-bid-rejected.ts"
 import type { InferEvolveHandler } from "@noddde/core";
 import type { AuctionTypes } from "../auction";
 
@@ -199,8 +196,7 @@ The most important thing to understand about evolve handlers is how state accumu
 
 ### Event 1: BankAccountCreated
 
-```typescript
-// evolvers/evolve-bank-account-created.ts
+```typescript title="bank-account/evolvers/evolve-bank-account-created.ts"
 export const evolveBankAccountCreated: InferEvolveHandler<
   BankAccountTypes,
   "BankAccountCreated"
@@ -221,8 +217,7 @@ This handler ignores both the event and prior state, returning a clean initial s
 
 ### Event 2: TransactionAuthorized (amount: 50)
 
-```typescript
-// evolvers/evolve-transaction-authorized.ts
+```typescript title="bank-account/evolvers/evolve-transaction-authorized.ts"
 export const evolveTransactionAuthorized: InferEvolveHandler<
   BankAccountTypes,
   "TransactionAuthorized"
@@ -275,8 +270,7 @@ The same handler runs again with a new event. Both transactions are now pending.
 
 ### Event 4: TransactionProcessed (id: "tx-1", amount: 50)
 
-```typescript
-// evolvers/evolve-transaction-processed.ts
+```typescript title="bank-account/evolvers/evolve-transaction-processed.ts"
 export const evolveTransactionProcessed: InferEvolveHandler<
   BankAccountTypes,
   "TransactionProcessed"
@@ -321,7 +315,7 @@ The rule: **"Does a decide handler need this field to make a decision?"**
 
 Both `balance` and `availableBalance` are stored because they are needed for authorization:
 
-```typescript
+```typescript title="bank-account/deciders/decide-authorize-transaction.ts"
 export const decideAuthorizeTransaction: InferDecideHandler<
   BankAccountTypes,
   "AuthorizeTransaction"
@@ -344,7 +338,7 @@ Even though `availableBalance` could theoretically be computed from the transact
 
 If a value is only needed for read models or queries, compute it in a projection rather than bloating aggregate state:
 
-```typescript
+```typescript title="bank-account/state.ts"
 // Don't store display-only data in aggregate state
 interface BankAccountState {
   balance: number;
@@ -367,7 +361,7 @@ The aggregate ID (`targetAggregateId`) is deliberately excluded from aggregate s
 
 The ID is always available in the command object:
 
-```typescript
+```typescript title="bank-account/deciders/decide-create-bank-account.ts"
 export const decideCreateBankAccount: InferDecideHandler<
   BankAccountTypes,
   "CreateBankAccount"
@@ -389,7 +383,7 @@ Quick reference for the most frequent evolve handler shapes, shown as extracted 
 
 ### Appending to an Array
 
-```typescript
+```typescript title="bank-account/evolvers/evolve-transaction-authorized.ts"
 export const evolveTransactionAuthorized: InferEvolveHandler<
   BankAccountTypes,
   "TransactionAuthorized"
@@ -404,7 +398,7 @@ export const evolveTransactionAuthorized: InferEvolveHandler<
 
 ### Updating an Item in an Array
 
-```typescript
+```typescript title="bank-account/evolvers/evolve-transaction-processed.ts"
 export const evolveTransactionProcessed: InferEvolveHandler<
   BankAccountTypes,
   "TransactionProcessed"
@@ -418,7 +412,7 @@ export const evolveTransactionProcessed: InferEvolveHandler<
 
 ### Incrementing a Counter
 
-```typescript
+```typescript title="auction/evolvers/evolve-bid-placed.ts"
 export const evolveBidPlaced: InferEvolveHandler<AuctionTypes, "BidPlaced"> = (
   event,
   state,
@@ -433,7 +427,7 @@ export const evolveBidPlaced: InferEvolveHandler<AuctionTypes, "BidPlaced"> = (
 
 For creation events that set the entire state from the event payload:
 
-```typescript
+```typescript title="bank-account/evolvers/evolve-bank-account-created.ts"
 export const evolveBankAccountCreated: InferEvolveHandler<
   BankAccountTypes,
   "BankAccountCreated"

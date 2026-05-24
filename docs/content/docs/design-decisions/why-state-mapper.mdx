@@ -7,12 +7,20 @@ description: Why noddde uses a bi-directional mapper to bridge aggregate state a
 
 When an aggregate uses a dedicated state table, noddde requires a `mapper` (`DrizzleStateMapper`, `PrismaStateMapper`, or `TypeORMStateMapper`) that defines how aggregate state translates to and from rows. The framework writes the `aggregateId` and `version` columns; the mapper owns everything else.
 
-```ts
+```ts title="order/state-mapper.ts"
 const orderMapper: DrizzleStateMapper<OrderState, typeof orders> = {
   aggregateIdColumn: orders.aggregateId,
   versionColumn: orders.version,
-  toRow: (s) => ({ customerId: s.customerId, total: s.total, status: s.status }),
-  fromRow: (r) => ({ customerId: r.customerId!, total: r.total!, status: r.status! }),
+  toRow: (s) => ({
+    customerId: s.customerId,
+    total: s.total,
+    status: s.status,
+  }),
+  fromRow: (r) => ({
+    customerId: r.customerId!,
+    total: r.total!,
+    status: r.status!,
+  }),
 };
 
 adapter.stateStored(orders, { mapper: orderMapper });

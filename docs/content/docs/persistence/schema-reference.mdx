@@ -257,7 +257,7 @@ CREATE TABLE IF NOT EXISTS orders (
 
 Each adapter accepts its own table reference format (Drizzle table object, Prisma model name, TypeORM entity class) plus a `mapper` option:
 
-```ts
+```ts title="main.ts"
 // Drizzle
 adapter.stateStored(orders, { mapper: orderMapper });
 
@@ -282,7 +282,7 @@ CREATE TABLE IF NOT EXISTS orders (
 );
 ```
 
-```ts
+```ts title="main.ts"
 // Drizzle
 adapter.stateStored(orders, { mapper: jsonStateMapper(orders) });
 

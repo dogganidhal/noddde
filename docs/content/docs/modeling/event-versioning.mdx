@@ -9,7 +9,7 @@ Event schemas inevitably change as your domain evolves. A field gets added, a ty
 
 Consider a `BankAccountCreated` event that originally had this payload:
 
-```typescript
+```typescript title="event-model/bank-account-created.ts"
 // Version 1 (original)
 {
   id: string;
@@ -19,7 +19,7 @@ Consider a `BankAccountCreated` event that originally had this payload:
 
 Later, you add a `status` field:
 
-```typescript
+```typescript title="event-model/bank-account-created.ts"
 // Version 2 (current)
 {
   id: string;
@@ -34,7 +34,7 @@ Without upcasting, replaying version 1 events through evolve handlers that expec
 
 An upcaster chain declares all historical payload versions as a tuple and provides transform functions between consecutive versions.
 
-```typescript
+```typescript title="bank-account/upcasters.ts"
 import {
   defineEventUpcasterChain,
   defineUpcasters,
@@ -69,7 +69,7 @@ const bankAccountUpcasters = defineUpcasters<BankAccountEvent>({
 
 Events can go through many versions. Each step in the chain transforms from one version to the next:
 
-```typescript
+```typescript title="upcasters.ts"
 type CreatedV1 = { id: string };
 type CreatedV2 = { id: string; status: "active" | "closed" };
 type CreatedV3 = { id: string; status: "active" | "closed"; createdAt: string };
@@ -88,7 +88,7 @@ The version tuple `[V1, V2, V3]` declares all shapes upfront. Step parameters an
 
 Pass the upcaster map to `defineAggregate` via the optional `upcasters` field:
 
-```typescript
+```typescript title="bank-account/bank-account.ts"
 const BankAccount = defineAggregate<BankAccountTypes>({
   initialState: { balance: 0, status: "active" },
   decide: {

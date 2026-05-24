@@ -17,7 +17,7 @@ yarn add pg
 
 The package exports TypeORM entity classes decorated with `@Entity`, `@Column`, etc. Register them in your `DataSource` configuration:
 
-```ts
+```ts title="main.ts"
 import {
   NodddeEventEntity,
   NodddeAggregateStateEntity,
@@ -45,7 +45,7 @@ For production, use TypeORM migrations instead of `synchronize: true`.
 
 ## Configuration
 
-```ts
+```ts title="main.ts"
 import { TypeORMAdapter } from "@noddde/typeorm";
 import { everyNEvents } from "@noddde/core";
 import { defineDomain } from "@noddde/core";
@@ -81,7 +81,7 @@ Pass the TypeORM entity class and a `TypeORMStateMapper`. The framework writes t
 
 ### Typed columns (recommended)
 
-```ts
+```ts title="main.ts"
 import type { TypeORMStateMapper } from "@noddde/typeorm";
 import { OrderTypedEntity } from "./entities"; // your own TypeORM entity
 
@@ -112,7 +112,9 @@ const domain = await wireDomain(definition, {
   persistenceAdapter: adapter,
   aggregates: {
     Order: {
-      persistence: adapter.stateStored(OrderTypedEntity, { mapper: orderMapper }),
+      persistence: adapter.stateStored(OrderTypedEntity, {
+        mapper: orderMapper,
+      }),
     },
   },
 });
@@ -120,7 +122,7 @@ const domain = await wireDomain(definition, {
 
 ### Opaque JSON via `jsonStateMapper`
 
-```ts
+```ts title="main.ts"
 import { jsonStateMapper } from "@noddde/typeorm";
 
 adapter.stateStored(OrderEntity, { mapper: jsonStateMapper<OrderEntity>() });

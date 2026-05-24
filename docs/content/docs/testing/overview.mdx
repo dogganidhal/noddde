@@ -21,7 +21,7 @@ yarn add --dev @noddde/testing
 
 Test individual handlers without booting a domain. The harnesses replay events, call handlers, and return structured results.
 
-```ts
+```ts title="__tests__/bank-account.test.ts"
 import { testAggregate } from "@noddde/testing";
 
 const result = await testAggregate(BankAccount)
@@ -53,7 +53,7 @@ Available unit harnesses:
 
 Test multiple components together with zero infrastructure boilerplate. `testDomain` automatically wires in-memory buses, persistence, and installs spies.
 
-```ts
+```ts title="__tests__/domain.test.ts"
 import { testDomain } from "@noddde/testing";
 
 const { domain, spy } = await testDomain({
@@ -95,7 +95,7 @@ For sagas, this pattern is inverted: events come in, commands go out.
 
 All unit harnesses capture errors in the result instead of throwing. This makes testing rejection cases straightforward:
 
-```ts
+```ts title="__tests__/bank-account-errors.test.ts"
 const result = await testAggregate(BankAccount)
   .when({
     name: "AuthorizeTransaction",
@@ -113,7 +113,7 @@ expect(result.events).toEqual([]);
 
 Since all handlers are extracted to standalone functions, you can import and test them directly without any harness:
 
-```ts
+```ts title="__tests__/direct-handler.test.ts"
 // Decide handler — import the extracted function
 import { decideAuthorizeTransaction } from "./deciders/decide-authorize-transaction";
 
@@ -140,7 +140,7 @@ The most common pattern is the **Clock**: inject a `Clock` interface instead of 
 
 For infrastructure with multiple members, create a reusable mock factory:
 
-```ts
+```ts title="__tests__/helpers/mock-infrastructure.ts"
 function createMockBankingInfrastructure() {
   return {
     logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
@@ -163,7 +163,7 @@ When events flow through the `Domain`, they are automatically enriched with an [
 
 Most tests care about _what_ happened (event name + payload), not _when_ or _by whom_. Use `stripMetadata` to remove the metadata envelope:
 
-```ts
+```ts title="__tests__/metadata-stripping.test.ts"
 import { stripMetadata } from "@noddde/testing";
 
 const { spy } = await testDomain({ aggregates: { BankAccount } });
@@ -182,7 +182,7 @@ expect(stripMetadata(spy.publishedEvents)).toContainEqual({
 
 Use `expectValidMetadata` to verify that an event carries a well-formed metadata envelope with all required fields:
 
-```ts
+```ts title="__tests__/metadata-validation.test.ts"
 import { expectValidMetadata } from "@noddde/testing";
 
 // Asserts: eventId is UUID v7, timestamp is valid ISO 8601,
@@ -194,7 +194,7 @@ expectValidMetadata(spy.publishedEvents[0]!);
 
 Two helpers verify that events form a proper tracing chain:
 
-```ts
+```ts title="__tests__/correlation.test.ts"
 import { expectSameCorrelation, expectCausationChain } from "@noddde/testing";
 
 // All events share the same correlationId (same causal chain)
@@ -210,7 +210,7 @@ These are particularly useful when testing [saga workflows](/docs/process-manage
 
 For tests that need exact equality (snapshot tests, deterministic replay), use `createTestMetadataFactory` to produce predictable metadata:
 
-```ts
+```ts title="__tests__/metadata-factory.test.ts"
 import { createTestMetadataFactory } from "@noddde/testing";
 
 const metadataFactory = createTestMetadataFactory({

@@ -25,11 +25,15 @@ Reference](/docs/getting-started/cli#noddde-new-aggregate-name) for details.
 
 </Callout>
 
-## Step 1: Define Events
+<Steps>
+
+<Step>
+
+## Define Events
 
 Events represent facts that have already occurred. Define them as a payload map using `DefineEvents`:
 
-```typescript
+```typescript title="event-model/index.ts"
 import { DefineEvents } from "@noddde/core";
 
 type BankAccountEvent = DefineEvents<{
@@ -63,11 +67,15 @@ Each key becomes the event's `name`, and the value becomes its `payload` type. T
 
 For a deeper look at how `DefineEvents` works under the hood, see [Messages & Type System](/docs/core-concepts/messages-and-types).
 
-## Step 2: Define Commands
+</Step>
+
+<Step>
+
+## Define Commands
 
 Commands represent intent -- a request for something to happen. Define them with `DefineCommands`:
 
-```typescript
+```typescript title="bank-account/commands/index.ts"
 import { DefineCommands } from "@noddde/core";
 
 type BankAccountCommand = DefineCommands<{
@@ -84,11 +92,15 @@ Each key becomes the command's `name`, and the value becomes its `payload` type.
 
 For a deeper look at how `DefineCommands` works under the hood, see [Messages & Type System](/docs/core-concepts/messages-and-types).
 
-## Step 3: Define State
+</Step>
+
+<Step>
+
+## Define State
 
 The state interface describes what the aggregate tracks between commands. Design it as a plain TypeScript interface:
 
-```typescript
+```typescript title="bank-account/state.ts"
 interface BankAccountState {
   balance: number;
   availableBalance: number;
@@ -108,11 +120,15 @@ A few design tips:
 - **Prefer flat structures.** Deeply nested state is harder to update immutably in evolve handlers. Keep it as shallow as your domain allows.
 - **The aggregate ID is NOT part of the state.** It lives on the command as `targetAggregateId` and is managed by the framework. See [Why Is the Aggregate ID Not in State?](/docs/design-decisions/why-id-not-in-state) for the rationale.
 
-## Step 4: Bundle Types
+</Step>
+
+<Step>
+
+## Bundle Types
 
 Bundle the state, events, commands, and infrastructure into a single `AggregateTypes` type. This is the single type parameter that `defineAggregate` uses for full type inference across all boundaries:
 
-```typescript
+```typescript title="bank-account/bank-account.ts"
 import { Infrastructure } from "@noddde/core";
 
 type BankAccountTypes = {
@@ -127,7 +143,11 @@ The `infrastructure` field specifies what services your decide handlers can acce
 
 This bundle replaces what would otherwise be five or more positional generic parameters. For the reasoning behind this approach, see [Why AggregateTypes?](/docs/design-decisions/why-aggregate-types).
 
-## Step 5: Extract Handlers
+</Step>
+
+<Step>
+
+## Extract Handlers
 
 The recommended pattern is to define decide handlers and evolve handlers as standalone functions in separate files, typed with `InferDecideHandler` and `InferEvolveHandler`. This keeps each handler focused, independently testable, and makes the aggregate definition itself a clean table of references.
 
@@ -135,8 +155,7 @@ The recommended pattern is to define decide handlers and evolve handlers as stan
 
 Each decide handler lives in its own file and is typed with `InferDecideHandler<TypesBundle, "CommandName">`:
 
-```typescript
-// deciders/decide-create-bank-account.ts
+```typescript title="bank-account/deciders/decide-create-bank-account.ts"
 import type { InferDecideHandler } from "@noddde/core";
 import type { BankAccountTypes } from "../bank-account";
 
@@ -149,8 +168,7 @@ export const decideCreateBankAccount: InferDecideHandler<
 });
 ```
 
-```typescript
-// deciders/decide-authorize-transaction.ts
+```typescript title="bank-account/deciders/decide-authorize-transaction.ts"
 import type { InferDecideHandler } from "@noddde/core";
 import type { BankAccountTypes } from "../bank-account";
 
@@ -188,8 +206,7 @@ export const decideAuthorizeTransaction: InferDecideHandler<
 
 Each evolve handler lives in its own file and is typed with `InferEvolveHandler<TypesBundle, "EventName">`:
 
-```typescript
-// evolvers/evolve-bank-account-created.ts
+```typescript title="bank-account/evolvers/evolve-bank-account-created.ts"
 import type { InferEvolveHandler } from "@noddde/core";
 import type { BankAccountTypes } from "../bank-account";
 
@@ -203,8 +220,7 @@ export const evolveBankAccountCreated: InferEvolveHandler<
 });
 ```
 
-```typescript
-// evolvers/evolve-transaction-authorized.ts
+```typescript title="bank-account/evolvers/evolve-transaction-authorized.ts"
 import type { InferEvolveHandler } from "@noddde/core";
 import type { BankAccountTypes } from "../bank-account";
 
@@ -221,14 +237,17 @@ export const evolveTransactionAuthorized: InferEvolveHandler<
 });
 ```
 
-## Step 6: defineAggregate
+</Step>
+
+<Step>
+
+## defineAggregate
 
 `defineAggregate` is an identity function -- it takes your aggregate object and returns it unchanged. Its only purpose is to provide type inference so TypeScript can verify that your decide handlers, evolve handlers, and initial state are all consistent.
 
 With extracted handlers, the aggregate definition becomes a concise wiring file that imports and maps each handler:
 
-```typescript
-// bank-account.ts
+```typescript title="bank-account/bank-account.ts"
 import { defineAggregate } from "@noddde/core";
 import { decideCreateBankAccount } from "./deciders/decide-create-bank-account";
 import { decideAuthorizeTransaction } from "./deciders/decide-authorize-transaction";
@@ -276,14 +295,17 @@ Because `defineAggregate` is an identity function, it adds **zero runtime overhe
 
 Extracting handlers is the recommended pattern in noddde for testability, readability, type safety, and maintainability. See [Why Extract Handlers?](/docs/design-decisions/why-extracted-handlers) for the full rationale.
 
+</Step>
+
+</Steps>
+
 ## Using Infrastructure
 
 When decide handlers need external services -- a clock, a logger, a fraud-check client -- define a custom infrastructure type and include it in the types bundle.
 
 Here is the auction domain, which uses an injected `clock` to validate bid timing. The types are defined first, then the `PlaceBid` handler is extracted to its own file with `InferDecideHandler`:
 
-```typescript
-// types.ts
+```typescript title="auction/auction.ts"
 import { Infrastructure, DefineEvents, DefineCommands } from "@noddde/core";
 
 interface AuctionInfrastructure extends Infrastructure {
@@ -321,8 +343,7 @@ export type AuctionTypes = {
 
 The `PlaceBid` handler destructures `{ clock }` from the infrastructure parameter. `InferDecideHandler` ensures TypeScript knows exactly which services are available:
 
-```typescript
-// deciders/decide-place-bid.ts
+```typescript title="auction/deciders/decide-place-bid.ts"
 import type { InferDecideHandler } from "@noddde/core";
 import type { AuctionTypes } from "../auction";
 
@@ -365,8 +386,7 @@ export const decidePlaceBid: InferDecideHandler<AuctionTypes, "PlaceBid"> = (
 
 The aggregate definition then wires everything together:
 
-```typescript
-// auction.ts
+```typescript title="auction/auction.ts"
 import { defineAggregate } from "@noddde/core";
 import { decideCreateAuction } from "./deciders/decide-create-auction";
 import { decidePlaceBid } from "./deciders/decide-place-bid";

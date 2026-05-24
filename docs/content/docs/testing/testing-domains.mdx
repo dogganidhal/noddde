@@ -7,7 +7,7 @@ The `testDomain` harness from `@noddde/testing` creates a fully wired domain wit
 
 ## testDomain
 
-```ts
+```ts title="__tests__/domain.test.ts"
 import { testDomain } from "@noddde/testing";
 
 const { domain, spy } = await testDomain({
@@ -38,7 +38,7 @@ expect(view?.balance).toBe(-100);
 
 ### Configuration
 
-```ts
+```ts title="test-domain-config.ts"
 type TestDomainConfig<TInfrastructure extends Infrastructure = Infrastructure> =
   {
     /** Aggregate definitions keyed by name. */
@@ -66,7 +66,7 @@ Only specify what you are testing. Everything else is wired automatically:
 
 ### Result Shape
 
-```ts
+```ts title="test-domain-result.ts"
 type TestDomainResult = {
   domain: Domain; // The fully initialized domain
   spy: DomainSpy; // Spy accessors
@@ -82,7 +82,7 @@ type DomainSpy = {
 
 `spy.publishedEvents` records every event published on the event bus, in order. This captures events from aggregate decide handlers after persistence:
 
-```ts
+```ts title="__tests__/published-events.test.ts"
 const { domain, spy } = await testDomain({
   aggregates: { BankAccount },
 });
@@ -108,7 +108,7 @@ expect(spy.publishedEvents).toEqual([
 
 `spy.dispatchedCommands` records commands dispatched through the command bus. This is most useful for verifying saga behavior -- sagas dispatch commands as reactions to events:
 
-```ts
+```ts title="__tests__/dispatched-commands.test.ts"
 const { domain, spy } = await testDomain({
   aggregates: {},
   sagas: { OrderFulfillment },
@@ -133,7 +133,7 @@ Commands dispatched by sagas that have no registered handler are captured by the
 
 After dispatching commands, check the projection view directly:
 
-```ts
+```ts title="__tests__/projection-views.test.ts"
 const { domain } = await testDomain({
   aggregates: { BankAccount },
   projections: { BankAccountView },
@@ -158,7 +158,7 @@ expect(view?.balance).toBe(1000);
 
 Pass domain-specific dependencies that handlers need:
 
-```ts
+```ts title="__tests__/custom-infrastructure.test.ts"
 const mockLogger = { info: vi.fn(), error: vi.fn() };
 
 const { domain } = await testDomain<BankingInfrastructure>({
@@ -181,7 +181,7 @@ expect(mockLogger.info).toHaveBeenCalled();
 
 Testing the complete order fulfillment flow -- aggregate, projection, and saga together:
 
-```ts
+```ts title="__tests__/order-fulfillment-slice.test.ts"
 const { domain, spy } = await testDomain({
   aggregates: { Order, Payment },
   projections: { OrderSummary },
@@ -218,10 +218,10 @@ expect(summary?.status).toBe("confirmed");
 
 ## When to Use testDomain vs. defineDomain + wireDomain
 
-| Scenario                             | Use                                                 |
-| ------------------------------------ | --------------------------------------------------- |
-| Testing handler logic in isolation   | `testAggregate`, `testProjection`, `testSaga`       |
-| Testing multiple components together | `testDomain`                                        |
+| Scenario                             | Use                                                                     |
+| ------------------------------------ | ----------------------------------------------------------------------- |
+| Testing handler logic in isolation   | `testAggregate`, `testProjection`, `testSaga`                           |
+| Testing multiple components together | `testDomain`                                                            |
 | Custom persistence strategies        | `defineDomain` from `@noddde/core` + `wireDomain` from `@noddde/engine` |
 | Custom bus implementations           | `defineDomain` from `@noddde/core` + `wireDomain` from `@noddde/engine` |
 | Production-like environment tests    | `defineDomain` from `@noddde/core` + `wireDomain` from `@noddde/engine` |

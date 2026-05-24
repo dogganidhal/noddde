@@ -21,8 +21,7 @@ The aggregate uses extracted handlers — each decide handler and evolve handler
 
 ### Decide handlers (extracted)
 
-```ts
-// deciders/decide-create-flash-sale.ts
+```ts title="flash-sale-item/deciders/decide-create-flash-sale.ts"
 import type { InferDecideHandler } from "@noddde/core";
 import type { FlashSaleItemTypes } from "../flash-sale-item";
 
@@ -38,8 +37,7 @@ export const decideCreateFlashSale: InferDecideHandler<
 });
 ```
 
-```ts
-// deciders/decide-purchase-item.ts
+```ts title="flash-sale-item/deciders/decide-purchase-item.ts"
 import type { InferDecideHandler } from "@noddde/core";
 import type { FlashSaleItemTypes } from "../flash-sale-item";
 
@@ -67,8 +65,7 @@ The `PurchaseItem` handler either produces `ItemPurchased` (decrements stock) or
 
 ### Evolve handlers (extracted)
 
-```ts
-// evolvers/evolve-flash-sale-created.ts
+```ts title="flash-sale-item/evolvers/evolve-flash-sale-created.ts"
 import type { InferEvolveHandler } from "@noddde/core";
 import type { FlashSaleItemTypes } from "../flash-sale-item";
 
@@ -82,8 +79,7 @@ export const evolveFlashSaleCreated: InferEvolveHandler<
 });
 ```
 
-```ts
-// evolvers/evolve-item-purchased.ts
+```ts title="flash-sale-item/evolvers/evolve-item-purchased.ts"
 import type { InferEvolveHandler } from "@noddde/core";
 import type { FlashSaleItemTypes } from "../flash-sale-item";
 
@@ -101,8 +97,7 @@ The `PurchaseRejected` evolve handler follows the same pattern — it returns `s
 
 ### Aggregate definition (wiring)
 
-```ts
-// flash-sale-item.ts
+```ts title="flash-sale-item/flash-sale-item.ts"
 import { defineAggregate } from "@noddde/core";
 import type { AggregateTypes, Infrastructure } from "@noddde/core";
 
@@ -129,7 +124,7 @@ export const FlashSaleItem = defineAggregate<FlashSaleItemTypes>({
 
 ## Domain Configuration
 
-```ts
+```ts title="main.ts"
 import { defineDomain } from "@noddde/core";
 import {
   wireDomain,

@@ -7,7 +7,7 @@ The in-memory event bus is the default implementation shipped with `@noddde/engi
 
 The default event bus, included in `@noddde/engine`. No external dependencies required.
 
-```ts
+```ts title="infrastructure/event-bus.ts"
 import { EventEmitterEventBus } from "@noddde/engine";
 
 const eventBus = new EventEmitterEventBus();
@@ -17,7 +17,7 @@ This is the right choice for development, testing, and single-process deployment
 
 ## Configuration
 
-```ts
+```ts title="infrastructure/event-bus.ts"
 import { EventEmitterEventBus } from "@noddde/engine";
 
 const eventBus = new EventEmitterEventBus({

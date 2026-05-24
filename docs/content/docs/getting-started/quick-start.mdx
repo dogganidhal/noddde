@@ -205,11 +205,15 @@ This example uses optimistic concurrency with no retries. For high-contention ag
 
 Now that you have seen the whole file, here is each part on its own.
 
-### 1. Events — `DefineEvents`
+<Steps>
+
+<Step>
+
+### Events — `DefineEvents`
 
 Events are immutable facts. `DefineEvents` turns a name → payload map into a discriminated union:
 
-```ts
+```ts title="account.ts"
 type BankAccountEvent = DefineEvents<{
   BankAccountCreated: { id: string };
   TransactionAuthorized: {
@@ -223,22 +227,30 @@ type BankAccountEvent = DefineEvents<{
 
 Each key becomes the event's `name` discriminant; the value becomes its `payload`.
 
-### 2. Commands — `DefineCommands`
+</Step>
+
+<Step>
+
+### Commands — `DefineCommands`
 
 Commands express intent. `void` means no payload — just a name and a `targetAggregateId`:
 
-```ts
+```ts title="account.ts"
 type BankAccountCommand = DefineCommands<{
   CreateBankAccount: void;
   AuthorizeTransaction: { amount: number; merchant: string };
 }>;
 ```
 
-### 3. State
+</Step>
+
+<Step>
+
+### State
 
 State holds everything `decide` reads to make decisions. The aggregate ID is **not** part of state — it lives on the command as `targetAggregateId`. See [Why ID Not in State](/docs/design-decisions/why-id-not-in-state).
 
-```ts
+```ts title="account.ts"
 interface BankAccountState {
   balance: number;
   availableBalance: number;
@@ -248,11 +260,15 @@ interface BankAccountState {
 }
 ```
 
-### 4. The `Types` bundle
+</Step>
+
+<Step>
+
+### The `Types` bundle
 
 One type that ties state, events, commands, and any custom infrastructure together. This single type replaces five positional generic parameters elsewhere in the framework. See [Why AggregateTypes Bundle](/docs/design-decisions/why-aggregate-types).
 
-```ts
+```ts title="account.ts"
 type BankAccountTypes = {
   state: BankAccountState;
   events: BankAccountEvent;
@@ -261,11 +277,15 @@ type BankAccountTypes = {
 };
 ```
 
-### 5. The aggregate — `defineAggregate`
+</Step>
+
+<Step>
+
+### The aggregate — `defineAggregate`
 
 Three things: `initialState`, a `decide` map (command name → handler returning events), and an `evolve` map (event name → pure state transition).
 
-```ts
+```ts title="account.ts"
 const BankAccount = defineAggregate<BankAccountTypes>({
   initialState: {
     /* ... */
@@ -281,11 +301,15 @@ const BankAccount = defineAggregate<BankAccountTypes>({
 
 `decide` is where business rules live — it can call infrastructure and return one or many events. `evolve` is pure: same event + state always produces the same next state. The two are different because event sourcing replays `evolve` against historical events to rebuild state on load.
 
-### 6. The domain — `defineDomain` + `wireDomain`
+</Step>
+
+<Step>
+
+### The domain — `defineDomain` + `wireDomain`
 
 `defineDomain` captures the static structure (which aggregates, projections, sagas exist). `wireDomain` connects it to infrastructure. With no second argument, you get in-memory defaults for everything:
 
-```ts
+```ts title="account.ts"
 const banking = defineDomain({
   writeModel: { aggregates: { BankAccount } },
   readModel: { projections: {} },
@@ -296,17 +320,25 @@ const domain = await wireDomain(banking);
 
 Swap to a real database with [persistence adapters](/docs/running/persistence-adapters).
 
-### 7. Dispatching commands
+</Step>
+
+<Step>
+
+### Dispatching commands
 
 `dispatchCommand` is fully typed against the domain — `name`, `targetAggregateId`, and `payload` are inferred per command:
 
-```ts
+```ts title="account.ts"
 await domain.dispatchCommand({
   name: "AuthorizeTransaction",
   targetAggregateId: accountId,
   payload: { amount: 100, merchant: "Amazon" },
 });
 ```
+
+</Step>
+
+</Steps>
 
 ## Next steps
 

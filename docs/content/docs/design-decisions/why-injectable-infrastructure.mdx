@@ -7,7 +7,7 @@ description: Why noddde uses function parameter injection instead of dependency 
 
 noddde injects infrastructure into handlers as function parameters. No DI container, no decorators, no service locator, no global state.
 
-```ts
+```ts title="auction/auction.ts"
 decide: {
   PlaceBid: (command, state, { clock }) => {
     const now = clock.now();
@@ -20,7 +20,7 @@ decide: {
 
 Domain logic that directly imports its dependencies is hard to test:
 
-```ts
+```ts title="bank-account-direct-imports.ts"
 // Problematic: direct import
 import { db } from "./database";
 import { logger } from "./logger";
@@ -50,7 +50,7 @@ To test this handler, you need to:
 
 Function parameter injection is the simplest possible dependency injection:
 
-```ts
+```ts title="auction/auction.ts"
 // Infrastructure is declared as a type
 interface AuctionInfrastructure {
   clock: Clock;
@@ -75,7 +75,7 @@ Benefits:
 
 ## Testing Comparison
 
-```ts
+```ts title="__tests__/authorize-transaction.test.ts"
 // With module mocking (complex)
 jest.mock("./database", () => ({ getRate: () => 1.5 }));
 jest.mock("./logger", () => ({ info: jest.fn() }));
@@ -95,7 +95,7 @@ const result = BankAccount.commands.AuthorizeTransaction(command, state, {
 
 Infrastructure is created once in the domain configuration and injected everywhere:
 
-```ts
+```ts title="domain.ts"
 infrastructure: () => ({
   clock: new SystemClock(),        // Production: real clock
   // OR
@@ -115,7 +115,7 @@ These trade-offs are intentional. Explicit wiring is easier to understand, debug
 
 ## Example
 
-```ts
+```ts title="infrastructure/index.ts"
 // Define what you need
 interface BankingInfrastructure {
   logger: Logger;

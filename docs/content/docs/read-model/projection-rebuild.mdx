@@ -21,7 +21,7 @@ Do **not** rebuild for a hot-path issue that needs a live fix — rebuild is an 
 
 ## The API
 
-```ts
+```ts title="packages/engine/src/domain.ts"
 class Domain<...> {
   rebuildProjection<TName extends keyof TProjections & string>(
     name: TName,
@@ -53,7 +53,7 @@ console.log(result);
 
 ### ProjectionRebuildOptions
 
-```ts
+```ts title="packages/engine/src/projection-rebuild.ts"
 interface ProjectionRebuildOptions {
   logger?: Logger;
   progressInterval?: number;
@@ -78,7 +78,7 @@ await domain.rebuildProjection("OrderSummary", {
 
 ### ProjectionRebuildResult
 
-```ts
+```ts title="packages/engine/src/projection-rebuild.ts"
 interface ProjectionRebuildResult {
   projectionName: string;
   eventsRead: number; // total events the EventReader yielded
@@ -185,7 +185,7 @@ Rebuild reads from an `EventReader` — a read-only, append-order capability for
 2. **Structural fallback** on the resolved event-sourced persistence — any persistence object with a callable `read()` method is treated as an `EventReader`. The in-memory `InMemoryEventSourcedAggregatePersistence` ships this out of the box, so rebuild works in development and tests with no extra wiring.
 3. If neither is found, `EventReaderUnavailableError`.
 
-```ts
+```ts title="packages/core/src/persistence/event-reader.ts"
 interface EventReader {
   read(options?: EventReadOptions): AsyncIterable<Event>;
 }
@@ -261,7 +261,7 @@ To make your adapter participate in rebuild, implement two capabilities:
 
 Add a `truncate()` method to your `ViewStore` implementation:
 
-```ts
+```ts title="view-store-truncate.ts"
 async truncate(): Promise<void> {
   // Clear every view managed by this store. Must be atomic enough that
   // the store reaches an empty state — typically a single DELETE FROM

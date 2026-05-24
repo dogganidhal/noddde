@@ -7,8 +7,7 @@ description: Why noddde recommends extracting decide handlers, evolve handlers, 
 
 noddde recommends extracting all handlers -- decide handlers, evolve handlers, saga on-entries, projection event handlers, and query handlers -- into standalone functions in separate files, typed with the `Infer*Handler` utilities.
 
-```ts
-// deciders/decide-place-bid.ts
+```ts title="auction/deciders/decide-place-bid.ts"
 import type { InferDecideHandler } from "@noddde/core";
 import type { AuctionTypes } from "../auction";
 
@@ -23,8 +22,7 @@ export const decidePlaceBid: InferDecideHandler<AuctionTypes, "PlaceBid"> = (
 
 The aggregate (or saga, or projection) definition becomes a clean wiring file:
 
-```ts
-// auction.ts
+```ts title="auction/auction.ts"
 export const Auction = defineAggregate<AuctionTypes>({
   initialState,
   decide: {
@@ -57,7 +55,7 @@ Inline handlers concentrate all business logic in a single file. As aggregates g
 
 Each handler is a plain function that can be tested in isolation. Pass in a command, a state snapshot, and (for decide handlers) an infrastructure stub -- assert on the returned events or new state. No aggregate wiring needed:
 
-```ts
+```ts title="__tests__/decide-place-bid.test.ts"
 import { decidePlaceBid } from "./deciders/decide-place-bid";
 
 it("should reject bids below the starting price", () => {
@@ -102,7 +100,7 @@ Changes to one handler do not require reading through a large file. Each handler
 
 For aggregates with 1-2 trivial handlers (e.g., a no-op evolve handler or a simple pass-through command), inline is acceptable:
 
-```ts
+```ts title="counter.ts"
 export const Counter = defineAggregate<CounterTypes>({
   initialState: { count: 0 },
   decide: {

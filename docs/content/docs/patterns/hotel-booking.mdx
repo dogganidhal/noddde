@@ -53,8 +53,7 @@ The `Booking` aggregate is the most instructive of the three. Its status field i
 
 #### Decide handlers (extracted)
 
-```ts
-// deciders/decide-request-payment.ts
+```ts title="booking/deciders/decide-request-payment.ts"
 import type { InferDecideHandler } from "@noddde/core";
 import type { BookingTypes } from "../booking";
 
@@ -78,8 +77,7 @@ export const decideRequestPayment: InferDecideHandler<
 };
 ```
 
-```ts
-// deciders/decide-complete-payment.ts
+```ts title="booking/deciders/decide-complete-payment.ts"
 import type { InferDecideHandler } from "@noddde/core";
 import type { BookingTypes } from "../booking";
 
@@ -108,8 +106,7 @@ The remaining decide handlers (`FailPayment`, `RefundPayment`, `CreateBooking`, 
 
 #### Evolve handlers (extracted)
 
-```ts
-// evolvers/evolve-payment-requested.ts
+```ts title="booking/evolvers/evolve-payment-requested.ts"
 import type { InferEvolveHandler } from "@noddde/core";
 import type { BookingTypes } from "../booking";
 
@@ -123,8 +120,7 @@ export const evolvePaymentRequested: InferEvolveHandler<
 });
 ```
 
-```ts
-// evolvers/evolve-payment-failed.ts
+```ts title="booking/evolvers/evolve-payment-failed.ts"
 import type { InferEvolveHandler } from "@noddde/core";
 import type { BookingTypes } from "../booking";
 
@@ -144,8 +140,7 @@ Notice that `PaymentFailed` resets status back to `"pending"` rather than `"canc
 
 The aggregate definition imports all handlers and wires them. This file contains no business logic — only composition.
 
-```ts
-// booking.ts
+```ts title="booking/booking.ts"
 import { defineAggregate } from "@noddde/core";
 
 type BookingTypes = {
@@ -198,8 +193,7 @@ This saga orchestrates the top-level booking flow. It starts on `BookingCreated`
 
 #### Transition handlers (extracted)
 
-```ts
-// on-entries/on-booking-created.ts
+```ts title="booking-fulfillment/on-entries/on-booking-created.ts"
 import { randomUUID } from "crypto";
 import type { BookingFulfillmentState } from "../state";
 
@@ -236,8 +230,7 @@ export const onBookingCreated = (event: {
 };
 ```
 
-```ts
-// on-entries/on-payment-completed.ts
+```ts title="booking-fulfillment/on-entries/on-payment-completed.ts"
 import type { BookingFulfillmentState } from "../state";
 
 export const onPaymentCompleted = async (
@@ -286,8 +279,7 @@ export const onPaymentCompleted = async (
 };
 ```
 
-```ts
-// on-entries/on-booking-cancelled.ts
+```ts title="booking-fulfillment/on-entries/on-booking-cancelled.ts"
 import type { BookingFulfillmentState } from "../state";
 
 export const onBookingCancelled = (
@@ -312,8 +304,7 @@ The `PaymentFailed`, `BookingConfirmed`, `BookingModified`, `PaymentRequested`, 
 
 #### Saga definition (wiring)
 
-```ts
-// saga.ts
+```ts title="booking-fulfillment/saga.ts"
 import { defineSaga } from "@noddde/core";
 import {
   onBookingCancelled,
@@ -361,8 +352,7 @@ This saga bridges the `RequestPayment` command (dispatched by `BookingFulfillmen
 
 #### Transition handlers (extracted)
 
-```ts
-// on-entries/on-payment-requested.ts
+```ts title="payment-processing/on-entries/on-payment-requested.ts"
 import type { PaymentProcessingState } from "../state";
 
 export const onPaymentRequested = async (
@@ -436,8 +426,7 @@ The `PaymentCompleted` and `PaymentFailed` handlers observe terminal states for 
 
 #### Saga definition (wiring)
 
-```ts
-// saga.ts
+```ts title="payment-processing/saga.ts"
 import { defineSaga } from "@noddde/core";
 import {
   onPaymentRequested,
@@ -471,8 +460,7 @@ The third saga is simpler: it starts on `GuestCheckedIn`, sends a welcome SMS vi
 
 The `RoomAvailabilityViewStore` extends the built-in `ViewStore` interface with a domain-specific `findAvailable` method. This pushes filtering to the database rather than loading all views into memory.
 
-```ts
-// domain/read-model/queries.ts
+```ts title="read-model/queries.ts"
 export interface RoomAvailabilityViewStore
   extends ViewStore<RoomAvailabilityView> {
   /** Finds available rooms, optionally filtered by room type. */
@@ -488,8 +476,7 @@ Projections follow the same extracted pattern. Each event handler is in its own 
 
 #### Event handlers (extracted)
 
-```ts
-// on-entries/on-room-created.ts
+```ts title="room-availability/on-entries/on-room-created.ts"
 import type { InferProjectionEventHandler } from "@noddde/core";
 import type { RoomAvailabilityProjectionDef } from "../room-availability";
 
@@ -510,8 +497,7 @@ export const onRoomCreated: InferProjectionEventHandler<
 };
 ```
 
-```ts
-// on-entries/on-room-reserved.ts
+```ts title="room-availability/on-entries/on-room-reserved.ts"
 import type { InferProjectionEventHandler } from "@noddde/core";
 import type { RoomAvailabilityProjectionDef } from "../room-availability";
 
@@ -532,8 +518,7 @@ The `RoomMadeAvailable`, `GuestCheckedIn`, `GuestCheckedOut`, and `RoomUnderMain
 
 #### Projection definition (wiring)
 
-```ts
-// room-availability.ts
+```ts title="room-availability/room-availability.ts"
 import { defineProjection } from "@noddde/core";
 import {
   onRoomCreated,
@@ -590,8 +575,7 @@ The sample shows both consistency modes side by side:
 
 `SearchAvailableRoomsHandler` is registered as a standalone query handler rather than a projection-backed query. It reads directly from `roomAvailabilityViewStore` via infrastructure injection:
 
-```ts
-// domain/read-model/query-handlers.ts
+```ts title="read-model/query-handlers.ts"
 export const SearchAvailableRoomsHandler: QueryHandler<
   HotelInfrastructure,
   Extract<SearchQuery, { name: "SearchAvailableRooms" }>
@@ -607,8 +591,7 @@ See [Queries](/docs/read-model/queries) for the full standalone query handler pa
 
 The domain configuration uses `defineDomain` to capture the pure domain structure, then `wireDomain` to connect infrastructure.
 
-```ts
-// src/main.ts
+```ts title="main.ts"
 import { DrizzleAdapter } from "@noddde/drizzle";
 import { defineDomain } from "@noddde/core";
 import {
@@ -695,8 +678,7 @@ The event bus uses `@noddde/rabbitmq` (`RabbitMqEventBus`) backed by a RabbitMQ 
 
 The group booking endpoint demonstrates `domain.withUnitOfWork()`. All commands dispatched inside the callback share a single database transaction — either all commit or all roll back.
 
-```ts
-// infrastructure/http/routes/bookings.ts
+```ts title="infrastructure/http/routes/bookings.ts"
 fastify.post("/bookings/group", async (request, reply) => {
   const { guestId, rooms } = request.body;
   const bookingIds: string[] = [];
