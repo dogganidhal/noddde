@@ -7,7 +7,7 @@ description: How noddde supports string, number, and bigint identifiers througho
 
 noddde defines a single type alias that represents the set of serializable identifier types supported by the framework:
 
-```typescript
+```typescript title="packages/core/src/cqrs/id.ts"
 type ID = string | number | bigint;
 ```
 
@@ -31,7 +31,7 @@ Rather than forcing all domains to use strings (and pay the conversion cost), no
 
 ### Commands
 
-```typescript
+```typescript title="packages/core/src/cqrs/command.ts"
 interface AggregateCommand<TID extends ID = string> extends Command {
   targetAggregateId: TID;
 }
@@ -48,7 +48,7 @@ The default is `string`, so existing code that omits the type parameter is unaff
 
 ### Event Metadata
 
-```typescript
+```typescript title="packages/core/src/edd/event-metadata.ts"
 interface EventMetadata {
   eventId: string;
   timestamp: string;
@@ -65,7 +65,7 @@ interface EventMetadata {
 
 ### Persistence Interfaces
 
-```typescript
+```typescript title="packages/core/src/persistence/event-sourced-aggregate-persistence.ts"
 interface EventSourcedAggregatePersistence {
   save(
     aggregateName: string,
@@ -81,7 +81,7 @@ All persistence interfaces accept `ID` for aggregate and saga identifiers. Custo
 
 ### Sagas
 
-```typescript
+```typescript title="packages/core/src/ddd/saga.ts"
 interface Saga<T extends SagaTypes, TSagaId extends ID = string> {
   /* ... */
 }
@@ -98,7 +98,7 @@ function defineSaga<T extends SagaTypes, TSagaId extends ID = string>(
 
 Branded types extending `string`, `number`, or `bigint` satisfy `ID`:
 
-```typescript
+```typescript title="branded-ids.ts"
 type UserId = string & { __brand: "UserId" };
 type AccountId = number & { __brand: "AccountId" };
 
@@ -113,7 +113,7 @@ This means you can use branded types for domain-specific identifier safety while
 
 All generic `ID` parameters default to `string`:
 
-```typescript
+```typescript title="commands/index.ts"
 // These are equivalent:
 type MyCommands = DefineCommands<{ Create: void }>;
 type MyCommands = DefineCommands<{ Create: void }, string>;
@@ -121,7 +121,7 @@ type MyCommands = DefineCommands<{ Create: void }, string>;
 
 Existing code that uses string identifiers requires no changes. To use a different identifier type, provide the type parameter explicitly:
 
-```typescript
+```typescript title="commands/index.ts"
 type MyCommands = DefineCommands<{ Create: void }, number>;
 // targetAggregateId is now `number`
 ```

@@ -56,7 +56,7 @@ Use a saga when a business process:
 
 Like aggregates and projections, a saga starts with a **types bundle** that declares its type universe:
 
-```ts
+```ts title="saga.ts"
 import { SagaTypes } from "@noddde/core";
 
 type OrderFulfillmentSagaDef = {
@@ -80,7 +80,7 @@ Note that `events` and `commands` can span multiple aggregates -- this is the wh
 
 The saga state tracks where the workflow currently stands. Design it around the workflow steps, not domain state:
 
-```ts
+```ts title="state.ts"
 type FulfillmentStatus =
   | "awaiting_payment"
   | "payment_failed"
@@ -107,7 +107,7 @@ The `initialState` should use null/empty zero-values, just like aggregate state.
 
 Every saga event handler returns a `SagaReaction` -- the new state plus commands to dispatch:
 
-```ts
+```ts title="packages/core/src/ddd/saga.ts"
 type SagaReaction<TState, TCommands extends Command> = {
   state: TState;
   commands?: TCommands | TCommands[];
@@ -118,7 +118,7 @@ This is the key design: handlers **return** commands declaratively rather than d
 
 ### Return patterns
 
-```ts
+```ts title="on-entries/return-patterns.ts"
 // Single command
 return {
   state: { ...state, status: "awaiting_payment" },
@@ -290,7 +290,7 @@ The **`on` map** solves this: each entry bundles an `id` function that extracts 
 
 The `on` field is a map keyed by event name. Each entry has an `id` function that receives the narrowed event type and returns the saga instance ID, and a `handle` function that receives the event, current state, and infrastructure. Whether the entry is inline or extracted, the shape is the same:
 
-```ts
+```ts title="saga.ts"
 on: {
   // Extracted entries -- each typed with InferSagaOnEntry in its own file
   OrderPlaced: onOrderPlaced,
@@ -315,7 +315,7 @@ This is exactly why `id` functions are per-event rather than a single shared ext
 
 The `startedBy` field declares which events can create a new saga instance:
 
-```ts
+```ts title="saga.ts"
 startedBy: ["OrderPlaced"],
 ```
 
@@ -334,7 +334,7 @@ The `startedBy` type is a non-empty tuple `[T, ...T[]]`, enforcing at least one 
 
 A saga may be started by multiple events:
 
-```ts
+```ts title="saga.ts"
 startedBy: ["OrderPlaced", "ImportedOrderReceived"],
 ```
 
@@ -342,7 +342,7 @@ startedBy: ["OrderPlaced", "ImportedOrderReceived"],
 
 By default, saga IDs are `string`. You can use a custom type via the second generic parameter:
 
-```ts
+```ts title="saga.ts"
 // UUID branded type
 type OrderSagaId = string & { __brand: "OrderSagaId" };
 
@@ -388,12 +388,9 @@ The full saga runtime lifecycle proceeds as follows:
 
 Sagas are registered in the `processModel` section of `defineDomain` -- a dedicated top-level key separate from `writeModel` and `readModel`:
 
-```ts
+```ts title="main.ts"
 import { defineDomain } from "@noddde/core";
-import {
-  wireDomain,
-  InMemorySagaPersistence,
-} from "@noddde/engine";
+import { wireDomain, InMemorySagaPersistence } from "@noddde/engine";
 
 const ecommerceDomain = defineDomain({
   writeModel: {
@@ -431,7 +428,7 @@ The `processModel` section is separate because sagas are neither pure write-mode
 
 Like aggregates and projections, sagas have `Infer*` helpers. The most commonly used is `InferSagaOnEntry`, which types an extracted on-entry in its own file:
 
-```ts
+```ts title="usage.ts"
 import type { InferSagaOnEntry } from "@noddde/core";
 
 // Types the full { id, handle } object for a specific event
@@ -440,7 +437,7 @@ type Entry = InferSagaOnEntry<OrderFulfillmentSagaDef, "OrderPlaced">;
 
 Definition-level helpers extract types from the built saga:
 
-```ts
+```ts title="usage.ts"
 import {
   InferSagaState,
   InferSagaEvents,

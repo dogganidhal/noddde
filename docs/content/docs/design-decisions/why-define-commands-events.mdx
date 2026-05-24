@@ -11,7 +11,7 @@ noddde provides `DefineCommands` and `DefineEvents` utility types that build dis
 
 The traditional approach to typed commands/events requires three things for each message:
 
-```ts
+```ts title="event-model-traditional.ts"
 // Step 1: Enum for names
 enum BankAccountEvents {
   BankAccountCreated = "BankAccountCreated",
@@ -51,7 +51,7 @@ This is:
 
 `DefineEvents` collapses all three declarations into one:
 
-```ts
+```ts title="event-model/index.ts"
 type BankAccountEvent = DefineEvents<{
   BankAccountCreated: { id: string };
   TransactionAuthorized: { id: string; amount: number; merchant: string };
@@ -67,7 +67,7 @@ This single declaration:
 
 `DefineCommands` works the same way, with the addition of `targetAggregateId`:
 
-```ts
+```ts title="bank-account/commands/index.ts"
 type BankAccountCommand = DefineCommands<{
   CreateBankAccount: void; // void = no payload
   AuthorizeTransaction: { amount: number; merchant: string };
@@ -78,7 +78,7 @@ type BankAccountCommand = DefineCommands<{
 
 The mapped type transformation step by step:
 
-```ts
+```ts title="define-events-expansion.ts"
 // Input: payload map
 { BankAccountCreated: { id: string }; TransactionAuthorized: { ... }; }
 
@@ -95,7 +95,7 @@ The mapped type transformation step by step:
 
 The result is a proper discriminated union where `name` is the discriminant. TypeScript narrows the type in `switch` statements:
 
-```ts
+```ts title="narrowing-example.ts"
 switch (event.name) {
   case "BankAccountCreated":
     // TypeScript knows event.payload is { id: string }
@@ -114,7 +114,7 @@ switch (event.name) {
 
 ## Example: Before and After
 
-```ts
+```ts title="before-and-after.ts"
 // Before: ~30 lines, 3 declarations, name appears 3 times
 enum Events {
   Created = "Created",

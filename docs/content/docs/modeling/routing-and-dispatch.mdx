@@ -9,7 +9,7 @@ When you call `domain.dispatchCommand()`, the framework executes a deterministic
 
 The entry point for all command processing is `domain.dispatchCommand()`. You pass a command object with a `name`, a `targetAggregateId`, and optionally a `payload`:
 
-```typescript
+```typescript title="main.ts"
 import { defineDomain } from "@noddde/core";
 import { wireDomain } from "@noddde/engine";
 
@@ -76,11 +76,19 @@ Publish
         --> saga handlers react and may dispatch further commands
 ```
 
-### Step 1: Command Received
+<Steps>
+
+<Step>
+
+### Command Received
 
 `domain.dispatchCommand(command)` receives the command object. The `name` field identifies which aggregate type should process it. The `targetAggregateId` field identifies which instance of that aggregate.
 
-### Step 2: Route to Aggregate
+</Step>
+
+<Step>
+
+### Route to Aggregate
 
 The framework scans the `commands` map of each aggregate in the `writeModel.aggregates` configuration to find one with a handler matching the command's `name`.
 
@@ -89,7 +97,11 @@ The framework scans the `commands` map of each aggregate in the `writeModel.aggr
 
 The `targetAggregateId` tells the framework which instance to load. Two commands with the same `name` but different `targetAggregateId` values operate on completely independent instances with separate event streams and separate state.
 
-### Step 3: Load Current State
+</Step>
+
+<Step>
+
+### Load Current State
 
 For event-sourced persistence, all past events for this aggregate instance are loaded and replayed through the `evolve` handlers to rebuild current state:
 
@@ -103,37 +115,57 @@ For state-stored persistence, the latest state snapshot is loaded directly.
 
 If no prior state exists (the aggregate instance is new), the `initialState` from the aggregate definition is used.
 
-### Step 4: Execute Decide Handler
+</Step>
+
+<Step>
+
+### Execute Decide Handler
 
 The matching handler is called with three arguments:
 
-```typescript
+```typescript title="dispatch-handler-call.ts"
 handler(command, currentState, infrastructure);
 ```
 
 The handler inspects the command and the current state, enforces business invariants, and returns one or more events representing what happened. See [Decide Handlers](/docs/modeling/command-handlers) for patterns on writing handler logic.
 
-### Step 5: Apply Returned Events
+</Step>
+
+<Step>
+
+### Apply Returned Events
 
 Each returned event is passed through the corresponding `evolve` handler to produce a new state:
 
-```typescript
+```typescript title="dispatch-evolve-step.ts"
 newState = evolve[event.name](event.payload, currentState);
 ```
 
 If the decide handler returns multiple events, they are applied sequentially. Each produces a new state that feeds into the next. See [State & Event Application](/docs/modeling/state-and-events) for evolve handler patterns.
 
-### Step 6: Persist
+</Step>
+
+<Step>
+
+### Persist
 
 For event-sourced persistence, the new events are appended to the aggregate's event stream in the event store.
 
 For state-stored persistence, the final state (after all events are applied) is saved as a snapshot, overwriting the previous one.
 
-### Step 7: Publish Events
+</Step>
+
+<Step>
+
+### Publish Events
 
 After successful persistence, each event is dispatched to the `EventBus`. This triggers registered projection reducers (which update read model views) and saga handlers (which may dispatch further commands or trigger side effects).
 
 Events are published **after** persistence, so handlers can assume the event is durably stored.
+
+</Step>
+
+</Steps>
 
 ## Command Routing
 
@@ -143,7 +175,7 @@ Routing answers two questions: **which aggregate type** handles a given command,
 
 The framework matches the command's `name` against the `commands` map of each registered aggregate. The aggregate whose map contains a handler for that name receives the command. This means command names must be globally unique across all aggregate types in a domain.
 
-```typescript
+```typescript title="main.ts"
 // BankAccount handles: CreateBankAccount, AuthorizeTransaction
 // Auction handles: CreateAuction, PlaceBid, CloseAuction
 
@@ -180,7 +212,7 @@ The `targetAggregateId` identifies which instance to load. Each aggregate type h
 
 When you define commands with `DefineCommands`, the `targetAggregateId` field is automatically included on every command in the resulting union:
 
-```typescript
+```typescript title="bank-account/commands/index.ts"
 type BankAccountCommand = DefineCommands<{
   CreateBankAccount: void;
   AuthorizeTransaction: { amount: number; merchant: string };
@@ -197,7 +229,7 @@ The `targetAggregateId` is the caller's responsibility. The framework does not g
 
 The key you use in `writeModel.aggregates` becomes the aggregate's internal name:
 
-```typescript
+```typescript title="domain.ts"
 writeModel: {
   aggregates: {
     BankAccount,        // name: "BankAccount"
@@ -212,7 +244,7 @@ This name is used for persistence namespacing (events stored under `BankAccount:
 
 If two aggregate types define a handler for the same command name, the framework cannot determine which should handle it. This is a configuration error. Keep command names globally unique, typically by prefixing with the aggregate context:
 
-```typescript
+```typescript title="commands.ts"
 // Good: unique names
 type BankAccountCommand = DefineCommands<{
   CreateBankAccount: void;
@@ -233,7 +265,7 @@ type AuctionCommand = DefineCommands<{
 
 By default, `targetAggregateId` is typed as `string`. For stricter type safety, you can use branded types via the second type parameter of `DefineCommands`:
 
-```typescript
+```typescript title="bank-account/commands/index.ts"
 type BankAccountId = string & { __brand: "BankAccountId" };
 
 type BankAccountCommand = DefineCommands<
@@ -249,7 +281,7 @@ type BankAccountCommand = DefineCommands<
 
 With a branded type, TypeScript rejects raw strings where a `BankAccountId` is expected. Create a helper function to construct IDs:
 
-```typescript
+```typescript title="main.ts"
 function bankAccountId(id: string): BankAccountId {
   return id as BankAccountId;
 }
@@ -272,7 +304,7 @@ This prevents accidentally passing an auction ID to a bank account command, catc
 
 The `CommandBus` is the transport interface for commands:
 
-```typescript
+```typescript title="packages/core/src/cqrs/command-bus.ts"
 interface CommandBus {
   dispatch(command: Command): Promise<void>;
 }
@@ -280,7 +312,7 @@ interface CommandBus {
 
 It is part of `CQRSInfrastructure`, which is provided during domain configuration:
 
-```typescript
+```typescript title="packages/core/src/cqrs/cqrs-infrastructure.ts"
 interface CQRSInfrastructure {
   commandBus: CommandBus;
   eventBus: EventBus;
@@ -294,7 +326,7 @@ In most cases, you interact with commands through `domain.dispatchCommand()` rat
 
 noddde ships with `InMemoryCommandBus`, a minimal in-process implementation suitable for development and testing:
 
-```typescript
+```typescript title="main.ts"
 import {
   InMemoryCommandBus,
   EventEmitterEventBus,
@@ -316,7 +348,7 @@ For production systems, you may need a command bus that adds logging, retry logi
 
 The `EventBus` is the transport mechanism that delivers events from aggregates to projections and sagas after persistence:
 
-```typescript
+```typescript title="packages/core/src/edd/event-bus.ts"
 interface EventBus extends Closeable {
   /** Publishes a single domain event to all subscribers. */
   dispatch<TEvent extends Event>(event: TEvent): Promise<void>;
@@ -331,7 +363,7 @@ Like the `CommandBus`, it is part of `CQRSInfrastructure`.
 
 The built-in `EventEmitterEventBus` is an in-process implementation that tracks handlers internally and awaits them sequentially during dispatch:
 
-```typescript
+```typescript title="main.ts"
 import { EventEmitterEventBus } from "@noddde/engine";
 
 buses: () => ({

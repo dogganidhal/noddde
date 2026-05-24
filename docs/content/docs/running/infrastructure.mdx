@@ -13,7 +13,7 @@ A decide handler that decides whether a transaction is authorized should not kno
 
 noddde enforces this by injecting infrastructure as a function parameter, never as a direct import:
 
-```ts
+```ts title="bank-account/bank-account.ts"
 decide: {
   AuthorizeTransaction: (command, state, { logger }) => {
     logger.info(`Processing transaction for ${command.payload.merchant}`);
@@ -28,13 +28,13 @@ The handler depends on the `Logger` interface, not a concrete `SystemClock`. Thi
 
 The base `Infrastructure` type is deliberately empty:
 
-```ts
+```ts title="packages/core/src/infrastructure/infrastructure.ts"
 type Infrastructure = {};
 ```
 
 You extend it with whatever your domain needs:
 
-```ts
+```ts title="infrastructure/index.ts"
 interface BankingInfrastructure {
   logger: Logger;
   bankAccountViewRepository: BankAccountViewRepository;
@@ -48,7 +48,7 @@ This type becomes the `infrastructure` member of your [AggregateTypes](/docs/mod
 
 The recommended pattern is to declare a **narrow infrastructure interface per component** rather than a single god-interface for the entire domain:
 
-```ts
+```ts title="infrastructure/index.ts"
 // Auction aggregate only needs a clock
 interface AuctionInfrastructure {
   clock: Clock;
@@ -68,7 +68,7 @@ interface PaymentInfrastructure {
 
 When you wire the domain, `wireDomain` computes the intersection of all these types. The `infrastructure` factory must return an object satisfying all of them:
 
-```ts
+```ts title="main.ts"
 const domain = await wireDomain(definition, {
   // Compiler requires: { clock: Clock, emailService: EmailService, paymentGateway: PaymentGateway }
   infrastructure: () => ({
@@ -87,7 +87,7 @@ Components that share the same dependency (like `clock` above) simply declare it
 
 Each member of your infrastructure type should be an interface with concrete implementations:
 
-```ts
+```ts title="infrastructure/clock.ts"
 interface Clock {
   now(): Date;
 }
@@ -128,7 +128,7 @@ Infrastructure appears as a parameter in three handler types:
 
 In addition to your custom infrastructure, noddde provides a built-in `CQRSInfrastructure` type:
 
-```ts
+```ts title="packages/core/src/cqrs/cqrs-infrastructure.ts"
 interface CQRSInfrastructure {
   commandBus: CommandBus;
   eventBus: EventBus;
@@ -152,7 +152,7 @@ With `wireDomain`, infrastructure is provided via the `DomainWiring` object. The
 
 The `infrastructure` factory provides your custom domain services -- repositories, clients, clocks:
 
-```ts
+```ts title="main.ts"
 const domain = await wireDomain(bankingDomain, {
   infrastructure: () => ({
     clock: new SystemClock(),
@@ -169,7 +169,7 @@ The infrastructure type is **inferred automatically** from your aggregates, proj
 
 The `buses` factory provides the three CQRS buses. It receives the resolved user infrastructure as a parameter:
 
-```ts
+```ts title="main.ts"
 buses: (customInfra) => ({
   commandBus: new InMemoryCommandBus(),
   eventBus: new EventEmitterEventBus(),
@@ -181,7 +181,7 @@ buses: (customInfra) => ({
 
 The `aggregates` field provides persistence, concurrency, and snapshots -- either globally or per-aggregate:
 
-```ts
+```ts title="main.ts"
 // Global: all aggregates share the same config
 aggregates: {
   persistence: () => new InMemoryEventSourcedAggregatePersistence(),
@@ -207,7 +207,7 @@ See [Persistence](/docs/running/persistence) for details on persistence strategi
 
 View stores are provided per-projection, separating runtime concerns from projection definitions:
 
-```ts
+```ts title="main.ts"
 import { InMemoryViewStoreFactory } from "@noddde/engine";
 
 projections: {
@@ -218,7 +218,7 @@ projections: {
 
 ### Other Wiring Fields
 
-```ts
+```ts title="main.ts"
 unitOfWork: () => () => new PostgresUnitOfWork(pool),
 idempotency: () => new InMemoryIdempotencyStore(),
 sagas: { persistence: () => new InMemorySagaPersistence() },
@@ -232,7 +232,7 @@ All providers are factory functions (not raw values). This is intentional:
 - **Async setup** -- Database connections, service discovery, config loading
 - **Clean isolation** -- Each test can create fresh infrastructure
 
-```ts
+```ts title="main.ts"
 infrastructure: async () => {
   const dbConnection = await connectToDatabase();
   return {
@@ -268,7 +268,7 @@ The built-in buses (`InMemoryCommandBus`, `EventEmitterEventBus`, `InMemoryQuery
 
 A common pattern is to wrap a bus with logging:
 
-```ts
+```ts title="infrastructure/logging-command-bus.ts"
 class LoggingCommandBus implements CommandBus {
   constructor(
     private readonly inner: CommandBus,
@@ -296,7 +296,7 @@ Notice how `buses` receives the custom infrastructure as a parameter. This allow
 
 The `defineDomain` + `wireDomain` split makes it especially easy to swap infrastructure for testing -- the domain definition is shared, only the wiring differs:
 
-```ts
+```ts title="main.ts"
 // Shared domain definition
 const bankingDomain = defineDomain({
   writeModel: { aggregates: { BankAccount } },
@@ -335,7 +335,7 @@ Same domain definition, different wiring. The domain logic does not change -- on
 
 After configuration, buses are available on `domain.infrastructure`:
 
-```ts
+```ts title="main.ts"
 const domain = await wireDomain(bankingDomain, {
   /* ... */
 });
@@ -347,7 +347,7 @@ const { commandBus, eventBus, queryBus } = domain.infrastructure;
 
 If your custom infrastructure holds resources that need cleanup on shutdown (database pools, file handles, network connections), implement the `Closeable` interface:
 
-```ts
+```ts title="infrastructure/postgres-bank-account-repository.ts"
 import type { Closeable } from "@noddde/core";
 
 class PostgresBankAccountRepository

@@ -13,7 +13,7 @@ yarn add @noddde/nats nats
 
 ## Configuration
 
-```ts
+```ts title="infrastructure/event-bus.ts"
 import { NatsEventBus } from "@noddde/nats";
 
 const eventBus = new NatsEventBus({
@@ -49,7 +49,7 @@ const eventBus = new NatsEventBus({
 
 ## Wiring with Domain
 
-```ts
+```ts title="main.ts"
 import { wireDomain } from "@noddde/engine";
 import { NatsEventBus } from "@noddde/nats";
 

@@ -26,7 +26,7 @@ noddde ships with an in-memory `EventEmitterEventBus` for single-process develop
 
 Every adapter implements this interface:
 
-```ts
+```ts title="packages/core/src/edd/event-bus.ts"
 import type { Closeable } from "@noddde/core";
 
 type AsyncEventHandler = (event: Event) => void | Promise<void>;

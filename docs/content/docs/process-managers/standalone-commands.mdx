@@ -15,7 +15,7 @@ For stateful, multi-step workflows that need to track progress and handle compen
 
 `StandaloneCommand` is an alias for the base `Command` interface:
 
-```typescript
+```typescript title="packages/core/src/cqrs/standalone-command.ts"
 type StandaloneCommand = Command;
 
 // Which is:
@@ -31,7 +31,7 @@ The naming distinction exists to make intent clear in your codebase. When you se
 
 Standalone command handlers have a different signature from aggregate decide handlers. Instead of receiving aggregate state, they receive the full [CQRS](/docs/core-concepts/cqrs-and-event-sourcing) infrastructure:
 
-```typescript
+```typescript title="packages/core/src/cqrs/standalone-command-handler.ts"
 type StandaloneCommandHandler<
   TInfrastructure extends Infrastructure,
   TCommand extends StandaloneCommand,
@@ -43,9 +43,9 @@ type StandaloneCommandHandler<
 ) => void | Promise<void>;
 ```
 
-| Parameter        | Description                                                                                                                       |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `command`        | The incoming standalone command                                                                                                   |
+| Parameter        | Description                                                                                                                           |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `command`        | The incoming standalone command                                                                                                       |
 | `infrastructure` | Your domain infrastructure merged with `CQRSInfrastructure` (commandBus, eventBus, queryBus) and `FrameworkInfrastructure` (`logger`) |
 
 Key differences from aggregate decide handlers:
@@ -58,7 +58,7 @@ Key differences from aggregate decide handlers:
 
 Standalone command handlers are registered in the `writeModel.standaloneCommandHandlers` map of your domain configuration:
 
-```typescript
+```typescript title="domain.ts"
 import { defineDomain } from "@noddde/core";
 import { wireDomain } from "@noddde/engine";
 
@@ -103,7 +103,7 @@ const domain = await wireDomain(bankingDomain, {
 
 Standalone commands work for stateless, fire-and-forget orchestration:
 
-```typescript
+```typescript title="command-handlers/handle-transfer-funds.ts"
 standaloneCommandHandlers: {
   TransferFunds: async (command, { commandBus }) => {
     const { fromAccountId, toAccountId, amount } = command.payload;
@@ -135,7 +135,7 @@ standaloneCommandHandlers: {
 
 Use standalone handlers to bridge your domain with external systems:
 
-```typescript
+```typescript title="command-handlers/handle-sync-with-external-crm.ts"
 standaloneCommandHandlers: {
   SyncWithExternalCRM: async (command, infrastructure) => {
     const { customerId, data } = command.payload;
@@ -156,7 +156,7 @@ standaloneCommandHandlers: {
 
 Standalone handlers can coordinate notifications that pull data from multiple sources:
 
-```typescript
+```typescript title="command-handlers/handle-send-order-confirmation.ts"
 standaloneCommandHandlers: {
   SendOrderConfirmation: async (command, infrastructure) => {
     const { orderId, customerId } = command.payload;

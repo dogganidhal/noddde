@@ -17,17 +17,25 @@ This means:
 
 ## Setup
 
-### 1. Install the OTel API and an SDK
+<Steps>
+
+<Step>
+
+### Install the OTel API and an SDK
 
 ```bash
 npm install @opentelemetry/api @opentelemetry/sdk-trace-node @opentelemetry/auto-instrumentations-node
 ```
 
-### 2. Register a tracer provider
+</Step>
+
+<Step>
+
+### Register a tracer provider
 
 Configure OTel before calling `wireDomain()`. A typical setup:
 
-```ts
+```ts title="infrastructure/tracing.ts"
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
@@ -44,9 +52,13 @@ const provider = new NodeTracerProvider({
 provider.register();
 ```
 
-### 3. Wire your domain as usual
+</Step>
 
-```ts
+<Step>
+
+### Wire your domain as usual
+
+```ts title="main.ts"
 import { wireDomain } from "@noddde/engine";
 
 const domain = await wireDomain(myDomainDefinition, {
@@ -55,6 +67,10 @@ const domain = await wireDomain(myDomainDefinition, {
 ```
 
 The engine logs `"OpenTelemetry detected. Tracing enabled."` at info level when OTel is found. If not found, it logs `"OpenTelemetry not detected. Tracing disabled."` at debug level.
+
+</Step>
+
+</Steps>
 
 ## What Gets Traced
 

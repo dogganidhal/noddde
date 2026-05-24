@@ -11,7 +11,7 @@ noddde uses a single `AggregateTypes` bundle type instead of multiple positional
 
 Without the bundle, a fully typed aggregate definition would require five positional generics:
 
-```ts
+```ts title="define-aggregate.ts"
 // Hypothetical — NOT how noddde works
 function defineAggregate<
   TState,
@@ -52,7 +52,7 @@ This is:
 
 The `AggregateTypes` bundle uses named members:
 
-```ts
+```ts title="bank-account/bank-account.ts"
 type AggregateTypes = {
   state: any;
   events: Event;
@@ -90,7 +90,7 @@ In practice, the extra type declaration serves as a useful summary of the aggreg
 
 ## Example
 
-```ts
+```ts title="bank-account/bank-account.ts"
 // The bundle declares the aggregate's type universe
 type BankAccountTypes = {
   state: BankAccountState;

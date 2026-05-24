@@ -7,7 +7,7 @@ description: Why saga event handlers return a SagaReaction instead of dispatchin
 
 Saga event handlers return a `SagaReaction<TState, TCommands>` (state + commands) rather than dispatching commands imperatively through the `CommandBus`.
 
-```ts
+```ts title="order-fulfillment/saga.ts"
 // noddde approach: declarative return
 PaymentCompleted: {
   id: (event) => event.payload.referenceId,
@@ -43,7 +43,7 @@ This consistency makes the framework predictable: **handlers declare outputs, th
 
 With declarative returns, testing is trivial:
 
-```ts
+```ts title="__tests__/order-fulfillment-saga.test.ts"
 const reaction = OrderFulfillmentSaga.on.PaymentCompleted!.handle(
   event,
   state,

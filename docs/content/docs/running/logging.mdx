@@ -59,7 +59,7 @@ Everything else gets JSON. No environment variables to set, no config flags to t
 
 The default level is `'warn'` -- only warnings and errors are visible. To see more detail, pass a `NodddeLogger` with a lower level:
 
-```ts
+```ts title="main.ts"
 import { wireDomain, NodddeLogger } from "@noddde/engine";
 
 const domain = await wireDomain(bankingDomain, {
@@ -81,7 +81,7 @@ A message is emitted only when its severity is **>=** the configured level.
 
 To suppress all framework logging:
 
-```ts
+```ts title="main.ts"
 import { NoopLogger } from "@noddde/engine";
 
 const domain = await wireDomain(bankingDomain, {
@@ -95,7 +95,7 @@ The framework logger is automatically available as `infrastructure.logger` in **
 
 ### In Aggregate Decide Handlers
 
-```ts
+```ts title="bank-account/bank-account.ts"
 const BankAccount = defineAggregate<BankAccountTypes>({
   initialState: { balance: 0 },
   decide: {
@@ -118,7 +118,7 @@ const BankAccount = defineAggregate<BankAccountTypes>({
 
 ### In Saga Handlers
 
-```ts
+```ts title="order-fulfillment/saga.ts"
 const OrderFulfillment = defineSaga<OrderFulfillmentTypes>({
   initialState: { status: "pending" },
   startedBy: ["OrderPlaced"],
@@ -144,7 +144,7 @@ const OrderFulfillment = defineSaga<OrderFulfillmentTypes>({
 
 ### In Query Handlers
 
-```ts
+```ts title="bank-account/query-handlers/handle-get-account-by-id.ts"
 const getAccountById: QueryHandler<BankingInfrastructure, GetAccountQuery> = (
   query,
   infrastructure,
@@ -158,7 +158,7 @@ const getAccountById: QueryHandler<BankingInfrastructure, GetAccountQuery> = (
 
 Use `child()` to create loggers with a more specific namespace:
 
-```ts
+```ts title="bank-account/bank-account.ts"
 Deposit: (command, state, infrastructure) => {
   const log = infrastructure.logger.child("deposit");
   log.info("Processing"); // logs as [noddde:deposit]
@@ -172,7 +172,7 @@ The framework itself uses child loggers with namespaces like `domain`, `command`
 
 The `infrastructure` factory in `DomainWiring` receives the framework logger as its first argument. Use it to inject logging into your custom services at construction time:
 
-```ts
+```ts title="main.ts"
 const domain = await wireDomain(bankingDomain, {
   infrastructure: (logger) => ({
     paymentGateway: new StripeGateway(logger.child("stripe")),
@@ -192,7 +192,7 @@ This gives your services properly-scoped child loggers that share the same level
 
 You can replace the built-in logger entirely by implementing the `Logger` interface from `@noddde/core`:
 
-```ts
+```ts title="infrastructure/pino-logger.ts"
 import type { Logger } from "@noddde/core";
 
 function createPinoLogger(pino: PinoInstance, ns: string): Logger {
@@ -213,7 +213,7 @@ const domain = await wireDomain(bankingDomain, {
 
 The `Logger` interface is minimal:
 
-```ts
+```ts title="packages/core/src/infrastructure/logger.ts"
 interface Logger {
   debug(message: string, data?: Record<string, unknown>): void;
   info(message: string, data?: Record<string, unknown>): void;

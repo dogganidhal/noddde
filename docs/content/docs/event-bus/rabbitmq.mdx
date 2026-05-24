@@ -14,7 +14,7 @@ yarn add -D @types/amqplib
 
 ## Configuration
 
-```ts
+```ts title="infrastructure/event-bus.ts"
 import { RabbitMqEventBus } from "@noddde/rabbitmq";
 
 const eventBus = new RabbitMqEventBus({
@@ -56,7 +56,7 @@ const eventBus = new RabbitMqEventBus({
 
 ## Wiring with Domain
 
-```ts
+```ts title="main.ts"
 import { wireDomain } from "@noddde/engine";
 import { RabbitMqEventBus } from "@noddde/rabbitmq";
 

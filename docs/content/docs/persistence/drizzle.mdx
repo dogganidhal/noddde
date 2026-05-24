@@ -17,7 +17,7 @@ yarn add better-sqlite3  # or: pg, mysql2
 
 The package exports convenience table definitions for each Drizzle dialect. Import from the sub-path matching your database:
 
-```ts
+```ts title="db/schema.ts"
 // SQLite
 import {
   events,
@@ -50,7 +50,7 @@ You can also define your own tables matching the expected column structure -- th
 
 ## Configuration
 
-```ts
+```ts title="main.ts"
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { DrizzleAdapter } from "@noddde/drizzle";
@@ -89,7 +89,7 @@ The persistence classes and `UnitOfWork` share a transaction store. When a trans
 
 For custom table overrides, pass a config object as the second argument:
 
-```ts
+```ts title="main.ts"
 import { DrizzleAdapter } from "@noddde/drizzle";
 import { myEvents, mySagas } from "./schema"; // your own Drizzle tables
 
@@ -111,7 +111,7 @@ The `stateStored()` helper takes a Drizzle table and a required `DrizzleStateMap
 
 Define a `DrizzleStateMapper` with one column per state field, then wire it via `stateStored()`:
 
-```ts
+```ts title="main.ts"
 import type { DrizzleStateMapper } from "@noddde/drizzle";
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 
@@ -149,7 +149,9 @@ const adapter = new DrizzleAdapter(db);
 const domain = await wireDomain(definition, {
   persistenceAdapter: adapter,
   aggregates: {
-    Order: { persistence: adapter.stateStored(orders, { mapper: orderMapper }) },
+    Order: {
+      persistence: adapter.stateStored(orders, { mapper: orderMapper }),
+    },
   },
 });
 ```
@@ -160,7 +162,7 @@ The mapper's `toRow` / `fromRow` are pure and lossless: `fromRow(toRow(state))` 
 
 When you want a dedicated table without per-field columns — for instance, to share a schema with another service — use `jsonStateMapper(table)`:
 
-```ts
+```ts title="main.ts"
 import { jsonStateMapper } from "@noddde/drizzle";
 
 const orders = sqliteTable("orders", {
@@ -174,7 +176,7 @@ adapter.stateStored(orders, { mapper: jsonStateMapper(orders) });
 
 `jsonStateMapper` resolves columns by JS-key convention (`aggregateId`, `state`, `version`). For non-conventional names, pass overrides:
 
-```ts
+```ts title="main.ts"
 adapter.stateStored(customOrders, {
   mapper: jsonStateMapper(customOrders, {
     aggregateIdColumn: customOrders.id,

@@ -9,7 +9,7 @@ The **transactional outbox pattern** solves this by writing events to an outbox 
 
 ## Quick Example
 
-```ts
+```ts title="main.ts"
 import { wireDomain, InMemoryOutboxStore } from "@noddde/engine";
 
 const domain = await wireDomain(orderDomain, {
@@ -61,7 +61,7 @@ Best-effort: outboxStore.markPublishedByEventIds()  <-- cleanup
 
 Add the `outbox` field as a top-level field in your `wireDomain` configuration:
 
-```ts
+```ts title="main.ts"
 outbox: {
   // Factory for the outbox store (called once during init)
   store: () => new InMemoryOutboxStore(),
@@ -75,7 +75,7 @@ outbox: {
 
 For production, all three [persistence adapter packages](/docs/running/persistence-adapters) (`@noddde/drizzle`, `@noddde/prisma`, `@noddde/typeorm`) include a database-backed `OutboxStore` via the adapter's `outboxStore` field. When you wire the domain with a `persistenceAdapter`, the outbox is resolved from the adapter automatically:
 
-```ts
+```ts title="main.ts"
 // Drizzle: the adapter exposes outboxStore directly
 import { DrizzleAdapter } from "@noddde/drizzle";
 const adapter = new DrizzleAdapter(db);
@@ -96,7 +96,7 @@ const typeormAdapter = new TypeORMAdapter(dataSource);
 
 The outbox relay is **not started automatically** during `domain.init()`. You control its lifecycle explicitly:
 
-```ts
+```ts title="main.ts"
 // Start polling
 domain.startOutboxRelay();
 
@@ -111,7 +111,7 @@ Both `startOutboxRelay()` and `stopOutboxRelay()` are idempotent — calling the
 
 ## The OutboxStore Interface
 
-```ts
+```ts title="packages/core/src/edd/outbox-store.ts"
 interface OutboxEntry {
   id: string; // UUID v7 (time-ordered)
   event: Event; // Fully enriched domain event
@@ -140,7 +140,7 @@ interface OutboxStore {
 
 Use `processOutboxOnce()` instead of starting the relay in tests:
 
-```ts
+```ts title="__tests__/outbox.test.ts"
 import { InMemoryOutboxStore } from "@noddde/engine";
 
 const outboxStore = new InMemoryOutboxStore();

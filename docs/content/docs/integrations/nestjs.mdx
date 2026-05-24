@@ -19,7 +19,7 @@ yarn add @noddde/nestjs @noddde/core @noddde/engine
 
 Use `forRoot` when your domain wiring has no NestJS-injected dependencies (e.g., all in-memory):
 
-```ts
+```ts title="app.module.ts"
 import { Module } from "@nestjs/common";
 import { NodddeModule } from "@noddde/nestjs";
 import { myDomainDefinition } from "./domain";
@@ -38,7 +38,7 @@ export class AppModule {}
 
 Use `forRootAsync` when your wiring depends on NestJS-managed services like `ConfigService`, database connections, or external clients:
 
-```ts
+```ts title="app.module.ts"
 import { Module } from "@nestjs/common";
 import { ConfigModule, ConfigService } from "@nestjs/config";
 import { NodddeModule } from "@noddde/nestjs";
@@ -90,7 +90,7 @@ export type AppDomain = InferDomain<typeof definition>;
 
 ### Using the convenience decorator
 
-```ts
+```ts title="order.controller.ts"
 import { Controller, Post, Body } from "@nestjs/common";
 import { InjectDomain } from "@noddde/nestjs";
 import type { AppDomain } from "./domain";
@@ -123,7 +123,7 @@ export class OrderController {
 
 ### Using the injection token directly
 
-```ts
+```ts title="order.service.ts"
 import { Inject } from "@nestjs/common";
 import { NODDDE_DOMAIN } from "@noddde/nestjs";
 import type { AppDomain } from "./domain";
@@ -138,7 +138,7 @@ export class OrderService {
 
 By default, only the `Domain` instance is injectable. Set `exposeBuses: true` to also register the `CommandBus`, `QueryBus`, and `EventBus` as individual providers:
 
-```ts
+```ts title="app.module.ts"
 NodddeModule.forRoot({
   definition: myDomainDefinition,
   exposeBuses: true,
@@ -147,8 +147,12 @@ NodddeModule.forRoot({
 
 Then inject them using convenience decorators or tokens:
 
-```ts
-import { InjectCommandBus, InjectQueryBus, InjectEventBus } from "@noddde/nestjs";
+```ts title="order.service.ts"
+import {
+  InjectCommandBus,
+  InjectQueryBus,
+  InjectEventBus,
+} from "@noddde/nestjs";
 import type { CommandBus, QueryBus, EventBus } from "@noddde/core";
 
 @Injectable()
@@ -167,7 +171,7 @@ These are the exact same bus instances used by the `Domain` internally.
 
 `NodddeMetadataInterceptor` wraps handler execution inside `domain.withMetadataContext()`, propagating correlation IDs, user IDs, and causation IDs from the request context into every command dispatched within the handler.
 
-```ts
+```ts title="order.controller.ts"
 import { Controller, UseInterceptors } from "@nestjs/common";
 import { NodddeMetadataInterceptor } from "@noddde/nestjs";
 
@@ -190,7 +194,7 @@ The interceptor accepts a `MetadataExtractor` function — you control how metad
 
 To apply globally:
 
-```ts
+```ts title="app.module.ts"
 import { APP_INTERCEPTOR } from "@nestjs/core";
 
 @Module({
@@ -223,29 +227,29 @@ No manual lifecycle management is needed.
 
 ### NodddeModuleOptions
 
-| Option       | Type                                       | Required | Default | Description                                              |
-| ------------ | ------------------------------------------ | -------- | ------- | -------------------------------------------------------- |
-| `definition` | `DomainDefinition`                         | Yes      | —       | The domain definition from `defineDomain()`              |
-| `wiring`     | `DomainWiring`                             | No       | `{}`    | Infrastructure wiring passed to `wireDomain()`           |
-| `exposeBuses`| `boolean`                                  | No       | `false` | Register CommandBus, QueryBus, EventBus as providers     |
+| Option        | Type               | Required | Default | Description                                          |
+| ------------- | ------------------ | -------- | ------- | ---------------------------------------------------- |
+| `definition`  | `DomainDefinition` | Yes      | —       | The domain definition from `defineDomain()`          |
+| `wiring`      | `DomainWiring`     | No       | `{}`    | Infrastructure wiring passed to `wireDomain()`       |
+| `exposeBuses` | `boolean`          | No       | `false` | Register CommandBus, QueryBus, EventBus as providers |
 
 ### NodddeModuleAsyncOptions
 
-| Option       | Type                                       | Required | Default | Description                                              |
-| ------------ | ------------------------------------------ | -------- | ------- | -------------------------------------------------------- |
-| `imports`    | `ModuleMetadata["imports"]`                | No       | `[]`    | Modules providing tokens for the factory                 |
-| `inject`     | `any[]`                                    | No       | `[]`    | Tokens to inject into `useFactory`                       |
-| `useFactory` | `(...args) => NodddeModuleOptions`         | Yes      | —       | Factory returning module options (can be async)          |
-| `exposeBuses`| `boolean`                                  | No       | `false` | Register CommandBus, QueryBus, EventBus as providers     |
+| Option        | Type                               | Required | Default | Description                                          |
+| ------------- | ---------------------------------- | -------- | ------- | ---------------------------------------------------- |
+| `imports`     | `ModuleMetadata["imports"]`        | No       | `[]`    | Modules providing tokens for the factory             |
+| `inject`      | `any[]`                            | No       | `[]`    | Tokens to inject into `useFactory`                   |
+| `useFactory`  | `(...args) => NodddeModuleOptions` | Yes      | —       | Factory returning module options (can be async)      |
+| `exposeBuses` | `boolean`                          | No       | `false` | Register CommandBus, QueryBus, EventBus as providers |
 
 ### Injection Tokens & Decorators
 
-| Token / Decorator      | Provides                 | Requires            |
-| ---------------------- | ------------------------ | ------------------- |
-| `NODDDE_DOMAIN` / `InjectDomain()`       | `Domain` instance       | `NodddeModule`      |
-| `NODDDE_COMMAND_BUS` / `InjectCommandBus()` | `CommandBus`          | `exposeBuses: true` |
-| `NODDDE_QUERY_BUS` / `InjectQueryBus()`   | `QueryBus`             | `exposeBuses: true` |
-| `NODDDE_EVENT_BUS` / `InjectEventBus()`   | `EventBus`             | `exposeBuses: true` |
+| Token / Decorator                           | Provides          | Requires            |
+| ------------------------------------------- | ----------------- | ------------------- |
+| `NODDDE_DOMAIN` / `InjectDomain()`          | `Domain` instance | `NodddeModule`      |
+| `NODDDE_COMMAND_BUS` / `InjectCommandBus()` | `CommandBus`      | `exposeBuses: true` |
+| `NODDDE_QUERY_BUS` / `InjectQueryBus()`     | `QueryBus`        | `exposeBuses: true` |
+| `NODDDE_EVENT_BUS` / `InjectEventBus()`     | `EventBus`        | `exposeBuses: true` |
 
 ## Compatibility with @nestjs/cqrs
 

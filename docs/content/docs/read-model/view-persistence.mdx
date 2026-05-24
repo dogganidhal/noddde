@@ -9,7 +9,7 @@ View persistence enables projections to automatically store and retrieve per-ent
 
 `ViewStore<TView>` is the base persistence interface for projection views:
 
-```ts
+```ts title="packages/core/src/ddd/view-store.ts"
 import type { ID } from "@noddde/core";
 
 interface ViewStore<TView = any> {
@@ -28,7 +28,7 @@ interface ViewStore<TView = any> {
 
 The base interface provides `save`, `load`, and `delete`. For advanced filtering, extend it:
 
-```ts
+```ts title="bank-account/types.ts"
 interface BankAccountViewStore extends ViewStore<BankAccountView> {
   findByBalanceRange(min: number, max: number): Promise<BankAccountView[]>;
   findByOwner(ownerId: string): Promise<BankAccountView[]>;
@@ -41,7 +41,7 @@ Custom methods are available in query handlers via the `{ views }` injection. Ex
 
 Any class or object that satisfies the three-method contract is a valid view store. A minimal stub:
 
-```ts
+```ts title="infrastructure/my-view-store.ts"
 import type { ID, ViewStore } from "@noddde/core";
 
 class MyViewStore<TView> implements ViewStore<TView> {
@@ -61,7 +61,7 @@ class MyViewStore<TView> implements ViewStore<TView> {
 
 The engine provides `InMemoryViewStore<TView>` for development and testing:
 
-```ts
+```ts title="usage.ts"
 import { InMemoryViewStore } from "@noddde/engine";
 
 const store = new InMemoryViewStore<BankAccountView>();
@@ -223,7 +223,7 @@ Sometimes a projection should remove a view in response to an event — a user i
 
 noddde exports a unique-symbol sentinel `DeleteView` for exactly this purpose. Returning it from a reducer instructs the engine to call `viewStore.delete(viewId)` instead of `viewStore.save(viewId, ...)` for that event.
 
-```ts
+```ts title="user/projection.ts"
 import { DeleteView, defineProjection } from "@noddde/core";
 
 const UserProjection = defineProjection<UserProjectionDef>({
@@ -254,7 +254,7 @@ When an event arrives for a projection with auto-persistence configured:
 
 The check is on the awaited value, so async reducers are supported. Because TypeScript widens a unique-symbol return from an async arrow to plain `symbol` when the contextual type is a union, give the async arrow an explicit return type:
 
-```ts
+```ts title="user/on-entries/on-user-deleted.ts"
 // Annotate the return type so TypeScript preserves `typeof DeleteView`.
 reduce: async (): Promise<typeof DeleteView> => DeleteView;
 ```
@@ -265,7 +265,7 @@ Sync arrows infer correctly without the annotation (`reduce: () => DeleteView`).
 
 Because the reducer's return type is a union, a single reducer can decide between updating the view and deleting it based on event content:
 
-```ts
+```ts title="item/projection.ts"
 const ItemProjection = defineProjection<ItemProjectionDef>({
   on: {
     ItemDeactivated: {
@@ -290,7 +290,7 @@ Deleting a view that does not exist is a no-op. The `ViewStore` contract require
 
 For projections with `consistency: "strong"`, view deletion is enlisted in the same unit of work as the originating command. If the command fails, the deletion is rolled back atomically:
 
-```ts
+```ts title="user/projection.ts"
 const UserProjection = defineProjection<UserProjectionDef>({
   on: {
     UserDeleted: {
@@ -346,7 +346,7 @@ Unlike the old exhaustive `identity` map, only events the projection cares about
 
 When `load()` returns `undefined` (new entity), the reducer receives `undefined` as the current view. To provide a default starting state, use `initialView`:
 
-```ts
+```ts title="account/projection.ts"
 const projection = defineProjection<Def>({
   on: {
     AccountCreated: {
@@ -363,7 +363,7 @@ const projection = defineProjection<Def>({
 
 The `viewStore` value lives in the domain configuration, under `projections`. It must be a `ViewStoreFactory` — a singleton with a `getForContext(ctx?)` method:
 
-```ts
+```ts title="main.ts"
 projections: {
   // Class-based factory (typical for ORM-backed stores).
   Account: { viewStore: new PrismaAccountViewStoreFactory(prisma) },
@@ -382,7 +382,7 @@ projections: {
 
 Implementing one is small:
 
-```ts
+```ts title="infrastructure/prisma-account-view-store-factory.ts"
 import type { Prisma, PrismaClient } from "@prisma/client";
 import type { ID, ViewStore, ViewStoreFactory } from "@noddde/core";
 
@@ -421,7 +421,7 @@ export class PrismaAccountViewStoreFactory
 
 For simple cases, use the `createViewStoreFactory` helper:
 
-```ts
+```ts title="infrastructure/account-view-store-factory.ts"
 import { createViewStoreFactory } from "@noddde/core";
 
 const factory = createViewStoreFactory<AccountView>(
@@ -436,7 +436,7 @@ const factory = createViewStoreFactory<AccountView>(
 
 When you already have a store instance in scope (typical in tests or lightweight setups), wrap it in a factory inline:
 
-```ts
+```ts title="main.ts"
 import { createViewStoreFactory } from "@noddde/core";
 
 const sharedStore = new InMemoryViewStore<AccountView>();
@@ -480,7 +480,7 @@ Command -> Aggregate -> Events -> [load + reduce + save/delete inside UoW commit
 
 Enable it with `consistency: "strong"`:
 
-```ts
+```ts title="projection.ts"
 const projection = defineProjection<Def>({
   on: {
     Created: onCreated, // extracted handler with InferProjectionEventHandler

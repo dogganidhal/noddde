@@ -105,8 +105,7 @@ Each aggregate owns its type unions. The aggregate file imports event payloads f
 
 **Decide handlers** and **evolve handlers** are standalone exported functions typed with `InferDecideHandler` and `InferEvolveHandler`. They are imported into the `defineAggregate` `decide` and `evolve` maps. This keeps each handler individually testable and the aggregate definition concise:
 
-```ts
-// deciders/decide-create-hotel-booking.ts
+```ts title="hotel-booking/deciders/decide-create-hotel-booking.ts"
 import type { InferDecideHandler } from "@noddde/core";
 import type { HotelBookingTypes } from "../hotel-booking.js";
 
@@ -169,8 +168,7 @@ export const HotelBooking = defineAggregate<HotelBookingTypes>({
 
 Projections follow the same extraction pattern as aggregates. **Query handlers** are typed with `InferProjectionQueryHandler` and **on-entries** are the event reducers that build the view. Both are standalone functions imported into the `defineProjection` `queryHandlers` and `on` maps:
 
-```ts
-// on-entries/on-hotel-booking-created.ts
+```ts title="hotel-booking/on-entries/on-hotel-booking-created.ts"
 import type { InferProjectionEventHandler } from "@noddde/core";
 import type { HotelBookingProjectionDef } from "../hotel-booking.js";
 
@@ -221,8 +219,7 @@ export const HotelBookingProjection =
 
 Sagas follow the same extraction pattern. **On-entries** are standalone `{ id, handle }` objects typed with `InferSagaOnEntry`, imported into the `defineSaga` `on` map. Each on-entry specifies how to extract the saga ID from the event and how to handle the transition:
 
-```ts
-// on-entries/on-order-placed.ts
+```ts title="booking-fulfillment/on-entries/on-order-placed.ts"
 import type { InferSagaOnEntry } from "@noddde/core";
 import type { BookingFulfillmentDef } from "../saga.js";
 
@@ -266,7 +263,7 @@ The `process-model/` directory is created empty when scaffolding a project or do
 
 The `defineDomain` call captures the pure domain structure — aggregates, projections, and sagas — without any infrastructure or runtime concerns:
 
-```ts
+```ts title="domain.ts"
 export const hotelBookingDomain = defineDomain({
   writeModel: { aggregates: { HotelBooking } },
   readModel: { projections: { HotelBooking: HotelBookingProjection } },
@@ -285,7 +282,7 @@ This is a sync identity function. It returns the input with full type inference.
 
 Defines the domain-wide infrastructure interface that gets passed to all handlers:
 
-```ts
+```ts title="infrastructure/index.ts"
 export interface HotelBookingInfrastructure extends Infrastructure {
   // clock, logger, external services, etc.
 }
@@ -299,7 +296,7 @@ export interface HotelBookingInfrastructure extends Infrastructure {
 
 Wires the domain to runtime infrastructure using `wireDomain`:
 
-```ts
+```ts title="main.ts"
 const domain = await wireDomain(hotelBookingDomain, {
   infrastructure: () => ({
     /* implementations */
@@ -325,7 +322,7 @@ noddde new saga BookingFulfillment
 
 Then wire them into `domain.ts`:
 
-```ts
+```ts title="domain.ts"
 import { Room } from "./write-model/aggregates/room/index.js";
 import { RoomAvailabilityProjection } from "./read-model/projections/room-availability/index.js";
 import { BookingFulfillmentSaga } from "./process-model/booking-fulfillment/index.js";

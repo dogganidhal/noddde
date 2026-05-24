@@ -77,7 +77,7 @@ Then run `prisma generate` and your preferred migration command.
 
 ## Configuration
 
-```ts
+```ts title="main.ts"
 import { PrismaClient } from "@prisma/client";
 import { PrismaAdapter } from "@noddde/prisma";
 import { everyNEvents } from "@noddde/core";
@@ -115,7 +115,7 @@ Pass the camelCase Prisma model delegate name and a `PrismaStateMapper`. The fra
 
 ### Typed columns (recommended)
 
-```ts
+```ts title="main.ts"
 import type { PrismaStateMapper } from "@noddde/prisma";
 import type { Prisma } from "@prisma/client";
 
@@ -148,7 +148,9 @@ const adapter = new PrismaAdapter(prisma);
 const domain = await wireDomain(definition, {
   persistenceAdapter: adapter,
   aggregates: {
-    Order: { persistence: adapter.stateStored("order", { mapper: orderMapper }) },
+    Order: {
+      persistence: adapter.stateStored("order", { mapper: orderMapper }),
+    },
   },
 });
 ```
@@ -157,7 +159,7 @@ The Prisma adapter validates that the model exists at creation time and throws a
 
 ### Opaque JSON via `jsonStateMapper`
 
-```ts
+```ts title="main.ts"
 import { jsonStateMapper } from "@noddde/prisma";
 
 adapter.stateStored("order", { mapper: jsonStateMapper() });
@@ -174,7 +176,7 @@ adapter.stateStored("customOrder", {
 
 For pessimistic concurrency, pass the `dialect` option since PrismaClient does not expose the database provider at runtime:
 
-```ts
+```ts title="main.ts"
 const adapter = new PrismaAdapter(prisma, { dialect: "postgresql" });
 ```
 

@@ -22,7 +22,7 @@ This separation allows domain definitions to be shared, tested, and analyzed ind
 
 `defineDomain` is a sync identity function -- it returns the input unchanged with full type inference. Consistent with `defineAggregate`, `defineProjection`, `defineSaga`. It lives in `@noddde/core` (and is re-exported from `@noddde/engine` for backward compatibility).
 
-```ts
+```ts title="domain.ts"
 import { defineDomain } from "@noddde/core";
 
 const bankingDomain = defineDomain({
@@ -61,7 +61,7 @@ The `TInfrastructure` generic is a type parameter only -- it flows through handl
 
 `wireDomain` accepts a `DomainDefinition` and an **optional** `DomainWiring`, resolves all factories, creates a `Domain` instance, and returns it. The wiring parameter can be omitted entirely for a zero-config hello world:
 
-```ts
+```ts title="main.ts"
 import { wireDomain } from "@noddde/engine";
 
 // Hello world -- everything defaults to in-memory
@@ -70,7 +70,7 @@ const domain = await wireDomain(bankingDomain);
 
 When you're ready for production, provide explicit wiring:
 
-```ts
+```ts title="main.ts"
 const domain = await wireDomain(bankingDomain, {
   // User-provided services (what handlers receive as `infrastructure`)
   infrastructure: () => ({
@@ -144,7 +144,7 @@ All fields are optional. Both `wireDomain(definition)` and `wireDomain(definitio
 
 The `persistenceAdapter` field accepts a `PersistenceAdapter` instance. When provided, the engine resolves aggregate persistence, saga persistence, unit-of-work, snapshots, outbox, idempotency, and locking from the adapter when not explicitly wired. Explicit wiring always takes precedence over adapter defaults.
 
-```ts
+```ts title="main.ts"
 import { DrizzleAdapter } from "@noddde/drizzle";
 
 const adapter = new DrizzleAdapter(db);
@@ -186,7 +186,7 @@ See [Logging](/docs/running/logging) for full details on output formats, log lev
 
 The `aggregates` field accepts either a global config (applies to all aggregates) or a per-aggregate record:
 
-```ts
+```ts title="main.ts"
 // Global: all aggregates share the same config
 aggregates: {
   persistence: () => adapter.eventSourcedPersistence,
@@ -237,7 +237,7 @@ The `concurrency` field accepts string shorthands or object form:
 
 View stores are configured per-projection in the wiring, separating runtime concerns from the projection definition. Each `viewStore` is a `ViewStoreFactory` — either an instance of a class implementing the interface, or a plain object built with `createViewStoreFactory`:
 
-```ts
+```ts title="main.ts"
 import { createViewStoreFactory } from "@noddde/core";
 import { InMemoryViewStoreFactory } from "@noddde/engine";
 
@@ -267,7 +267,7 @@ The `writeModel` section defines how your application processes commands.
 
 The `aggregates` map associates names with [aggregate definitions](/docs/modeling/defining-aggregates):
 
-```ts
+```ts title="domain.ts"
 import { BankAccount } from "./aggregate";
 
 writeModel: {
@@ -285,7 +285,7 @@ A domain can register any number of aggregate types. Each aggregate type handles
 
 Some commands do not target a specific aggregate instance. These are handled by standalone command handlers:
 
-```ts
+```ts title="standalone-command-handlers/process-settlements.ts"
 import { StandaloneCommandHandler } from "@noddde/core";
 
 const processSettlements: StandaloneCommandHandler<
@@ -305,7 +305,7 @@ const processSettlements: StandaloneCommandHandler<
 
 Register them in `standaloneCommandHandlers`:
 
-```ts
+```ts title="domain.ts"
 writeModel: {
   aggregates: { BankAccount },
   standaloneCommandHandlers: {
@@ -322,7 +322,7 @@ The `readModel` section defines how your application builds views and serves que
 
 ### Registering Projections
 
-```ts
+```ts title="domain.ts"
 import { BankAccountProjection } from "./projection";
 import { TransactionHistoryProjection } from "./transaction-history";
 
@@ -342,7 +342,7 @@ Each [projection](/docs/read-model/projections) receives events from the `EventB
 
 For queries that do not belong to any specific projection, register them as standalone query handlers:
 
-```ts
+```ts title="domain.ts"
 import { QueryHandler } from "@noddde/core";
 
 const getSystemStatus: QueryHandler<
@@ -369,7 +369,7 @@ Standalone query handlers are useful for cross-projection queries, system health
 
 The `processModel` section registers [sagas](/docs/process-managers/sagas) and standalone event handlers for event-driven workflows and side effects:
 
-```ts
+```ts title="domain.ts"
 import { BookingFulfillmentSaga } from "./process-model/booking-fulfillment";
 
 processModel: {
@@ -390,7 +390,7 @@ Both `sagas` and `standaloneEventHandlers` are optional — include only what yo
 
 Standalone event handlers are lightweight, stateless functions that react to domain events with simple side effects — sending emails, logging audit trails, notifying external systems. Unlike sagas, they don't maintain state, don't dispatch commands, and don't need persistence.
 
-```ts
+```ts title="domain.ts"
 standaloneEventHandlers: {
   OrderPlaced: async (event, infrastructure) => {
     await infrastructure.analytics.track("order_placed", event.payload);
@@ -411,7 +411,7 @@ The `Domain` class returned by `wireDomain` exposes the main capabilities of you
 
 ### Dispatching Commands
 
-```ts
+```ts title="main.ts"
 const aggregateId = await domain.dispatchCommand({
   name: "CreateBankAccount",
   targetAggregateId: "acc-123",
@@ -422,7 +422,7 @@ const aggregateId = await domain.dispatchCommand({
 
 ### Dispatching Queries
 
-```ts
+```ts title="main.ts"
 const account = await domain.dispatchQuery({
   name: "GetBankAccountById",
   payload: { id: "acc-123" },
@@ -433,7 +433,7 @@ const account = await domain.dispatchQuery({
 
 ### Accessing Infrastructure
 
-```ts
+```ts title="main.ts"
 const { commandBus, eventBus, queryBus } = domain.infrastructure;
 ```
 
@@ -443,7 +443,7 @@ The `infrastructure` getter returns the merged custom infrastructure and CQRS in
 
 Projection views are persisted via `ViewStore`. To read a projection's view, query through the query bus or access the view store directly from your infrastructure:
 
-```ts
+```ts title="main.ts"
 // Via query bus
 const view = await domain.infrastructure.queryBus.dispatch({
   name: "GetOrderSummary",
@@ -462,7 +462,7 @@ Every event dispatched through the domain is automatically enriched with an `Eve
 
 ### What Metadata Contains
 
-```ts
+```ts title="packages/core/src/edd/event-metadata.ts"
 interface EventMetadata {
   eventId: string; // UUID v7 (time-ordered)
   timestamp: string; // ISO 8601
@@ -479,7 +479,7 @@ interface EventMetadata {
 
 The `metadataProvider` is a function called on every command dispatch. Use it to inject per-request context (e.g., the authenticated user ID or a trace ID from HTTP middleware):
 
-```ts
+```ts title="main.ts"
 const domain = await wireDomain(bankingDomain, {
   // ...other wiring
   metadataProvider: () => ({
@@ -495,7 +495,7 @@ Values from the provider are merged into every event's metadata. Fields you omit
 
 For one-off overrides (admin actions, migration scripts, manual fixes), use `withMetadataContext` as an escape hatch:
 
-```ts
+```ts title="main.ts"
 await domain.withMetadataContext(
   { userId: "admin", correlationId: "manual-fix-123" },
   () => domain.dispatchCommand(fixCommand),
@@ -512,7 +512,7 @@ When a saga dispatches commands in response to an event, the engine automaticall
 
 Here is a full domain configuration for a banking application using `defineDomain` + `wireDomain`:
 
-```ts
+```ts title="main.ts"
 import { defineDomain } from "@noddde/core";
 import {
   wireDomain,
@@ -587,7 +587,7 @@ const account = await domain.dispatchQuery({
 
 When your application needs to stop — whether for a deployment, scaling event, or process signal — call `domain.shutdown()` to safely wind down the domain:
 
-```ts
+```ts title="main.ts"
 const domain = await wireDomain(bankingDomain, {
   /* wiring */
 });
@@ -609,7 +609,7 @@ Shutdown proceeds through four sequential phases:
 
 You can set a maximum duration for the drain phases:
 
-```ts
+```ts title="main.ts"
 await domain.shutdown({ timeoutMs: 10_000 }); // 10 seconds
 ```
 
@@ -619,7 +619,7 @@ The default timeout is 30 seconds. If in-flight operations do not complete withi
 
 Commands and queries dispatched after shutdown has started receive a `DomainShutdownError`:
 
-```ts
+```ts title="main.ts"
 import { DomainShutdownError } from "@noddde/engine";
 
 try {
@@ -639,7 +639,7 @@ Calling `shutdown()` multiple times returns the same promise. The shutdown seque
 
 If your custom infrastructure holds resources (database connections, file handles, network sockets), implement the `Closeable` interface so the domain releases them automatically:
 
-```ts
+```ts title="infrastructure/database-pool.ts"
 import type { Closeable } from "@noddde/core";
 
 class MyDatabasePool implements Closeable {

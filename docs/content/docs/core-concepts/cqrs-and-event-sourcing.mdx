@@ -38,7 +38,7 @@ The write model is where domain logic lives. Its primary building blocks are **a
 
 In the domain definition, the write model is declared under the `writeModel` key:
 
-```typescript
+```typescript title="domain.ts"
 import { defineDomain } from "@noddde/core";
 import { wireDomain } from "@noddde/engine";
 
@@ -70,7 +70,7 @@ The read model consumes events and builds **projections** -- query-optimized dat
 
 For queries that do not belong to any projection, noddde provides **standalone query handlers**.
 
-```typescript
+```typescript title="domain.ts"
 const bankingDomain = defineDomain({
   // ...
   readModel: {
@@ -106,7 +106,7 @@ For a detailed guide on defining sagas, `on` map entries, and handlers, see [Sag
 
 Communication between the write model, read model, and the outside world flows through three buses. Together they form the `CQRSInfrastructure`:
 
-```typescript
+```typescript title="packages/core/src/cqrs/cqrs-infrastructure.ts"
 interface CQRSInfrastructure {
   commandBus: CommandBus;
   eventBus: EventBus;
@@ -116,7 +116,7 @@ interface CQRSInfrastructure {
 
 **CommandBus** routes commands to the correct handler -- either an aggregate's decide handler or a standalone command handler, based on the command's `name`.
 
-```typescript
+```typescript title="packages/core/src/cqrs/command-bus.ts"
 interface CommandBus {
   dispatch(command: Command): Promise<void>;
 }
@@ -124,7 +124,7 @@ interface CommandBus {
 
 **EventBus** distributes events to all interested subscribers. After an aggregate produces events, the framework dispatches each one through the event bus. Every projection with a matching reducer and every saga with a matching association receives it.
 
-```typescript
+```typescript title="packages/core/src/edd/event-bus.ts"
 interface EventBus {
   dispatch<TEvent extends Event>(event: TEvent): Promise<void>;
 }
@@ -132,7 +132,7 @@ interface EventBus {
 
 **QueryBus** routes queries to the appropriate handler and returns the result. It connects the outside world to the read model.
 
-```typescript
+```typescript title="packages/core/src/cqrs/query-bus.ts"
 interface QueryBus {
   dispatch<TQuery extends Query<any>>(
     query: TQuery,
@@ -142,7 +142,7 @@ interface QueryBus {
 
 noddde ships with in-memory implementations of all three buses for development and testing:
 
-```typescript
+```typescript title="main.ts"
 import {
   InMemoryCommandBus,
   EventEmitterEventBus,
@@ -191,7 +191,7 @@ The event stream is an append-only log. Events are never modified or deleted. Ea
 
 noddde supports event sourcing through the `EventSourcedAggregatePersistence` interface:
 
-```typescript
+```typescript title="packages/core/src/persistence/event-sourced-aggregate-persistence.ts"
 interface EventSourcedAggregatePersistence {
   save(
     aggregateName: string,
@@ -212,7 +212,7 @@ When a command arrives for an aggregate instance, the framework follows this seq
 
 The conceptual replay logic looks like this:
 
-```typescript
+```typescript title="replay-state.ts"
 function replayState<T extends AggregateTypes>(
   aggregate: Aggregate<T>,
   events: Event[],
@@ -230,7 +230,7 @@ This is why the evolve handlers in a noddde aggregate are so important. They are
 
 Not every aggregate needs event sourcing. noddde also supports **state-stored persistence**, where the framework saves and loads the final state directly:
 
-```typescript
+```typescript title="packages/core/src/persistence/state-stored-aggregate-persistence.ts"
 interface StateStoredAggregatePersistence {
   save(aggregateName: string, aggregateId: string, state: any): Promise<void>;
   load(aggregateName: string, aggregateId: string): Promise<any>;
@@ -241,7 +241,7 @@ With state-stored persistence, events are still produced by decide handlers and 
 
 The key design choice: **the aggregate definition does not change** between event-sourced and state-stored persistence. The same `defineAggregate` with the same `decide` and `evolve` handlers works with either strategy. The persistence strategy is a deployment decision, not a domain modeling decision.
 
-```typescript
+```typescript title="bank-account/bank-account.ts"
 // This aggregate works identically with either persistence strategy
 const BankAccount = defineAggregate<BankAccountTypes>({
   initialState: { balance: 0, status: "active" },

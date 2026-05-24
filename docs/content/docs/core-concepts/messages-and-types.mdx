@@ -31,7 +31,7 @@ Every message in noddde follows the same structural pattern: a **name** field th
 
 ### The Command Interface
 
-```typescript
+```typescript title="packages/core/src/cqrs/command.ts"
 interface Command {
   name: string;
   payload?: any;
@@ -43,7 +43,7 @@ The optional `commandId` field enables [idempotent command processing](/docs/run
 
 Commands that target a specific aggregate instance extend this with `targetAggregateId`, which tells the framework which aggregate instance should handle the command:
 
-```typescript
+```typescript title="packages/core/src/cqrs/command.ts"
 interface AggregateCommand<TID extends ID = string> extends Command {
   targetAggregateId: TID;
 }
@@ -53,7 +53,7 @@ Commands that do not target an aggregate (for example, commands handled by stand
 
 ### The Event Interface
 
-```typescript
+```typescript title="packages/core/src/edd/event.ts"
 interface Event {
   name: string;
   payload: any;
@@ -65,7 +65,7 @@ Events have a required `payload` (unlike commands where it is optional) — ever
 
 ### The Query Interface
 
-```typescript
+```typescript title="packages/core/src/cqrs/query.ts"
 interface Query<TResult> {
   name: string;
   payload?: any;
@@ -84,7 +84,7 @@ The `name` field is the key to type safety in noddde. When you define multiple c
 
 Consider a set of banking events:
 
-```typescript
+```typescript title="event-model/index.ts"
 type BankingEvent =
   | { name: "BankAccountCreated"; payload: { id: string } }
   | {
@@ -96,7 +96,7 @@ type BankingEvent =
 
 TypeScript can narrow the type based on the `name` field. Inside a `switch` statement, each `case` branch knows the exact shape of the payload:
 
-```typescript
+```typescript title="describe-event.ts"
 function describeEvent(event: BankingEvent): string {
   switch (event.name) {
     case "BankAccountCreated":
@@ -126,7 +126,7 @@ The `DefineCommands` and `DefineEvents` utility types are the foundation of nodd
 
 Without these utilities, defining a set of typed commands requires writing each variant of the union by hand:
 
-```typescript
+```typescript title="bank-account/commands/index-manual.ts"
 // Without DefineCommands — verbose and error-prone
 type BankingCommand =
   | { name: "CreateBankAccount"; targetAggregateId: string }
@@ -149,7 +149,7 @@ Every variant repeats `targetAggregateId: string`. Commands without payloads mus
 
 With `DefineCommands`, you express the same type as a simple mapping from command names to payload types:
 
-```typescript
+```typescript title="bank-account/bank-account.ts"
 import { DefineCommands, DefineEvents } from "@noddde/core";
 
 // With DefineCommands — concise and correct by construction
@@ -177,7 +177,7 @@ Let's trace through the type transformation for the banking commands above.
 
 The `DefineCommands` type is defined as:
 
-```typescript
+```typescript title="packages/core/src/cqrs/command.ts"
 type DefineCommands<
   TPayloads extends Record<string, any>,
   TID extends ID = string,
@@ -192,7 +192,7 @@ type DefineCommands<
 
 Applied to our input, this produces an intermediate object type:
 
-```typescript
+```typescript title="define-commands-phase-1.ts"
 {
   CreateBankAccount: {
     name: "CreateBankAccount";
@@ -222,7 +222,7 @@ Applied to our input, this produces an intermediate object type:
 
 **Phase 2: Indexed access to union.** The `[keyof TPayloads & string]` at the end indexes into this object type with all keys at once, producing a union of all value types:
 
-```typescript
+```typescript title="define-commands-phase-2.ts"
 | { name: "CreateBankAccount"; targetAggregateId: string }
 | { name: "AuthorizeTransaction"; targetAggregateId: string; payload: { amount: number; merchant: string } }
 | { name: "DepositFunds"; targetAggregateId: string; payload: { amount: number } }
@@ -235,7 +235,7 @@ This is a proper discriminated union with `name` as the discriminant. TypeScript
 
 `DefineEvents` follows the same pattern, but simpler — events always have a payload (no `void` check) and do not carry `targetAggregateId`:
 
-```typescript
+```typescript title="packages/core/src/edd/event.ts"
 type DefineEvents<TPayloads extends Record<string, any>> = {
   [K in keyof TPayloads & string]: { name: K; payload: TPayloads[K] };
 }[keyof TPayloads & string];
@@ -243,7 +243,7 @@ type DefineEvents<TPayloads extends Record<string, any>> = {
 
 For the banking events payload map defined earlier, the result is:
 
-```typescript
+```typescript title="define-events-expanded.ts"
 | { name: "BankAccountCreated"; payload: { id: string } }
 | { name: "TransactionAuthorized"; payload: { id: string; amount: number; merchant: string } }
 | { name: "TransactionDeclined"; payload: { reason: string } }
@@ -269,7 +269,7 @@ This symmetry is intentional. Commands and events are both messages. They follow
 
 The second type parameter `TID` on `DefineCommands` defaults to `string`, but you can use any type that suits your domain:
 
-```typescript
+```typescript title="bank-account/commands/index.ts"
 // UUID-branded type
 type AccountId = string & { __brand: "AccountId" };
 
@@ -288,7 +288,7 @@ type BankingCommand = DefineCommands<
 
 When a command's payload type is `void`, the resulting type has no `payload` field at all. This is not the same as `payload: undefined` — the field is completely absent from the type, which prevents you from accidentally passing data where none is expected:
 
-```typescript
+```typescript title="void-payload-example.ts"
 type MyCommands = DefineCommands<{
   CreateBankAccount: void;
   AuthorizeTransaction: { amount: number; merchant: string };
@@ -313,7 +313,7 @@ const auth: MyCommands = {
 
 When defining an aggregate, you need to specify several related types: the state shape, the command union, the event union, and the infrastructure type. A naive approach would use positional generics:
 
-```typescript
+```typescript title="positional-generics-hypothetical.ts"
 // Hypothetical positional generics — NOT how noddde works
 defineAggregate<
   BankAccountState,
@@ -332,7 +332,7 @@ This is fragile. Five generic parameters in a specific order are hard to read, e
 
 noddde uses a single named types bundle instead:
 
-```typescript
+```typescript title="packages/core/src/ddd/aggregate.ts"
 type AggregateTypes = {
   state: any;
   events: Event;
@@ -343,7 +343,7 @@ type AggregateTypes = {
 
 You define your aggregate's types bundle as a concrete type:
 
-```typescript
+```typescript title="bank-account/bank-account.ts"
 type BankAccountTypes = {
   state: BankAccountState;
   commands: BankingCommand;
@@ -354,7 +354,7 @@ type BankAccountTypes = {
 
 Then pass it as a single generic parameter:
 
-```typescript
+```typescript title="bank-account/bank-account.ts"
 const BankAccount = defineAggregate<BankAccountTypes>({
   initialState: { balance: 0, status: "active" },
   decide: {
@@ -370,7 +370,7 @@ const BankAccount = defineAggregate<BankAccountTypes>({
 
 The `AggregateTypes` bundle is not just a convenience for the developer — it is the mechanism that powers the framework's type inference. The `Aggregate` interface uses the bundle to generate correctly typed handler maps:
 
-```typescript
+```typescript title="packages/core/src/ddd/aggregate.ts"
 // How the framework uses the bundle internally
 type DecideHandlerMap<T extends AggregateTypes> = {
   [K in T["commands"]["name"]]: DecideHandler<
@@ -398,7 +398,7 @@ This means that when you write a decide handler for `AuthorizeTransaction`, Type
 
 You get this without writing a single type annotation on the handler function:
 
-```typescript
+```typescript title="bank-account/bank-account.ts"
 decide: {
   // TypeScript infers all parameter types from the bundle
   AuthorizeTransaction: (command, state, infrastructure) => {
@@ -421,7 +421,7 @@ decide: {
 
 Similarly, in evolve handlers, the event payload type is narrowed per handler:
 
-```typescript
+```typescript title="bank-account/bank-account.ts"
 evolve: {
   // TypeScript knows: event is { amount: number; merchant: string }
   // (the payload of TransactionAuthorized)
@@ -436,7 +436,7 @@ evolve: {
 
 Compare reading the bundle:
 
-```typescript
+```typescript title="bank-account/bank-account.ts"
 type BankAccountTypes = {
   state: BankAccountState;
   commands: BankingCommand;
@@ -447,7 +447,7 @@ type BankAccountTypes = {
 
 Versus reading positional generics:
 
-```typescript
+```typescript title="positional-generics-comparison.ts"
 defineAggregate<BankAccountState, BankingCommand, BankingEvent, string, MyInfrastructure>({...})
 ```
 
@@ -473,7 +473,7 @@ At every step, TypeScript infers the types from the previous step. You declare t
 
 noddde provides utility types for extracting individual types from an aggregate definition. These are useful when you need to reference an aggregate's types outside of the aggregate definition itself — for example, in tests, in projections, or in utility functions.
 
-```typescript
+```typescript title="packages/core/src/ddd/aggregate.ts"
 type InferAggregateState<T extends Aggregate> =
   T extends Aggregate<infer U> ? U["state"] : never;
 
@@ -496,7 +496,7 @@ Use inference helpers when you have an aggregate value (the result of `defineAgg
 
 **Example: Typing a test helper.**
 
-```typescript
+```typescript title="__tests__/apply-events.ts"
 import { InferAggregateState, InferAggregateEvents } from "@noddde/core";
 
 // Extract types from the aggregate value
@@ -513,7 +513,7 @@ function applyEvents(events: BankEvent[]): BankState {
 
 **Example: Typing a projection's event handler.**
 
-```typescript
+```typescript title="handle-event.ts"
 import { InferAggregateEvents } from "@noddde/core";
 
 type AllBankEvents = InferAggregateEvents<typeof BankAccount>;
@@ -534,7 +534,7 @@ function handleEvent(event: AllBankEvents): void {
 
 If you already have the types bundle (e.g., `BankAccountTypes`), you can access the types directly:
 
-```typescript
+```typescript title="types-direct-access.ts"
 // Direct access — no inference helper needed
 type State = BankAccountTypes["state"];
 type Events = BankAccountTypes["events"];
@@ -549,7 +549,7 @@ The inference helpers are for when you only have the aggregate value (the result
 
 The most common mistake when using noddde's type system is over-annotating. You almost never need to write type annotations on handler parameters:
 
-```typescript
+```typescript title="bank-account/bank-account.ts"
 // Unnecessary — TypeScript already knows these types
 decide: {
   AuthorizeTransaction: (
@@ -569,7 +569,7 @@ decide: {
 
 Always assign the types bundle to a named type alias rather than inlining it:
 
-```typescript
+```typescript title="bank-account/bank-account.ts"
 // Good — readable and reusable
 type BankAccountTypes = {
   state: BankAccountState;
@@ -597,7 +597,7 @@ const BankAccount = defineAggregate<{
 
 When your state includes literal types (like status strings), use `as const` to preserve the literal type:
 
-```typescript
+```typescript title="bank-account/state.ts"
 initialState: {
   balance: 0,
   status: "active" as const,  // Type is "active", not string

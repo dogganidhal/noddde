@@ -9,7 +9,7 @@ The Clock pattern is the canonical example of infrastructure injection in noddde
 
 Consider an auction system where bids are rejected if the auction has ended:
 
-```ts
+```ts title="auction/auction.ts"
 // Problematic: direct Date call
 decide: {
   PlaceBid: (command, state) => {
@@ -32,7 +32,7 @@ This handler is non-deterministic. It produces different results depending on wh
 
 Define a `Clock` interface and inject it through infrastructure:
 
-```ts
+```ts title="infrastructure/clock.ts"
 // Interface — the capability your domain needs
 interface Clock {
   now(): Date;
@@ -56,7 +56,7 @@ class FixedClock implements Clock {
 
 Add it to your infrastructure type:
 
-```ts
+```ts title="infrastructure/index.ts"
 interface AuctionInfrastructure {
   clock: Clock;
 }
@@ -64,7 +64,7 @@ interface AuctionInfrastructure {
 
 Use it in the decide handler:
 
-```ts
+```ts title="auction/auction.ts"
 decide: {
   PlaceBid: (command, state, { clock }) => {
     const now = clock.now(); // Deterministic!
@@ -87,7 +87,7 @@ decide: {
 
 Now tests are deterministic and clear:
 
-```ts
+```ts title="__tests__/auction-place-bid.test.ts"
 describe("PlaceBid", () => {
   const auctionEndsAt = new Date("2024-06-01T00:00:00Z");
   const openAuctionState: AuctionState = {
@@ -139,7 +139,7 @@ describe("PlaceBid", () => {
 
 In production, provide `SystemClock` via the `infrastructure` field in `wireDomain`:
 
-```ts
+```ts title="main.ts"
 import { defineDomain } from "@noddde/core";
 import { wireDomain } from "@noddde/engine";
 

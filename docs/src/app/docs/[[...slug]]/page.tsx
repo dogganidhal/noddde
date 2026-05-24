@@ -8,6 +8,7 @@ import {
 import { notFound } from "next/navigation";
 import defaultMdxComponents from "fumadocs-ui/mdx";
 import { File, Folder, Files } from "fumadocs-ui/components/files";
+import { Step, Steps } from "fumadocs-ui/components/steps";
 import { Mermaid } from "@/components/mermaid";
 import { PreWithTitle } from "@/components/code-block";
 import type { Metadata } from "next";
@@ -35,6 +36,8 @@ export default async function Page(props: {
             Files,
             File,
             Folder,
+            Steps,
+            Step,
             Mermaid,
           }}
         />

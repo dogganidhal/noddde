@@ -13,7 +13,7 @@ yarn add @noddde/kafka kafkajs
 
 ## Configuration
 
-```ts
+```ts title="infrastructure/event-bus.ts"
 import { KafkaEventBus } from "@noddde/kafka";
 
 const eventBus = new KafkaEventBus({
@@ -52,7 +52,7 @@ const eventBus = new KafkaEventBus({
 
 ## Wiring with Domain
 
-```ts
+```ts title="main.ts"
 import { wireDomain } from "@noddde/engine";
 import { KafkaEventBus } from "@noddde/kafka";
 

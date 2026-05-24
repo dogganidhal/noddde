@@ -7,7 +7,7 @@ description: Writing decide handler logic -- validation, returning events, infra
 
 Every aggregate decide handler has this shape:
 
-```typescript
+```typescript title="decide-handler-signature.ts"
 (command: TCommand, state: TState, infrastructure: TInfrastructure) =>
   TEvents | TEvents[] | Promise<TEvents | TEvents[]>;
 ```
@@ -46,8 +46,7 @@ We recommend extracting each decide handler to its own file typed with `InferDec
 
 The simplest case: the handler returns one event object.
 
-```typescript
-// deciders/decide-create-bank-account.ts
+```typescript title="bank-account/deciders/decide-create-bank-account.ts"
 import type { InferDecideHandler } from "@noddde/core";
 import type { BankAccountTypes } from "../bank-account";
 
@@ -67,8 +66,7 @@ export const decideCreateBankAccount: InferDecideHandler<
 
 A handler can return different events depending on the current state. This is how you model business rule validation:
 
-```typescript
-// deciders/decide-authorize-transaction.ts
+```typescript title="bank-account/deciders/decide-authorize-transaction.ts"
 import type { InferDecideHandler } from "@noddde/core";
 import type { BankAccountTypes } from "../bank-account";
 
@@ -110,8 +108,7 @@ Notice that both branches return an event. The handler does not throw an excepti
 
 Return an array when a single command produces multiple events:
 
-```typescript
-// deciders/decide-close-month.ts
+```typescript title="bank-account/deciders/decide-close-month.ts"
 import type { InferDecideHandler } from "@noddde/core";
 import type { BankAccountTypes } from "../bank-account";
 
@@ -147,8 +144,7 @@ Decide handlers are where business rules live. The `state` parameter contains th
 
 ### Balance Checking
 
-```typescript
-// deciders/decide-authorize-transaction.ts
+```typescript title="bank-account/deciders/decide-authorize-transaction.ts"
 import type { InferDecideHandler } from "@noddde/core";
 import type { BankAccountTypes } from "../bank-account";
 
@@ -184,8 +180,7 @@ export const decideAuthorizeTransaction: InferDecideHandler<
 
 ### Status Checking
 
-```typescript
-// deciders/decide-place-bid.ts
+```typescript title="auction/deciders/decide-place-bid.ts"
 import type { InferDecideHandler } from "@noddde/core";
 import type { AuctionTypes } from "../auction";
 
@@ -231,7 +226,7 @@ Each check inspects the current state and returns an appropriate rejection event
 
 noddde encourages modeling business rule violations as **rejection events** rather than thrown exceptions. When a transaction has insufficient funds, the handler returns a `TransactionDeclined` event. When a bid is too low, it returns a `BidRejected` event.
 
-```typescript
+```typescript title="bank-account/deciders/decide-authorize-transaction.ts"
 if (state.availableBalance < amount) {
   return {
     name: "TransactionDeclined",
@@ -258,7 +253,7 @@ Contrast this with throwing an exception: exceptions abort the command processin
 
 Throw exceptions only for truly unexpected situations -- programming errors, infrastructure failures, or invariants that indicate a bug in your code:
 
-```typescript
+```typescript title="bank-account/deciders/decide-authorize-transaction.ts"
 export const decideAuthorizeTransaction: InferDecideHandler<
   BankAccountTypes,
   "AuthorizeTransaction"
@@ -287,8 +282,7 @@ The rule of thumb: if a human user could cause this condition through normal use
 
 The third parameter gives you access to your domain infrastructure. Destructure the services you need directly in the function signature. `InferDecideHandler` automatically types the infrastructure from your `AggregateTypes` bundle:
 
-```typescript
-// deciders/decide-place-bid.ts
+```typescript title="auction/deciders/decide-place-bid.ts"
 import type { InferDecideHandler } from "@noddde/core";
 import type { AuctionTypes } from "../auction";
 
@@ -315,8 +309,7 @@ In tests, you inject fakes (a fixed clock, a stub fraud service). In production,
 
 When a handler needs several infrastructure services, destructure them all:
 
-```typescript
-// deciders/decide-authorize-transaction.ts
+```typescript title="bank-account/deciders/decide-authorize-transaction.ts"
 import type { InferDecideHandler } from "@noddde/core";
 import type { BankAccountTypes } from "../bank-account";
 
@@ -357,8 +350,7 @@ export const decideAuthorizeTransaction: InferDecideHandler<
 
 Handlers can be asynchronous when they need to call external infrastructure. Mark the handler with `async` and the framework will `await` it before persisting events:
 
-```typescript
-// deciders/decide-authorize-transaction.ts
+```typescript title="bank-account/deciders/decide-authorize-transaction.ts"
 import type { InferDecideHandler } from "@noddde/core";
 import type { BankAccountTypes } from "../bank-account";
 

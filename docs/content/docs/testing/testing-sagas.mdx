@@ -7,7 +7,7 @@ Sagas orchestrate workflows across aggregates by reacting to events and dispatch
 
 ## testSaga
 
-```ts
+```ts title="__tests__/order-fulfillment-saga.test.ts"
 import { testSaga } from "@noddde/testing";
 
 const result = await testSaga(OrderFulfillmentSaga)
@@ -42,7 +42,7 @@ expect(result.commands).toEqual([
 
 ### Result Shape
 
-```ts
+```ts title="saga-test-result.ts"
 type SagaTestResult<TState, TCommands> = {
   state: TState; // New saga state
   commands: TCommands[]; // Commands to dispatch (always an array, empty if none)
@@ -56,7 +56,7 @@ Commands are always normalized to an array, even when the handler returns a sing
 
 When no `.givenState()` is called, the handler receives `saga.initialState`:
 
-```ts
+```ts title="__tests__/order-fulfillment-saga-startup.test.ts"
 const result = await testSaga(OrderFulfillmentSaga)
   .when({
     name: "OrderPlaced",
@@ -78,7 +78,7 @@ expect(result.commands).toEqual([
 
 Some saga handlers update state without dispatching commands:
 
-```ts
+```ts title="__tests__/order-fulfillment-saga-state-only.test.ts"
 const result = await testSaga(OrderFulfillmentSaga)
   .givenState({ status: "fulfilled", orderId: "o-1" })
   .when({
@@ -101,7 +101,7 @@ Most saga handlers return commands in the reaction rather than dispatching throu
 
 When saga handlers use domain-specific infrastructure (notification services, APIs, etc.), provide it via `.withInfrastructure()`:
 
-```ts
+```ts title="__tests__/notification-saga.test.ts"
 const mockNotifier = { send: vi.fn().mockResolvedValue(undefined) };
 
 const result = await testSaga(NotificationSaga)
@@ -121,7 +121,7 @@ expect(mockNotifier.send).toHaveBeenCalledWith(
 
 In rare cases where a saga handler calls `commandBus.dispatch` directly (instead of returning commands in the reaction), override the CQRS buses:
 
-```ts
+```ts title="__tests__/special-saga.test.ts"
 const mockDispatch = vi.fn().mockResolvedValue(undefined);
 
 const result = await testSaga(SpecialSaga)
@@ -138,7 +138,7 @@ expect(mockDispatch).toHaveBeenCalled();
 
 If a saga handler throws, the error is captured:
 
-```ts
+```ts title="__tests__/strict-saga.test.ts"
 const result = await testSaga(StrictSaga)
   .givenState({ validated: false })
   .when({ name: "InvalidEvent", payload: { bad: true } })
@@ -152,7 +152,7 @@ expect(result.commands).toEqual([]);
 
 Each on-entry bundles an `id` function that extracts the saga instance ID from an event. Since on-entries are extracted to standalone files, import them directly:
 
-```ts
+```ts title="__tests__/saga-id-extraction.test.ts"
 import { onOrderPlaced } from "./on-entries/on-order-placed";
 
 const sagaId = onOrderPlaced.id({
@@ -165,7 +165,7 @@ expect(sagaId).toBe("o-1");
 
 Each bounded context may name the correlation field differently (`orderId`, `referenceId`, `customerReference`), so verify that each on-entry's `id` function resolves to the same saga ID:
 
-```ts
+```ts title="__tests__/saga-id-multi-event.test.ts"
 import { onOrderPlaced } from "./on-entries/on-order-placed";
 import { onPaymentCompleted } from "./on-entries/on-payment-completed";
 
@@ -203,7 +203,7 @@ describe("on entry id extraction", () => {
 
 Replay a sequence of events through the saga to verify the complete lifecycle. Import the extracted on-entries and call their `handle` function directly:
 
-```ts
+```ts title="__tests__/order-fulfillment-saga-workflow.test.ts"
 import { onOrderPlaced } from "./on-entries/on-order-placed";
 import { onPaymentCompleted } from "./on-entries/on-payment-completed";
 import { onShipmentDispatched } from "./on-entries/on-shipment-dispatched";
