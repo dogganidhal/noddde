@@ -1,0 +1,16 @@
+{
+  "title": "Event Bus",
+  "description": "In-process and broker-backed event buses",
+  "icon": "radio",
+  "pages": [
+    "---Concepts---",
+    "[Adapters overview](/docs/running/event-bus-adapters)",
+    "---Adapters---",
+    "in-memory",
+    "kafka",
+    "nats",
+    "rabbitmq",
+    "---Reference---",
+    "custom-event-bus"
+  ]
+}

@@ -1,0 +1,70 @@
+---
+title: RabbitMQ Event Bus
+description: Reliable broker-backed event bus using RabbitMQ and amqplib with confirm-channel publishing and exponential-backoff reconnection.
+---
+
+The `@noddde/rabbitmq` package wraps `amqplib` to deliver events through RabbitMQ exchanges with confirm-channel publishing, durable queues, and indefinite mid-session reconnection.
+
+## Installation
+
+```bash
+yarn add @noddde/rabbitmq amqplib
+yarn add -D @types/amqplib
+```
+
+## Configuration
+
+```ts
+import { RabbitMqEventBus } from "@noddde/rabbitmq";
+
+const eventBus = new RabbitMqEventBus({
+  url: "amqp://localhost:5672",
+  exchangeName: "noddde.events", // optional (this is the default)
+  exchangeType: "topic", // optional — "topic" (default) or "fanout"
+  queuePrefix: "noddde", // optional — queues become "noddde.AccountCreated"
+  prefetchCount: 10, // optional — backpressure control
+  resilience: {
+    // optional — connection resilience with exponential backoff
+    maxAttempts: 3,
+    initialDelayMs: 1000,
+    maxDelayMs: 30000,
+  },
+});
+```
+
+| Option                      | Type                  | Required | Default                                   | Description                                                                                                               |
+| --------------------------- | --------------------- | -------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `url`                       | `string`              | Yes      | ---                                       | AMQP connection URL                                                                                                       |
+| `exchangeName`              | `string`              | No       | `"noddde.events"`                         | Exchange name for event publishing                                                                                        |
+| `exchangeType`              | `"topic" \| "fanout"` | No       | `"topic"`                                 | Exchange type                                                                                                             |
+| `queuePrefix`               | `string`              | No       | `"noddde"`                                | Queue name prefix                                                                                                         |
+| `prefetchCount`             | `number`              | No       | `10`                                      | Maximum unacknowledged messages per consumer. Provides backpressure control                                               |
+| `resilience.maxAttempts`    | `number`              | No       | `3`                                       | Maximum number of initial connection attempts. Mid-session reconnection retries indefinitely until `close()` is called    |
+| `resilience.initialDelayMs` | `number`              | No       | `1000`                                    | Initial delay between retries in milliseconds. Doubles on each retry                                                      |
+| `resilience.maxDelayMs`     | `number`              | No       | `30000`                                   | Maximum delay between retries in milliseconds                                                                             |
+| `logger`                    | `Logger`              | No       | `NodddeLogger("warn", "noddde:rabbitmq")` | Framework logger instance from `@noddde/core`. All internal logging goes through this logger with structured context data |
+
+## How It Works
+
+- **Publishing**: Events are serialized as JSON and published to the configured exchange with the event name as the routing key. Messages are marked `{ persistent: true }` for durability. When `event.metadata.eventId` is present, it is set as the AMQP `messageId` property, giving consumers a stable identifier for retry tracking. The bus uses a **confirm channel** (`createConfirmChannel`) and awaits `waitForConfirms()` after each publish, guaranteeing the broker has accepted the message before `dispatch()` resolves.
+- **Subscribing**: Each event name gets a dedicated durable queue (`${queuePrefix}.${eventName}`) bound to the exchange. Multiple handlers for the same event are invoked in parallel via `Promise.allSettled()` — every handler runs to completion even when some fail, and each failure is logged individually with structured fields (see [Handler Error Isolation](/docs/running/event-bus-adapters#handler-error-isolation)). Consumers must be idempotent since handlers that completed before a sibling failure will re-execute on redelivery.
+- **Delivery**: At-least-once with manual acknowledgment. On handler success, the message is acked. On any handler failure, the first rejection is re-thrown after all siblings have settled, and the consume callback calls `channel.nack(msg, false, true)` for requeue.
+- **Poison message protection**: Malformed messages that fail JSON deserialization are acknowledged and skipped, preventing infinite nack/requeue loops. If `resilience.maxRetries` is configured, messages that exceed the delivery count limit (tracked via an in-memory counter per message) are also acknowledged and discarded. The in-memory approach is used instead of `x-death` headers because `x-death` requires a dead-letter exchange to be configured.
+- **Backpressure**: The `prefetchCount` option limits how many unacknowledged messages the broker sends to this consumer, providing natural backpressure when handlers are slow.
+- **Connection resilience**: The `resilience` option enables retry with exponential backoff on initial connection failure. Delay doubles on each attempt, capped at `maxDelayMs`. If all attempts fail, the last error is thrown. After a successful connection, `error` and `close` handlers are registered on the AMQP connection to detect unexpected disconnections. On unexpected close, the bus automatically attempts reconnection **indefinitely** using jittered exponential backoff (base delay doubles each attempt, capped at `maxDelayMs`, with +-25% random jitter to prevent thundering herd). Unlike the initial `connect()`, mid-session reconnection ignores `maxAttempts` and retries until either the broker recovers or `close()` is called. During reconnection, `dispatch()` rejects with a connection error. Once reconnected, the exchange and all consumers are re-established automatically.
+- **Logging**: All internal logging uses the framework `Logger` interface from `@noddde/core`. Pass a custom `logger` in the config or accept the default (`NodddeLogger("warn", "noddde:rabbitmq")`). All log calls include structured context data (event name, error details).
+
+## Wiring with Domain
+
+```ts
+import { wireDomain } from "@noddde/engine";
+import { RabbitMqEventBus } from "@noddde/rabbitmq";
+
+const domain = await wireDomain(myDomain, {
+  buses: () => ({
+    eventBus: new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+    }),
+  }),
+});
+```

@@ -1,0 +1,70 @@
+---
+title: Kafka Event Bus
+description: Distributed event bus using Apache Kafka via kafkajs, with at-least-once delivery and per-aggregate partition ordering.
+---
+
+The `@noddde/kafka` package wraps `kafkajs` to deliver events through Kafka topics with at-least-once semantics and per-aggregate partition ordering.
+
+## Installation
+
+```bash
+yarn add @noddde/kafka kafkajs
+```
+
+## Configuration
+
+```ts
+import { KafkaEventBus } from "@noddde/kafka";
+
+const eventBus = new KafkaEventBus({
+  brokers: ["localhost:9092"],
+  clientId: "my-service",
+  groupId: "my-service-group",
+  topicPrefix: "noddde.", // optional — topics become "noddde.AccountCreated"
+  sessionTimeout: 60000, // optional — increase for slow handlers
+  heartbeatInterval: 5000, // optional — must be < sessionTimeout / 3
+  resilience: { maxAttempts: 11, initialDelayMs: 500, maxRetries: 5 }, // optional — connection + delivery resilience
+  partitionKeyStrategy: "aggregateId", // optional — default uses aggregateId for per-aggregate ordering
+  // logger: myCustomLogger, // optional — defaults to NodddeLogger("warn", "noddde:kafka")
+});
+```
+
+| Option                 | Type                                                  | Required | Default                                               | Description                                                                                                                                                                                                                                                      |
+| ---------------------- | ----------------------------------------------------- | -------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `brokers`              | `string[]`                                            | Yes      | —                                                     | Kafka broker addresses                                                                                                                                                                                                                                           |
+| `clientId`             | `string`                                              | Yes      | —                                                     | Client identifier                                                                                                                                                                                                                                                |
+| `groupId`              | `string`                                              | Yes      | —                                                     | Consumer group ID. Events fan out across different group IDs                                                                                                                                                                                                     |
+| `topicPrefix`          | `string`                                              | No       | `""`                                                  | Prefix prepended to event names to form topic names                                                                                                                                                                                                              |
+| `sessionTimeout`       | `number`                                              | No       | `30000`                                               | Consumer session timeout in ms. Increase if handlers are slow                                                                                                                                                                                                    |
+| `heartbeatInterval`    | `number`                                              | No       | `3000`                                                | Consumer heartbeat interval in ms. Must be less than sessionTimeout/3                                                                                                                                                                                            |
+| `resilience`           | `BrokerResilience`                                    | No       | `maxAttempts=6, initialDelayMs=300, maxDelayMs=30000` | Connection resilience config. `maxAttempts` maps to kafkajs `retries` (minus 1), `initialDelayMs` to `initialRetryTime`, `maxDelayMs` to `maxRetryTime`. `maxRetries` limits per-message delivery attempts                                                       |
+| `partitionKeyStrategy` | `"aggregateId" \| ((event: Event) => string \| null)` | No       | `"aggregateId"`                                       | Strategy for deriving the Kafka message key. Default uses `event.metadata?.aggregateId` (stringified) for per-aggregate partition ordering, falling back to `null` (round-robin). A custom function receives the full event and returns the key string or `null` |
+| `logger`               | `Logger`                                              | No       | `NodddeLogger("warn", "noddde:kafka")`                | Framework logger instance from `@noddde/core`. All internal logging goes through this logger with structured context data                                                                                                                                        |
+
+## How It Works
+
+- **Publishing**: Events are serialized as JSON and sent to a Kafka topic derived from the event name (`${topicPrefix}${event.name}`). The message key is determined by the `partitionKeyStrategy` option: by default (`"aggregateId"`), the key is `event.metadata?.aggregateId` (stringified), ensuring per-aggregate partition ordering. If no `aggregateId` is present, the key is `null` (round-robin). A custom function can be provided to derive the key from the full event.
+- **Subscribing**: Handlers registered via `on()` receive messages through a Kafka consumer. Handlers registered before `connect()` are buffered and subscriptions are created when the connection is established. Multiple handlers for the same event are invoked in parallel via `Promise.allSettled()` — every handler runs to completion even when some fail, and each failure is logged individually with structured fields (see [Handler Error Isolation](/docs/running/event-bus-adapters#handler-error-isolation)).
+- **Delivery**: At-least-once. The consumer runs with `autoCommit: false` — offsets are committed explicitly via `consumer.commitOffsets()` only after all handlers complete successfully. If any handler fails, the first rejection is re-thrown after all siblings have settled (so the offset is not committed and the message is redelivered). After a successful commit, the in-memory delivery count entry for the message is pruned to prevent unbounded memory growth. Consumers must be idempotent — handlers that completed before a sibling failure will re-execute on redelivery.
+- **Poison message protection**: Malformed messages that fail JSON deserialization are logged and skipped (offset committed), preventing corrupt data from blocking the partition. If `resilience.maxRetries` is configured, messages that exceed the delivery attempt limit are also skipped with a warning.
+- **Connection resilience**: The optional `resilience` config (`BrokerResilience` from `@noddde/core`) is mapped to kafkajs retry options for automatic reconnection on broker unavailability. `maxAttempts` maps to kafkajs `retries` (minus 1, since kafkajs counts retries after the first attempt), `initialDelayMs` to `initialRetryTime`, and `maxDelayMs` to `maxRetryTime`. The `sessionTimeout` and `heartbeatInterval` options tune consumer rebalance behavior for slow handlers. Concurrent `connect()` calls are deduplicated via a connection promise mutex to prevent parallel connection attempts.
+- **Logging**: All internal logging uses the framework `Logger` interface from `@noddde/core`. Pass a custom `logger` in the config or accept the default (`NodddeLogger("warn", "noddde:kafka")`). All log calls include structured context data (event name, error details).
+
+## Wiring with Domain
+
+```ts
+import { wireDomain } from "@noddde/engine";
+import { KafkaEventBus } from "@noddde/kafka";
+
+const domain = await wireDomain(myDomain, {
+  buses: () => ({
+    eventBus: new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "my-service",
+      groupId: "my-service-group",
+    }),
+  }),
+});
+```
+
+The Domain auto-calls `connect()` on the event bus during wiring (via `Connectable` auto-discovery) and `close()` on shutdown (via `Closeable` auto-discovery). No manual lifecycle management needed.

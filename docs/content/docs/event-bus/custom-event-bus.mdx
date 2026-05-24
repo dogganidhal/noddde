@@ -1,0 +1,46 @@
+---
+title: Custom Event Bus
+description: Build your own EventBus implementation for any message transport — Redis Streams, Pub/Sub, NSQ, anything.
+---
+
+Implement the `EventBus` interface to integrate any transport that isn't covered by the shipped adapters.
+
+You can implement the `EventBus` interface directly for any message transport. If your bus needs an async connection step, also implement `Connectable` — the Domain will auto-call `connect()` during wiring:
+
+```ts
+import type {
+  EventBus,
+  AsyncEventHandler,
+  Connectable,
+  Event,
+} from "@noddde/core";
+
+export class RedisEventBus implements EventBus, Connectable {
+  private readonly handlers = new Map<string, AsyncEventHandler[]>();
+
+  async connect(): Promise<void> {
+    // Connect to Redis
+  }
+
+  on(eventName: string, handler: AsyncEventHandler): void {
+    const existing = this.handlers.get(eventName) ?? [];
+    this.handlers.set(eventName, [...existing, handler]);
+  }
+
+  async dispatch<TEvent extends Event>(event: TEvent): Promise<void> {
+    // Publish to Redis Streams, Pub/Sub, etc.
+  }
+
+  async close(): Promise<void> {
+    this.handlers.clear();
+    // Disconnect from Redis
+  }
+}
+```
+
+The requirements are:
+
+- `dispatch()` publishes to all subscribers for the event name.
+- `on()` supports multiple handlers per event name (fan-out).
+- `close()` releases all resources and is idempotent.
+- `connect()` (if implementing `Connectable`) establishes the connection and is idempotent.
