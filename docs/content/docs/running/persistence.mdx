@@ -570,7 +570,7 @@ const accountId = await domain.withUnitOfWork(async () => {
 
 ### Saga Unit of Work
 
-Saga reactions are automatically wrapped in a unit of work. When a saga handler dispatches commands, the saga state persistence and all dispatched command operations share a single unit of work:
+Saga reactions are automatically wrapped in a unit of work. By default (`atomicity: "atomic"`), the saga state persistence and all dispatched command operations share a single unit of work:
 
 ```
 Event arrives --> saga handler executes
@@ -581,6 +581,8 @@ Event arrives --> saga handler executes
 ```
 
 This ensures that saga state transitions and the commands they trigger are always consistent.
+
+A saga declared with [`atomicity: "best-effort"`](/docs/process-managers/sagas#atomicity) inverts this: its state is committed in its own unit of work **first**, and the reaction commands are then dispatched afterward, each obtaining its own unit of work. A reaction-command failure no longer rolls back the (already committed) saga-state transition.
 
 ### The UnitOfWork Interface
 
