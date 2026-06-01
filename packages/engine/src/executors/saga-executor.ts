@@ -1,6 +1,7 @@
 /* eslint-disable no-unused-vars */
 import { AsyncLocalStorage } from "node:async_hooks";
 import type {
+  Command,
   CQRSInfrastructure,
   Event,
   Infrastructure,
@@ -16,11 +17,19 @@ import type { Instrumentation } from "../tracing";
 
 /**
  * Executes the full saga event handling lifecycle: derive instance ID,
- * load state, bootstrap or resume, execute handler, persist state,
- * and dispatch reaction commands — all within an atomic unit of work.
+ * load state, bootstrap or resume, execute handler, persist state, and
+ * dispatch reaction commands.
  *
- * Creates its own UoW that spans saga state persistence and all
- * commands dispatched by the saga reaction, ensuring atomicity.
+ * The transactional coupling between saga-state persistence and
+ * reaction-command dispatch is selected per-saga by
+ * `saga.atomicity ?? "atomic"`:
+ *
+ * - **`"atomic"`** (default) — a single UoW spans the saga-state save and
+ *   all reaction commands; they commit or roll back together.
+ * - **`"best-effort"`** — the saga state is committed first, then reaction
+ *   commands are dispatched outside that UoW (each obtains its own UoW),
+ *   so command handlers that publish events directly observe the committed
+ *   saga state (issue #119). A command failure does not roll back the state.
  *
  * @internal Not exported — instantiated by {@link Domain} during init.
  */
@@ -124,74 +133,109 @@ export class SagaExecutor {
           userId: event.metadata?.userId,
         };
 
-        // Step 7: Create UoW for saga state persistence
+        // Step 7: Resolve atomicity mode (an absent field defaults to "atomic")
+        const mode = saga.atomicity ?? "atomic";
         const uow = this.unitOfWorkFactory();
         const sagaPersistence = this.sagaPersistence;
-        let events: Event[] = [];
 
-        // Step 8: Commit saga state FIRST, before dispatching commands.
-        // This ensures the saga executor finds persisted state when command
-        // handlers dispatch events synchronously through the event bus.
-        await this.uowStorage.run(uow, async () => {
-          await this.metadataStorage.run(sagaCtx, async () => {
-            try {
-              // Enlist saga state persistence
-              uow.enlist(() =>
-                sagaPersistence.save(sagaName, sagaId, reaction.state),
-              );
-
-              // Commit saga state + any deferred changes
-              const commitFn = () => uow.commit();
-              events = this.instrumentation
-                ? await this.instrumentation.withSpan(
-                    "noddde.uow.commit",
-                    { "noddde.saga.name": sagaName },
-                    commitFn,
-                  )
-                : await commitFn();
-
-              // Step 9: Publish all deferred events sequentially
-              for (const e of events) {
-                await this.infrastructure.eventBus.dispatch(e);
-              }
-
-              // Best-effort post-dispatch callback (e.g., mark outbox entries published)
-              if (this.onEventsDispatched && events.length > 0) {
-                try {
-                  await this.onEventsDispatched(events);
-                } catch {
-                  // Best-effort: relay will catch unpublished entries
-                }
-              }
-            } catch (error) {
-              this.logger?.error("Saga execution failed.", {
-                sagaName,
-                sagaId: String(sagaId),
-                eventName: event.name,
-                error: String(error),
-              });
-              try {
-                await uow.rollback();
-              } catch {
-                // UoW may already be completed if commit failed
-              }
-              throw error;
-            }
-          });
-        });
-
-        // Step 10: Dispatch commands outside UoW context (inside metadata context).
-        // Saga state is already persisted, so events dispatched by command handlers
-        // will find the saga state when processed by the saga executor.
-        // Each command creates its own UoW via CommandLifecycleExecutor.
-        if (reaction.commands) {
-          const commands = Array.isArray(reaction.commands)
+        const commands: Command[] = reaction.commands
+          ? Array.isArray(reaction.commands)
             ? reaction.commands
-            : [reaction.commands];
-          await this.metadataStorage.run(sagaCtx, async () => {
-            for (const command of commands) {
-              await this.infrastructure.commandBus.dispatch(command);
+            : [reaction.commands]
+          : [];
+
+        // Log, attempt a best-effort rollback, and re-throw. Used for the
+        // saga-state commit phase in both modes.
+        const failCommitPhase = async (error: unknown): Promise<never> => {
+          this.logger?.error("Saga execution failed.", {
+            sagaName,
+            sagaId: String(sagaId),
+            eventName: event.name,
+            error: String(error),
+          });
+          try {
+            await uow.rollback();
+          } catch {
+            // UoW may already be completed if commit failed
+          }
+          throw error;
+        };
+
+        // Commit the saga's UoW and publish its deferred events sequentially
+        // (sequential dispatch preserves causal ordering), then run the
+        // best-effort post-dispatch callback. The caller enlists beforehand.
+        const commitAndPublish = async (): Promise<void> => {
+          const commitFn = () => uow.commit();
+          const events = this.instrumentation
+            ? await this.instrumentation.withSpan(
+                "noddde.uow.commit",
+                { "noddde.saga.name": sagaName },
+                commitFn,
+              )
+            : await commitFn();
+
+          for (const e of events) {
+            await this.infrastructure.eventBus.dispatch(e);
+          }
+
+          // Best-effort post-dispatch callback (e.g., mark outbox entries published)
+          if (this.onEventsDispatched && events.length > 0) {
+            try {
+              await this.onEventsDispatched(events);
+            } catch {
+              // Best-effort: relay will catch unpublished entries
             }
+          }
+        };
+
+        const dispatchCommands = async (): Promise<void> => {
+          for (const command of commands) {
+            await this.infrastructure.commandBus.dispatch(command);
+          }
+        };
+
+        if (mode === "best-effort") {
+          // Best-effort: commit the saga state FIRST, then dispatch reaction
+          // commands OUTSIDE the saga's UoW (each obtains its own UoW via the
+          // CommandLifecycleExecutor) but still inside the metadata context.
+          // Because the saga state is already durable, command handlers that
+          // publish events directly via the event bus — and any re-entrant
+          // saga executions they trigger — observe the committed state
+          // (issue #119). A command failure after commit does NOT roll back
+          // the saga state; it propagates.
+          await this.uowStorage.run(uow, async () => {
+            await this.metadataStorage.run(sagaCtx, async () => {
+              try {
+                uow.enlist(() =>
+                  sagaPersistence.save(sagaName, sagaId, reaction.state),
+                );
+                await commitAndPublish();
+              } catch (error) {
+                await failCommitPhase(error);
+              }
+            });
+          });
+
+          if (commands.length > 0) {
+            await this.metadataStorage.run(sagaCtx, dispatchCommands);
+          }
+        } else {
+          // Atomic (default): the saga's UoW spans the saga-state save and all
+          // reaction commands, so they commit or roll back together. Aggregate
+          // command handlers enlist on this same UoW (explicit-UoW path) and
+          // their events are deferred until commit.
+          await this.uowStorage.run(uow, async () => {
+            await this.metadataStorage.run(sagaCtx, async () => {
+              try {
+                uow.enlist(() =>
+                  sagaPersistence.save(sagaName, sagaId, reaction.state),
+                );
+                await dispatchCommands();
+                await commitAndPublish();
+              } catch (error) {
+                await failCommitPhase(error);
+              }
+            });
           });
         }
       };
