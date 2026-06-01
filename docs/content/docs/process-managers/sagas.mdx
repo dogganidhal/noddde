@@ -424,6 +424,45 @@ const domain = await wireDomain(ecommerceDomain, {
 
 The `processModel` section is separate because sagas are neither pure write-model (they subscribe to events) nor pure read-model (they dispatch commands). They bridge both sides.
 
+## Atomicity
+
+By default, a saga's state transition and the commands it returns are **atomic**: the saga state save and every reaction command share a single unit of work, so they commit or roll back together. If any reaction command fails, the saga-state transition is rolled back too.
+
+You can change this per-saga with the optional `atomicity` field on the definition:
+
+```ts title="saga.ts"
+export const OrderFulfillmentSaga = defineSaga<OrderFulfillmentSagaDef>({
+  atomicity: "atomic", // (default) or "best-effort"
+  initialState: {
+    /* ... */
+  },
+  startedBy: ["OrderPlaced"],
+  on: {
+    /* ... */
+  },
+});
+```
+
+| Mode                   | Coupling                                                                                                          | On reaction-command failure                                                                                                      |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `"atomic"` _(default)_ | Saga-state save and all reaction commands share one unit of work.                                                 | The whole reaction rolls back — saga state is **not** persisted.                                                                 |
+| `"best-effort"`        | Saga state is committed **first**, then reaction commands are dispatched afterward, each in its own unit of work. | The (already committed) saga state **stays persisted**; the failing command's own changes roll back. The error still propagates. |
+
+<Callout type="info">
+  `atomicity` is purely declarative on the definition — `defineSaga` does not
+  read, validate, or default it. The engine's saga executor consumes it, and
+  treats an absent field as `"atomic"`, so existing sagas keep their current
+  behavior.
+</Callout>
+
+### When to use `best-effort`
+
+Choose `best-effort` when a reaction command's handler publishes a follow-up event **directly** through the event bus (the off-path pattern that [standalone command handlers](/docs/process-managers/standalone-commands) must use, since they have no "return events" channel) and that event needs to advance the **same** saga instance.
+
+Under `atomic`, reaction commands run inside the saga's still-uncommitted unit of work, so a re-entrant event dispatched by a command handler loads `null` saga state and is silently dropped — the saga never advances. Committing the saga state first (`best-effort`) makes that re-entrant event observe the persisted state and resume the saga. This is the fix for the silent event loss in [issue #119](https://github.com/dogganidhal/noddde/issues/119).
+
+If your aggregates follow the **golden path** — deciders **return** events rather than dispatching them, and the engine publishes those events only after the unit of work commits — `atomic` is correct and you do not need `best-effort`.
+
 ## Type Inference Helpers
 
 Like aggregates and projections, sagas have `Infer*` helpers. The most commonly used is `InferSagaOnEntry`, which types an extracted on-entry in its own file:

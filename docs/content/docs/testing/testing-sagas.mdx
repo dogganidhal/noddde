@@ -265,6 +265,12 @@ it("should complete the full happy path", async () => {
 });
 ```
 
+## Atomicity Mode and testSaga
+
+`testSaga` exercises a saga handler in isolation — event in, reaction out — without the engine's unit of work, persistence, or command dispatch. A saga's [`atomicity`](/docs/process-managers/sagas#atomicity) setting (`"atomic"` vs `"best-effort"`) only governs how the **engine** couples the state commit with reaction-command dispatch at runtime, so it has no effect on a `testSaga` result: the returned `state` and `commands` are identical in either mode.
+
+To verify mode-dependent behavior — for example, that a `best-effort` saga commits its state before dispatching commands, or resumes when a command handler publishes a consumed event — drive the saga through the engine with [`testDomain`](/docs/testing/testing-domains) instead.
+
 ## Next Steps
 
 - [Testing Domains](/docs/testing/testing-domains) -- `testDomain` for full saga orchestration tests across aggregates and projections

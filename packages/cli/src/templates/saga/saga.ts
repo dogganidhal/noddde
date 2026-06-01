@@ -23,6 +23,11 @@ type ${ctx.name}SagaDef = {
 // ── Saga definition ─────────────────────────────────────────────
 
 export const ${ctx.name}Saga = defineSaga<${ctx.name}SagaDef>({
+  // atomicity defaults to "atomic" (state + reaction commands commit together).
+  // Set "best-effort" to commit saga state before dispatching commands — needed
+  // when a command handler publishes a consumed event directly via the event bus.
+  // atomicity: "best-effort",
+
   initialState: initial${ctx.name}SagaState,
 
   startedBy: [
