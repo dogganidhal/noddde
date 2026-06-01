@@ -5,6 +5,7 @@ import { defineSaga } from "@noddde/core";
 import type {
   SagaTypes,
   DefineEvents,
+  Event,
   Infrastructure,
   CQRSInfrastructure,
   UnitOfWork,
@@ -368,10 +369,9 @@ describe("SagaExecutor", () => {
       }),
     ).rejects.toThrow("Command failed");
 
-    // Saga state IS persisted even when a command fails — state commits
-    // before commands, so a downstream command failure does not roll it back.
+    // Saga state should NOT be persisted due to rollback
     const state = await sagaPersistence.load("RbSaga", "rb1");
-    expect(state).toEqual({ ran: true });
+    expect(state).toBeUndefined();
   });
 
   // ============================================================
@@ -468,5 +468,296 @@ describe("SagaExecutor", () => {
 
     const state = await sagaPersistence.load("FlowSaga", "flow-1");
     expect(state).toEqual({ steps: ["started", "continued"] });
+  });
+});
+
+type BeRbState = { ran: boolean };
+type BeRbEvent = DefineEvents<{ BeRbTrigger: { id: string } }>;
+type BeRbTypes = SagaTypes & {
+  state: BeRbState;
+  events: BeRbEvent;
+  commands: never;
+  infrastructure: Infrastructure & CQRSInfrastructure;
+};
+
+const BeRbSaga = defineSaga<BeRbTypes>({
+  atomicity: "best-effort",
+  initialState: { ran: false },
+  startedBy: ["BeRbTrigger"],
+  on: {
+    BeRbTrigger: {
+      id: (event) => event.payload.id,
+      handle: () => ({
+        state: { ran: true },
+        commands: {
+          name: "FailingCmd",
+          payload: {},
+          targetAggregateId: "fail-be",
+        },
+      }),
+    },
+  },
+});
+
+describe("SagaExecutor best-effort", () => {
+  it("should persist saga state even when a command throws", async () => {
+    const sagaPersistence = new InMemorySagaPersistence();
+    const commandBus = new InMemoryCommandBus();
+    commandBus.register("FailingCmd", async () => {
+      throw new Error("Command failed");
+    });
+    const infrastructure: Infrastructure & CQRSInfrastructure = {
+      commandBus,
+      eventBus: new EventEmitterEventBus(),
+      queryBus: new InMemoryQueryBus(),
+    };
+    const uowStorage = new AsyncLocalStorage<UnitOfWork>();
+    const metadataStorage = new AsyncLocalStorage<MetadataContext>();
+
+    const executor = new SagaExecutor(
+      infrastructure,
+      sagaPersistence,
+      createInMemoryUnitOfWork,
+      uowStorage,
+      metadataStorage,
+    );
+
+    await expect(
+      executor.execute("BeRbSaga", BeRbSaga, {
+        name: "BeRbTrigger",
+        payload: { id: "be1" },
+      }),
+    ).rejects.toThrow("Command failed");
+
+    // Saga state IS persisted — committed before the command ran.
+    const state = await sagaPersistence.load("BeRbSaga", "be1");
+    expect(state).toEqual({ ran: true });
+  });
+});
+
+type OrderingState = { phase: string };
+type OrderingEvent = DefineEvents<{ Begin: { id: string } }>;
+type OrderingTypes = SagaTypes & {
+  state: OrderingState;
+  events: OrderingEvent;
+  commands: never;
+  infrastructure: Infrastructure & CQRSInfrastructure;
+};
+
+const OrderingSaga = defineSaga<OrderingTypes>({
+  atomicity: "best-effort",
+  initialState: { phase: "init" },
+  startedBy: ["Begin"],
+  on: {
+    Begin: {
+      id: (event) => event.payload.id,
+      handle: () => ({
+        state: { phase: "committed" },
+        commands: { name: "Probe", payload: {}, targetAggregateId: "p1" },
+      }),
+    },
+  },
+});
+
+describe("SagaExecutor best-effort (commit ordering)", () => {
+  it("should have committed saga state by the time the command handler runs", async () => {
+    const sagaPersistence = new InMemorySagaPersistence();
+    const commandBus = new InMemoryCommandBus();
+    const uowStorage = new AsyncLocalStorage<UnitOfWork>();
+    const metadataStorage = new AsyncLocalStorage<MetadataContext>();
+
+    let stateSeenByCommand: unknown;
+    commandBus.register("Probe", async () => {
+      stateSeenByCommand = await sagaPersistence.load("OrderingSaga", "o1");
+    });
+
+    const infrastructure: Infrastructure & CQRSInfrastructure = {
+      commandBus,
+      eventBus: new EventEmitterEventBus(),
+      queryBus: new InMemoryQueryBus(),
+    };
+
+    const executor = new SagaExecutor(
+      infrastructure,
+      sagaPersistence,
+      createInMemoryUnitOfWork,
+      uowStorage,
+      metadataStorage,
+    );
+
+    await executor.execute("OrderingSaga", OrderingSaga, {
+      name: "Begin",
+      payload: { id: "o1" },
+    });
+
+    // The command handler observed the already-committed saga state.
+    expect(stateSeenByCommand).toEqual({ phase: "committed" });
+  });
+});
+
+type TaskState = { step: "initial" | "processing" | "done" };
+type TaskEvent = DefineEvents<{
+  StartTask: { taskId: string };
+  ProcessCompleted: { taskId: string };
+}>;
+type TaskTypes = SagaTypes & {
+  state: TaskState;
+  events: TaskEvent;
+  commands: never;
+  infrastructure: Infrastructure & CQRSInfrastructure;
+};
+
+const BestEffortTaskSaga = defineSaga<TaskTypes>({
+  atomicity: "best-effort",
+  initialState: { step: "initial" },
+  startedBy: ["StartTask"],
+  on: {
+    StartTask: {
+      id: (event) => event.payload.taskId,
+      handle: (event) => ({
+        state: { step: "processing" },
+        commands: {
+          name: "ProcessTask",
+          payload: { taskId: event.payload.taskId },
+          targetAggregateId: event.payload.taskId,
+        },
+      }),
+    },
+    ProcessCompleted: {
+      id: (event) => event.payload.taskId,
+      handle: (_event, state) => ({
+        state: { ...state, step: "done" },
+      }),
+    },
+  },
+});
+
+describe("SagaExecutor best-effort (issue #119)", () => {
+  it("should resume the saga when a command handler dispatches a consumed event", async () => {
+    const sagaPersistence = new InMemorySagaPersistence();
+    const commandBus = new InMemoryCommandBus();
+    const eventBus = new EventEmitterEventBus();
+    const uowStorage = new AsyncLocalStorage<UnitOfWork>();
+    const metadataStorage = new AsyncLocalStorage<MetadataContext>();
+
+    const infrastructure: Infrastructure & CQRSInfrastructure = {
+      commandBus,
+      eventBus,
+      queryBus: new InMemoryQueryBus(),
+    };
+
+    const executor = new SagaExecutor(
+      infrastructure,
+      sagaPersistence,
+      createInMemoryUnitOfWork,
+      uowStorage,
+      metadataStorage,
+    );
+
+    // Wire the executor to the event bus exactly as Domain does (eventBus.on).
+    for (const eventName of Object.keys(BestEffortTaskSaga.on)) {
+      eventBus.on(eventName, (event: Event) =>
+        executor.execute("TaskSaga", BestEffortTaskSaga, event),
+      );
+    }
+
+    // Standalone-style command handler: publishes an event directly (off-path).
+    commandBus.register("ProcessTask", async (command) => {
+      await eventBus.dispatch({
+        name: "ProcessCompleted",
+        payload: { taskId: (command.payload as { taskId: string }).taskId },
+      });
+    });
+
+    await executor.execute("TaskSaga", BestEffortTaskSaga, {
+      name: "StartTask",
+      payload: { taskId: "t-1" },
+    });
+
+    const state = await sagaPersistence.load("TaskSaga", "t-1");
+    expect(state).toEqual({ step: "done" });
+  });
+});
+
+type AtomicTaskState = { step: "initial" | "processing" | "done" };
+type AtomicTaskEvent = DefineEvents<{
+  StartTask: { taskId: string };
+  ProcessCompleted: { taskId: string };
+}>;
+type AtomicTaskTypes = SagaTypes & {
+  state: AtomicTaskState;
+  events: AtomicTaskEvent;
+  commands: never;
+  infrastructure: Infrastructure & CQRSInfrastructure;
+};
+
+const AtomicTaskSaga = defineSaga<AtomicTaskTypes>({
+  atomicity: "atomic",
+  initialState: { step: "initial" },
+  startedBy: ["StartTask"],
+  on: {
+    StartTask: {
+      id: (event) => event.payload.taskId,
+      handle: (event) => ({
+        state: { step: "processing" },
+        commands: {
+          name: "ProcessTask",
+          payload: { taskId: event.payload.taskId },
+          targetAggregateId: event.payload.taskId,
+        },
+      }),
+    },
+    ProcessCompleted: {
+      id: (event) => event.payload.taskId,
+      handle: (_event, state) => ({
+        state: { ...state, step: "done" },
+      }),
+    },
+  },
+});
+
+describe("SagaExecutor atomic (issue #119 limitation)", () => {
+  it("should drop a command-handler-dispatched event (saga stays at processing)", async () => {
+    const sagaPersistence = new InMemorySagaPersistence();
+    const commandBus = new InMemoryCommandBus();
+    const eventBus = new EventEmitterEventBus();
+    const uowStorage = new AsyncLocalStorage<UnitOfWork>();
+    const metadataStorage = new AsyncLocalStorage<MetadataContext>();
+
+    const infrastructure: Infrastructure & CQRSInfrastructure = {
+      commandBus,
+      eventBus,
+      queryBus: new InMemoryQueryBus(),
+    };
+
+    const executor = new SagaExecutor(
+      infrastructure,
+      sagaPersistence,
+      createInMemoryUnitOfWork,
+      uowStorage,
+      metadataStorage,
+    );
+
+    for (const eventName of Object.keys(AtomicTaskSaga.on)) {
+      eventBus.on(eventName, (event: Event) =>
+        executor.execute("AtomicTaskSaga", AtomicTaskSaga, event),
+      );
+    }
+
+    commandBus.register("ProcessTask", async (command) => {
+      await eventBus.dispatch({
+        name: "ProcessCompleted",
+        payload: { taskId: (command.payload as { taskId: string }).taskId },
+      });
+    });
+
+    await executor.execute("AtomicTaskSaga", AtomicTaskSaga, {
+      name: "StartTask",
+      payload: { taskId: "t-2" },
+    });
+
+    // The re-entrant ProcessCompleted arrived before commit → dropped.
+    const state = await sagaPersistence.load("AtomicTaskSaga", "t-2");
+    expect(state).toEqual({ step: "processing" });
   });
 });
