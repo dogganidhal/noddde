@@ -6,6 +6,7 @@ status: implemented
 exports:
   [
     SagaTypes,
+    SagaAtomicity,
     SagaReaction,
     SagaEventHandler,
     SagaOnEntry,
@@ -21,14 +22,14 @@ exports:
   ]
 depends_on: [id, edd/event, cqrs/command/command, infrastructure/index]
 docs:
-  - sagas/overview.mdx
-  - sagas/defining-sagas.mdx
-  - sagas/testing-sagas.mdx
+  - process-managers/sagas.mdx
+  - testing/testing-sagas.mdx
+  - design-decisions/why-sagas-return-commands.mdx
 ---
 
 # SagaTypes, SagaReaction, SagaEventHandler, SagaOnEntry, Saga, defineSaga & Infer Utilities
 
-> Sagas (process managers) are the structural inverse of aggregates: where aggregates receive commands and emit events, sagas receive events and emit commands. This module provides the complete saga definition pattern: `SagaTypes` bundles the type parameters, `SagaReaction` is the handler return type, `SagaEventHandler` implements the react phase, `SagaOnEntry` bundles identity extraction and handler per event, `Saga` is the definition interface with a unified `on` map, `defineSaga` provides type inference, and five `Infer*` utilities extract individual types.
+> Sagas (process managers) are the structural inverse of aggregates: where aggregates receive commands and emit events, sagas receive events and emit commands. This module provides the complete saga definition pattern: `SagaTypes` bundles the type parameters, `SagaReaction` is the handler return type, `SagaEventHandler` implements the react phase, `SagaOnEntry` bundles identity extraction and handler per event, `Saga` is the definition interface with a unified `on` map, `defineSaga` provides type inference, and five `Infer*` utilities extract individual types. `SagaAtomicity` is an optional per-saga setting (`"atomic" | "best-effort"`) declared on the `Saga` definition that selects how the engine couples saga-state persistence with reaction-command dispatch; it is a pure declaration in core (the engine's `SagaExecutor` consumes it, defaulting an absent value to `"atomic"`).
 
 ## Type Contract
 
@@ -38,6 +39,13 @@ docs:
   - `events: Event` -- discriminated union of events this saga reacts to.
   - `commands: Command` -- discriminated union of commands this saga may dispatch.
   - `infrastructure: Infrastructure` -- external dependencies for event handlers.
+
+- **`SagaAtomicity`** is the string-literal union `"atomic" | "best-effort"`. It selects the transactional coupling between a saga instance's state persistence and the commands it dispatches in reaction to an event:
+
+  - `"atomic"` -- saga-state save and all reaction commands share one unit of work; they commit or roll back together (a reaction-command failure rolls back the saga-state transition).
+  - `"best-effort"` -- the saga state is committed first, then reaction commands are dispatched outside that unit of work; a reaction-command failure does not roll back the (already committed) saga state.
+
+  Consumed by the engine's `SagaExecutor`; see `engine/executors/saga-executor` for the runtime semantics. **When omitted, the engine treats the saga as `"atomic"`.**
 
 - **`SagaReaction<TState, TCommands>`** is an object type:
 
@@ -56,11 +64,12 @@ docs:
   - `id: (event: TEvent) => TSagaId` -- extracts the saga instance ID from the event. Required.
   - `handle: SagaEventHandler<TEvent, TState, TCommands, TInfrastructure>` -- the saga event handler.
 
-- **`Saga<T extends SagaTypes, TSagaId extends ID = string>`** is an interface with three fields:
+- **`Saga<T extends SagaTypes, TSagaId extends ID = string>`** is an interface with four fields (one optional):
 
   - `initialState: T["state"]` -- zero-value state for new saga instances.
   - `startedBy: [T["events"]["name"], ...T["events"]["name"][]]` -- non-empty tuple of event names that start the saga.
   - `on: SagaOnMap<T, TSagaId>` -- partial map of event names to `SagaOnEntry` objects. Only events the saga handles need entries.
+  - `atomicity?: SagaAtomicity` -- **optional.** Selects how saga-state persistence and reaction-command dispatch are coupled (`"atomic" | "best-effort"`). When omitted, the engine treats the saga as `"atomic"`. This is a declarative field only — `defineSaga` does not read, validate, or default it.
 
 - **Internal type `SagaOnMap<T, TSagaId>`** -- maps each event name (optionally) to a `SagaOnEntry`. Partial over the event union.
 
@@ -91,6 +100,8 @@ docs:
 - Commands in `SagaReaction` are optional -- a handler may only update state without dispatching.
 - Commands can be a single command or an array of commands.
 - `defineSaga` is an identity function returning the same config object.
+- `atomicity` is optional on the `Saga` definition. When specified, it is exactly one of `"atomic"` or `"best-effort"` (the `SagaAtomicity` union).
+- `atomicity` carries no runtime behavior in core: it is a declarative field consumed by the engine's `SagaExecutor`. `defineSaga` does not read, validate, or inject a default for it — a saga authored without the field has `atomicity === undefined` at runtime, and the engine supplies the default (`"atomic"`).
 - `TSagaId` is bounded by `ID`, defaults to `string`, and can be customized (e.g., `number`, `bigint`, branded type).
 - `InferSagaEventHandler<T, K>` resolves to a function receiving the narrowed event (via `Extract<T["events"], { name: K }>`), the saga state, and infrastructure merged with `CQRSInfrastructure` and `FrameworkInfrastructure`, returning `SagaReaction` or `Promise<SagaReaction>`.
 - `InferSagaOnEntry<T, K, TSagaId>` resolves to an object with `id: (event) => TSagaId` and `handle: InferSagaEventHandler<T, K>`.
@@ -104,7 +115,9 @@ docs:
 - `startedBy` elements must be valid event names from the saga's event union.
 - `SagaReaction.commands` is optional; when omitted, no commands are dispatched.
 - Infrastructure parameter in handlers always includes `CQRSInfrastructure` and `FrameworkInfrastructure` via `&`.
-- `defineSaga` returns the exact same object reference.
+- `defineSaga` returns the exact same object reference (adding `atomicity` does not change this — the field, present or absent, is preserved verbatim).
+- `atomicity`, when present, is exactly `"atomic"` or `"best-effort"`; no other value is assignable (`SagaAtomicity`).
+- `defineSaga` never mutates or defaults `atomicity`; an omitted field stays `undefined` on the returned object — the engine, not core, supplies the `"atomic"` default.
 - `SagaTypes["commands"]` is constrained to `Command` (not `AggregateCommand`), allowing sagas to dispatch both aggregate and standalone commands.
 - `InferSagaEventHandler<T, K>` always produces the same type as the `handle` field of `SagaOnMap<T>[K]`.
 - `InferSagaOnEntry<T, K, TSagaId>` always produces the same type as `SagaOnMap<T, TSagaId>[K]`.
@@ -118,6 +131,9 @@ docs:
 - **Custom saga ID type**: `TSagaId = number` or a branded string type.
 - **Commands as array**: `commands: [cmd1, cmd2]` dispatches multiple commands.
 - **Partial on map**: Only a subset of event types need entries in `on`.
+- **No `atomicity` field**: `saga.atomicity` is `undefined`; the engine applies its default (`"atomic"`). Behavior is identical to pre-`atomicity` sagas.
+- **Explicit `atomicity: "best-effort"`**: round-trips unchanged through `defineSaga`; the engine commits saga state before dispatching reaction commands.
+- **Explicit `atomicity: "atomic"`**: round-trips unchanged; identical to omitting the field.
 
 ## Integration Points
 
@@ -125,6 +141,7 @@ docs:
 - `startedBy` tells the runtime which events should create new saga instances.
 - Sagas bridge between bounded contexts by reacting to events from one context and dispatching commands to another.
 - `InferSaga*` utilities are used downstream for persistence, testing, and engine configuration.
+- The engine's `SagaExecutor` reads `saga.atomicity` (defaulting an absent value to `"atomic"`) to choose its unit-of-work / commit ordering. The field is purely declarative here; its observable behavior is specified in `engine/executors/saga-executor`.
 
 ## Test Scenarios
 
@@ -686,6 +703,118 @@ describe("InferSagaOnEntry", () => {
     });
 
     expectTypeOf(saga.on.OrderPlaced).not.toBeUndefined();
+  });
+});
+```
+
+### Saga exposes an optional atomicity field typed as SagaAtomicity
+
+```ts
+import { describe, it, expectTypeOf } from "vitest";
+import type { Saga, SagaAtomicity } from "@noddde/core";
+
+describe("Saga atomicity field", () => {
+  it("should type SagaAtomicity as the atomic | best-effort union", () => {
+    expectTypeOf<SagaAtomicity>().toEqualTypeOf<"atomic" | "best-effort">();
+  });
+
+  it("should expose atomicity as an optional SagaAtomicity on Saga", () => {
+    expectTypeOf<Saga["atomicity"]>().toEqualTypeOf<
+      SagaAtomicity | undefined
+    >();
+  });
+});
+```
+
+### defineSaga round-trips an explicit atomicity value
+
+```ts
+import { describe, it, expect, expectTypeOf } from "vitest";
+import { defineSaga } from "@noddde/core";
+import type {
+  DefineEvents,
+  Command,
+  Infrastructure,
+  SagaAtomicity,
+} from "@noddde/core";
+
+describe("defineSaga atomicity", () => {
+  type E = DefineEvents<{ Started: { id: string } }>;
+  type C = Command & { name: "Noop" };
+  type T = {
+    state: { started: boolean };
+    events: E;
+    commands: C;
+    infrastructure: Infrastructure;
+  };
+
+  it("should preserve an explicit best-effort atomicity", () => {
+    const saga = defineSaga<T>({
+      atomicity: "best-effort",
+      initialState: { started: false },
+      startedBy: ["Started"],
+      on: {
+        Started: {
+          id: (event) => event.payload.id,
+          handle: () => ({ state: { started: true } }),
+        },
+      },
+    });
+    expect(saga.atomicity).toBe("best-effort");
+    expectTypeOf(saga.atomicity).toEqualTypeOf<SagaAtomicity | undefined>();
+  });
+
+  it("should preserve an explicit atomic atomicity", () => {
+    const saga = defineSaga<T>({
+      atomicity: "atomic",
+      initialState: { started: false },
+      startedBy: ["Started"],
+      on: {
+        Started: {
+          id: (event) => event.payload.id,
+          handle: () => ({ state: { started: true } }),
+        },
+      },
+    });
+    expect(saga.atomicity).toBe("atomic");
+  });
+});
+```
+
+### defineSaga leaves atomicity undefined when omitted (no default injected)
+
+```ts
+import { describe, it, expect } from "vitest";
+import { defineSaga } from "@noddde/core";
+import type { DefineEvents, Command, Infrastructure } from "@noddde/core";
+
+describe("defineSaga atomicity default", () => {
+  type E = DefineEvents<{ Started: { id: string } }>;
+  type C = Command & { name: "Noop" };
+  type T = {
+    state: {};
+    events: E;
+    commands: C;
+    infrastructure: Infrastructure;
+  };
+
+  it("should not inject a default — an omitted atomicity stays undefined", () => {
+    const config = {
+      initialState: {},
+      startedBy: ["Started" as const],
+      on: {
+        Started: {
+          id: (e: any) => String(e.payload.id),
+          handle: (_e: any, s: any) => ({ state: s }),
+        },
+      },
+    };
+    const saga = defineSaga<T>(config as any);
+
+    // Engine, not core, supplies the "atomic" default — core leaves it absent.
+    expect(saga.atomicity).toBeUndefined();
+    // Identity is preserved exactly (the new field does not change this).
+    expect(saga).toBe(config);
   });
 });
 ```

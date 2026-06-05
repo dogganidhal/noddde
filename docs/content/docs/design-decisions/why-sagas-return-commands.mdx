@@ -61,6 +61,8 @@ With imperative dispatch, you'd need to mock the `CommandBus`, capture calls, an
 
 The framework can persist the new saga state and dispatch commands as a single logical operation. If the handler dispatched commands imperatively, a failure between dispatches would leave the saga in an inconsistent state — commands partially dispatched but state not updated.
 
+By default (`atomicity: "atomic"`) the saga-state save and all returned commands share one unit of work, so they commit or roll back together. A saga can opt into `atomicity: "best-effort"` to commit its state before dispatching commands — see [Atomicity](/docs/process-managers/sagas#atomicity) for when that trade-off is worthwhile.
+
 ### Deterministic Replay
 
 If saga event streams are replayed (for rebuilding state or debugging), declarative reactions can be inspected without executing side effects. Imperative dispatches would re-trigger commands during replay.
@@ -70,6 +72,26 @@ If saga event streams are replayed (for rebuilding state or debugging), declarat
 Handlers still receive `CQRSInfrastructure` (including `QueryBus`), so they _can_ read data before deciding which commands to return. The constraint is on outputs, not inputs: you can read from the query bus, but you return commands rather than dispatching them.
 
 For truly imperative side effects (notifications, logging), handlers can call infrastructure methods directly — only command dispatch is declarative.
+
+## The Golden Path: Return Events, Don't Dispatch Them
+
+The same principle applies one layer down, to the **aggregates** a saga's commands target. On the golden path, aggregate deciders **return** events; the engine defers them and publishes them only **after** the unit of work commits. This is what makes the saga's atomicity guarantee hold — the saga state and the events its commands produce become visible together, in order.
+
+Dispatching an event manually with `eventBus.dispatch()` from inside a command handler (or decider) is **off the golden path**: the event is published immediately, before the surrounding unit of work commits, so it loses the engine's ordering and atomicity guarantees.
+
+<Callout type="warn">
+  Under the default `atomic` saga mode, an event a command handler dispatches
+  directly is delivered **before** the saga's unit of work commits. If that
+  event is meant to advance the same saga instance, the re-entrant handler loads
+  uncommitted (`null`) state and the event is silently dropped — the saga never
+  advances ([issue #119](https://github.com/dogganidhal/noddde/issues/119)).
+  Prefer returning events from your deciders. If a handler genuinely must
+  dispatch directly (e.g. a [standalone command
+  handler](/docs/process-managers/standalone-commands), which has no return
+  channel), set the consuming saga to [`atomicity:
+  "best-effort"`](/docs/process-managers/sagas#atomicity) so it commits its
+  state before dispatching.
+</Callout>
 
 ## See Also
 

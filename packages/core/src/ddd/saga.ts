@@ -43,6 +43,32 @@ export type SagaTypes = {
   infrastructure: Infrastructure;
 };
 
+// ---- Atomicity mode ----
+
+/**
+ * Selects the transactional coupling between a saga instance's state
+ * persistence and the commands it dispatches in reaction to an event.
+ *
+ * - **`"atomic"`** — Saga-state save and all reaction commands share one unit
+ *   of work; they commit or roll back together. A reaction-command failure
+ *   rolls back the saga-state transition. This is the default: the engine
+ *   treats an absent `atomicity` field as `"atomic"`.
+ *
+ * - **`"best-effort"`** — The saga state is committed first, then reaction
+ *   commands are dispatched outside that unit of work; a reaction-command
+ *   failure does **not** roll back the (already committed) saga state.
+ *   Use this mode when reaction commands may dispatch events directly via
+ *   `eventBus.dispatch()` (off-path/standalone handlers) to ensure the
+ *   re-entrant event observes committed saga state (issue #119 fix).
+ *
+ * Consumed by the engine's `SagaExecutor`; see
+ * `engine/executors/saga-executor` for the runtime semantics.
+ * **When omitted, the engine treats the saga as `"atomic"`.**
+ *
+ * @see {@link Saga.atomicity}
+ */
+export type SagaAtomicity = "atomic" | "best-effort";
+
 // ---- Reaction return type ----
 
 /**
@@ -191,6 +217,25 @@ export interface Saga<
    * this map is partial over the event union.
    */
   on: SagaOnMap<T, TSagaId>;
+
+  /**
+   * **Optional.** Selects how saga-state persistence and reaction-command
+   * dispatch are coupled (`"atomic" | "best-effort"`). When omitted, the
+   * engine treats the saga as `"atomic"`.
+   *
+   * - `"atomic"` (default) — state save and all reaction commands share one
+   *   unit of work; they commit or roll back together.
+   * - `"best-effort"` — state is committed first; reaction commands are
+   *   dispatched afterward, each in its own unit of work. Safer for sagas
+   *   whose command handlers publish events directly via `eventBus.dispatch()`
+   *   (the off-path pattern; fixes issue #119).
+   *
+   * This is a **declarative** field only — `defineSaga` does not read,
+   * validate, or default it. The engine's `SagaExecutor` consumes it.
+   *
+   * @see {@link SagaAtomicity}
+   */
+  atomicity?: SagaAtomicity;
 }
 
 /**

@@ -15,6 +15,7 @@ import type {
   InferSagaState,
   Infrastructure,
   Saga,
+  SagaAtomicity,
   SagaEventHandler,
   SagaReaction,
 } from "@noddde/core";
@@ -463,5 +464,89 @@ describe("InferSagaOnEntry", () => {
     });
 
     expectTypeOf(saga.on.OrderPlaced).not.toBeUndefined();
+  });
+});
+
+describe("Saga atomicity field", () => {
+  it("should type SagaAtomicity as the atomic | best-effort union", () => {
+    expectTypeOf<SagaAtomicity>().toEqualTypeOf<"atomic" | "best-effort">();
+  });
+
+  it("should expose atomicity as an optional SagaAtomicity on Saga", () => {
+    expectTypeOf<Saga["atomicity"]>().toEqualTypeOf<
+      SagaAtomicity | undefined
+    >();
+  });
+});
+
+describe("defineSaga atomicity", () => {
+  type E = DefineEvents<{ Started: { id: string } }>;
+  type C = Command & { name: "Noop" };
+  type T = {
+    state: { started: boolean };
+    events: E;
+    commands: C;
+    infrastructure: Infrastructure;
+  };
+
+  it("should preserve an explicit best-effort atomicity", () => {
+    const saga = defineSaga<T>({
+      atomicity: "best-effort",
+      initialState: { started: false },
+      startedBy: ["Started"],
+      on: {
+        Started: {
+          id: (event) => event.payload.id,
+          handle: () => ({ state: { started: true } }),
+        },
+      },
+    });
+    expect(saga.atomicity).toBe("best-effort");
+    expectTypeOf(saga.atomicity).toEqualTypeOf<SagaAtomicity | undefined>();
+  });
+
+  it("should preserve an explicit atomic atomicity", () => {
+    const saga = defineSaga<T>({
+      atomicity: "atomic",
+      initialState: { started: false },
+      startedBy: ["Started"],
+      on: {
+        Started: {
+          id: (event) => event.payload.id,
+          handle: () => ({ state: { started: true } }),
+        },
+      },
+    });
+    expect(saga.atomicity).toBe("atomic");
+  });
+});
+
+describe("defineSaga atomicity default", () => {
+  type E = DefineEvents<{ Started: { id: string } }>;
+  type C = Command & { name: "Noop" };
+  type T = {
+    state: {};
+    events: E;
+    commands: C;
+    infrastructure: Infrastructure;
+  };
+
+  it("should not inject a default — an omitted atomicity stays undefined", () => {
+    const config = {
+      initialState: {},
+      startedBy: ["Started" as const],
+      on: {
+        Started: {
+          id: (e: any) => String(e.payload.id),
+          handle: (_e: any, s: any) => ({ state: s }),
+        },
+      },
+    };
+    const saga = defineSaga<T>(config as any);
+
+    // Engine, not core, supplies the "atomic" default — core leaves it absent.
+    expect(saga.atomicity).toBeUndefined();
+    // Identity is preserved exactly (the new field does not change this).
+    expect(saga).toBe(config);
   });
 });

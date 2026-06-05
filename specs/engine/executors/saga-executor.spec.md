@@ -16,7 +16,7 @@ depends_on:
 
 # SagaExecutor
 
-> `SagaExecutor` executes the full saga event handling lifecycle: derive the saga instance ID from the event via the `on` map, load the saga state, bootstrap (if the event is in `startedBy`) or ignore (if the saga has not started), execute the saga handler, persist the new saga state, and dispatch reaction commands -- all within an atomic unit of work. The saga's UoW spans both saga state persistence and all aggregate commands dispatched by the reaction, ensuring atomicity. This is an engine-internal class instantiated by `Domain` during `init()`.
+> `SagaExecutor` executes the full saga event handling lifecycle: derive the saga instance ID from the event via the `on` map, load the saga state, bootstrap (if the event is in `startedBy`) or ignore (if the saga has not started), execute the saga handler, persist the new saga state, and dispatch reaction commands. The transactional coupling between saga-state persistence and reaction-command dispatch is selected per-saga by `saga.atomicity ?? "atomic"` (see `ddd/saga`): in **atomic** mode (the default) a single unit of work spans the saga-state save and all reaction commands, so they commit or roll back together; in **best-effort** mode the saga state is committed first and reaction commands are dispatched afterward, each in its own unit of work. This is an engine-internal class instantiated by `Domain` during `init()`.
 
 ## Type Contract
 
@@ -49,6 +49,7 @@ class SagaExecutor {
 
 - `SagaExecutor` is constructed with the merged infrastructure (including CQRS buses), saga persistence, UoW factory, and `AsyncLocalStorage` instances for UoW and metadata context propagation.
 - `execute` is the single public method. It processes a single event for a given saga definition, handling the full lifecycle internally.
+- `execute` selects its unit-of-work / commit ordering from `saga.atomicity` (`"atomic" | "best-effort"`, from `ddd/saga`), defaulting an absent value to `"atomic"`. The constructor signature is unchanged — the mode is read per-event from the `saga` argument, so one executor instance serves sagas of either mode.
 
 ## Behavioral Requirements
 
@@ -81,48 +82,55 @@ class SagaExecutor {
    - `userId`: from `event.metadata?.userId`.
      This ensures all commands dispatched by the saga carry the same correlation chain as the triggering event.
 
-### Create Saga-Scoped UoW
+### Resolve Atomicity Mode
 
-7. **Create a new UoW** -- Call `unitOfWorkFactory()` to create a new UoW for this saga reaction. This UoW spans both the saga state persistence and any commands dispatched by the reaction.
+7. **Resolve mode** -- Compute the effective mode as `saga.atomicity ?? "atomic"`. The saga definition's optional `atomicity` field (see `ddd/saga`) selects the transactional coupling; an absent field defaults to `"atomic"`. The mode governs only the unit-of-work and commit ordering relative to reaction-command dispatch (BRs 8-18). Steps 1-6 (association lookup, load, bootstrap/resume, handler invocation, metadata-context construction) and the correlation guarantees are identical across modes.
 
-8. **Run within UoW and metadata context** -- Use `uowStorage.run(uow, ...)` and `metadataStorage.run(sagaCtx, ...)` to make the UoW and metadata context available to all commands dispatched within the saga handler execution.
+### Atomic Mode (default)
 
-### Enlist Saga State Persistence
+> Saga-state persistence and all reaction commands share one unit of work: they commit or roll back together. This is correct as long as command-produced events come from aggregate deciders that **return** events (the golden path) — `CommandLifecycleExecutor` detects the saga's UoW in `AsyncLocalStorage`, enlists on it, and `deferPublish`es those events so they are published only after the saga's UoW commits.
 
-9. **Enlist state save** -- Call `uow.enlist(() => sagaPersistence.save(sagaName, sagaId, reaction.state))` to defer saga state persistence until UoW commit.
+8. **Create a saga-scoped UoW** -- Call `unitOfWorkFactory()`. This single UoW spans both the saga-state save and every command dispatched by the reaction.
 
-### Dispatch Reaction Commands
+9. **Run within UoW and metadata context** -- Use `uowStorage.run(uow, ...)` and `metadataStorage.run(sagaCtx, ...)` so the UoW and metadata context are visible to all commands dispatched within the handler-reaction scope.
 
-10. **Dispatch commands within UoW** -- If `reaction.commands` is defined:
-    - Normalize to array: if `reaction.commands` is a single command, wrap in an array.
-    - For each command, call `infrastructure.commandBus.dispatch(command)`.
-    - Because the UoW is in the `AsyncLocalStorage`, aggregate command handlers invoked by the command bus will enlist their persistence on the same UoW, achieving atomicity.
+10. **Enlist saga-state save** -- Call `uow.enlist(() => sagaPersistence.save(sagaName, sagaId, reaction.state))` to defer saga-state persistence until commit.
 
-### Commit Atomically
+11. **Dispatch reaction commands within the UoW** -- If `reaction.commands` is defined, normalize to an array (wrap a single command) and call `infrastructure.commandBus.dispatch(command)` for each. Because the UoW is in the `AsyncLocalStorage`, aggregate command handlers enlist their persistence on the **same** UoW (the explicit-UoW path in `CommandLifecycleExecutor`), achieving atomicity.
 
-11. **Commit UoW** -- Call `uow.commit()` which executes all enlisted operations (saga state save + aggregate persistence saves) and returns the deferred events.
+12. **Commit atomically** -- Call `uow.commit()`, which executes all enlisted operations (saga-state save + aggregate persistence saves) and returns the deferred events.
 
-### Publish Deferred Events
+13. **Publish deferred events, then callback** -- After a successful commit, dispatch every returned event sequentially via `for (const e of events) { await infrastructure.eventBus.dispatch(e); }` (sequential dispatch preserves causal ordering — events from a single saga reaction arrive at consumers in the order they were produced). Then, if `onEventsDispatched` is provided and `events.length > 0`, call `onEventsDispatched(events)`; errors from this callback are silently swallowed (a non-fatal outbox-marking hook).
 
-12. **Publish events after commit** -- After successful commit, dispatch all returned events sequentially via `for (const e of events) { await infrastructure.eventBus.dispatch(e); }`. Sequential dispatch preserves causal ordering — events from a single saga reaction arrive at consumers in the order they were produced.
+14. **Rollback on failure (atomic)** -- If any step within the UoW scope (state enlist, command dispatch, or commit) throws, call `uow.rollback()` (best-effort; rollback errors are swallowed) and re-throw the original error. The saga state is **not** persisted, and any aggregate changes enlisted on the same UoW are rolled back with it.
 
-12b. **Post-dispatch callback (best-effort)** -- After dispatching all events, if `onEventsDispatched` is provided, call `onEventsDispatched(events)`. Errors from this callback are silently swallowed. This enables the Domain to mark outbox entries as published.
+### Best-Effort Mode
 
-### Rollback on Error
+> The saga state is committed **first** in its own UoW; **then** reaction commands are dispatched **outside** that UoW (each command obtains its own UoW via `CommandLifecycleExecutor`), still inside the metadata context. Because the saga state is already durable before any command runs, events that command handlers dispatch **directly** through the event bus — and any re-entrant saga executions they trigger — observe the committed saga state. This is the escape hatch for off-path dispatch (issue #119), notably **standalone command handlers**, which have no "return events" channel and can only publish via `eventBus.dispatch()`.
 
-13. **Rollback on failure** -- If any step within the UoW scope throws, call `uow.rollback()` (best-effort; rollback errors are swallowed). The original error is re-thrown.
+15. **Create and commit a saga-state UoW first** -- Create a UoW, run within `uowStorage.run(uow, ...)` and `metadataStorage.run(sagaCtx, ...)`, enlist the saga-state save, and call `uow.commit()` **before** dispatching any reaction command. For a state-only UoW the returned deferred-events array is typically empty; publish any returned events sequentially and invoke `onEventsDispatched` (when `events.length > 0`) exactly as in atomic mode (BR 13). If this commit phase throws, call `uow.rollback()` (best-effort) and re-throw — the saga state is not persisted.
+
+16. **Dispatch reaction commands after commit, outside the saga UoW** -- After the saga-state UoW has committed, if `reaction.commands` is defined, normalize to an array and dispatch each via `infrastructure.commandBus.dispatch(command)`, wrapped in `metadataStorage.run(sagaCtx, ...)` but **not** in `uowStorage.run`. With no ambient UoW, each command creates its own implicit UoW via `CommandLifecycleExecutor`, commits independently, and publishes its own produced events after its own commit.
+
+17. **Committed-state visibility** -- Because the saga state is persisted before any reaction command runs, a command handler (aggregate decider or standalone handler) that dispatches an event directly via `infrastructure.eventBus.dispatch()` — and any re-entrant `SagaExecutor.execute` triggered by that event for the same saga instance — loads the committed saga state (not `null`). The event is handled (or starts/resumes the instance) rather than being silently dropped.
+
+18. **No cross-command rollback (best-effort)** -- Once the saga-state UoW has committed, a subsequent reaction-command failure does **not** roll back the (already durable) saga state; the failing command's own UoW rolls back only its own aggregate changes. The error still propagates to the caller / event bus.
 
 ## Invariants
 
-- The saga's UoW always spans saga state persistence and all aggregate commands dispatched by the reaction. They commit or rollback together.
-- Events are published only after successful UoW commit (never before).
-- The metadata context is set before any commands are dispatched, ensuring enriched events carry the saga's correlation chain.
+- **Atomicity is per-saga, selected by `saga.atomicity ?? "atomic"`.** Steps 1-6 (lookup, load, bootstrap/resume, handler, metadata) are identical across modes; only the UoW / commit / dispatch ordering differs.
+- In **atomic** mode, the saga's UoW spans saga-state persistence and all reaction commands; they commit or roll back together. A reaction-command failure rolls back the saga-state transition.
+- In **best-effort** mode, the saga state is committed in its own UoW **before** any reaction command is dispatched; reaction commands run outside that UoW, each in its own UoW. A reaction-command failure does **not** roll back the (already committed) saga state.
+- Events produced by aggregate deciders are published only after the UoW that persists them commits (never before) — in **atomic** mode the saga's UoW, in **best-effort** mode each command's own UoW.
+- The metadata context is set before any commands are dispatched, in **both** modes, ensuring enriched events carry the saga's correlation chain.
 - The `causationId` for events produced by saga-dispatched commands is the `eventId` of the triggering event (linking cause to effect).
 - If `saga.on[event.name]` is `undefined`, the event is silently ignored (no error).
 - If `saga.on[event.name]?.handle` is `undefined`, the event is silently ignored (no error).
 - If the saga has not started and the event is not in `startedBy`, the event is silently ignored.
 - UoW rollback errors are swallowed; the original error is re-thrown.
-- The executor creates its own UoW (not reusing an existing one). Saga reactions always have their own atomic boundary.
+- The executor always creates its own UoW for saga-state persistence (it never reuses an ambient one). In **atomic** mode that UoW also bounds the reaction commands; in **best-effort** mode the reaction commands are dispatched after it commits and obtain their own UoWs.
+- In **best-effort** mode, a command handler that dispatches an event directly via `eventBus.dispatch()` observes committed saga state; the re-entrant saga event is handled, not dropped.
+- In **atomic** mode, off-path direct `eventBus.dispatch()` from a command handler still races the saga-state commit: with the in-process bus the re-entrant event is delivered before the saga's UoW commits, loads `null`, and is silently ignored ("saga not started"). This is a **documented limitation of `atomic`**; the golden path (deciders/aggregates **return** events, which are deferred and published only after commit) avoids it entirely.
 
 ## Edge Cases
 
@@ -132,8 +140,12 @@ class SagaExecutor {
 - **Saga already started and receives a startedBy event** -- Uses the existing state (does not reset to `initialState`). The `startedBy` check only applies when state is `null`.
 - **Reaction with no commands** -- Only saga state is persisted. No commands dispatched. UoW commits with just the state save.
 - **Reaction with single command (not array)** -- Normalized to `[command]` before dispatching.
-- **Reaction with multiple commands** -- Each dispatched sequentially. All aggregate changes enlist on the same UoW.
-- **Command dispatch throws** -- UoW is rolled back. Saga state is not persisted. Error propagates.
+- **Reaction with multiple commands** -- Each dispatched sequentially. In **atomic** mode all aggregate changes enlist on the saga's UoW; in **best-effort** mode each command commits in its own UoW after the saga state is persisted.
+- **Command dispatch throws (atomic mode)** -- The saga's UoW is rolled back; saga state is **not** persisted; the error propagates.
+- **Command dispatch throws (best-effort mode)** -- The saga-state UoW has already committed, so saga state **is** persisted; the failing command's own UoW rolls back its own aggregate changes; the error still propagates.
+- **Saga omits `atomicity`** -- Treated as `"atomic"` (default); behavior is identical to pre-`atomicity` sagas.
+- **Best-effort saga whose command handler dispatches a consumed event** -- The event is processed against committed saga state and advances the saga instance (the issue #119 scenario, fixed under best-effort).
+- **Atomic saga whose command handler dispatches a consumed event** -- With the in-process event bus the re-entrant event is delivered before the saga UoW commits, loads `null`, and is dropped ("saga not started"); the saga does not advance. Documented limitation of `atomic` — use the golden path (return events) or `best-effort`.
 - **sagaPersistence.save throws during commit** -- UoW commit fails. Error propagates after rollback attempt.
 - **Triggering event has no metadata** -- `correlationId` defaults to a new UUID v7. `causationId` defaults to `event.name`. `userId` is `undefined`.
 - **Triggering event has metadata** -- `correlationId`, `causationId` (from `eventId`), and `userId` are propagated.
@@ -142,8 +154,9 @@ class SagaExecutor {
 ## Integration Points
 
 - **Domain** -- Constructs the `SagaExecutor` during `init()` and subscribes it to event bus events matching `Object.keys(saga.on)`.
+- **`Saga.atomicity` (core, `ddd/saga`)** -- `execute` reads `saga.atomicity` to select the mode; an absent field defaults to `"atomic"`. The field is declared and documented in the core saga spec; this spec defines its observable runtime behavior.
 - **CommandBus** -- Saga dispatches commands through `infrastructure.commandBus.dispatch()`. This routes to aggregate command handlers registered by the Domain.
-- **CommandLifecycleExecutor** -- When the saga dispatches commands, the command bus invokes the `CommandLifecycleExecutor`. Because the saga's UoW is in the `AsyncLocalStorage`, the executor uses the saga's UoW (explicit UoW path).
+- **CommandLifecycleExecutor** -- When the saga dispatches commands, the command bus invokes the `CommandLifecycleExecutor`. In **atomic** mode the saga's UoW is in `AsyncLocalStorage`, so the executor takes the explicit-UoW path and enlists on it. In **best-effort** mode commands are dispatched after the saga UoW commits and outside `uowStorage`, so the executor takes the implicit-UoW path — creating and committing its own UoW per command and publishing that command's events after its own commit.
 - **SagaPersistence** -- Saga state is loaded and saved via the persistence interface.
 - **MetadataEnricher** -- Indirectly used: the metadata context set by the saga flows through `AsyncLocalStorage` to the `MetadataEnricher` in `CommandLifecycleExecutor`, ensuring correlation propagation.
 - **EventBus** -- Events deferred by aggregate commands within the saga are published after UoW commit.
@@ -586,6 +599,8 @@ describe("SagaExecutor", () => {
 
 ### execute rolls back UoW when command dispatch throws
 
+> **Atomic-mode test (default).** `RbSaga` declares no `atomicity` field, so it runs in the default `atomic` mode: the saga's UoW spans the state save and the failing command, so a command failure rolls back the saga-state transition. The best-effort inverse is the next scenario.
+
 ```ts
 import { AsyncLocalStorage } from "node:async_hooks";
 import { describe, it, expect } from "vitest";
@@ -975,6 +990,403 @@ describe("SagaExecutor", () => {
 
     const state = await sagaPersistence.load("FlowSaga", "flow-1");
     expect(state).toEqual({ steps: ["started", "continued"] });
+  });
+});
+```
+
+### execute persists saga state even when a command throws under best-effort
+
+> Best-effort inverse of the atomic rollback test. `atomicity: "best-effort"` commits the saga state before dispatching reaction commands, so a downstream command failure does **not** roll back the saga-state transition; the error still propagates.
+
+```ts
+import { AsyncLocalStorage } from "node:async_hooks";
+import { describe, it, expect } from "vitest";
+import { defineSaga } from "@noddde/core";
+import type {
+  SagaTypes,
+  DefineEvents,
+  Infrastructure,
+  CQRSInfrastructure,
+  UnitOfWork,
+} from "@noddde/core";
+import {
+  InMemoryCommandBus,
+  EventEmitterEventBus,
+  InMemoryQueryBus,
+  InMemorySagaPersistence,
+  createInMemoryUnitOfWork,
+} from "@noddde/engine";
+import { SagaExecutor } from "../../../executors/saga-executor";
+import type { MetadataContext } from "../../../domain";
+
+type BeRbState = { ran: boolean };
+type BeRbEvent = DefineEvents<{ BeRbTrigger: { id: string } }>;
+type BeRbTypes = SagaTypes & {
+  state: BeRbState;
+  events: BeRbEvent;
+  commands: never;
+  infrastructure: Infrastructure & CQRSInfrastructure;
+};
+
+const BeRbSaga = defineSaga<BeRbTypes>({
+  atomicity: "best-effort",
+  initialState: { ran: false },
+  startedBy: ["BeRbTrigger"],
+  on: {
+    BeRbTrigger: {
+      id: (event) => event.payload.id,
+      handle: () => ({
+        state: { ran: true },
+        commands: {
+          name: "FailingCmd",
+          payload: {},
+          targetAggregateId: "fail-be",
+        },
+      }),
+    },
+  },
+});
+
+describe("SagaExecutor best-effort", () => {
+  it("should persist saga state even when a command throws", async () => {
+    const sagaPersistence = new InMemorySagaPersistence();
+    const commandBus = new InMemoryCommandBus();
+    commandBus.register("FailingCmd", async () => {
+      throw new Error("Command failed");
+    });
+    const infrastructure: Infrastructure & CQRSInfrastructure = {
+      commandBus,
+      eventBus: new EventEmitterEventBus(),
+      queryBus: new InMemoryQueryBus(),
+    };
+    const uowStorage = new AsyncLocalStorage<UnitOfWork>();
+    const metadataStorage = new AsyncLocalStorage<MetadataContext>();
+
+    const executor = new SagaExecutor(
+      infrastructure,
+      sagaPersistence,
+      createInMemoryUnitOfWork,
+      uowStorage,
+      metadataStorage,
+    );
+
+    await expect(
+      executor.execute("BeRbSaga", BeRbSaga, {
+        name: "BeRbTrigger",
+        payload: { id: "be1" },
+      }),
+    ).rejects.toThrow("Command failed");
+
+    // Saga state IS persisted — committed before the command ran.
+    const state = await sagaPersistence.load("BeRbSaga", "be1");
+    expect(state).toEqual({ ran: true });
+  });
+});
+```
+
+### execute commits saga state before dispatching commands under best-effort
+
+> Proves the commit-first ordering directly: by the time the reaction command's handler runs, the new saga state is already loadable from persistence.
+
+```ts
+import { AsyncLocalStorage } from "node:async_hooks";
+import { describe, it, expect } from "vitest";
+import { defineSaga } from "@noddde/core";
+import type {
+  SagaTypes,
+  DefineEvents,
+  Infrastructure,
+  CQRSInfrastructure,
+  UnitOfWork,
+} from "@noddde/core";
+import {
+  InMemoryCommandBus,
+  EventEmitterEventBus,
+  InMemoryQueryBus,
+  InMemorySagaPersistence,
+  createInMemoryUnitOfWork,
+} from "@noddde/engine";
+import { SagaExecutor } from "../../../executors/saga-executor";
+import type { MetadataContext } from "../../../domain";
+
+type OrderingState = { phase: string };
+type OrderingEvent = DefineEvents<{ Begin: { id: string } }>;
+type OrderingTypes = SagaTypes & {
+  state: OrderingState;
+  events: OrderingEvent;
+  commands: never;
+  infrastructure: Infrastructure & CQRSInfrastructure;
+};
+
+const OrderingSaga = defineSaga<OrderingTypes>({
+  atomicity: "best-effort",
+  initialState: { phase: "init" },
+  startedBy: ["Begin"],
+  on: {
+    Begin: {
+      id: (event) => event.payload.id,
+      handle: () => ({
+        state: { phase: "committed" },
+        commands: { name: "Probe", payload: {}, targetAggregateId: "p1" },
+      }),
+    },
+  },
+});
+
+describe("SagaExecutor best-effort", () => {
+  it("should have committed saga state by the time the command handler runs", async () => {
+    const sagaPersistence = new InMemorySagaPersistence();
+    const commandBus = new InMemoryCommandBus();
+    const uowStorage = new AsyncLocalStorage<UnitOfWork>();
+    const metadataStorage = new AsyncLocalStorage<MetadataContext>();
+
+    let stateSeenByCommand: unknown;
+    commandBus.register("Probe", async () => {
+      stateSeenByCommand = await sagaPersistence.load("OrderingSaga", "o1");
+    });
+
+    const infrastructure: Infrastructure & CQRSInfrastructure = {
+      commandBus,
+      eventBus: new EventEmitterEventBus(),
+      queryBus: new InMemoryQueryBus(),
+    };
+
+    const executor = new SagaExecutor(
+      infrastructure,
+      sagaPersistence,
+      createInMemoryUnitOfWork,
+      uowStorage,
+      metadataStorage,
+    );
+
+    await executor.execute("OrderingSaga", OrderingSaga, {
+      name: "Begin",
+      payload: { id: "o1" },
+    });
+
+    // The command handler observed the already-committed saga state.
+    expect(stateSeenByCommand).toEqual({ phase: "committed" });
+  });
+});
+```
+
+### execute under best-effort lets a command-handler-dispatched event resume the same saga (issue #119)
+
+> Canonical reproduction of issue #119, fixed under `best-effort`. The saga's `StartTask` handler dispatches a `ProcessTask` command whose handler publishes a `ProcessCompleted` event **directly** on the event bus (the off-path pattern standalone command handlers must use). The executor is subscribed to the bus via `eventBus.on`, exactly as `Domain` wires it. Because best-effort commits saga state before dispatching the command, the re-entrant `ProcessCompleted` finds the persisted state and advances the saga to `done`.
+
+```ts
+import { AsyncLocalStorage } from "node:async_hooks";
+import { describe, it, expect } from "vitest";
+import { defineSaga } from "@noddde/core";
+import type {
+  SagaTypes,
+  DefineEvents,
+  Event,
+  Infrastructure,
+  CQRSInfrastructure,
+  UnitOfWork,
+} from "@noddde/core";
+import {
+  InMemoryCommandBus,
+  EventEmitterEventBus,
+  InMemoryQueryBus,
+  InMemorySagaPersistence,
+  createInMemoryUnitOfWork,
+} from "@noddde/engine";
+import { SagaExecutor } from "../../../executors/saga-executor";
+import type { MetadataContext } from "../../../domain";
+
+type TaskState = { step: "initial" | "processing" | "done" };
+type TaskEvent = DefineEvents<{
+  StartTask: { taskId: string };
+  ProcessCompleted: { taskId: string };
+}>;
+type TaskTypes = SagaTypes & {
+  state: TaskState;
+  events: TaskEvent;
+  commands: never;
+  infrastructure: Infrastructure & CQRSInfrastructure;
+};
+
+const BestEffortTaskSaga = defineSaga<TaskTypes>({
+  atomicity: "best-effort",
+  initialState: { step: "initial" },
+  startedBy: ["StartTask"],
+  on: {
+    StartTask: {
+      id: (event) => event.payload.taskId,
+      handle: (event) => ({
+        state: { step: "processing" },
+        commands: {
+          name: "ProcessTask",
+          payload: { taskId: event.payload.taskId },
+          targetAggregateId: event.payload.taskId,
+        },
+      }),
+    },
+    ProcessCompleted: {
+      id: (event) => event.payload.taskId,
+      handle: (_event, state) => ({
+        state: { ...state, step: "done" },
+      }),
+    },
+  },
+});
+
+describe("SagaExecutor best-effort (issue #119)", () => {
+  it("should resume the saga when a command handler dispatches a consumed event", async () => {
+    const sagaPersistence = new InMemorySagaPersistence();
+    const commandBus = new InMemoryCommandBus();
+    const eventBus = new EventEmitterEventBus();
+    const uowStorage = new AsyncLocalStorage<UnitOfWork>();
+    const metadataStorage = new AsyncLocalStorage<MetadataContext>();
+
+    const infrastructure: Infrastructure & CQRSInfrastructure = {
+      commandBus,
+      eventBus,
+      queryBus: new InMemoryQueryBus(),
+    };
+
+    const executor = new SagaExecutor(
+      infrastructure,
+      sagaPersistence,
+      createInMemoryUnitOfWork,
+      uowStorage,
+      metadataStorage,
+    );
+
+    // Wire the executor to the event bus exactly as Domain does (eventBus.on).
+    for (const eventName of Object.keys(BestEffortTaskSaga.on)) {
+      eventBus.on(eventName, (event: Event) =>
+        executor.execute("TaskSaga", BestEffortTaskSaga, event),
+      );
+    }
+
+    // Standalone-style command handler: publishes an event directly (off-path).
+    commandBus.register("ProcessTask", async (command) => {
+      await eventBus.dispatch({
+        name: "ProcessCompleted",
+        payload: { taskId: (command.payload as { taskId: string }).taskId },
+      });
+    });
+
+    await executor.execute("TaskSaga", BestEffortTaskSaga, {
+      name: "StartTask",
+      payload: { taskId: "t-1" },
+    });
+
+    const state = await sagaPersistence.load("TaskSaga", "t-1");
+    expect(state).toEqual({ step: "done" });
+  });
+});
+```
+
+### execute under atomic drops an event dispatched by a command handler (issue #119 limitation)
+
+> Documents the `atomic`-mode limitation. The same shape as the best-effort reproduction, but `atomicity: "atomic"`. Because commands are dispatched inside the saga's UoW (before commit), the re-entrant `ProcessCompleted` loads `null` saga state and is dropped — the saga never reaches `done`. The remedy is the golden path (return events) or `best-effort`.
+
+```ts
+import { AsyncLocalStorage } from "node:async_hooks";
+import { describe, it, expect } from "vitest";
+import { defineSaga } from "@noddde/core";
+import type {
+  SagaTypes,
+  DefineEvents,
+  Event,
+  Infrastructure,
+  CQRSInfrastructure,
+  UnitOfWork,
+} from "@noddde/core";
+import {
+  InMemoryCommandBus,
+  EventEmitterEventBus,
+  InMemoryQueryBus,
+  InMemorySagaPersistence,
+  createInMemoryUnitOfWork,
+} from "@noddde/engine";
+import { SagaExecutor } from "../../../executors/saga-executor";
+import type { MetadataContext } from "../../../domain";
+
+type AtomicTaskState = { step: "initial" | "processing" | "done" };
+type AtomicTaskEvent = DefineEvents<{
+  StartTask: { taskId: string };
+  ProcessCompleted: { taskId: string };
+}>;
+type AtomicTaskTypes = SagaTypes & {
+  state: AtomicTaskState;
+  events: AtomicTaskEvent;
+  commands: never;
+  infrastructure: Infrastructure & CQRSInfrastructure;
+};
+
+const AtomicTaskSaga = defineSaga<AtomicTaskTypes>({
+  atomicity: "atomic",
+  initialState: { step: "initial" },
+  startedBy: ["StartTask"],
+  on: {
+    StartTask: {
+      id: (event) => event.payload.taskId,
+      handle: (event) => ({
+        state: { step: "processing" },
+        commands: {
+          name: "ProcessTask",
+          payload: { taskId: event.payload.taskId },
+          targetAggregateId: event.payload.taskId,
+        },
+      }),
+    },
+    ProcessCompleted: {
+      id: (event) => event.payload.taskId,
+      handle: (_event, state) => ({
+        state: { ...state, step: "done" },
+      }),
+    },
+  },
+});
+
+describe("SagaExecutor atomic (issue #119 limitation)", () => {
+  it("should drop a command-handler-dispatched event (saga stays at processing)", async () => {
+    const sagaPersistence = new InMemorySagaPersistence();
+    const commandBus = new InMemoryCommandBus();
+    const eventBus = new EventEmitterEventBus();
+    const uowStorage = new AsyncLocalStorage<UnitOfWork>();
+    const metadataStorage = new AsyncLocalStorage<MetadataContext>();
+
+    const infrastructure: Infrastructure & CQRSInfrastructure = {
+      commandBus,
+      eventBus,
+      queryBus: new InMemoryQueryBus(),
+    };
+
+    const executor = new SagaExecutor(
+      infrastructure,
+      sagaPersistence,
+      createInMemoryUnitOfWork,
+      uowStorage,
+      metadataStorage,
+    );
+
+    for (const eventName of Object.keys(AtomicTaskSaga.on)) {
+      eventBus.on(eventName, (event: Event) =>
+        executor.execute("AtomicTaskSaga", AtomicTaskSaga, event),
+      );
+    }
+
+    commandBus.register("ProcessTask", async (command) => {
+      await eventBus.dispatch({
+        name: "ProcessCompleted",
+        payload: { taskId: (command.payload as { taskId: string }).taskId },
+      });
+    });
+
+    await executor.execute("AtomicTaskSaga", AtomicTaskSaga, {
+      name: "StartTask",
+      payload: { taskId: "t-2" },
+    });
+
+    // The re-entrant ProcessCompleted arrived before commit → dropped.
+    const state = await sagaPersistence.load("AtomicTaskSaga", "t-2");
+    expect(state).toEqual({ step: "processing" });
   });
 });
 ```
