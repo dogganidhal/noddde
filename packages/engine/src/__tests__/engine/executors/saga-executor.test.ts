@@ -368,9 +368,10 @@ describe("SagaExecutor", () => {
       }),
     ).rejects.toThrow("Command failed");
 
-    // Saga state should NOT be persisted due to rollback
+    // Saga state IS persisted even when a command fails — state commits
+    // before commands, so a downstream command failure does not roll it back.
     const state = await sagaPersistence.load("RbSaga", "rb1");
-    expect(state).toBeUndefined();
+    expect(state).toEqual({ ran: true });
   });
 
   // ============================================================

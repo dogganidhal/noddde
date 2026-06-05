@@ -124,10 +124,14 @@ export class SagaExecutor {
           userId: event.metadata?.userId,
         };
 
-        // Step 7: Create UoW for saga reaction (spans state + commands)
+        // Step 7: Create UoW for saga state persistence
         const uow = this.unitOfWorkFactory();
         const sagaPersistence = this.sagaPersistence;
+        let events: Event[] = [];
 
+        // Step 8: Commit saga state FIRST, before dispatching commands.
+        // This ensures the saga executor finds persisted state when command
+        // handlers dispatch events synchronously through the event bus.
         await this.uowStorage.run(uow, async () => {
           await this.metadataStorage.run(sagaCtx, async () => {
             try {
@@ -136,19 +140,9 @@ export class SagaExecutor {
                 sagaPersistence.save(sagaName, sagaId, reaction.state),
               );
 
-              // Step 8: Dispatch commands (within the saga's UoW + metadata context)
-              if (reaction.commands) {
-                const commands = Array.isArray(reaction.commands)
-                  ? reaction.commands
-                  : [reaction.commands];
-                for (const command of commands) {
-                  await this.infrastructure.commandBus.dispatch(command);
-                }
-              }
-
-              // Step 9: Commit saga state + all aggregate changes atomically
+              // Commit saga state + any deferred changes
               const commitFn = () => uow.commit();
-              const events = this.instrumentation
+              events = this.instrumentation
                 ? await this.instrumentation.withSpan(
                     "noddde.uow.commit",
                     { "noddde.saga.name": sagaName },
@@ -156,7 +150,7 @@ export class SagaExecutor {
                   )
                 : await commitFn();
 
-              // Step 10: Publish all deferred events sequentially
+              // Step 9: Publish all deferred events sequentially
               for (const e of events) {
                 await this.infrastructure.eventBus.dispatch(e);
               }
@@ -185,6 +179,21 @@ export class SagaExecutor {
             }
           });
         });
+
+        // Step 10: Dispatch commands outside UoW context (inside metadata context).
+        // Saga state is already persisted, so events dispatched by command handlers
+        // will find the saga state when processed by the saga executor.
+        // Each command creates its own UoW via CommandLifecycleExecutor.
+        if (reaction.commands) {
+          const commands = Array.isArray(reaction.commands)
+            ? reaction.commands
+            : [reaction.commands];
+          await this.metadataStorage.run(sagaCtx, async () => {
+            for (const command of commands) {
+              await this.infrastructure.commandBus.dispatch(command);
+            }
+          });
+        }
       };
 
       if (this.instrumentation) {
