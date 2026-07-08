@@ -232,34 +232,41 @@ export class KafkaEventBus implements EventBus, Connectable {
    * Handlers registered before `connect()` are buffered and subscriptions are
    * established when `connect()` is called.
    *
+   * Registering an additional handler for an event whose topic is already
+   * subscribed is allowed at any time (in-process fan-out). However, calling
+   * `on()` after `connect()` for an event whose topic is **not** yet
+   * subscribed throws: kafkajs forbids subscribing to a new topic on a
+   * running consumer (`Cannot subscribe to topic while consumer is running`),
+   * so the subscription cannot take effect and the messages would be silently
+   * lost. Register all handlers before `connect()`.
+   *
    * @throws If called after `close()`.
+   * @throws If called after `connect()` for an event whose topic is not
+   *   already subscribed.
    */
   on(eventName: string, handler: AsyncEventHandler): void {
     if (this._closed) {
       throw new Error("KafkaEventBus is closed");
     }
 
-    const existing = this._handlers.get(eventName) ?? [];
-    this._handlers.set(eventName, [...existing, handler]);
-
-    // If already connected, subscribe to the topic immediately
-    if (this._connected && this._consumer != null) {
+    // After connect(), a new topic subscription can't be added to a running
+    // kafkajs consumer. Fail loudly instead of silently dropping the handler's
+    // messages. Registering another handler for an already-subscribed topic is
+    // fine — no new subscribe is needed.
+    if (this._connected) {
       const topic = this._topicName(eventName);
       if (!this._subscribedTopics.has(topic)) {
-        // Optimistically mark the topic as subscribed, then roll back on failure
-        // so that a future on() call can retry.
-        this._subscribedTopics.add(topic);
-        this._consumer
-          .subscribe({ topic, fromBeginning: false })
-          .catch((err: unknown) => {
-            this._logger.error(
-              `Failed to subscribe to topic "${topic}". It will be retried on the next on() call.`,
-              { topic, error: String(err) },
-            );
-            this._subscribedTopics.delete(topic);
-          });
+        throw new Error(
+          `KafkaEventBus: on("${eventName}") called after connect(). Kafka does not ` +
+            `allow subscribing to a new topic ("${topic}") on a running consumer, so ` +
+            `this handler's events would be silently lost. Register all handlers with ` +
+            `on() before calling connect().`,
+        );
       }
     }
+
+    const existing = this._handlers.get(eventName) ?? [];
+    this._handlers.set(eventName, [...existing, handler]);
   }
 
   /**

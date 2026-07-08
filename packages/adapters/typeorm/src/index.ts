@@ -5,6 +5,8 @@ export {
   NodddeSagaStateEntity,
   NodddeSnapshotEntity,
   NodddeOutboxEntryEntity,
+  createNodddeEntities,
+  type NodddeEntities,
 } from "./entities";
 export {
   TypeORMEventSourcedAggregatePersistence,

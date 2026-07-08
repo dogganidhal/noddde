@@ -6,7 +6,13 @@ export {
   PrismaSnapshotStore,
   PrismaOutboxStore,
 } from "./persistence";
-export { PrismaAdvisoryLocker } from "./advisory-locker";
+export {
+  PrismaAdvisoryLocker,
+  withConnectionLimitOne,
+  type PrismaDialect,
+  type PrismaAdvisoryLockerOptions,
+  type PrismaAdvisoryLockerFromUrlOptions,
+} from "./advisory-locker";
 export {
   PrismaUnitOfWork,
   createPrismaUnitOfWorkFactory,

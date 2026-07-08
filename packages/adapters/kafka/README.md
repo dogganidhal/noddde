@@ -30,14 +30,39 @@ const eventBus = new KafkaEventBus({
   groupId: "my-service-group",
 });
 
-await eventBus.connect();
-
+// Do NOT call connect() yourself here: wireDomain() registers every event
+// handler via on() first, then auto-connects the bus. See "Subscribe before
+// connect()" below — subscriptions can only be established while the consumer
+// is not yet running.
 const domain = await wireDomain(definition, {
   eventBus,
 });
 
 // Clean shutdown
 await eventBus.close();
+```
+
+### Subscribe before connect()
+
+Kafka does not allow subscribing to a new topic on a consumer that is already
+running (`kafkajs` throws `Cannot subscribe to topic while consumer is
+running`). `KafkaEventBus` therefore only establishes subscriptions during
+`connect()`, from the set of handlers registered with `on()` up to that point.
+
+- **Register all handlers with `on()` before calling `connect()`.** When you
+  use `wireDomain()`, this happens automatically — it wires every handler and
+  then connects the bus for you, so you should not call `connect()` yourself.
+- Calling `on()` **after** `connect()` for an event whose topic is not already
+  subscribed **throws** immediately, rather than silently dropping the
+  handler's messages. Registering an additional handler for an
+  already-subscribed event is always allowed (in-process fan-out).
+
+If you construct the bus manually, connect only after all `on()` calls:
+
+```typescript
+eventBus.on("AccountCreated", handleAccountCreated);
+eventBus.on("AccountClosed", handleAccountClosed);
+await eventBus.connect(); // subscriptions activate here
 ```
 
 ### Configuration

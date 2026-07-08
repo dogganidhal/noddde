@@ -43,10 +43,9 @@ definePersistenceContract("typeorm/mssql", () => {
   return {
     eventSourced: a.eventSourcedPersistence,
     stateStored: a.stateStoredPersistence,
-    // MSSQL `TEXT` is codepage-limited; supplementary-plane chars get
-    // replaced on storage. Persisting upgrades to `nvarchar(max)` for
-    // Unicode safety is tracked separately.
-    unicodeSafe: false,
+    // The MSSQL DataSource registers the `nvarchar(max)` entity variant
+    // (createNodddeEntities("mssql")), so supplementary-plane Unicode
+    // round-trips — the contract runs with unicodeSafe defaulting to true.
   };
 });
 defineSagaContract("typeorm/mssql", () => ({

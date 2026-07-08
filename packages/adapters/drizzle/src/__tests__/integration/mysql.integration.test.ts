@@ -1,4 +1,4 @@
-import { beforeAll, afterAll } from "vitest";
+import { beforeAll, afterAll, describe, it, expect } from "vitest";
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
 import {
@@ -96,6 +96,40 @@ defineUnitOfWorkContract("drizzle/mysql", async () => {
     stateStored: adapter.stateStoredPersistence,
     uowFactory: adapter.unitOfWorkFactory,
   };
+});
+
+// Regression for ROBUSTNESS §3.1: the timestamp encoding changed to
+// `mode: "string"` emitting `YYYY-MM-DD HH:MM:SS.fff`. On MySQL the previous
+// encoding also produced space-separated timestamps (no `Z` — MySQL rejects
+// it), so a mid-migration `noddde_outbox` mixes rows with and without the
+// fractional-second component. `created_at` is a native `TIMESTAMP(3)` column,
+// so MySQL parses both and `ORDER BY created_at` is temporal. Proven here.
+describe("outbox created_at ordering across mixed timestamp formats (§3.1)", () => {
+  it("orders whole-second and fractional-second rows temporally", async () => {
+    await truncate();
+    const rows: Array<{ id: string; ts: string }> = [
+      { id: "b-frac-middle", ts: "2024-01-02 00:00:00.500" }, // new format
+      { id: "a-whole-earliest", ts: "2024-01-01 00:00:00" }, // old format
+      { id: "c-frac-latest", ts: "2024-01-03 00:00:00.250" }, // new format
+    ];
+    for (const r of rows) {
+      await pool.query(
+        `INSERT INTO noddde_outbox (id, event, created_at, published_at)
+         VALUES (?, ?, ?, NULL)`,
+        [r.id, JSON.stringify({ name: "E", payload: {} }), r.ts],
+      );
+    }
+
+    const adapter = makeAdapter();
+    const loaded = await adapter.outboxStore!.loadUnpublished(100);
+    expect(loaded.map((e) => e.id)).toEqual([
+      "a-whole-earliest",
+      "b-frac-middle",
+      "c-frac-latest",
+    ]);
+    const times = loaded.map((e) => e.createdAt.getTime());
+    expect(times).toEqual([...times].sort((x, y) => x - y));
+  });
 });
 
 defineAdvisoryLockerContract("drizzle/mysql", async () => {
