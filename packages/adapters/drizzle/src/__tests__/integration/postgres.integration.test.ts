@@ -1,4 +1,4 @@
-import { beforeAll, afterAll } from "vitest";
+import { beforeAll, afterAll, describe, it, expect } from "vitest";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import {
@@ -88,6 +88,38 @@ defineUnitOfWorkContract("drizzle/postgres", async () => {
     stateStored: adapter.stateStoredPersistence,
     uowFactory: adapter.unitOfWorkFactory,
   };
+});
+
+describe("Drizzle Postgres — dialect-specific behaviour", () => {
+  it("orders mixed-format timestamps temporally, not lexicographically (robustness §3.1)", async () => {
+    // Regression test for packages/testing-integration/ROBUSTNESS.md §3.1: this
+    // adapter used to write timestamps as ISO-with-Z (`2024-06-01T08:00:00.000Z`,
+    // via mode: "date") and now writes space-separated, no-Z strings (via
+    // toDbTimestamp, mode: "string"). The worry was that a mid-migration table
+    // containing rows from both eras could sort incorrectly under
+    // `ORDER BY created_at` if the comparison were lexicographic (`T` > space,
+    // `Z` > nothing). Since `created_at` is a native TIMESTAMPTZ column, Postgres
+    // parses both textual forms into the same internal temporal representation
+    // before comparing, so ordering must remain correct regardless of which
+    // format wrote which row. This inserts an old-format row with a later id but
+    // earlier timestamp than a new-format row, and asserts the earlier timestamp
+    // still sorts first.
+    await truncate();
+    await pool.query(
+      `INSERT INTO noddde_outbox (id, event, created_at) VALUES
+         ('new-format-late', $1::jsonb, '2024-06-01 12:00:00.000'::timestamptz),
+         ('old-format-early', $1::jsonb, '2024-06-01T08:00:00.000Z'::timestamptz)`,
+      [JSON.stringify({ name: "Warmup", payload: {} })],
+    );
+
+    const adapter = makeAdapter();
+    const unpublished = await adapter.outboxStore!.loadUnpublished();
+
+    expect(unpublished.map((e) => e.id)).toEqual([
+      "old-format-early",
+      "new-format-late",
+    ]);
+  });
 });
 
 defineAdvisoryLockerContract("drizzle/postgres", async () => {

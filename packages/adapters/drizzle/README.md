@@ -63,6 +63,19 @@ adapter.stateStored(usersTable, {
 });
 ```
 
+## Upgrading
+
+### Timestamp column format (pre-1.0 → 1.0.0-rc.0)
+
+As of `1.0.0-rc.0`, `created_at`/`published_at` on PostgreSQL and MySQL are read/written as strings (Drizzle `mode: "string"`) instead of JS `Date` objects (`mode: "date"`). Written values now look like `2024-06-01 08:00:00.000` (space-separated, no `Z`) instead of the ISO-8601-with-`Z` form the pg driver's `Date` serialization used to produce.
+
+**This is safe to deploy without a data migration.** `created_at`/`published_at` are native `TIMESTAMPTZ` (PostgreSQL) / `TIMESTAMP(3)` (MySQL) columns — the database parses any accepted textual form into the same internal temporal value before storing or comparing it, so:
+
+- Existing rows written under the old format keep sorting correctly relative to new rows under `ORDER BY created_at` (verified by a regression test that inserts both formats and asserts temporal ordering — see `src/__tests__/integration/{postgres,mysql}.integration.test.ts`).
+- On MySQL specifically, the old ISO-with-`Z` shape was never actually persisted as literal text either way — MySQL's `TIMESTAMP` parser rejects a trailing `Z` outright, so there is no on-disk representation to worry about.
+
+No action is required beyond upgrading the package. SQLite is unaffected — it has always stored timestamps as `TEXT`.
+
 ## Peer Dependencies
 
 - `drizzle-orm` >= 0.30.0
