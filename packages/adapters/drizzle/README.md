@@ -17,6 +17,7 @@ npm install @noddde/drizzle drizzle-orm
 - **`DrizzleAdapter`** &mdash; Full persistence adapter for `wireDomain`: event-sourced aggregates, state-stored aggregates, sagas, snapshots, and outbox
 - **`DrizzleAdvisoryLocker`** &mdash; Distributed pessimistic locking (PostgreSQL/MySQL)
 - **`DrizzleSnapshotStore`** / **`DrizzleOutboxStore`** &mdash; Optional stores
+- **`DrizzleEventIdempotencyStore`** &mdash; Durable event-handler redelivery dedup, paired with `withIdempotency()`
 - **Built-in schemas** via `@noddde/drizzle/pg`, `@noddde/drizzle/sqlite`, `@noddde/drizzle/mysql`
 
 The dialect is auto-detected from your Drizzle `db` instance.
@@ -62,6 +63,29 @@ adapter.stateStored(usersTable, {
   version: "version",
 });
 ```
+
+### Event Handler Idempotency
+
+`DrizzleEventIdempotencyStore` gives `withIdempotency()` (from `@noddde/core`) a durable, restart-safe backing store, so event handlers can detect and skip duplicate deliveries under Kafka/RabbitMQ at-least-once redelivery. Like `DrizzleOutboxStore`, it's dialect-agnostic: you supply the dialect-specific `eventIdempotency` table.
+
+```typescript
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import Database from "better-sqlite3";
+import { eventIdempotency } from "@noddde/drizzle/sqlite"; // or /pg, /mysql
+import { DrizzleEventIdempotencyStore } from "@noddde/drizzle";
+import { withIdempotency } from "@noddde/core";
+
+const db = drizzle(new Database("app.db"));
+const store = new DrizzleEventIdempotencyStore(
+  db,
+  { current: null },
+  eventIdempotency,
+);
+
+const handler = withIdempotency(myEventHandler, store);
+```
+
+An optional `ttlMs` constructor argument applies lazy TTL expiry on `hasProcessed`. Call `store.removeExpired(ttlMs)` periodically (e.g. from a cron job) to sweep old rows and bound storage growth — it's never called automatically.
 
 ## Peer Dependencies
 

@@ -75,3 +75,13 @@ export const outbox = sqliteTable("noddde_outbox", {
   createdAt: text("created_at").notNull(),
   publishedAt: text("published_at"),
 });
+
+/**
+ * SQLite table definition for event handler idempotency tracking.
+ * Records dedup keys already processed so redelivered events (Kafka,
+ * RabbitMQ at-least-once semantics) can be detected and skipped.
+ */
+export const eventIdempotency = sqliteTable("noddde_event_idempotency", {
+  key: text("key").primaryKey(),
+  processedAt: text("processed_at").notNull(),
+});
