@@ -78,7 +78,22 @@ defineSnapshotContract("prisma/mysql", () => {
 
 defineOutboxContract("prisma/mysql", () => {
   const adapter = makeAdapter();
-  return { outbox: adapter.outboxStore };
+  return {
+    outbox: adapter.outboxStore,
+    // Raw read of every row so the deletePublished(olderThan) cases can
+    // observe which published rows survived (there is no "load published").
+    loadAll: async () => {
+      const rows = await prisma.nodddeOutboxEntry.findMany();
+      return rows.map((r) => ({
+        id: r.id,
+        event: typeof r.event === "string" ? JSON.parse(r.event) : r.event,
+        aggregateName: r.aggregateName ?? undefined,
+        aggregateId: r.aggregateId ?? undefined,
+        createdAt: new Date(r.createdAt),
+        publishedAt: r.publishedAt != null ? new Date(r.publishedAt) : null,
+      }));
+    },
+  };
 });
 
 defineUnitOfWorkContract("prisma/mysql", () => {
@@ -97,6 +112,7 @@ defineAdvisoryLockerContract("prisma/mysql", async () => {
   const b = new PrismaClient({ datasources: { db: { url } } });
   await a.$connect();
   await b.$connect();
+  let killedA = false;
   return {
     lockerA: new PrismaAdvisoryLocker(
       a as unknown as SharedPrismaClient,
@@ -106,9 +122,15 @@ defineAdvisoryLockerContract("prisma/mysql", async () => {
       b as unknown as SharedPrismaClient,
       "mysql",
     ),
-    cleanup: async () => {
+    // Disconnecting the pinned (connection_limit=1) client ends its single
+    // MySQL session, which releases the GET_LOCK it held without release().
+    killSessionA: async () => {
+      killedA = true;
       await a.$disconnect();
-      await b.$disconnect();
+    },
+    cleanup: async () => {
+      if (!killedA) await a.$disconnect().catch(() => {});
+      await b.$disconnect().catch(() => {});
     },
   };
 });

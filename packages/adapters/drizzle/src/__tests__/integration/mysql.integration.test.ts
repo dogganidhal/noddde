@@ -84,8 +84,28 @@ defineSnapshotContract("drizzle/mysql", async () => {
 
 defineOutboxContract("drizzle/mysql", async () => {
   await truncate();
-  const adapter = makeAdapter();
-  return { outbox: adapter.outboxStore! };
+  const db = drizzle(pool);
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    stateStore: aggregateStates,
+    sagaStore: sagaStates,
+    snapshotStore: snapshots,
+    outboxStore: outbox,
+  });
+  return {
+    outbox: adapter.outboxStore!,
+    loadAll: async () => {
+      const rows = await db.select().from(outbox);
+      return rows.map((r) => ({
+        id: r.id,
+        event: typeof r.event === "string" ? JSON.parse(r.event) : r.event,
+        aggregateName: r.aggregateName ?? undefined,
+        aggregateId: r.aggregateId ?? undefined,
+        createdAt: new Date(r.createdAt),
+        publishedAt: r.publishedAt != null ? new Date(r.publishedAt) : null,
+      }));
+    },
+  };
 });
 
 defineUnitOfWorkContract("drizzle/mysql", async () => {
@@ -116,12 +136,20 @@ defineAdvisoryLockerContract("drizzle/mysql", async () => {
   });
   const lockerA = new DrizzleAdvisoryLocker(drizzle(connA), "mysql");
   const lockerB = new DrizzleAdvisoryLocker(drizzle(connB), "mysql");
+  let killedA = false;
   return {
     lockerA,
     lockerB,
+    killSessionA: async () => {
+      killedA = true;
+      // destroy() closes the socket immediately (no COM_QUIT) — a crash,
+      // not a graceful disconnect. MySQL releases GET_LOCK held by the
+      // session when it dies.
+      connA.destroy();
+    },
     cleanup: async () => {
-      await connA.end();
-      await connB.end();
+      if (!killedA) await connA.end().catch(() => {});
+      await connB.end().catch(() => {});
     },
   };
 });

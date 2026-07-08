@@ -60,8 +60,31 @@ defineSnapshotContract("drizzle/sqlite", () => {
 });
 
 defineOutboxContract("drizzle/sqlite", () => {
-  const { adapter, cleanup } = makeAdapter();
-  return { outbox: adapter.outboxStore!, cleanup };
+  const { sqlite, db } = makeDb();
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    stateStore: aggregateStates,
+    sagaStore: sagaStates,
+    snapshotStore: snapshots,
+    outboxStore: outbox,
+  });
+  return {
+    outbox: adapter.outboxStore!,
+    loadAll: async () => {
+      const rows = await db.select().from(outbox);
+      return rows.map((r) => ({
+        id: r.id,
+        event: typeof r.event === "string" ? JSON.parse(r.event) : r.event,
+        aggregateName: r.aggregateName ?? undefined,
+        aggregateId: r.aggregateId ?? undefined,
+        createdAt: new Date(r.createdAt),
+        publishedAt: r.publishedAt != null ? new Date(r.publishedAt) : null,
+      }));
+    },
+    cleanup: async () => {
+      sqlite.close();
+    },
+  };
 });
 
 defineUnitOfWorkContract("drizzle/sqlite", () => {

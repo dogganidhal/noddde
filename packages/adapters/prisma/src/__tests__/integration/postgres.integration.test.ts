@@ -75,7 +75,22 @@ defineSnapshotContract("prisma/postgres", () => {
 
 defineOutboxContract("prisma/postgres", () => {
   const adapter = makeAdapter();
-  return { outbox: adapter.outboxStore };
+  return {
+    outbox: adapter.outboxStore,
+    // Raw read of every row so the deletePublished(olderThan) cases can
+    // observe which published rows survived (there is no "load published").
+    loadAll: async () => {
+      const rows = await prisma.nodddeOutboxEntry.findMany();
+      return rows.map((r) => ({
+        id: r.id,
+        event: typeof r.event === "string" ? JSON.parse(r.event) : r.event,
+        aggregateName: r.aggregateName ?? undefined,
+        aggregateId: r.aggregateId ?? undefined,
+        createdAt: new Date(r.createdAt),
+        publishedAt: r.publishedAt != null ? new Date(r.publishedAt) : null,
+      }));
+    },
+  };
 });
 
 defineUnitOfWorkContract("prisma/postgres", () => {
@@ -97,6 +112,7 @@ defineAdvisoryLockerContract("prisma/postgres", async () => {
   const b = new PrismaClient({ datasources: { db: { url: pinnedUrl } } });
   await a.$connect();
   await b.$connect();
+  let killedA = false;
   return {
     lockerA: new PrismaAdvisoryLocker(
       a as unknown as SharedPrismaClient,
@@ -106,9 +122,16 @@ defineAdvisoryLockerContract("prisma/postgres", async () => {
       b as unknown as SharedPrismaClient,
       "postgresql",
     ),
-    cleanup: async () => {
+    // Disconnecting the pinned (connection_limit=1) client closes its single
+    // pg session, so the backend reclaims A's session-scoped advisory locks
+    // without any explicit release().
+    killSessionA: async () => {
+      killedA = true;
       await a.$disconnect();
-      await b.$disconnect();
+    },
+    cleanup: async () => {
+      if (!killedA) await a.$disconnect().catch(() => {});
+      await b.$disconnect().catch(() => {});
     },
   };
 });

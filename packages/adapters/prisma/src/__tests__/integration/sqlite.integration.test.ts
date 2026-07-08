@@ -71,7 +71,22 @@ defineSnapshotContract("prisma/sqlite", () => {
 
 defineOutboxContract("prisma/sqlite", () => {
   const adapter = makeAdapter();
-  return { outbox: adapter.outboxStore };
+  return {
+    outbox: adapter.outboxStore,
+    // Raw read of every row so the deletePublished(olderThan) cases can
+    // observe which published rows survived (there is no "load published").
+    loadAll: async () => {
+      const rows = await prisma.nodddeOutboxEntry.findMany();
+      return rows.map((r) => ({
+        id: r.id,
+        event: typeof r.event === "string" ? JSON.parse(r.event) : r.event,
+        aggregateName: r.aggregateName ?? undefined,
+        aggregateId: r.aggregateId ?? undefined,
+        createdAt: new Date(r.createdAt),
+        publishedAt: r.publishedAt != null ? new Date(r.publishedAt) : null,
+      }));
+    },
+  };
 });
 
 defineUnitOfWorkContract("prisma/sqlite", () => {

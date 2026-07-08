@@ -8,6 +8,16 @@ export interface AdvisoryLockerContractContext {
   lockerA: AggregateLocker;
   /** Second locker on a *different* session, used to test cross-session blocking. */
   lockerB: AggregateLocker;
+  /**
+   * Optional hook that forcibly terminates lockerA's underlying database
+   * session/connection *without* going through `release()` — the equivalent
+   * of the holding process crashing. Database advisory locks
+   * (`pg_advisory_lock`, MySQL `GET_LOCK`, MSSQL `sp_getapplock`) are
+   * session-scoped and must be reclaimed by the server when the session
+   * dies; this hook lets the contract prove that. When omitted, the
+   * crash-recovery case is skipped for that adapter.
+   */
+  killSessionA?: () => Promise<void>;
   cleanup?: () => Promise<void>;
 }
 
@@ -72,6 +82,32 @@ export function defineAdvisoryLockerContract(
       await ctx.lockerB.acquire("Payment", "id", 500);
       await ctx.lockerA.release("Order", "id");
       await ctx.lockerB.release("Payment", "id");
+    });
+
+    // The whole point of a database advisory lock is that it survives a
+    // clean release *and* a dirty crash: if the process holding the lock
+    // dies, the database must reclaim it so the system doesn't deadlock
+    // forever. Every existing case releases explicitly; this one severs
+    // session A's connection with the lock still held and proves session B
+    // can then acquire it. Skipped for adapters that don't expose a
+    // `killSessionA` hook.
+    it("auto-releases the lock when the holding session is terminated without release()", async () => {
+      if (!ctx.killSessionA) return;
+      await ctx.lockerA.acquire("Order", "o-crash");
+
+      // Sanity check: while A holds it, B cannot acquire within a short
+      // timeout — proves the lock is genuinely held before we kill A.
+      await expect(
+        ctx.lockerB.acquire("Order", "o-crash", 250),
+      ).rejects.toBeInstanceOf(LockTimeoutError);
+
+      // Kill A's session abruptly. No release() is called.
+      await ctx.killSessionA();
+
+      // The server must have reclaimed the lock on session death, so B
+      // now acquires it within the timeout.
+      await ctx.lockerB.acquire("Order", "o-crash", 5000);
+      await ctx.lockerB.release("Order", "o-crash");
     });
   });
 }

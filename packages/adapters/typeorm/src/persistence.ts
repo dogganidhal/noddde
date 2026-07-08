@@ -153,33 +153,51 @@ export class TypeORMStateStoredAggregatePersistence
       where: { aggregateName, aggregateId },
     });
 
-    if (existing) {
-      if (existing.version !== expectedVersion) {
+    try {
+      if (existing) {
+        if (existing.version !== expectedVersion) {
+          throw new ConcurrencyError(
+            aggregateName,
+            aggregateId,
+            expectedVersion,
+            existing.version,
+          );
+        }
+        existing.state = serialized;
+        existing.version = expectedVersion + 1;
+        await repo.save(existing);
+      } else {
+        if (expectedVersion !== 0) {
+          throw new ConcurrencyError(
+            aggregateName,
+            aggregateId,
+            expectedVersion,
+            0,
+          );
+        }
+        const entity = new NodddeAggregateStateEntity();
+        entity.aggregateName = aggregateName;
+        entity.aggregateId = aggregateId;
+        entity.state = serialized;
+        entity.version = 1;
+        await repo.save(entity);
+      }
+    } catch (error: unknown) {
+      if (error instanceof ConcurrencyError) throw error;
+      // The `findOne`-then-insert path has a TOCTOU window: two racing
+      // saves for a brand-new aggregate both see no existing row and both
+      // INSERT, violating the primary key. Map that to a ConcurrencyError
+      // so concurrent creators get the same contract as a stale version.
+      const message = error instanceof Error ? error.message : String(error);
+      if (/UNIQUE|duplicate|unique/i.test(message)) {
         throw new ConcurrencyError(
           aggregateName,
           aggregateId,
           expectedVersion,
-          existing.version,
+          -1,
         );
       }
-      existing.state = serialized;
-      existing.version = expectedVersion + 1;
-      await repo.save(existing);
-    } else {
-      if (expectedVersion !== 0) {
-        throw new ConcurrencyError(
-          aggregateName,
-          aggregateId,
-          expectedVersion,
-          0,
-        );
-      }
-      const entity = new NodddeAggregateStateEntity();
-      entity.aggregateName = aggregateName;
-      entity.aggregateId = aggregateId;
-      entity.state = serialized;
-      entity.version = 1;
-      await repo.save(entity);
+      throw error;
     }
   }
 
