@@ -17,6 +17,7 @@ npm install @noddde/prisma @prisma/client
 - **`PrismaAdapter`** &mdash; Full persistence adapter for `wireDomain`: event-sourced aggregates, state-stored aggregates, sagas, snapshots, and outbox
 - **`PrismaAdvisoryLocker`** &mdash; Distributed pessimistic locking (PostgreSQL/MySQL)
 - **Individual persistence classes** if you need fine-grained control: `PrismaEventSourcedAggregatePersistence`, `PrismaStateStoredAggregatePersistence`, `PrismaSagaPersistence`, `PrismaSnapshotStore`, `PrismaOutboxStore`
+- **`PrismaEventIdempotencyStore`** &mdash; Durable dedup store for event handler redelivery (pairs with `withIdempotency()`)
 - **`PrismaUnitOfWork`** &mdash; ACID transaction context
 
 ## Usage
@@ -47,6 +48,36 @@ adapter.stateStored("order", {
   state: "data",
   version: "rev",
 });
+```
+
+### Event Handler Idempotency
+
+`PrismaEventIdempotencyStore` is a durable, Prisma-backed implementation of `EventIdempotencyStore` (`@noddde/core`). Pair it with `withIdempotency()` to dedupe event handler invocations under Kafka/RabbitMQ at-least-once redelivery — dedup state survives restarts and is shared across process instances, unlike the in-memory store.
+
+```typescript
+import { PrismaClient } from "@prisma/client";
+import { PrismaEventIdempotencyStore } from "@noddde/prisma";
+import { withIdempotency } from "@noddde/core";
+
+const prisma = new PrismaClient();
+const idempotencyStore = new PrismaEventIdempotencyStore(prisma, {
+  current: null,
+});
+
+const safeHandler = withIdempotency(myEventHandler, idempotencyStore);
+```
+
+Optionally pass a `ttlMs` third argument to lazily expire records read via `hasProcessed`, and call `removeExpired(ttlMs)` periodically (e.g. from a cron job) to bound table growth.
+
+Like the outbox and snapshot stores, this requires the consuming application to add the `NodddeEventIdempotencyRecord` model to its own `schema.prisma` and run `prisma generate`:
+
+```prisma
+model NodddeEventIdempotencyRecord {
+  key         String   @id
+  processedAt DateTime @map("processed_at")
+
+  @@map("noddde_event_idempotency")
+}
 ```
 
 ## Peer Dependencies

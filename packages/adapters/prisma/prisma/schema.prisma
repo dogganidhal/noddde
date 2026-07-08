@@ -66,6 +66,14 @@ model NodddeOutboxEntry {
   @@map("noddde_outbox")
 }
 
+/// Event idempotency table for deduping event handler invocations under at-least-once redelivery.
+model NodddeEventIdempotencyRecord {
+  key         String   @id
+  processedAt DateTime @map("processed_at")
+
+  @@map("noddde_event_idempotency")
+}
+
 /// Test fixture: typed-column dedicated state table for the Order aggregate.
 /// Used by the typed-column PrismaStateMapper integration tests.
 model Order {
