@@ -93,6 +93,17 @@ export class KafkaEventBus implements EventBus, Connectable {
    * Set at the start of the round-trip, cleared in a finally block when done.
    */
   private _warmingUp: Promise<void> | null = null;
+  /**
+   * Synthetic event name for the internal warmup topic, derived from
+   * `clientId` so each bus instance gets its own dedicated topic.
+   */
+  private readonly _warmupEventName: string;
+  /**
+   * Resolvers for in-flight `_performWarmupRoundTrip()` calls, invoked by
+   * the persistent internal warmup handler (registered once, during
+   * `connect()`) whenever a warmup message is observed.
+   */
+  private readonly _warmupWaiters: Set<() => void> = new Set();
   /** Internal handler registry keyed by event name. */
   private readonly _handlers: Map<string, AsyncEventHandler[]> = new Map();
   /** Topics that have already been subscribed to (avoids duplicate subscribes). */
@@ -108,6 +119,7 @@ export class KafkaEventBus implements EventBus, Connectable {
     this._config = config;
     this._logger = config.logger ?? new NodddeLogger("warn", "noddde:kafka");
     this._instrumentation = config.instrumentation ?? new Instrumentation(null);
+    this._warmupEventName = `__noddde_warmup_${config.clientId}`;
     this._kafka = new Kafka({
       brokers: config.brokers,
       clientId: config.clientId,
@@ -155,7 +167,19 @@ export class KafkaEventBus implements EventBus, Connectable {
         await this._producer.connect();
         await this._consumer.connect();
 
+        // Provision the warmup topic and its internal handler *before*
+        // consumer.run() starts, so the round-trip works the moment
+        // connect() resolves — kafkajs forbids subscribing to a new topic
+        // once the consumer is running ("Cannot subscribe to topic while
+        // consumer is running"). Only done eagerly for warmupOnConnect;
+        // an explicit warmup() call without it provisions lazily via the
+        // stop/subscribe/restart path in warmup() itself.
+        if (this._config.warmupOnConnect) {
+          await this._provisionWarmupTopic();
+        }
+
         // Subscribe to topics for all handlers registered before connect
+        // (including the warmup handler registered just above, if provisioned).
         for (const eventName of this._handlers.keys()) {
           const topic = this._topicName(eventName);
           if (!this._subscribedTopics.has(topic)) {
@@ -164,73 +188,7 @@ export class KafkaEventBus implements EventBus, Connectable {
           }
         }
 
-        // Wait for the consumer to be polling for messages before
-        // `connect()` resolves. Without this, `consumer.run()` returns
-        // immediately and the caller can dispatch a message *before* the
-        // consumer's initial offset fetch completes — with the default
-        // `fromBeginning: false`, that first message gets skipped because
-        // the offset reset happens after it was published.
-        //
-        // We listen for the kafkajs `FETCH_START` event rather than
-        // `GROUP_JOIN`: GROUP_JOIN fires after partition assignment, but
-        // before the consumer's initial offset fetch lands, so a
-        // message published right after GROUP_JOIN can still end up
-        // below the consumer's eventual starting position.
-        // `FETCH_START` only fires once the consumer is actually polling,
-        // which is the moment we can guarantee subsequent publishes will
-        // be delivered.
-        let fetchStarted!: () => void;
-        const fetchStartedPromise = new Promise<void>((resolve) => {
-          fetchStarted = resolve;
-        });
-        const unsubscribe = this._consumer.on(
-          this._consumer.events.FETCH_START,
-          () => fetchStarted(),
-        );
-
-        await this._consumer.run({
-          // Disable auto-commit so offsets are only committed after all handlers
-          // complete successfully (at-least-once delivery guarantee).
-          autoCommit: false,
-          eachMessage: async ({ topic, partition, message }) => {
-            const rawValue = message.value?.toString();
-            if (rawValue == null) {
-              return;
-            }
-            // Derive event name from topic by stripping the prefix
-            const prefix = this._config.topicPrefix ?? "";
-            const eventName = topic.startsWith(prefix)
-              ? topic.slice(prefix.length)
-              : topic;
-            const offsetKey = `${topic}:${partition}:${message.offset}`;
-            await this._handleMessage(eventName, rawValue, offsetKey);
-
-            // Explicitly commit the offset after all handlers succeeded.
-            // Without this, kafkajs never persists offsets when autoCommit is false.
-            await this._consumer!.commitOffsets([
-              {
-                topic,
-                partition,
-                offset: (BigInt(message.offset) + 1n).toString(),
-              },
-            ]);
-
-            // Prune the delivery-count entry to prevent unbounded memory growth.
-            this._deliveryCounts.delete(offsetKey);
-          },
-        });
-
-        // If we subscribed to any topic, wait for the consumer to start
-        // fetching. With no subscribed topics there's nothing to wait
-        // for — kafkajs won't emit FETCH_START at all. Cap at 30s so a
-        // misconfigured broker doesn't hang the process forever.
-        if (this._subscribedTopics.size > 0) {
-          await Promise.race([
-            fetchStartedPromise,
-            new Promise<void>((resolve) => setTimeout(resolve, 30_000)),
-          ]);
-        }
-        unsubscribe();
+        await this._runConsumerLoop();
 
         this._connected = true;
 
@@ -247,6 +205,111 @@ export class KafkaEventBus implements EventBus, Connectable {
 
     this._connecting = connecting;
     return connecting;
+  }
+
+  /**
+   * Creates the internal warmup topic via the admin client and registers
+   * the persistent internal handler that resolves in-flight
+   * `_performWarmupRoundTrip()` waiters. Does NOT subscribe — the caller
+   * is responsible for adding the topic to `_subscribedTopics` (either via
+   * `connect()`'s pre-run subscribe loop, or `warmup()`'s lazy
+   * stop/subscribe/restart path).
+   */
+  private async _provisionWarmupTopic(): Promise<void> {
+    const warmupTopic = this._topicName(this._warmupEventName);
+    const admin = this._kafka.admin();
+    await admin.connect();
+    try {
+      await admin.createTopics({
+        waitForLeaders: true,
+        topics: [{ topic: warmupTopic, numPartitions: 1 }],
+      });
+    } finally {
+      await admin.disconnect();
+    }
+    this._handlers.set(this._warmupEventName, [
+      async () => {
+        for (const resolveWaiter of this._warmupWaiters) {
+          resolveWaiter();
+        }
+      },
+    ]);
+  }
+
+  /**
+   * Starts (or restarts) the consumer's fetch loop via `consumer.run()`,
+   * and waits for the `FETCH_START` event before resolving so that
+   * publishes issued right after this call are guaranteed to be seen by
+   * the consumer (see the long-form rationale below).
+   *
+   * Without this wait, `consumer.run()` returns immediately and the caller
+   * can dispatch a message *before* the consumer's initial offset fetch
+   * completes — with the default `fromBeginning: false`, that first
+   * message gets skipped because the offset reset happens after it was
+   * published.
+   *
+   * We listen for the kafkajs `FETCH_START` event rather than
+   * `GROUP_JOIN`: `GROUP_JOIN` fires after partition assignment, but
+   * before the consumer's initial offset fetch lands, so a message
+   * published right after `GROUP_JOIN` can still end up below the
+   * consumer's eventual starting position. `FETCH_START` only fires once
+   * the consumer is actually polling, which is the moment we can
+   * guarantee subsequent publishes will be delivered.
+   */
+  private async _runConsumerLoop(): Promise<void> {
+    const consumer = this._consumer!;
+
+    let fetchStarted!: () => void;
+    const fetchStartedPromise = new Promise<void>((resolve) => {
+      fetchStarted = resolve;
+    });
+    const unsubscribe = consumer.on(consumer.events.FETCH_START, () =>
+      fetchStarted(),
+    );
+
+    await consumer.run({
+      // Disable auto-commit so offsets are only committed after all handlers
+      // complete successfully (at-least-once delivery guarantee).
+      autoCommit: false,
+      eachMessage: async ({ topic, partition, message }) => {
+        const rawValue = message.value?.toString();
+        if (rawValue == null) {
+          return;
+        }
+        // Derive event name from topic by stripping the prefix
+        const prefix = this._config.topicPrefix ?? "";
+        const eventName = topic.startsWith(prefix)
+          ? topic.slice(prefix.length)
+          : topic;
+        const offsetKey = `${topic}:${partition}:${message.offset}`;
+        await this._handleMessage(eventName, rawValue, offsetKey);
+
+        // Explicitly commit the offset after all handlers succeeded.
+        // Without this, kafkajs never persists offsets when autoCommit is false.
+        await consumer.commitOffsets([
+          {
+            topic,
+            partition,
+            offset: (BigInt(message.offset) + 1n).toString(),
+          },
+        ]);
+
+        // Prune the delivery-count entry to prevent unbounded memory growth.
+        this._deliveryCounts.delete(offsetKey);
+      },
+    });
+
+    // If we subscribed to any topic, wait for the consumer to start
+    // fetching. With no subscribed topics there's nothing to wait for —
+    // kafkajs won't emit FETCH_START at all. Cap at 30s so a
+    // misconfigured broker doesn't hang the process forever.
+    if (this._subscribedTopics.size > 0) {
+      await Promise.race([
+        fetchStartedPromise,
+        new Promise<void>((resolve) => setTimeout(resolve, 30_000)),
+      ]);
+    }
+    unsubscribe();
   }
 
   /**
@@ -346,19 +409,24 @@ export class KafkaEventBus implements EventBus, Connectable {
 
     const warmingUp = (async () => {
       try {
-        const topic = `__noddde_warmup_${this._config.clientId}`;
-        const admin = this._kafka.admin();
-        await admin.connect();
-        try {
-          await admin.createTopics({
-            waitForLeaders: true,
-            topics: [{ topic, numPartitions: 1 }],
+        const warmupTopic = this._topicName(this._warmupEventName);
+        if (!this._subscribedTopics.has(warmupTopic)) {
+          // Not provisioned during connect() (warmupOnConnect wasn't set).
+          // kafkajs forbids subscribing to a new topic while the consumer
+          // is running, so we stop it, add the subscription, and restart
+          // the fetch loop — the "expensive but correct" late-subscribe
+          // path, scoped only to the warmup topic.
+          await this._consumer!.stop();
+          await this._provisionWarmupTopic();
+          await this._consumer!.subscribe({
+            topic: warmupTopic,
+            fromBeginning: false,
           });
-        } finally {
-          await admin.disconnect();
+          this._subscribedTopics.add(warmupTopic);
+          await this._runConsumerLoop();
         }
 
-        await this._performWarmupRoundTrip(topic);
+        await this._performWarmupRoundTrip();
         this._warmedUp = true;
       } finally {
         this._warmingUp = null;
@@ -370,18 +438,21 @@ export class KafkaEventBus implements EventBus, Connectable {
   }
 
   /**
-   * Registers an internal handler for the given warmup topic and
-   * repeatedly dispatches a throwaway event to it (on a 1-second interval)
-   * until the handler observes the message, or until `warmupTimeoutMs`
-   * elapses.
+   * Repeatedly dispatches a throwaway event to the warmup topic (on a
+   * 1-second interval) until the persistent internal warmup handler
+   * (registered once in `connect()`, before `consumer.run()`) observes it,
+   * or until `warmupTimeoutMs` elapses. The subscription itself is already
+   * in place by the time this runs — see `connect()` — since kafkajs
+   * forbids subscribing to a new topic after the consumer starts running.
    */
-  private _performWarmupRoundTrip(topic: string): Promise<void> {
+  private _performWarmupRoundTrip(): Promise<void> {
     const timeoutMs = this._config.warmupTimeoutMs ?? 60000;
+    const eventName = this._warmupEventName;
 
     return new Promise<void>((resolve, reject) => {
       let settled = false;
       // Declared up front (rather than as `const` at their `setInterval`/
-      // `setTimeout` call sites) because the mock producer in unit tests —
+      // `setTimeout` call sites) because the internal warmup handler —
       // and potentially a very fast real broker — can invoke `finish()`
       // synchronously from within `dispatchOnce()`'s call to `dispatch()`,
       // i.e. before a `const` initializer below it would have run.
@@ -391,21 +462,20 @@ export class KafkaEventBus implements EventBus, Connectable {
       const finish = (): void => {
         if (settled) return;
         settled = true;
+        this._warmupWaiters.delete(finish);
         clearInterval(intervalId);
         clearTimeout(timeoutId);
         resolve();
       };
 
-      this.on(topic, async () => {
-        finish();
-      });
+      this._warmupWaiters.add(finish);
 
       const dispatchOnce = (): void => {
-        this.dispatch({ name: topic, payload: { warmup: true } }).catch(
+        this.dispatch({ name: eventName, payload: { warmup: true } }).catch(
           (err: unknown) => {
             this._logger.warn(
-              `Warmup dispatch to topic "${topic}" failed; will retry.`,
-              { topic, error: String(err) },
+              `Warmup dispatch to topic "${eventName}" failed; will retry.`,
+              { eventName, error: String(err) },
             );
           },
         );
@@ -416,10 +486,11 @@ export class KafkaEventBus implements EventBus, Connectable {
       timeoutId = setTimeout(() => {
         if (settled) return;
         settled = true;
+        this._warmupWaiters.delete(finish);
         clearInterval(intervalId);
         reject(
           new Error(
-            `KafkaEventBus warmup timed out after ${timeoutMs}ms waiting for round-trip on topic "${topic}"`,
+            `KafkaEventBus warmup timed out after ${timeoutMs}ms waiting for round-trip on topic "${eventName}"`,
           ),
         );
       }, timeoutMs);

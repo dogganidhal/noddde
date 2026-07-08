@@ -151,10 +151,11 @@ export class KafkaEventBus implements EventBus, Connectable {
 
 ### Warmup
 
-20. **Explicit warmup round-trip** -- `warmup()` addresses broker-side cold-start latency that `connect()`'s `FETCH_START` wait does not cover (a freshly-deployed cluster's first end-to-end publish/consume cycle can take far longer than subsequent ones). It creates a uniquely-named internal topic (derived from `clientId`), ensures it exists via the Kafka admin client, registers an internal handler for it, and repeatedly dispatches a throwaway event to that topic (on a 1-second interval) until the internal handler observes it. `warmup()` must be called after `connect()`; calling it before `connect()` or after `close()` throws the same "not connected" error as `dispatch()`.
+20. **Explicit warmup round-trip** -- `warmup()` addresses broker-side cold-start latency that `connect()`'s `FETCH_START` wait does not cover (a freshly-deployed cluster's first end-to-end publish/consume cycle can take far longer than subsequent ones). It uses a uniquely-named internal topic (derived from `clientId`) and repeatedly dispatches a throwaway event to that topic (on a 1-second interval) until an internal handler observes it. `warmup()` must be called after `connect()`; calling it before `connect()` or after `close()` throws the same "not connected" error as `dispatch()`.
 21. **Idempotent** -- After the first successful `warmup()` call, subsequent calls resolve immediately without repeating the round-trip. Concurrent overlapping calls are deduplicated via an in-flight promise mutex, mirroring `connect()`'s dedup pattern — the second caller awaits the first rather than starting a parallel round-trip.
-22. **warmupOnConnect config** -- When `warmupOnConnect: true`, `connect()` calls `warmup()` internally after the consumer starts polling and before `connect()`'s returned promise resolves, so callers that opt in get a fully warmed bus from a single `await connect()`.
+22. **warmupOnConnect config** -- When `warmupOnConnect: true`, the warmup topic is created and its subscription registered _before_ `consumer.run()` starts during `connect()` (kafkajs forbids subscribing to a new topic once the consumer is running), and `connect()` then calls `warmup()` internally before its own returned promise resolves — so callers that opt in get a fully warmed bus from a single `await connect()`.
 23. **Warmup timeout** -- If the round-trip doesn't complete within `warmupTimeoutMs` (default `60000`), `warmup()` rejects with a timeout error rather than hanging indefinitely.
+24. **Late warmup() without warmupOnConnect** -- If `warmup()` is called explicitly after `connect()` resolved without `warmupOnConnect` configured, the warmup topic's subscription was not set up before `consumer.run()` started. Since kafkajs forbids subscribing while the consumer is running, `warmup()` handles this by stopping the consumer (`consumer.stop()`), provisioning the warmup topic and subscription, and restarting the fetch loop (`consumer.run()` again) before performing the round-trip. This is scoped only to the warmup topic — it does not fix late `on()` registration for other event names (see robustness §3.4, out of scope here).
 
 ## Invariants
 
@@ -189,6 +190,7 @@ export class KafkaEventBus implements EventBus, Connectable {
 - **warmup() called after a prior successful warmup()**: Resolves immediately; no additional round-trip, no additional topic creation.
 - **warmup() round-trip exceeds warmupTimeoutMs**: Rejects with a timeout error; does not hang indefinitely.
 - **warmupOnConnect: true with broker unreachable**: `connect()` rejects with the warmup failure (propagated), consistent with `connect()` surfacing connection errors.
+- **warmup() called explicitly without warmupOnConnect**: The warmup topic wasn't subscribed before `consumer.run()` started during `connect()`, so `warmup()` stops the consumer, provisions the topic and subscription, and restarts the fetch loop before performing the round-trip — verified against a real broker, not just mocks.
 
 ## Integration Points
 
