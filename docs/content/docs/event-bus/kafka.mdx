@@ -40,6 +40,8 @@ const eventBus = new KafkaEventBus({
 | `resilience`           | `BrokerResilience`                                    | No       | `maxAttempts=6, initialDelayMs=300, maxDelayMs=30000` | Connection resilience config. `maxAttempts` maps to kafkajs `retries` (minus 1), `initialDelayMs` to `initialRetryTime`, `maxDelayMs` to `maxRetryTime`. `maxRetries` limits per-message delivery attempts                                                       |
 | `partitionKeyStrategy` | `"aggregateId" \| ((event: Event) => string \| null)` | No       | `"aggregateId"`                                       | Strategy for deriving the Kafka message key. Default uses `event.metadata?.aggregateId` (stringified) for per-aggregate partition ordering, falling back to `null` (round-robin). A custom function receives the full event and returns the key string or `null` |
 | `logger`               | `Logger`                                              | No       | `NodddeLogger("warn", "noddde:kafka")`                | Framework logger instance from `@noddde/core`. All internal logging goes through this logger with structured context data                                                                                                                                        |
+| `warmupOnConnect`      | `boolean`                                             | No       | `false`                                               | When `true`, `connect()` runs a `warmup()` round-trip before its returned promise resolves, so a single `await connect()` returns a fully warmed bus (see [Cold-start warmup](#cold-start-warmup))                                                               |
+| `warmupTimeoutMs`      | `number`                                              | No       | `60000`                                               | Timeout in ms for the `warmup()` publish/consume round-trip before it rejects                                                                                                                                                                                    |
 
 ## How It Works
 
@@ -49,6 +51,35 @@ const eventBus = new KafkaEventBus({
 - **Poison message protection**: Malformed messages that fail JSON deserialization are logged and skipped (offset committed), preventing corrupt data from blocking the partition. If `resilience.maxRetries` is configured, messages that exceed the delivery attempt limit are also skipped with a warning.
 - **Connection resilience**: The optional `resilience` config (`BrokerResilience` from `@noddde/core`) is mapped to kafkajs retry options for automatic reconnection on broker unavailability. `maxAttempts` maps to kafkajs `retries` (minus 1, since kafkajs counts retries after the first attempt), `initialDelayMs` to `initialRetryTime`, and `maxDelayMs` to `maxRetryTime`. The `sessionTimeout` and `heartbeatInterval` options tune consumer rebalance behavior for slow handlers. Concurrent `connect()` calls are deduplicated via a connection promise mutex to prevent parallel connection attempts.
 - **Logging**: All internal logging uses the framework `Logger` interface from `@noddde/core`. Pass a custom `logger` in the config or accept the default (`NodddeLogger("warn", "noddde:kafka")`). All log calls include structured context data (event name, error details).
+
+## Cold-start warmup
+
+A freshly-deployed Kafka cluster is slow on its **first** end-to-end publish/consume cycle: topic auto-creation, leader election, and ISR sync happen lazily on first use, so the first message can take far longer to be delivered than every message after it. `connect()` waits for the consumer to begin polling (via kafkajs `FETCH_START`), but that wait does not cover this broker-side cold start.
+
+`warmup()` addresses it by running a throwaway publish/consume round-trip on a dedicated internal topic (named from `clientId`) and resolving only once the round-trip is observed:
+
+```ts title="infrastructure/event-bus.ts"
+await eventBus.connect();
+await eventBus.warmup(); // resolves once the broker has served a full round-trip
+```
+
+- **Must follow `connect()`**: calling `warmup()` before `connect()` or after `close()` throws the same "not connected" error as `dispatch()`.
+- **Idempotent**: after the first successful call, subsequent calls resolve immediately without repeating the round-trip. Concurrent overlapping calls are deduplicated into a single round-trip via an in-flight promise mutex (mirroring `connect()`).
+- **Bounded**: rejects with a timeout error if the round-trip does not complete within `warmupTimeoutMs` (default `60000`) rather than hanging indefinitely.
+
+Set `warmupOnConnect: true` to fold the warmup into connection so a single `await connect()` returns a fully warmed bus. A warmup failure then propagates through `connect()`'s returned promise, consistent with how `connect()` surfaces other connection errors:
+
+```ts title="infrastructure/event-bus.ts"
+const eventBus = new KafkaEventBus({
+  brokers: ["localhost:9092"],
+  clientId: "my-service",
+  groupId: "my-service-group",
+  warmupOnConnect: true,
+  warmupTimeoutMs: 60000, // optional — round-trip timeout (default 60000)
+});
+
+await eventBus.connect(); // only resolves once the broker is warm
+```
 
 ## Wiring with Domain
 

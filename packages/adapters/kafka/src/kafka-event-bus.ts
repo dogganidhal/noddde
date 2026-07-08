@@ -44,6 +44,17 @@ export interface KafkaEventBusConfig {
    * `traceId`/`spanId` correlation fields. Defaults to a no-op instance.
    */
   instrumentation?: Instrumentation;
+  /**
+   * When `true`, `connect()` automatically performs a `warmup()` round-trip
+   * before resolving, so the returned promise only settles once the broker
+   * has passed cold-start latency. Default: `false`.
+   */
+  warmupOnConnect?: boolean;
+  /**
+   * Timeout in milliseconds for the `warmup()` publish/consume round-trip
+   * before it rejects. Default: `60000`.
+   */
+  warmupTimeoutMs?: number;
 }
 
 /**
@@ -65,7 +76,7 @@ export class KafkaEventBus implements EventBus, Connectable {
   private readonly _logger: Logger;
   private readonly _instrumentation: Instrumentation;
   /** The kafkajs Kafka client. Exposed as a field so tests can inject a mock. */
-  private _kafka: Pick<Kafka, "producer" | "consumer">;
+  private _kafka: Pick<Kafka, "producer" | "consumer" | "admin">;
   private _producer: Producer | null = null;
   private _consumer: Consumer | null = null;
   private _connected = false;
@@ -75,6 +86,13 @@ export class KafkaEventBus implements EventBus, Connectable {
    * Set at the start of connection, cleared in a finally block when done.
    */
   private _connecting: Promise<void> | null = null;
+  /** `true` once a `warmup()` round-trip has completed successfully. */
+  private _warmedUp = false;
+  /**
+   * In-flight warmup promise used to deduplicate concurrent `warmup()` calls.
+   * Set at the start of the round-trip, cleared in a finally block when done.
+   */
+  private _warmingUp: Promise<void> | null = null;
   /** Internal handler registry keyed by event name. */
   private readonly _handlers: Map<string, AsyncEventHandler[]> = new Map();
   /** Topics that have already been subscribed to (avoids duplicate subscribes). */
@@ -215,6 +233,13 @@ export class KafkaEventBus implements EventBus, Connectable {
         unsubscribe();
 
         this._connected = true;
+
+        // Opt-in cold-start mitigation: run the warmup round-trip before
+        // connect()'s returned promise resolves, so a failure propagates
+        // through connect() just like any other connection error.
+        if (this._config.warmupOnConnect) {
+          await this.warmup();
+        }
       } finally {
         this._connecting = null;
       }
@@ -287,6 +312,117 @@ export class KafkaEventBus implements EventBus, Connectable {
           value,
         },
       ],
+    });
+  }
+
+  /**
+   * Performs a throwaway publish/consume round-trip on a dedicated internal
+   * topic to force the Kafka cluster past cold-start latency (topic
+   * creation, leader election, ISR sync) before real traffic flows.
+   *
+   * Must be called after `connect()`. Idempotent: after the first
+   * successful call, subsequent calls resolve immediately without
+   * repeating the round-trip. Concurrent overlapping calls are deduplicated
+   * via an in-flight promise mutex, mirroring `connect()`'s dedup pattern.
+   *
+   * @throws If called before `connect()` or after `close()`.
+   * @throws If the round-trip does not complete within `warmupTimeoutMs`
+   *   (default 60000ms).
+   */
+  async warmup(): Promise<void> {
+    if (this._closed || !this._connected) {
+      throw new Error("KafkaEventBus is not connected. Call connect() first.");
+    }
+
+    if (this._warmedUp) {
+      return;
+    }
+
+    // Deduplicate concurrent warmup() calls: if a round-trip is already in
+    // progress, await that promise rather than starting a parallel one.
+    if (this._warmingUp != null) {
+      return this._warmingUp;
+    }
+
+    const warmingUp = (async () => {
+      try {
+        const topic = `__noddde_warmup_${this._config.clientId}`;
+        const admin = this._kafka.admin();
+        await admin.connect();
+        try {
+          await admin.createTopics({
+            waitForLeaders: true,
+            topics: [{ topic, numPartitions: 1 }],
+          });
+        } finally {
+          await admin.disconnect();
+        }
+
+        await this._performWarmupRoundTrip(topic);
+        this._warmedUp = true;
+      } finally {
+        this._warmingUp = null;
+      }
+    })();
+
+    this._warmingUp = warmingUp;
+    return warmingUp;
+  }
+
+  /**
+   * Registers an internal handler for the given warmup topic and
+   * repeatedly dispatches a throwaway event to it (on a 1-second interval)
+   * until the handler observes the message, or until `warmupTimeoutMs`
+   * elapses.
+   */
+  private _performWarmupRoundTrip(topic: string): Promise<void> {
+    const timeoutMs = this._config.warmupTimeoutMs ?? 60000;
+
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      // Declared up front (rather than as `const` at their `setInterval`/
+      // `setTimeout` call sites) because the mock producer in unit tests —
+      // and potentially a very fast real broker — can invoke `finish()`
+      // synchronously from within `dispatchOnce()`'s call to `dispatch()`,
+      // i.e. before a `const` initializer below it would have run.
+      let intervalId: ReturnType<typeof setInterval> | undefined;
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+      const finish = (): void => {
+        if (settled) return;
+        settled = true;
+        clearInterval(intervalId);
+        clearTimeout(timeoutId);
+        resolve();
+      };
+
+      this.on(topic, async () => {
+        finish();
+      });
+
+      const dispatchOnce = (): void => {
+        this.dispatch({ name: topic, payload: { warmup: true } }).catch(
+          (err: unknown) => {
+            this._logger.warn(
+              `Warmup dispatch to topic "${topic}" failed; will retry.`,
+              { topic, error: String(err) },
+            );
+          },
+        );
+      };
+
+      dispatchOnce();
+      intervalId = setInterval(dispatchOnce, 1000);
+      timeoutId = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        clearInterval(intervalId);
+        reject(
+          new Error(
+            `KafkaEventBus warmup timed out after ${timeoutMs}ms waiting for round-trip on topic "${topic}"`,
+          ),
+        );
+      }, timeoutMs);
     });
   }
 
