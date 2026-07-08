@@ -11,6 +11,18 @@ import type { ChannelModel, ConfirmChannel } from "amqplib";
 import amqplib from "amqplib";
 
 /**
+ * True if `error` is amqplib's PRECONDITION_FAILED, which `assertExchange`
+ * throws when an exchange already exists with a different type than requested.
+ */
+function isExchangeTypeMismatch(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes("PRECONDITION_FAILED") ||
+    message.includes("PRECONDITION-FAILED")
+  );
+}
+
+/**
  * Configuration for the RabbitMqEventBus.
  */
 export interface RabbitMqEventBusConfig {
@@ -194,6 +206,17 @@ export class RabbitMqEventBus implements EventBus, Connectable {
         this._connected = true;
         return;
       } catch (error) {
+        if (isExchangeTypeMismatch(error)) {
+          // Not transient: a different exchangeType will never succeed on
+          // retry against the same exchangeName. Fail fast with guidance.
+          throw new Error(
+            `Failed to assert exchange "${this._exchangeName}": an exchange with this name already ` +
+              `exists with a different type than the configured exchangeType ("${this._exchangeType}"). ` +
+              `RabbitMQ exchanges cannot be changed in place — see the "Changing exchangeType after ` +
+              `deployment" section in the @noddde/rabbitmq README. Original error: ${(error as Error).message}`,
+            { cause: error },
+          );
+        }
         lastError = error as Error;
         if (attempt < maxAttempts - 1) {
           const delay = Math.min(initialDelay * Math.pow(2, attempt), maxDelay);

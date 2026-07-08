@@ -153,6 +153,44 @@ describe("RabbitMqEventBus", () => {
     expect(mockChannel.prefetch).toHaveBeenCalledWith(20);
   });
 
+  it("should fail fast with a clear message on exchangeType mismatch (PRECONDITION_FAILED)", async () => {
+    const mockChannel = {
+      assertExchange: vi
+        .fn()
+        .mockRejectedValue(
+          new Error(
+            "Operation failed: QueueDeclare; 406 (PRECONDITION_FAILED) with message " +
+              "\"PRECONDITION_FAILED - inequivalent arg 'type' for exchange 'my-domain-events' in vhost '/': received 'fanout' but current is 'topic'\"",
+          ),
+        ),
+      prefetch: vi.fn(),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    const mockConnection = {
+      createConfirmChannel: vi.fn().mockResolvedValue(mockChannel),
+      on: vi.fn(),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const amqplib = await import("amqplib");
+    (amqplib.default.connect as ReturnType<typeof vi.fn>).mockResolvedValue(
+      mockConnection,
+    );
+
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      exchangeName: "my-domain-events",
+      exchangeType: "fanout",
+      resilience: { maxAttempts: 5, initialDelayMs: 1, maxDelayMs: 1 },
+    });
+
+    await expect(bus.connect()).rejects.toThrow(
+      /exchangeType after deployment/i,
+    );
+    // Not transient: must not burn through the configured retry attempts.
+    expect(mockChannel.assertExchange).toHaveBeenCalledTimes(1);
+  });
+
   it("should retry connection with exponential backoff", async () => {
     const bus = new RabbitMqEventBus({
       url: "amqp://localhost:5672",
