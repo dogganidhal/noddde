@@ -58,6 +58,49 @@ const eventBus = new KafkaEventBus({
 });
 ```
 
+## Troubleshooting
+
+### Cold-start latency on freshly-deployed clusters
+
+`connect()` waits for the consumer's `FETCH_START` event, which guarantees the consumer is actively polling before `connect()` resolves. That only covers consumer-side readiness. On a brand-new Kafka cluster (e.g. a fresh broker in CI, or a first-ever deployment), the _broker's_ first end-to-end publish/consume round trip can be dramatically slower than subsequent ones — slow enough to exceed a typical 30s delivery expectation.
+
+This is a one-shot cold-start cost, not an ongoing issue: once a topic/partition has been touched once, later publishes are fast. If your application (or its tests) can't tolerate a slow first delivery, warm the cluster up explicitly at startup with a throwaway publish/consume cycle before serving traffic:
+
+```typescript
+import { Kafka } from "kafkajs";
+import { KafkaEventBus } from "@noddde/kafka";
+
+async function warmupKafka(brokers: string[]) {
+  const warmupTopic = "__warmup";
+  const admin = new Kafka({ brokers, clientId: "warmup-admin" }).admin();
+  await admin.connect();
+  await admin.createTopics({
+    waitForLeaders: true,
+    topics: [{ topic: warmupTopic, numPartitions: 1 }],
+  });
+  await admin.disconnect();
+
+  const warmupBus = new KafkaEventBus({
+    brokers,
+    clientId: "warmup",
+    groupId: "warmup-group",
+  });
+  let warmedUp = false;
+  warmupBus.on(warmupTopic, async () => {
+    warmedUp = true;
+  });
+  await warmupBus.connect();
+
+  while (!warmedUp) {
+    await warmupBus.dispatch({ name: warmupTopic, payload: {} });
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  await warmupBus.close();
+}
+```
+
+Run this once at process startup before wiring the real `KafkaEventBus`/domain. The `@noddde/kafka` integration test suite uses the same pattern in `beforeAll` to avoid flaking on a cold CI cluster.
+
 ## Peer Dependencies
 
 - `kafkajs` >= 2.0.0
