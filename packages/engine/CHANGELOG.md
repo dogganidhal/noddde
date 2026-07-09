@@ -1,5 +1,26 @@
 # @noddde/engine
 
+## 1.0.0-rc.1
+
+### Minor Changes
+
+- 69b9817: Add `KafkaEventBus.warmup()` / `warmupOnConnect` for Kafka cold-start latency, and a new `EventIdempotencyStore` + `withIdempotency()` primitive (`@noddde/core`) for deduplicating event handler invocations under Kafka/RabbitMQ at-least-once redelivery, with an in-memory implementation in `@noddde/engine` and durable table-backed implementations in `@noddde/typeorm`, `@noddde/drizzle`, and `@noddde/prisma`.
+
+  `@noddde/nats` gets a permanent benchmark test (no API change) documenting that per-subscription inbox-subject memory is negligible at scale — no code change was needed after measuring against a real broker.
+
+- e6d3e39: `SagaExecutor` now honors a per-saga `atomicity` mode (`saga.atomicity ?? "atomic"`):
+
+  - **`atomic`** (default) — unchanged: the saga's unit of work spans the saga-state save and all reaction commands, so they commit or roll back together.
+  - **`best-effort`** — commits the saga state first, then dispatches reaction commands outside that unit of work (each command obtains its own UoW via `CommandLifecycleExecutor`). Command handlers that publish events directly through the event bus — and the re-entrant saga executions they trigger — therefore observe the committed saga state, fixing the silent event loss in issue #119. Trade-off: a reaction-command failure no longer rolls back the saga-state transition.
+
+  Sagas that do not set `atomicity` keep their current transactional behavior.
+
+### Patch Changes
+
+- Updated dependencies [69b9817]
+- Updated dependencies [54a763d]
+  - @noddde/core@1.0.0-rc.1
+
 ## 1.0.0-rc.0
 
 ### Major Changes

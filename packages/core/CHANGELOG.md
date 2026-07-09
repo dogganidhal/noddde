@@ -1,5 +1,17 @@
 # @noddde/core
 
+## 1.0.0-rc.1
+
+### Minor Changes
+
+- 69b9817: Add `KafkaEventBus.warmup()` / `warmupOnConnect` for Kafka cold-start latency, and a new `EventIdempotencyStore` + `withIdempotency()` primitive (`@noddde/core`) for deduplicating event handler invocations under Kafka/RabbitMQ at-least-once redelivery, with an in-memory implementation in `@noddde/engine` and durable table-backed implementations in `@noddde/typeorm`, `@noddde/drizzle`, and `@noddde/prisma`.
+
+  `@noddde/nats` gets a permanent benchmark test (no API change) documenting that per-subscription inbox-subject memory is negligible at scale — no code change was needed after measuring against a real broker.
+
+- 54a763d: Add an optional per-saga `atomicity` field and the `SagaAtomicity` type (`"atomic" | "best-effort"`) to saga definitions.
+
+  `atomicity` is a declarative field on `defineSaga` / the `Saga` interface; `defineSaga` remains a pure identity function and does not read, validate, or default it. The engine's `SagaExecutor` consumes the field, treating an absent value as `"atomic"` (today's behavior), so existing sagas are unaffected.
+
 ## 1.0.0-rc.0
 
 ### Major Changes

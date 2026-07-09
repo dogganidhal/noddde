@@ -1,6 +1,6 @@
 {
   "name": "@noddde/nestjs",
-  "version": "1.0.0-rc.0",
+  "version": "1.0.0-rc.1",
   "description": "NestJS integration for noddde — DDD, CQRS, and Event Sourcing",
   "license": "MIT",
   "author": "Nidhal Dogga",
@@ -48,8 +48,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@noddde/core": "1.0.0-rc.0",
-    "@noddde/engine": "1.0.0-rc.0",
+    "@noddde/core": "1.0.0-rc.1",
+    "@noddde/engine": "1.0.0-rc.1",
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.8.0"
   },

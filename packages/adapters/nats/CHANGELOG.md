@@ -1,5 +1,19 @@
 # @noddde/nats
 
+## 1.0.0-rc.1
+
+### Patch Changes
+
+- 69b9817: Add `KafkaEventBus.warmup()` / `warmupOnConnect` for Kafka cold-start latency, and a new `EventIdempotencyStore` + `withIdempotency()` primitive (`@noddde/core`) for deduplicating event handler invocations under Kafka/RabbitMQ at-least-once redelivery, with an in-memory implementation in `@noddde/engine` and durable table-backed implementations in `@noddde/typeorm`, `@noddde/drizzle`, and `@noddde/prisma`.
+
+  `@noddde/nats` gets a permanent benchmark test (no API change) documenting that per-subscription inbox-subject memory is negligible at scale — no code change was needed after measuring against a real broker.
+
+- Updated dependencies [69b9817]
+- Updated dependencies [54a763d]
+- Updated dependencies [e6d3e39]
+  - @noddde/core@1.0.0-rc.1
+  - @noddde/engine@1.0.0-rc.1
+
 ## 1.0.0-rc.0
 
 ### Major Changes
