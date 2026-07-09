@@ -451,13 +451,18 @@ export class KafkaEventBus implements EventBus, Connectable {
 
     return new Promise<void>((resolve, reject) => {
       let settled = false;
-      // Declared up front (rather than as `const` at their `setInterval`/
-      // `setTimeout` call sites) because the internal warmup handler —
-      // and potentially a very fast real broker — can invoke `finish()`
-      // synchronously from within `dispatchOnce()`'s call to `dispatch()`,
-      // i.e. before a `const` initializer below it would have run.
-      let intervalId: ReturnType<typeof setInterval> | undefined;
-      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      // intervalId/timeoutId are assigned *before* the first dispatchOnce()
+      // call below (not after) — the internal warmup handler, and
+      // potentially a very fast real broker, can invoke finish()
+      // synchronously from within that first call (dispatch() -> a mock or
+      // zero-latency producer -> the consumer's eachMessage -> the warmup
+      // handler, all in the same synchronous call stack). If the handles
+      // were assigned after dispatchOnce(), finish() would call
+      // clearInterval/clearTimeout on still-undefined values (no-ops), and
+      // the interval would keep firing warmup dispatches forever even
+      // after warmup already succeeded.
+      let intervalId: ReturnType<typeof setInterval>;
+      let timeoutId: ReturnType<typeof setTimeout>;
 
       const finish = (): void => {
         if (settled) return;
@@ -481,7 +486,6 @@ export class KafkaEventBus implements EventBus, Connectable {
         );
       };
 
-      dispatchOnce();
       intervalId = setInterval(dispatchOnce, 1000);
       timeoutId = setTimeout(() => {
         if (settled) return;
@@ -494,6 +498,7 @@ export class KafkaEventBus implements EventBus, Connectable {
           ),
         );
       }, timeoutMs);
+      dispatchOnce();
     });
   }
 

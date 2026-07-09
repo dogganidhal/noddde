@@ -880,4 +880,34 @@ describe("KafkaEventBus warmup", () => {
 
     await expect(bus.warmup()).rejects.toThrow(/timed out/i);
   }, 10_000);
+
+  it("should clear the retry interval once warmup resolves synchronously, instead of dispatching forever", async () => {
+    vi.useFakeTimers();
+    try {
+      const { mockKafka, mockProducer } = createMockKafkaForWarmup();
+      const bus = new KafkaEventBus({
+        brokers: ["localhost:9092"],
+        clientId: "test",
+        groupId: "test-group",
+      });
+      (bus as any)._kafka = mockKafka;
+
+      await bus.connect();
+      // The mock delivers the warmup message synchronously from within the
+      // first dispatchOnce() call, so finish() runs before the interval/
+      // timeout handles would have been assigned under the old (buggy)
+      // ordering — this is exactly the race Copilot flagged.
+      await bus.warmup();
+
+      const callsAtResolution = mockProducer.send.mock.calls.length;
+
+      // Advance well past several 1s interval ticks. If the interval was
+      // never cleared (the bug), send() keeps getting called.
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(mockProducer.send.mock.calls.length).toBe(callsAtResolution);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
