@@ -49,24 +49,27 @@ export class MySQLLocker implements AggregateLocker {
       `SELECT RELEASE_LOCK(?) AS released`,
       lockName,
     );
-    this._held.delete(lockName);
 
     // `RELEASE_LOCK` returns 1 when released by this session, 0 when the lock
     // is held by a *different* session, and NULL when the lock does not exist.
-    // Only treat a non-1 result as an error when this locker believed it held
-    // the lock — a double-release (name absent) stays an idempotent no-op.
-    if (believedHeld) {
-      const released = result[0]?.released;
-      if (released !== 1n && released !== 1) {
-        throw new Error(
-          `PrismaAdvisoryLocker: RELEASE_LOCK reported the lock for ` +
-            `"${aggregateName}:${aggregateId}" was not held on this connection, so it ` +
-            `was NOT released and will leak. This means acquire() and release() ran on ` +
-            `different pool connections — Prisma multiplexes queries over its connection ` +
-            `pool. Construct the locker with PrismaAdvisoryLocker.fromUrl(url, "mysql") ` +
-            `(recommended) or pass a PrismaClient pinned to connection_limit=1.`,
-        );
-      }
+    const released = result[0]?.released;
+    const ok = released === 1n || released === 1;
+
+    // Only clear the name on a *successful* release. If it failed while we
+    // believed we held the lock (multiplexing), keep the name in `_held` so a
+    // retried release() still detects the bug instead of being silently treated
+    // as a double-release. A genuine double-release (name absent) stays a no-op.
+    if (ok) {
+      this._held.delete(lockName);
+    } else if (believedHeld) {
+      throw new Error(
+        `PrismaAdvisoryLocker: RELEASE_LOCK reported the lock for ` +
+          `"${aggregateName}:${aggregateId}" was not held on this connection, so it ` +
+          `was NOT released and will leak. This means acquire() and release() ran on ` +
+          `different pool connections — Prisma multiplexes queries over its connection ` +
+          `pool. Construct the locker with PrismaAdvisoryLocker.fromUrl(url, "mysql") ` +
+          `(recommended) or pass a PrismaClient pinned to connection_limit=1.`,
+      );
     }
   }
 }

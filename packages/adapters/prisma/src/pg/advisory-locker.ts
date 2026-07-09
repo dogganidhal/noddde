@@ -68,25 +68,29 @@ export class PostgresLocker implements AggregateLocker {
       `SELECT pg_advisory_unlock($1::bigint) AS released`,
       hashKey,
     );
-    this._held.delete(keyStr);
 
-    // Only assert on the unlock result when this locker instance believed it
-    // held the lock. `pg_advisory_unlock` returns `false` both for an
-    // already-released lock (legitimate idempotent double-release, which we
-    // must not turn into an error) and for a release issued on a session that
-    // does not hold the lock. The `_held` set separates the two.
-    if (believedHeld) {
-      const released = result[0]?.released;
-      if (released !== true && released !== "t") {
-        throw new Error(
-          `PrismaAdvisoryLocker: pg_advisory_unlock reported the lock for ` +
-            `"${aggregateName}:${aggregateId}" was not held on this connection, so it ` +
-            `was NOT released and will leak. This means acquire() and release() ran on ` +
-            `different pool connections — Prisma multiplexes queries over its connection ` +
-            `pool. Construct the locker with PrismaAdvisoryLocker.fromUrl(url, "postgresql") ` +
-            `(recommended) or pass a PrismaClient pinned to connection_limit=1.`,
-        );
-      }
+    // `pg_advisory_unlock` returns `false` both for an already-released lock
+    // (legitimate idempotent double-release, which we must not turn into an
+    // error) and for a release issued on a session that does not hold the lock.
+    // The `_held` set separates the two.
+    const released = result[0]?.released;
+    const ok = released === true || released === "t";
+
+    // Only clear the key on a *successful* unlock. If the unlock failed while
+    // we believed we held the lock (multiplexing), keep the key in `_held` so a
+    // retried release() still detects the bug instead of being silently treated
+    // as a double-release.
+    if (ok) {
+      this._held.delete(keyStr);
+    } else if (believedHeld) {
+      throw new Error(
+        `PrismaAdvisoryLocker: pg_advisory_unlock reported the lock for ` +
+          `"${aggregateName}:${aggregateId}" was not held on this connection, so it ` +
+          `was NOT released and will leak. This means acquire() and release() ran on ` +
+          `different pool connections — Prisma multiplexes queries over its connection ` +
+          `pool. Construct the locker with PrismaAdvisoryLocker.fromUrl(url, "postgresql") ` +
+          `(recommended) or pass a PrismaClient pinned to connection_limit=1.`,
+      );
     }
   }
 }

@@ -122,6 +122,19 @@ describe("release hardening (Postgres)", () => {
     await locker.acquire("Order", "o-1");
     await expect(locker.release("Order", "o-1")).resolves.toBeUndefined();
   });
+
+  it("keeps throwing on a retried release after a failed (wrong-session) unlock", async () => {
+    // Every unlock reports released=false (multiplexing). The first release()
+    // must throw AND retain the key in _held so a retry still detects the leak
+    // instead of being silently swallowed as a double-release.
+    const client = makeMockClient({ defaultRow: [{ released: false }] });
+    const locker = new PrismaAdvisoryLocker(client, "postgresql");
+    await locker.acquire("Order", "o-1");
+
+    await expect(locker.release("Order", "o-1")).rejects.toThrow();
+    // The retry still throws — the key was not cleared by the failed release.
+    await expect(locker.release("Order", "o-1")).rejects.toThrow();
+  });
 });
 
 describe("release hardening (MySQL)", () => {
@@ -144,5 +157,22 @@ describe("release hardening (MySQL)", () => {
     const locker = new PrismaAdvisoryLocker(client, "mysql");
     await locker.acquire("Order", "o-1");
     await expect(locker.release("Order", "o-1")).resolves.toBeUndefined();
+  });
+
+  it("keeps throwing on a retried release after a failed (wrong-session) release", async () => {
+    const client = makeMockClient({
+      // acquire → 1n; both release attempts → 0n (wrong session)
+      queryResults: [
+        [{ acquired: 1n }],
+        [{ released: 0n }],
+        [{ released: 0n }],
+      ],
+    });
+    const locker = new PrismaAdvisoryLocker(client, "mysql");
+    await locker.acquire("Order", "o-1");
+
+    await expect(locker.release("Order", "o-1")).rejects.toThrow();
+    // The retry still throws — the name was not cleared by the failed release.
+    await expect(locker.release("Order", "o-1")).rejects.toThrow();
   });
 });

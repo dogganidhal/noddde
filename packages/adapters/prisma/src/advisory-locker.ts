@@ -1,6 +1,4 @@
 /* eslint-disable no-unused-vars */
-import { createRequire } from "node:module";
-import { join } from "node:path";
 import type { PrismaClient } from "@prisma/client";
 import type { AggregateLocker, Closeable, Logger } from "@noddde/core";
 import { PostgresLocker } from "./pg/advisory-locker";
@@ -52,18 +50,16 @@ let cachedPrismaCtor: (new (options: unknown) => PrismaClient) | undefined;
  * Loaded lazily (not via a top-level `import`) so that merely importing
  * `@noddde/prisma` does not require a generated Prisma client — only callers
  * of {@link PrismaAdvisoryLocker.fromUrl} without a `clientFactory` do.
- * Works in both the CJS and ESM builds: the CJS build has a native `require`;
- * the ESM build (where `require` is undefined) derives one via
- * `createRequire`, resolving `@prisma/client` from the current working
- * directory — where an app that depends on this adapter has it installed.
+ *
+ * Resolution is **module-relative** (Node's normal upward `node_modules`
+ * lookup from this file), not CWD-relative, so it works regardless of the
+ * process working directory. The CJS build has a native module-relative
+ * `require`; the ESM build gets an equivalent one injected by a banner
+ * (`createRequire(import.meta.url)`) in `tsup.config.ts`.
  */
 function loadPrismaClientCtor(): new (options: unknown) => PrismaClient {
   if (cachedPrismaCtor) return cachedPrismaCtor;
-  const req =
-    typeof require === "function"
-      ? require
-      : createRequire(join(process.cwd(), "index.js"));
-  const mod = req("@prisma/client") as {
+  const mod = require("@prisma/client") as {
     PrismaClient: new (options: unknown) => PrismaClient;
   };
   if (typeof mod?.PrismaClient !== "function") {
