@@ -18,40 +18,17 @@ beforeAll(async () => {
   // signal, but the broker's first end-to-end publish/consume cycle is
   // dramatically slower than subsequent ones (consistently >30s in CI
   // on a 1-broker cluster). Without this, the *first* contract test
-  // hits the contract's 30s delivery deadline. We run a throwaway
-  // publish/consume cycle here so every real test sees a hot broker.
-  const warmupTopic = `__warmup_${uniqueSuffix()}`;
-  const warmupAdmin = new Kafka({
-    brokers: kafka_.brokers,
-    clientId: "warmup-admin",
-  }).admin();
-  await warmupAdmin.connect();
-  await warmupAdmin.createTopics({
-    waitForLeaders: true,
-    topics: [{ topic: warmupTopic, numPartitions: 1 }],
-  });
-  await warmupAdmin.disconnect();
-
+  // hits the contract's 30s delivery deadline. `warmupOnConnect` runs a
+  // throwaway publish/consume cycle as part of `connect()` so every real
+  // test below sees a hot broker.
   const warmupBus = new KafkaEventBus({
     brokers: kafka_.brokers,
-    clientId: "warmup",
+    clientId: `warmup-${uniqueSuffix()}`,
     groupId: `warmup-group-${uniqueSuffix()}`,
-  });
-  let warmedUp = false;
-  warmupBus.on(warmupTopic, async () => {
-    warmedUp = true;
+    warmupOnConnect: true,
+    warmupTimeoutMs: 60_000,
   });
   await warmupBus.connect();
-  await waitFor(
-    async () => {
-      await warmupBus.dispatch({
-        name: warmupTopic,
-        payload: { warmup: true },
-      });
-      return warmedUp;
-    },
-    { timeoutMs: 60_000, intervalMs: 1000 },
-  );
   await warmupBus.close();
 }, 300_000);
 

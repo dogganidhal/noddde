@@ -37,27 +37,11 @@ These were "made green" via test-side workarounds because the proper fix is out 
   - Or expose the same Prisma `$transaction(async (tx) => ...)` callback handle so the locker can guarantee session affinity within a single tx. This changes the locker API but eliminates the footgun.
 - **Acceptance:** Test setup no longer needs `connection_limit=1`; the locker either enforces it or surfaces it loudly.
 
-### 1.3 Kafka broker cold-start can drop the first dispatch in production
-
-- **Affected:** `@noddde/kafka`
-- **Symptom:** Even with the new `FETCH_START` wait in `connect()`, a freshly-deployed Kafka cluster's first end-to-end publish/consume cycle is dramatically slower than subsequent ones. On a 1-broker GitHub-Actions cluster, the first message in a brand-new cluster never reached the consumer within 30s.
-- **Workaround in tests:** Integration tests run a throwaway publish/consume cycle in `beforeAll` so the broker is hot before the real tests run.
-- **Proper fix:** Document this in the `@noddde/kafka` README, and consider either:
-  - Adding a `KafkaEventBus.warmup()` method that performs the dummy publish/consume cycle internally, callable explicitly by the app on startup, or
-  - A configurable `fromBeginning: true` mode for the consumer (off by default) that sidesteps the issue entirely at the cost of replaying historical events.
-- **Acceptance:** Either the README has a clear "first deployment cold-start" warning, or the adapter exposes a documented warmup path.
-
 ---
 
 ## 2. Coverage gaps in the contract suite
 
-These behaviours aren't exercised at all. They might be working fine — or they might not.
-
-### 2.7 Handler idempotency under at-least-once delivery
-
-Kafka and RabbitMQ both redeliver on handler failure. The contracts test _that_ this happens, but no test verifies the framework can detect or help with the resulting double-delivery. This is a user concern, but a "see this event before?" helper would be a useful framework primitive.
-
-**Next step:** evaluate whether to ship a thin idempotency-key helper, or just document the user's responsibility prominently.
+_All items in this category have been addressed (failure injection, concurrent saves, scale smoke tests, `deletePublished(olderThan)`, JSON payload edge cases, advisory-lock crash recovery, and handler idempotency)._
 
 ---
 
@@ -70,12 +54,6 @@ Things that look fragile under scrutiny but pass today. Each gets a hypothesis a
 This PR switched Drizzle pg/mysql timestamps from `mode: "date"` to `mode: "string"` and emits `YYYY-MM-DD HH:MM:SS.fff` instead of ISO with `Z`. New deployments are fine. **Mid-migration deployments** that have historical rows in the previous format could see `ORDER BY created_at` produce odd ordering.
 
 **Next step:** document the timestamp-format change as a breaking change in CHANGELOG, and add a migration note. Add a test that mixes old-format and new-format strings and asserts ordering.
-
-### 3.3 NATS `deliverTo` per subscription scales unboundedly
-
-The NATS adapter now creates a unique inbox subject per `on()` call. Long-running processes that register hundreds of subscriptions over time (e.g., dynamic event-name routing) could exhaust NATS inbox-namespace memory.
-
-**Next step:** measure inbox count and memory pressure with 1k subscriptions in a long-running test. May want to share inboxes across subscriptions for the same consumerGroup.
 
 ### 3.4 Kafka late `on()` after connect is silently broken, but the code pretends it works
 
@@ -95,10 +73,7 @@ If a user changes `exchangeType` from `"topic"` to `"fanout"` between deployment
 
 ## 4. Recommended ordering
 
-The test-coverage follow-ups (§2.1–§2.6, §3.2, §3.5) have landed: failure
-injection via Toxiproxy, the advisory-lock crash-recovery case, the
-concurrent-save race, the `deletePublished(olderThan)` coverage, the
-property-based JSON edge-case sweep, and the slow-tagged scale smoke tests.
+The coverage-gap follow-ups (§2.1–§2.7) and two of the plausible-bug items (§3.2, §3.5) have landed: failure injection via Toxiproxy, the advisory-lock crash-recovery case, the concurrent-save race, the `deletePublished(olderThan)` coverage, the property-based JSON edge-case sweep, the slow-tagged scale smoke tests, and the handler-idempotency primitive.
 
 Remaining, roughly in priority order:
 
