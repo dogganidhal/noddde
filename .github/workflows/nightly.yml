@@ -1,0 +1,79 @@
+name: Nightly (slow tests)
+
+# Slow, resource-heavy integration tests that are skipped in PR CI:
+#   - Toxiproxy failure-injection / reconnection tests (ROBUSTNESS.md §2.1)
+#   - High-volume scale smoke tests (ROBUSTNESS.md §2.3)
+# They only run when NODDDE_SLOW_TESTS=1, which this workflow sets. PR latency
+# stays low; these get exercised at least once a day.
+
+on:
+  schedule:
+    # 02:47 UTC, offset from the regular Integration nightly (03:13) so the
+    # two don't contend for the same runners.
+    - cron: "47 2 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scale:
+    name: scale (drizzle/postgres)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+      - run: yarn install --frozen-lockfile
+      - run: yarn build --filter=@noddde/core --filter=@noddde/engine --filter=@noddde/drizzle
+      - name: Scale smoke tests
+        env:
+          INTEGRATION: "1"
+          CI: "true"
+          NODDDE_SLOW_TESTS: "1"
+        run: yarn workspace @noddde/drizzle test:integration -- src/__tests__/integration/postgres.integration.test.ts
+
+  reconnect:
+    name: reconnect (${{ matrix.broker }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        broker: [nats, rabbitmq]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+      - run: yarn install --frozen-lockfile
+      - run: yarn build --filter=@noddde/core --filter=@noddde/engine --filter=@noddde/${{ matrix.broker }}
+      - name: Reconnection failure-injection tests
+        env:
+          INTEGRATION: "1"
+          CI: "true"
+          NODDDE_SLOW_TESTS: "1"
+        run: yarn workspace @noddde/${{ matrix.broker }} test:integration -- src/__tests__/integration/${{ matrix.broker }}.reconnect.integration.test.ts
+
+  nightly-required:
+    name: Nightly (required)
+    if: always()
+    needs: [scale, reconnect]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any needed job failed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | python3 -c "
+          import json, sys
+          data = json.loads(sys.stdin.read())
+          failed = [k for k, v in data.items() if v.get('result') == 'failure']
+          if failed:
+              print(f'Failed jobs: {failed}')
+              sys.exit(1)
+          print('All nightly jobs passed.')
+          "

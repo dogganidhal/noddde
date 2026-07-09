@@ -8,6 +8,7 @@ import {
   defineOutboxContract,
   defineUnitOfWorkContract,
   defineAdvisoryLockerContract,
+  defineScaleContract,
   startPostgres,
   type StartedPostgres,
 } from "@noddde/testing-integration";
@@ -76,8 +77,30 @@ defineSnapshotContract("drizzle/postgres", async () => {
 
 defineOutboxContract("drizzle/postgres", async () => {
   await truncate();
-  const adapter = makeAdapter();
-  return { outbox: adapter.outboxStore! };
+  const db = drizzle(pool);
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    stateStore: aggregateStates,
+    sagaStore: sagaStates,
+    snapshotStore: snapshots,
+    outboxStore: outbox,
+  });
+  return {
+    outbox: adapter.outboxStore!,
+    // Raw read of every row so the deletePublished(olderThan) cases can
+    // observe which published rows survived (there is no "load published").
+    loadAll: async () => {
+      const rows = await db.select().from(outbox);
+      return rows.map((r) => ({
+        id: r.id,
+        event: typeof r.event === "string" ? JSON.parse(r.event) : r.event,
+        aggregateName: r.aggregateName ?? undefined,
+        aggregateId: r.aggregateId ?? undefined,
+        createdAt: new Date(r.createdAt),
+        publishedAt: r.publishedAt != null ? new Date(r.publishedAt) : null,
+      }));
+    },
+  };
 });
 
 defineUnitOfWorkContract("drizzle/postgres", async () => {
@@ -129,6 +152,18 @@ describe("outbox created_at ordering across mixed timestamp formats (§3.1)", ()
   });
 });
 
+// Slow-tagged high-volume smoke tests (§2.3). Skipped unless
+// NODDDE_SLOW_TESTS=1 (set by the nightly workflow). One PG-backed adapter
+// is enough to catch algorithmic regressions in these paths.
+defineScaleContract("drizzle/postgres", async () => {
+  await truncate();
+  const adapter = makeAdapter();
+  return {
+    eventSourced: adapter.eventSourcedPersistence,
+    outbox: adapter.outboxStore!,
+  };
+});
+
 defineAdvisoryLockerContract("drizzle/postgres", async () => {
   // Each AdvisoryLocker contract test needs two *independent* sessions
   // because postgres advisory locks are session-scoped. We allocate one
@@ -138,14 +173,34 @@ defineAdvisoryLockerContract("drizzle/postgres", async () => {
   const clientB = new pg.Client({ connectionString: pg_.url });
   await clientA.connect();
   await clientB.connect();
+  // Destroying the socket below makes pg emit an 'error' on the client;
+  // swallow it so it doesn't surface as an unhandled exception.
+  clientA.on("error", () => {});
   const lockerA = new DrizzleAdvisoryLocker(drizzle(clientA), "pg");
   const lockerB = new DrizzleAdvisoryLocker(drizzle(clientB), "pg");
+  let killedA = false;
   return {
     lockerA,
     lockerB,
+    killSessionA: async () => {
+      killedA = true;
+      // Sever A's TCP socket outright — the backend sees a reset (a crash),
+      // not a graceful terminate, and reclaims its session-scoped advisory
+      // locks.
+      const stream = (
+        clientA as unknown as {
+          connection?: { stream?: { destroy?: () => void } };
+        }
+      ).connection?.stream;
+      if (stream?.destroy) {
+        stream.destroy();
+      } else {
+        await clientA.end();
+      }
+    },
     cleanup: async () => {
-      await clientA.end();
-      await clientB.end();
+      if (!killedA) await clientA.end().catch(() => {});
+      await clientB.end().catch(() => {});
     },
   };
 });

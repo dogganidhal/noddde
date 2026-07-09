@@ -52,3 +52,15 @@ export function dockerAvailable(): boolean {
   // `INTEGRATION=1 yarn test:integration` and skip otherwise.
   return process.env.INTEGRATION === "1" || process.env.CI === "true";
 }
+
+/**
+ * Gate for expensive/slow integration tests (Toxiproxy fault injection,
+ * high-volume scale smoke tests). These add real wall-clock time and
+ * container overhead, so they're skipped by default and opted into with
+ * `NODDDE_SLOW_TESTS=1`. The nightly CI workflow sets this; PR CI does not.
+ *
+ * Usage: `describe.skipIf(!slowTestsEnabled())("...", () => { ... })`.
+ */
+export function slowTestsEnabled(): boolean {
+  return process.env.NODDDE_SLOW_TESTS === "1";
+}

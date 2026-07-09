@@ -20,7 +20,10 @@ import {
   NodddeSnapshotEntity,
   NodddeOutboxEntryEntity,
 } from "../entities";
-import { TypeORMEventSourcedAggregatePersistence } from "../persistence";
+import {
+  TypeORMEventSourcedAggregatePersistence,
+  TypeORMStateStoredAggregatePersistence,
+} from "../persistence";
 
 let dataSource: DataSource;
 let infra: ReturnType<typeof createTypeORMPersistence>;
@@ -219,6 +222,36 @@ describe("TypeORMStateStoredAggregatePersistence", () => {
         5,
       ),
     ).rejects.toThrow(ConcurrencyError);
+  });
+
+  it("maps a concurrent-create duplicate-key insert to ConcurrencyError", async () => {
+    // Two racing creators both see no existing row (findOne → null) and both
+    // INSERT; the loser gets a raw unique-violation from the driver. That
+    // race can't be reproduced with the synchronous in-memory driver, so we
+    // stub the repository: no existing row, INSERT throws a duplicate-key
+    // error. The persistence must surface ConcurrencyError, not the raw one.
+    const repo = {
+      findOne: vi.fn().mockResolvedValue(null),
+      save: vi
+        .fn()
+        .mockRejectedValue(
+          new Error("UNIQUE constraint failed: noddde_aggregate_states.id"),
+        ),
+    };
+    const fakeDataSource = {
+      manager: { getRepository: () => repo },
+    } as unknown as DataSource;
+    const persistence = new TypeORMStateStoredAggregatePersistence(
+      fakeDataSource,
+      { current: undefined } as unknown as ConstructorParameters<
+        typeof TypeORMStateStoredAggregatePersistence
+      >[1],
+    );
+
+    await expect(
+      persistence.save("Account", "acc-race", { balance: 1 }, 0),
+    ).rejects.toBeInstanceOf(ConcurrencyError);
+    expect(repo.save).toHaveBeenCalled();
   });
 });
 

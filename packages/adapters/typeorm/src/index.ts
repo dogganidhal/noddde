@@ -15,6 +15,10 @@ export {
   TypeORMSnapshotStore,
   TypeORMOutboxStore,
 } from "./persistence";
+export {
+  TypeORMEventIdempotencyStore,
+  NodddeEventIdempotencyEntity,
+} from "./event-idempotency";
 export { TypeORMAdvisoryLocker } from "./advisory-locker";
 export {
   TypeORMUnitOfWork,

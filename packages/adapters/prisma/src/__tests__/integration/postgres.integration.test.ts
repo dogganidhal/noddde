@@ -75,7 +75,22 @@ defineSnapshotContract("prisma/postgres", () => {
 
 defineOutboxContract("prisma/postgres", () => {
   const adapter = makeAdapter();
-  return { outbox: adapter.outboxStore };
+  return {
+    outbox: adapter.outboxStore,
+    // Raw read of every row so the deletePublished(olderThan) cases can
+    // observe which published rows survived (there is no "load published").
+    loadAll: async () => {
+      const rows = await prisma.nodddeOutboxEntry.findMany();
+      return rows.map((r) => ({
+        id: r.id,
+        event: typeof r.event === "string" ? JSON.parse(r.event) : r.event,
+        aggregateName: r.aggregateName ?? undefined,
+        aggregateId: r.aggregateId ?? undefined,
+        createdAt: new Date(r.createdAt),
+        publishedAt: r.publishedAt != null ? new Date(r.publishedAt) : null,
+      }));
+    },
+  };
 });
 
 defineUnitOfWorkContract("prisma/postgres", () => {
@@ -108,6 +123,12 @@ defineAdvisoryLockerContract("prisma/postgres", async () => {
   return {
     lockerA,
     lockerB,
+    // Killing A's session = closing its owned single-connection client. That
+    // ends A's one pg session, so the backend reclaims A's session-scoped
+    // advisory locks without any explicit release() (§2.6 crash recovery).
+    killSessionA: async () => {
+      await lockerA.close();
+    },
     cleanup: async () => {
       await lockerA.close();
       await lockerB.close();

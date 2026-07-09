@@ -1,126 +1,87 @@
----
-spec: specs/adapters/kafka/kafka-event-bus.spec.md
-source: packages/adapters/kafka/src/kafka-event-bus.ts
-tests: packages/adapters/kafka/src/__tests__/kafka-event-bus.test.ts
-builder: sonnet
-date: 2026-04-10
-status: GREEN
----
+## Build Report: KafkaEventBus (warmup feature)
 
-# Build Report: KafkaEventBus (partition key strategy + framework logger)
+- **Spec**: specs/adapters/kafka/kafka-event-bus.spec.md
+- **Source**: packages/adapters/kafka/src/kafka-event-bus.ts
+- **Tests**: packages/adapters/kafka/src/**tests**/kafka-event-bus.test.ts
+- **Result**: GREEN
+- **Tests passing**: 29/29
+- **Loop count**: 2 (one loop to fix a TDZ bug in the initial warmup implementation, described below)
 
-**Spec**: `specs/adapters/kafka/kafka-event-bus.spec.md`
-**Builder**: Claude Sonnet 4.6
-**Date**: 2026-04-10
-**Status**: GREEN — all 21 tests pass, type check clean, lint clean
+### Test Results
 
----
+| Test                                                                                            | Status |
+| ----------------------------------------------------------------------------------------------- | ------ |
+| should publish event to topic derived from event name                                           | PASS   |
+| should prepend topicPrefix to event name for topic                                              | PASS   |
+| should throw when dispatching before connect                                                    | PASS   |
+| should invoke registered handler when event is consumed                                         | PASS   |
+| should invoke all handlers concurrently via Promise.all                                         | PASS   |
+| should reject if any handler throws during parallel invocation                                  | PASS   |
+| should map BrokerResilience to kafkajs retry configuration                                      | PASS   |
+| should configure consumer with sessionTimeout and heartbeatInterval                             | PASS   |
+| should disconnect and clear handlers on close                                                   | PASS   |
+| should not throw when close is called multiple times                                            | PASS   |
+| should pass autoCommit: false to consumer.run()                                                 | PASS   |
+| should call consumer.stop() before consumer.disconnect() on close                               | PASS   |
+| should skip poison messages without throwing on deserialization failure                         | PASS   |
+| should serialize the full event object including metadata                                       | PASS   |
+| should explicitly commit offsets after handling                                                 | PASS   |
+| should deduplicate concurrent connect() calls                                                   | PASS   |
+| should log error and remove topic from subscribed set when subscribe fails after connect        | PASS   |
+| should use aggregateId as message key by default                                                | PASS   |
+| should use null key when event has no aggregateId                                               | PASS   |
+| should use custom function for partition key when provided                                      | PASS   |
+| should use provided logger for warn logging with structured data                                | PASS   |
+| should run every handler to completion even when an earlier one throws                          | PASS   |
+| should log once per failed handler with handlerName and error fields                            | PASS   |
+| should not commit the offset when any handler fails (existing redelivery behavior is preserved) | PASS   |
+| **should create the warmup topic, dispatch, and resolve once the round-trip is observed** (new) | PASS   |
+| **should not repeat the round-trip on a second call after success** (new)                       | PASS   |
+| **should throw when warmup is called before connect** (new)                                     | PASS   |
+| **should perform the warmup round-trip during connect when warmupOnConnect is true** (new)      | PASS   |
+| **should reject with a timeout error when the handler never observes the warmup event** (new)   | PASS   |
 
-## Changes Made
+Note: the task brief mentioned "6 NEW scenario headings," but the spec's Test Scenarios section under warmup actually contains 5 new `###` headings (listed above, all now covered). No discrepancy in the spec content itself — just the count in the task description.
 
-### Modified: `packages/adapters/kafka/src/kafka-event-bus.ts`
+### Implementation summary
 
-#### Fix 1: Configurable partition key strategy (Requirement 3)
+- `KafkaEventBusConfig`: added `warmupOnConnect?: boolean` and `warmupTimeoutMs?: number` (default 60000ms), documented with JSDoc, matching the spec's Type Contract.
+- `_kafka` field type widened from `Pick<Kafka, "producer" | "consumer">` to `Pick<Kafka, "producer" | "consumer" | "admin">` so tests can inject a mock `admin()`.
+- Added `_warmedUp: boolean` and `_warmingUp: Promise<void> | null` fields, mirroring the existing `_connecting` mutex pattern.
+- Added public `warmup(): Promise<void>`:
+  - Throws the existing "KafkaEventBus is not connected. Call connect() first." error when called before `connect()` or after `close()`.
+  - Idempotent via `_warmedUp` (no-op after first success) and deduplicates concurrent calls via `_warmingUp` in-flight promise.
+  - Creates topic `` `__noddde_warmup_${clientId}` `` via `this._kafka.admin()` (`connect()` → `createTopics({ waitForLeaders: true, topics: [...] })` → `disconnect()`).
+  - Delegates the actual round-trip to a new private `_performWarmupRoundTrip(topic)`, which registers an internal handler via the bus's own `on()`, dispatches a throwaway event immediately and then every 1s via `setInterval`, and races against a `setTimeout(warmupTimeoutMs)` that rejects with a message containing "timed out".
+- Wired `warmupOnConnect` into `connect()`: after `this._connected = true` is set (inside the existing async IIFE, before the outer `connect()` promise resolves), calls `await this.warmup()` when the config flag is set, so a warmup failure propagates through `connect()`'s returned promise.
 
-- Added `partitionKeyStrategy?: "aggregateId" | ((event: Event) => string | null)` to `KafkaEventBusConfig`.
-- Added `private _resolvePartitionKey(event: Event): string | null` method:
-  - Default strategy `"aggregateId"`: reads `event.metadata?.aggregateId`, stringifies via `String()`, falls back to `null`.
-  - Custom function: called with the full event, returns key or `null`.
-- Updated `dispatch()` to call `this._resolvePartitionKey(event)` instead of `event.metadata?.correlationId`.
-- Added `eslint-disable-next-line no-unused-vars` on the `partitionKeyStrategy` field to suppress a false positive from `eslint:recommended` that incorrectly flags named callback parameters in TypeScript interface type positions.
+### Bug found and fixed during the GREEN loop
 
-This is a behavior change from the previous implementation: the old default was `correlationId`; the new default is `aggregateId`.
+The first implementation of `_performWarmupRoundTrip` declared `intervalId`/`timeoutId` as `const` at their `setInterval`/`setTimeout` call sites, referenced from a `finish()` closure defined earlier in the function. In unit tests (and potentially against a very fast real broker), the mock producer's `send()` synchronously drives the consumer's `eachMessage` callback, which synchronously invokes the internal warmup handler and thus `finish()` — before the `const intervalId = setInterval(...)` line had executed. This threw `ReferenceError: Cannot access 'intervalId' before initialization` (TDZ), which the code swallowed via `dispatch().catch()` logging, but the round-trip's `resolve()` was never reached, causing the first three warmup tests to hang until the 5000ms vitest timeout. Fixed by declaring `intervalId`/`timeoutId` with `let` up front (undefined initially) before the `finish`/`dispatchOnce` closures are defined, then assigning them later — `clearInterval(undefined)` / `clearTimeout(undefined)` are safe no-ops. After the fix, all warmup tests pass in well under a second (the timeout test intentionally waits out its 50ms `warmupTimeoutMs`).
 
-#### Fix 2: Framework logger (Requirement 19)
+### Integration test refactor
 
-- Added `Logger` to the `@noddde/core` import.
-- Added `NodddeLogger` import from `@noddde/engine`.
-- Added `logger?: Logger` to `KafkaEventBusConfig`.
-- Added `private readonly _logger: Logger` field initialized from `config.logger ?? new NodddeLogger("warn", "noddde:kafka")`.
-- Replaced all `console.error(...)` calls with `this._logger.error(message, { structuredData })`.
-- Replaced all `console.warn(...)` calls with `this._logger.warn(message, { structuredData })`.
-- Zero `console.*` calls remain in the implementation.
+Refactored the `beforeAll` cold-start warmup workaround in `packages/adapters/kafka/src/__tests__/integration/kafka.integration.test.ts` (previously ~lines 14-56) to use the new `KafkaEventBus.warmup()` method via `warmupOnConnect: true`, instead of manually creating a throwaway admin client + bus + `waitFor` polling loop:
 
-### Modified: `packages/adapters/kafka/package.json`
-
-- Added `"@noddde/engine": "0.0.0"` to `dependencies` (required for `NodddeLogger` import).
-
-### Modified: `packages/adapters/kafka/vitest.config.mts`
-
-- Added `"@noddde/engine"` alias pointing to `../../engine/src/index.ts` (mirrors NATS adapter pattern).
-
-### Modified: `packages/adapters/kafka/src/__tests__/kafka-event-bus.test.ts`
-
-**Updated existing test**: `"should log error and remove topic from subscribed set when subscribe fails after connect"` — changed from `vi.spyOn(console, "error")` to injecting a mock logger via `config.logger`. The implementation now routes errors through the framework logger, so `console.error` is never called. Test intent (error is logged, topic removed) is unchanged.
-
-**4 new tests added**:
-
-- `"should use aggregateId as message key by default"` — dispatches with `metadata.aggregateId: "order-123"`, asserts sent key is `"order-123"`.
-- `"should use null key when event has no aggregateId"` — dispatches without metadata, asserts sent key is `null`.
-- `"should use custom function for partition key when provided"` — configures `partitionKeyStrategy: (event) => \`custom-${event.name}\``, asserts sent key is `"custom-OrderPlaced"`.
-- `"should use provided logger for warn logging with structured data"` — injects mock logger, triggers deserialization failure via `_handleMessage`, asserts `mockLogger.warn` was called with a message containing `"deserialize"` and data `{ eventName: "TestEvent" }`.
-
----
-
-## Test Results
-
-```
-✓ should publish event to topic derived from event name
-✓ should prepend topicPrefix to event name for topic
-✓ should throw when dispatching before connect
-✓ should invoke registered handler when event is consumed
-✓ should invoke all handlers concurrently via Promise.all
-✓ should reject if any handler throws during parallel invocation
-✓ should map BrokerResilience to kafkajs retry configuration
-✓ should configure consumer with sessionTimeout and heartbeatInterval
-✓ should disconnect and clear handlers on close
-✓ should not throw when close is called multiple times
-✓ should pass autoCommit: false to consumer.run()
-✓ should call consumer.stop() before consumer.disconnect() on close
-✓ should skip poison messages without throwing on deserialization failure
-✓ should serialize the full event object including metadata
-✓ should explicitly commit offsets after handling
-✓ should deduplicate concurrent connect() calls
-✓ should log error and remove topic from subscribed set when subscribe fails after connect
-✓ should use aggregateId as message key by default
-✓ should use null key when event has no aggregateId
-✓ should use custom function for partition key when provided
-✓ should use provided logger for warn logging with structured data
-
-Test Files: 1 passed (1)
-Tests:      21 passed (21)
+```ts
+const warmupBus = new KafkaEventBus({
+  brokers: kafka_.brokers,
+  clientId: `warmup-${uniqueSuffix()}`,
+  groupId: `warmup-group-${uniqueSuffix()}`,
+  warmupOnConnect: true,
+  warmupTimeoutMs: 60_000,
+});
+await warmupBus.connect();
+await warmupBus.close();
 ```
 
-All 21 tests GREEN.
+This removes ~30 lines of manual admin-client/topic-creation/`waitFor`-polling boilerplate while preserving identical behavior: `connect()` now internally creates the warmup topic via the admin client, registers an internal handler, and polls/dispatches until observed or timed out (same 60s budget as before). The `waitFor` import is still required and retained, since it's used by three other (non-warmup) tests later in the same file (partition-routing convergence, consumer-group fan-out, and a maxRetries poison-message test). The `Kafka` import from `kafkajs` is also still required and retained — it's used by five other admin/probe-consumer usages elsewhere in the file.
 
----
+This file requires a running Kafka test container (via testcontainers/Docker) and **could not be executed in this environment** (no Docker available). The change was made by careful manual reading of the surrounding contract-test setup and cross-checking every remaining usage of the removed/kept imports (`Kafka`, `waitFor`) to confirm neither became unused. Recommend verifying this file passes in CI, specifically:
 
-## Type Check Results
+- The `beforeAll` hook completes within its 300s timeout.
+- The subsequent `defineEventBusContract("kafka", ...)` and `KafkaEventBus broker-specific behaviour` tests still pass against a warmed broker (i.e., the warmup actually mitigates the cold-start latency it replaced).
 
-### `packages/adapters/kafka` (`npx tsc --noEmit`)
+### Concerns
 
-**Clean** — no errors.
-
----
-
-## Lint Results
-
-### `packages/adapters/kafka` (`npx eslint . --max-warnings 0`)
-
-**Clean** — exit 0, 0 warnings.
-
----
-
-## Spec Compliance Notes
-
-- **Req 3** — Message key is now derived from `partitionKeyStrategy` config (default `"aggregateId"`). Custom function support implemented via `_resolvePartitionKey`.
-- **Req 19** — All logging goes through the `Logger` interface. No `console.*` calls remain. Structured data is passed as the second argument on every log call.
-
----
-
-## Files Modified
-
-- `packages/adapters/kafka/src/kafka-event-bus.ts`
-- `packages/adapters/kafka/src/__tests__/kafka-event-bus.test.ts`
-- `packages/adapters/kafka/package.json`
-- `packages/adapters/kafka/vitest.config.mts`
+None. All spec requirements 20-23 (Warmup) and associated Invariants/Edge Cases are implemented and covered by unit tests. `tsc --noEmit` and `npx vitest run` (full package suite, excluding integration) both pass cleanly; `prettier --check` and `eslint --max-warnings 0` pass on all touched files.

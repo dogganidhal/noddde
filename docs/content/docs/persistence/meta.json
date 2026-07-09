@@ -13,6 +13,7 @@
     "typeorm",
     "---Reference---",
     "schema-reference",
+    "payload-shapes",
     "custom-adapters"
   ]
 }

@@ -1,109 +1,45 @@
----
-spec: specs/adapters/kafka/kafka-event-bus.spec.md
-source: packages/adapters/kafka/src/kafka-event-bus.ts
-tests: packages/adapters/kafka/src/__tests__/kafka-event-bus.test.ts
-auditor: opus
-cycle: 1
-date: 2026-04-10
-verdict: PASS
----
+## Audit Report: KafkaEventBus (warmup feature)
 
-# Audit Report: KafkaEventBus (partition key strategy + framework logger)
+- **Verdict**: PASS
+- **Cycle**: 1
 
-**Spec**: `specs/adapters/kafka/kafka-event-bus.spec.md`
-**Auditor**: Claude Opus 4.6
-**Cycle**: 1
-**Date**: 2026-04-10
-**Verdict**: **PASS**
+### Mechanical Checks
 
----
+| Check                                     | Result             | Details                                                                                                                                                                          |
+| ----------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Export: `warmup()` public method          | PASS               | `warmup(): Promise<void>` on `KafkaEventBus` (kafka-event-bus.ts:332).                                                                                                           |
+| Export: `warmupOnConnect` config          | PASS               | `KafkaEventBusConfig.warmupOnConnect?: boolean` (kafka-event-bus.ts:52), JSDoc present.                                                                                          |
+| Export: `warmupTimeoutMs` config          | PASS               | `KafkaEventBusConfig.warmupTimeoutMs?: number` (kafka-event-bus.ts:57), default 60000, JSDoc present.                                                                            |
+| Req 20 — explicit warmup round-trip       | implemented+tested | Admin `createTopics({waitForLeaders:true})` on `__noddde_warmup_${clientId}`, internal handler, 1s-interval dispatch. Test: "create the warmup topic, dispatch, and resolve...". |
+| Req 21 — idempotent + concurrent dedupe   | implemented+tested | `_warmedUp` guard + `_warmingUp` in-flight mutex. Test: "not repeat the round-trip on a second call".                                                                            |
+| Req 22 — `warmupOnConnect`                | implemented+tested | `await this.warmup()` inside connect IIFE after `_connected=true` (line 240-242). Test: "perform the warmup round-trip during connect...".                                       |
+| Req 23 — warmup timeout                   | implemented+tested | `setTimeout` rejects with "...timed out after ${ms}ms..." Test: "reject with a timeout error...".                                                                                |
+| Invariant — at most one real round-trip   | PASS               | `_warmedUp` set only after success; guard returns early on repeat (line 337-339). First call not short-circuited.                                                                |
+| Edge — warmup() before connect throws     | PASS               | Line 333-335 throws "not connected". Test present.                                                                                                                               |
+| Edge — warmup() after close throws        | PASS               | `_closed` checked in same guard (line 333).                                                                                                                                      |
+| Edge — concurrent dedupe                  | PASS               | `_warmingUp` returned to second caller (line 343-345).                                                                                                                           |
+| Edge — warmupOnConnect propagates failure | PASS               | `await this.warmup()` in IIFE; rejection rejects connect()'s promise (finally only clears `_connecting`).                                                                        |
+| Stub check (`throw new Error`)            | PASS               | Only the two legitimate "not connected"/"closed" guards; no TODO stubs.                                                                                                          |
+| console.\* check                          | PASS               | No `console.` calls; warmup logging uses `this._logger.warn`.                                                                                                                    |
+| `tsc --noEmit`                            | PASS               | Exit 0.                                                                                                                                                                          |
+| Unit tests (verbose)                      | PASS               | 29/29 GREEN, incl. all 5 warmup scenarios.                                                                                                                                       |
+| Full package suite                        | PASS               | 29/29 GREEN, no regressions.                                                                                                                                                     |
+| `eslint --max-warnings 0`                 | PASS               | Exit 0.                                                                                                                                                                          |
 
-## Mechanical Checks
+### Coherence Review
 
-| Check           | Result | Notes                                                           |
-| --------------- | ------ | --------------------------------------------------------------- |
-| Export coverage | PASS   | `KafkaEventBus` and `KafkaEventBusConfig` exported via index.ts |
-| Stub check      | PASS   | Only legitimate error throws (closed, not connected)            |
-| Console check   | PASS   | Zero `console.*` calls in source                                |
-| Type check      | PASS   | `tsc --noEmit` clean                                            |
-| Test execution  | PASS   | 21/21 tests pass                                                |
+- **Spec intent alignment**: Strong. `warmup()` genuinely forces a publish/consume round-trip and resolves only when the internal handler observes the event — not a technicality. Timeout path rejects with a real timeout error (message contains "timed out"), does not hang or silently resolve. The idempotency guard checks `_warmedUp` (set post-success) so the FIRST call always runs; only 2nd+ calls short-circuit. `warmupOnConnect` failures propagate through `connect()`'s returned promise (awaited inside the IIFE; `finally` only clears the connect mutex).
+- **Unhandled scenarios**: None spec-violating. Note (non-blocking): under `warmupOnConnect: true`, `warmup()` calls `on()` on an already-connected bus, which subscribes after `consumer.run()`. This reuses the same subscribe-after-connect path the spec already establishes in Req 7, so it is spec-conformant and not new risk introduced by this feature. It cannot be exercised without Docker; recommend confirming the integration `beforeAll` completes in CI (builder already flagged this).
+- **Convention compliance**: JSDoc on `warmup()`, `warmupOnConnect`, `warmupTimeoutMs`. Functional style, framework `Logger` used, mirrors the existing `_connecting` mutex pattern. The TDZ fix (declaring `intervalId`/`timeoutId` as `let` up front) is sound given the synchronous mock-driven round-trip.
 
-## Behavioral Requirement Audit
+### Integration Test Refactor
 
-| Req | Description                            | Implemented | Tested |
-| --- | -------------------------------------- | ----------- | ------ |
-| 1   | Topic derivation                       | Yes         | Yes    |
-| 2   | JSON serialization                     | Yes         | Yes    |
-| 3   | Message key via partition key strategy | Yes         | Yes    |
-| 4   | Producer acknowledgment                | Yes         | Yes    |
-| 5   | Dispatch before connect throws         | Yes         | Yes    |
-| 6   | on registers handlers by event name    | Yes         | Yes    |
-| 7   | Consumer subscription + failure        | Yes         | Yes    |
-| 8   | Poison message protection              | Yes         | Yes    |
-| 9   | Parallel handler invocation            | Yes         | Yes    |
-| 9b  | maxRetries delivery limit              | Yes         | No\*   |
-| 10  | Explicit offset commit                 | Yes         | Yes    |
-| 11  | Session timeout and heartbeat          | Yes         | Yes    |
-| 12  | Connect establishes producer/consumer  | Yes         | Yes    |
-| 13  | Connect idempotent and concurrent-safe | Yes         | Yes    |
-| 14  | Close disconnects cleanly              | Yes         | Yes    |
-| 15  | Close idempotent                       | Yes         | Yes    |
-| 16  | Handler errors propagate               | Yes         | Yes    |
-| 17  | Serialization errors on dispatch       | Yes         | No\*   |
-| 18  | Connection errors on dispatch          | Yes         | No\*   |
-| 19  | Framework logger                       | Yes         | Yes    |
+`kafka.integration.test.ts` `beforeAll` now warms the broker via `new KafkaEventBus({ warmupOnConnect: true, warmupTimeoutMs: 60_000 })` → `connect()` → `close()`, replacing the manual admin-client + `waitFor` polling loop. Static read confirms the original intent (warm the broker before contract tests, same 60s budget) is preserved. `waitFor` and `Kafka` imports remain used by later tests (partition routing, consumer-group fan-out, maxRetries redelivery, and `prepareTopics`). No unused imports. Not executed (no Docker) — recommend CI verification.
 
-\* Req 9b: maxRetries logic is implemented and straightforward; no dedicated test exists but behavior is clear from code inspection. Not a FAIL-worthy gap. \* Reqs 17-18: These are inherent JavaScript behaviors (JSON.stringify throwing, producer.send rejecting). Not a FAIL-worthy gap.
+### Documentation
 
-## Coherence Review
-
-### Requirement 3: Partition Key Strategy
-
-`_resolvePartitionKey()` correctly implements the spec:
-
-- Default strategy `"aggregateId"`: reads `event.metadata?.aggregateId`, stringifies with `String()`, falls back to `null`.
-- Custom function: receives the full event, returns the key string or `null`.
-- `dispatch()` calls `_resolvePartitionKey()` to derive the key.
-
-**Verdict**: Matches spec intent exactly.
-
-### Requirement 19: Framework Logger
-
-- `_logger` field initialized from `config.logger ?? new NodddeLogger("warn", "noddde:kafka")`.
-- All logging calls use `this._logger.warn(...)` or `this._logger.error(...)` with structured second parameter.
-- Zero `console.*` calls confirmed via grep.
-
-**Verdict**: Matches spec intent exactly.
-
-## Invariant Verification
-
-All seven spec invariants hold:
-
-1. Events serialized as JSON -- `JSON.stringify` in dispatch.
-2. Handlers receive full Event -- `JSON.parse` returns full object, passed to handlers.
-3. Offset commits after successful handler completion -- explicit `commitOffsets` in `eachMessage` after `_handleMessage`.
-4. No deduplication -- no dedup logic exists (correct).
-5. Topic names follow `${topicPrefix}${eventName}` -- `_topicName()` method.
-6. Message key defaults to aggregateId -- `_resolvePartitionKey()`.
-7. No `console.*` calls -- confirmed.
-
-## Documentation Updates Applied
-
-The Auditor updated `docs/content/docs/running/event-bus-adapters.mdx`:
-
-1. Added `partitionKeyStrategy` and `logger` rows to the Kafka config table.
-2. Updated the "Publishing" bullet: replaced incorrect `metadata.correlationId` reference with correct `partitionKeyStrategy` / `aggregateId` description.
-3. Added a "Logging" bullet to the Kafka "How It Works" section (matching NATS and RabbitMQ sections).
-4. Updated the example config snippet to show `partitionKeyStrategy` and `logger` options.
-
-## Files Reviewed
-
-- `specs/adapters/kafka/kafka-event-bus.spec.md`
-- `packages/adapters/kafka/src/kafka-event-bus.ts`
-- `packages/adapters/kafka/src/__tests__/kafka-event-bus.test.ts`
-- `packages/adapters/kafka/src/index.ts`
-- `specs/reports/kafka-event-bus.build-report.md`
-
-## Files Modified
-
-- `docs/content/docs/running/event-bus-adapters.mdx` (documentation updates)
+- **Pages updated**: 2
+  - `packages/adapters/kafka/README.md` — added warmup bullet to "What's Inside" and a "Cold-start warmup" section documenting `warmup()`, idempotency, timeout, and `warmupOnConnect`.
+  - `docs/content/docs/event-bus/kafka.mdx` — added `warmupOnConnect` and `warmupTimeoutMs` rows to the config table and a "Cold-start warmup" section.
+  - Verified `docs/.../running/infrastructure.mdx` and `event-bus-adapters.mdx` reference Kafka only generally (no config-field tables) — no staleness introduced.
+  - Prettier clean on both edited files.

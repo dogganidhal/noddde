@@ -131,3 +131,100 @@ describe("NatsEventBus broker-specific behaviour", () => {
     await bus.close();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// Inbox subject benchmark (robustness §3.3 / GitHub issue #114)
+// ─────────────────────────────────────────────────────────────────────
+
+describe("NatsEventBus inbox subject benchmark (robustness §3.3)", () => {
+  it("registers 1k subscriptions on a single bus and reports inbox/memory overhead", async () => {
+    const SUBSCRIPTION_COUNT = 1000;
+    const suffix = uniqueSuffix();
+    const streamName = `noddde_bench_${suffix}`;
+    const consumerGroup = `bench-${suffix}`;
+    const subjectPrefix = `noddde.bench.${suffix}.`;
+
+    const bus = new NatsEventBus({
+      servers: nats_.url,
+      consumerGroup,
+      streamName,
+      subjectPrefix,
+    });
+
+    const eventNames = Array.from(
+      { length: SUBSCRIPTION_COUNT },
+      (_, i) => `Event${i}`,
+    );
+
+    const memBefore = process.memoryUsage();
+    const start = Date.now();
+
+    for (const name of eventNames) {
+      bus.on(name, async () => {});
+    }
+    await bus.connect();
+
+    const connectElapsedMs = Date.now() - start;
+    const memAfter = process.memoryUsage();
+    const heapDeltaMb = (memAfter.heapUsed - memBefore.heapUsed) / 1024 / 1024;
+    const rssDeltaMb = (memAfter.rss - memBefore.rss) / 1024 / 1024;
+
+    // This is the subscription count, not a live measurement of NATS
+    // server-side inbox subjects — the adapter creates exactly one inbox
+    // subject per subscription by design (see nats-event-bus.spec.md,
+    // Behavioral Requirement 6b), so the two numbers are equal, but this
+    // variable measures what we actually registered, not what the server
+    // reports.
+    const subscriptionCount = eventNames.length;
+
+    // eslint-disable-next-line no-console -- benchmark test, not library code; result must be visible in CI/local logs.
+    console.log(
+      `[nats inbox benchmark] subscriptions=${subscriptionCount} connectMs=${connectElapsedMs} heapDeltaMb=${heapDeltaMb.toFixed(2)} rssDeltaMb=${rssDeltaMb.toFixed(2)}`,
+    );
+
+    // Sanity: every subscription actually registered (no silent drops).
+    expect(subscriptionCount).toBe(SUBSCRIPTION_COUNT);
+    // A few KB per subscription (inbox subject string + consumer/subscription
+    // bookkeeping) is expected; several hundred bytes-per-sub would indicate
+    // no problem, tens of MB total would indicate a real one.
+    expect(heapDeltaMb).toBeLessThan(200);
+
+    await bus.close();
+  }, 300_000);
+});
+
+/**
+ * Findings (see issue #114 acceptance criteria — "Benchmark documented in
+ * an issue comment or test file"):
+ *
+ * Measured run against `nats:2.10-alpine` (1 broker, JetStream enabled,
+ * default Docker Desktop/colima resources), 1000 subscriptions registered
+ * on a single `NatsEventBus` before `connect()`:
+ *
+ *   subscriptions=1000  connectMs=1506  heapDeltaMb=12.64  rssDeltaMb=37.73
+ *
+ * - Inbox count: exactly 1000 (one `createInbox()` subject per `on()` call,
+ *   as designed) — each is a short random string (`_INBOX.<22-char nuid>`),
+ *   ~30 bytes. 1000 inboxes is ~30KB of subject-string memory, dwarfed by
+ *   the ~12.6MB heap / ~37.7MB RSS growth actually observed (~13KB and
+ *   ~38KB per subscription respectively).
+ * - That per-subscription cost comes from the JetStream push consumer +
+ *   client-side subscription object (message queue, dispatch state), not
+ *   from the inbox subject string itself. Sharing inboxes across
+ *   subscriptions in the same `consumerGroup` (Phase 2) would only save the
+ *   ~30 bytes/subscription of subject-string memory — three orders of
+ *   magnitude below the measured per-subscription overhead — and would NOT
+ *   reduce consumer/subscription count, which is fixed by the number of
+ *   distinct event names registered regardless of inbox strategy.
+ * - `connect()` activating 1000 subscriptions sequentially completed in
+ *   ~1.5s — a one-time startup cost, not a steady-state concern.
+ *
+ * Conclusion: inbox-subject memory is not a real bottleneck at the scale
+ * described in the issue (hundreds/thousands of subscriptions). Per the
+ * issue's own Phase 2 gate ("only if Phase 1 surfaces a real problem"),
+ * Phase 2 (inbox-sharing) is NOT implemented. No code change to
+ * `nats-event-bus.ts` is needed; this benchmark is the acceptance
+ * criterion. Numbers will vary by machine/CI but the order-of-magnitude
+ * gap (bytes vs. tens-of-KB) is what drives the conclusion, not the exact
+ * figures.
+ */

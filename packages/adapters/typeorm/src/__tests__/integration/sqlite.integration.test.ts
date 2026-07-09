@@ -8,6 +8,7 @@ import {
   defineUnitOfWorkContract,
 } from "@noddde/testing-integration";
 import { buildAdapter, makeDataSource, truncateAll } from "./helpers";
+import { NodddeOutboxEntryEntity } from "../../entities";
 
 let ds: DataSource;
 
@@ -41,6 +42,19 @@ defineSnapshotContract("typeorm/sqlite", () => ({
 }));
 defineOutboxContract("typeorm/sqlite", () => ({
   outbox: buildAdapter(ds).outboxStore,
+  // Raw read of every row so the deletePublished(olderThan) cases can
+  // observe which published rows survived (there is no "load published").
+  loadAll: async () => {
+    const rows = await ds.getRepository(NodddeOutboxEntryEntity).find();
+    return rows.map((r) => ({
+      id: r.id,
+      event: typeof r.event === "string" ? JSON.parse(r.event) : r.event,
+      aggregateName: r.aggregateName ?? undefined,
+      aggregateId: r.aggregateId ?? undefined,
+      createdAt: new Date(r.createdAt),
+      publishedAt: r.publishedAt != null ? new Date(r.publishedAt) : null,
+    }));
+  },
 }));
 defineUnitOfWorkContract("typeorm/sqlite", () => {
   const a = buildAdapter(ds);
