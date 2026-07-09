@@ -64,6 +64,36 @@ adapter.stateStored(usersTable, {
 });
 ```
 
+## Migrating: timestamp encoding change (breaking, since 1.0.0-rc.0)
+
+As of `1.0.0-rc.0`, the pg/mysql schemas use `timestamp` columns in
+`mode: "string"` and the persistence layer writes a portable, driver-agnostic
+format: `YYYY-MM-DD HH:MM:SS.fff` (no `Z` suffix). Previously it used
+`mode: "date"`. This changes the string the adapter sends to the database, not
+the column type.
+
+**Is my data at risk?** No, for ordering. `created_at` / `published_at` are
+native `TIMESTAMPTZ` (pg) / `TIMESTAMP(3)` (mysql) columns. The database parses
+both the old and new string encodings into real timestamp values, so
+`ORDER BY created_at` (used by outbox reads) stays temporally correct even for
+a table that mixes rows written before and after the upgrade. This is covered
+by regression tests in
+`src/__tests__/integration/{postgres,mysql}.integration.test.ts`.
+
+**Migration runbook:**
+
+1. No data migration is required — existing rows keep working and sort
+   correctly alongside newly-written rows.
+2. **Run your database in UTC** (or ensure the connection session time zone is
+   UTC). The new format omits an explicit time zone, so on `TIMESTAMPTZ` a
+   non-UTC session time zone would interpret written timestamps in that zone.
+   Every noddde `Date` is serialized from `toISOString()` (UTC), so a UTC
+   session keeps stored instants correct and consistent with any historical
+   ISO-with-`Z` rows.
+3. If you maintain your own migrations/DDL for the noddde tables, keep
+   `created_at`/`published_at` as native timestamp columns (not `text`) so the
+   database — not string comparison — determines ordering.
+
 ### Event Handler Idempotency
 
 `DrizzleEventIdempotencyStore` gives `withIdempotency()` (from `@noddde/core`) a durable, restart-safe backing store, so event handlers can detect and skip duplicate deliveries under Kafka/RabbitMQ at-least-once redelivery. Like `DrizzleOutboxStore`, it's dialect-agnostic: you supply the dialect-specific `eventIdempotency` table.

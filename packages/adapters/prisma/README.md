@@ -36,6 +36,43 @@ const domain = await wireDomain(definition, {
 });
 ```
 
+### Advisory locking & connection pooling (important)
+
+Database advisory locks (PostgreSQL `pg_advisory_lock`, MySQL/MariaDB
+`GET_LOCK`) are **session-scoped**: a lock must be released on the same DB
+session it was acquired on. Prisma multiplexes queries across an internal
+connection pool, so a locker built from an ordinary `PrismaClient` can acquire
+on one connection and release on another — the release becomes a silent no-op
+and the lock leaks.
+
+Use `PrismaAdvisoryLocker.fromUrl(...)`, which owns a client pinned to
+`connection_limit=1` and guarantees session affinity:
+
+```typescript
+import { PrismaAdvisoryLocker } from "@noddde/prisma";
+import { wireDomain } from "@noddde/engine";
+
+const locker = PrismaAdvisoryLocker.fromUrl(
+  process.env.DATABASE_URL!,
+  "postgresql", // or "mysql" | "mariadb"
+);
+
+const domain = await wireDomain(definition, {
+  aggregates: {
+    concurrency: { strategy: "pessimistic", locker, lockTimeoutMs: 5000 },
+  },
+});
+
+// The engine auto-discovers the locker via Closeable and disconnects its
+// owned client on shutdown. If you manage lifecycle manually:
+await locker.close();
+```
+
+If you must pass your own `PrismaClient` to the constructor, it **must** be
+pinned to a single connection (`?connection_limit=1` in the datasource URL).
+As a safety net, `release()` throws with an actionable message if it detects a
+lock that was released on a different connection than it was acquired on.
+
 ### Dedicated State Models
 
 For state-stored aggregates with custom Prisma models:

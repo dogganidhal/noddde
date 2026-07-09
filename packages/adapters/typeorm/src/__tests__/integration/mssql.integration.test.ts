@@ -12,7 +12,6 @@ import {
 } from "@noddde/testing-integration";
 import { buildAdapter, makeDataSource, truncateAll } from "./helpers";
 import { TypeORMAdvisoryLocker } from "../../advisory-locker";
-import { NodddeOutboxEntryEntity } from "../../entities";
 
 let mssql_: StartedMssql;
 let ds: DataSource;
@@ -44,10 +43,9 @@ definePersistenceContract("typeorm/mssql", () => {
   return {
     eventSourced: a.eventSourcedPersistence,
     stateStored: a.stateStoredPersistence,
-    // MSSQL `TEXT` is codepage-limited; supplementary-plane chars get
-    // replaced on storage. Persisting upgrades to `nvarchar(max)` for
-    // Unicode safety is tracked separately.
-    unicodeSafe: false,
+    // The MSSQL DataSource registers the `nvarchar(max)` entity variant
+    // (createNodddeEntities("mssql")), so supplementary-plane Unicode
+    // round-trips — the contract runs with unicodeSafe defaulting to true.
   };
 });
 defineSagaContract("typeorm/mssql", () => ({
@@ -60,8 +58,24 @@ defineOutboxContract("typeorm/mssql", () => ({
   outbox: buildAdapter(ds).outboxStore,
   // Raw read of every row so the deletePublished(olderThan) cases can
   // observe which published rows survived (there is no "load published").
+  // Resolve the outbox entity by table name: on MSSQL the DataSource
+  // registers the dialect-specific `nvarchar(max)` variant from
+  // createNodddeEntities("mssql"), not the exported static class.
   loadAll: async () => {
-    const rows = await ds.getRepository(NodddeOutboxEntryEntity).find();
+    const meta = ds.entityMetadatas.find(
+      (m) => m.tableName === "noddde_outbox",
+    );
+    if (!meta) throw new Error("noddde_outbox entity not registered");
+    const rows = await ds
+      .getRepository<{
+        id: string;
+        event: unknown;
+        aggregateName: string | null;
+        aggregateId: string | null;
+        createdAt: Date | string;
+        publishedAt: Date | string | null;
+      }>(meta.target)
+      .find();
     return rows.map((r) => ({
       id: r.id,
       event: typeof r.event === "string" ? JSON.parse(r.event) : r.event,

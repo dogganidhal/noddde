@@ -4,13 +4,22 @@ import {
   Column,
   PrimaryColumn,
   Index,
+  type ColumnOptions,
+  type PrimaryColumnOptions,
+  type DatabaseType,
 } from "typeorm";
 
 /**
- * MSSQL needs `nvarchar(max)` for Unicode-safe JSON storage; `text` is
- * legacy and ASCII-only there. For every other dialect, plain `text`
- * is correct. `simple-json`-style column types would be more idiomatic
- * but break the JSON-string round-trip the persistence layer relies on.
+ * JSON payloads are stored as serialized strings. On most dialects a plain
+ * `text` column is Unicode-safe. MSSQL is the exception: TypeORM maps `text`
+ * to the legacy `TEXT` column type, which is codepage-limited and silently
+ * mangles characters outside the basic multilingual plane (emoji, etc.). MSSQL
+ * therefore needs `nvarchar(max)`.
+ *
+ * These constants are the defaults used by the statically-declared entity
+ * classes below (safe for postgres / mysql / sqlite). For MSSQL, use
+ * {@link createNodddeEntities}, which returns entities whose JSON/text columns
+ * are `nvarchar(max)`.
  */
 const JSON_COLUMN_TYPE = { type: "text" as const };
 const JSON_COLUMN_TYPE_NULLABLE = { type: "text" as const, nullable: true };
@@ -150,4 +159,218 @@ export class NodddeOutboxEntryEntity {
     transformer: NULLABLE_DATE_TRANSFORMER,
   })
   publishedAt!: Date | null;
+}
+
+/**
+ * The set of TypeORM entity classes backing noddde's built-in stores. Register
+ * every value on your `DataSource` and pass the same `DataSource` to
+ * {@link createTypeORMAdapter}.
+ */
+export interface NodddeEntities {
+  NodddeEventEntity: new () => NodddeEventEntity;
+  NodddeAggregateStateEntity: new () => NodddeAggregateStateEntity;
+  NodddeSagaStateEntity: new () => NodddeSagaStateEntity;
+  NodddeSnapshotEntity: new () => NodddeSnapshotEntity;
+  NodddeOutboxEntryEntity: new () => NodddeOutboxEntryEntity;
+}
+
+/** Column-type overrides used when building dialect-specific entity classes. */
+interface EntityColumnTypes {
+  /** Large serialized-JSON / text columns (payload, metadata, state, event). */
+  json: ColumnOptions;
+  /** Bounded string columns used as primary keys / index members and ids. */
+  key: ColumnOptions;
+  /** Non-nullable datetime column (created_at). */
+  datetime: ColumnOptions;
+  /** Nullable, text-backed date column (published_at) — keeps the transformer. */
+  publishedAt: ColumnOptions;
+}
+
+/**
+ * Programmatically builds a fresh set of entity classes with the given
+ * column types. Decorators are applied imperatively (rather than via `@`
+ * syntax) so the column types can be chosen at call time from `types`. Every
+ * column specifies an explicit `type`, so no `reflect-metadata` design-type
+ * inference is required.
+ *
+ * Keep the columns here in sync with the statically-declared classes above.
+ */
+function buildEntities(types: EntityColumnTypes): NodddeEntities {
+  const key = (name?: string): ColumnOptions =>
+    name ? { name, ...types.key } : { ...types.key };
+  // PrimaryColumn accepts a narrower options type than Column; the shared
+  // `types.key` (type + length) is valid for both, so cast at the PK sites.
+  const pk = (name?: string): PrimaryColumnOptions =>
+    key(name) as PrimaryColumnOptions;
+
+  class NodddeEventEntity {
+    id!: number;
+    aggregateName!: string;
+    aggregateId!: string;
+    sequenceNumber!: number;
+    eventName!: string;
+    payload!: string;
+    metadata!: string | null;
+    createdAt!: Date;
+  }
+  PrimaryGeneratedColumn()(NodddeEventEntity.prototype, "id");
+  Column(key("aggregate_name"))(NodddeEventEntity.prototype, "aggregateName");
+  Column(key("aggregate_id"))(NodddeEventEntity.prototype, "aggregateId");
+  Column({ name: "sequence_number", type: "int" })(
+    NodddeEventEntity.prototype,
+    "sequenceNumber",
+  );
+  Column(key("event_name"))(NodddeEventEntity.prototype, "eventName");
+  Column({ ...types.json })(NodddeEventEntity.prototype, "payload");
+  Column({ ...types.json, nullable: true })(
+    NodddeEventEntity.prototype,
+    "metadata",
+  );
+  Column({ name: "created_at", ...types.datetime })(
+    NodddeEventEntity.prototype,
+    "createdAt",
+  );
+  Index(["aggregateName", "aggregateId", "sequenceNumber"], { unique: true })(
+    NodddeEventEntity,
+  );
+  Entity("noddde_events")(NodddeEventEntity);
+
+  class NodddeAggregateStateEntity {
+    aggregateName!: string;
+    aggregateId!: string;
+    state!: string;
+    version!: number;
+  }
+  PrimaryColumn(pk("aggregate_name"))(
+    NodddeAggregateStateEntity.prototype,
+    "aggregateName",
+  );
+  PrimaryColumn(pk("aggregate_id"))(
+    NodddeAggregateStateEntity.prototype,
+    "aggregateId",
+  );
+  Column({ ...types.json })(NodddeAggregateStateEntity.prototype, "state");
+  Column({ type: "int", default: 0 })(
+    NodddeAggregateStateEntity.prototype,
+    "version",
+  );
+  Entity("noddde_aggregate_states")(NodddeAggregateStateEntity);
+
+  class NodddeSagaStateEntity {
+    sagaName!: string;
+    sagaId!: string;
+    state!: string;
+  }
+  PrimaryColumn(pk("saga_name"))(NodddeSagaStateEntity.prototype, "sagaName");
+  PrimaryColumn(pk("saga_id"))(NodddeSagaStateEntity.prototype, "sagaId");
+  Column({ ...types.json })(NodddeSagaStateEntity.prototype, "state");
+  Entity("noddde_saga_states")(NodddeSagaStateEntity);
+
+  class NodddeSnapshotEntity {
+    aggregateName!: string;
+    aggregateId!: string;
+    state!: string;
+    version!: number;
+  }
+  PrimaryColumn(pk("aggregate_name"))(
+    NodddeSnapshotEntity.prototype,
+    "aggregateName",
+  );
+  PrimaryColumn(pk("aggregate_id"))(
+    NodddeSnapshotEntity.prototype,
+    "aggregateId",
+  );
+  Column({ ...types.json })(NodddeSnapshotEntity.prototype, "state");
+  Column({ type: "int" })(NodddeSnapshotEntity.prototype, "version");
+  Entity("noddde_snapshots")(NodddeSnapshotEntity);
+
+  class NodddeOutboxEntryEntity {
+    id!: string;
+    event!: string;
+    aggregateName!: string | null;
+    aggregateId!: string | null;
+    createdAt!: Date;
+    publishedAt!: Date | null;
+  }
+  PrimaryColumn(pk())(NodddeOutboxEntryEntity.prototype, "id");
+  Column({ ...types.json })(NodddeOutboxEntryEntity.prototype, "event");
+  Column({ name: "aggregate_name", ...types.key, nullable: true })(
+    NodddeOutboxEntryEntity.prototype,
+    "aggregateName",
+  );
+  Column({ name: "aggregate_id", ...types.key, nullable: true })(
+    NodddeOutboxEntryEntity.prototype,
+    "aggregateId",
+  );
+  Column({ name: "created_at", ...types.datetime })(
+    NodddeOutboxEntryEntity.prototype,
+    "createdAt",
+  );
+  Column({
+    name: "published_at",
+    ...types.publishedAt,
+    nullable: true,
+    transformer: NULLABLE_DATE_TRANSFORMER,
+  })(NodddeOutboxEntryEntity.prototype, "publishedAt");
+  Entity("noddde_outbox")(NodddeOutboxEntryEntity);
+
+  return {
+    NodddeEventEntity,
+    NodddeAggregateStateEntity,
+    NodddeSagaStateEntity,
+    NodddeSnapshotEntity,
+    NodddeOutboxEntryEntity,
+  };
+}
+
+/** The statically-declared (default) entity classes. */
+const STATIC_ENTITIES: NodddeEntities = {
+  NodddeEventEntity,
+  NodddeAggregateStateEntity,
+  NodddeSagaStateEntity,
+  NodddeSnapshotEntity,
+  NodddeOutboxEntryEntity,
+};
+
+/**
+ * Returns the TypeORM entity classes to register on a `DataSource`, with
+ * column types chosen for the given database dialect.
+ *
+ * - **MSSQL** (`"mssql"`): JSON/text columns use `nvarchar(max)` and string
+ *   keys use `nvarchar(255)`, so supplementary-plane Unicode (emoji, etc.) in
+ *   event payloads round-trips correctly. MSSQL's legacy `text` column would
+ *   otherwise silently corrupt such characters.
+ * - **Every other dialect** (postgres, mysql, mariadb, sqlite, …) and when the
+ *   dialect is omitted: the default classes, whose `text` columns are already
+ *   Unicode-safe. Returned unchanged, so there is no schema difference from
+ *   registering the exported entity classes directly.
+ *
+ * Register the returned classes on your `DataSource` and pass that same
+ * `DataSource` to {@link createTypeORMAdapter}; the adapter resolves each store
+ * by table name, so it works with whichever variant you register.
+ *
+ * @example
+ * ```ts
+ * const entities = createNodddeEntities("mssql");
+ * const dataSource = new DataSource({
+ *   type: "mssql",
+ *   entities: Object.values(entities),
+ *   // ...connection options
+ * });
+ * await dataSource.initialize();
+ * const adapter = createTypeORMAdapter(dataSource, { outboxStore: true });
+ * ```
+ */
+export function createNodddeEntities(dialect?: DatabaseType): NodddeEntities {
+  if (dialect === "mssql") {
+    return buildEntities({
+      json: { type: "nvarchar", length: "MAX" },
+      key: { type: "nvarchar", length: "255" },
+      datetime: { type: "datetime2" },
+      // published_at holds ISO date strings (ASCII); nvarchar(max) keeps it
+      // consistent with the other text columns and never truncates.
+      publishedAt: { type: "nvarchar", length: "MAX" },
+    });
+  }
+  return STATIC_ENTITIES;
 }

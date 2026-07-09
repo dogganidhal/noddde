@@ -238,8 +238,18 @@ describe("TypeORMStateStoredAggregatePersistence", () => {
           new Error("UNIQUE constraint failed: noddde_aggregate_states.id"),
         ),
     };
+    // The persistence resolves repositories by table name from the registered
+    // entity metadata, so the mock manager must expose both an entityMetadatas
+    // entry for the state table and getRepository() returning the stub.
     const fakeDataSource = {
-      manager: { getRepository: () => repo },
+      manager: {
+        connection: {
+          entityMetadatas: [
+            { tableName: "noddde_aggregate_states", target: class {} },
+          ],
+        },
+        getRepository: () => repo,
+      },
     } as unknown as DataSource;
     const persistence = new TypeORMStateStoredAggregatePersistence(
       fakeDataSource,

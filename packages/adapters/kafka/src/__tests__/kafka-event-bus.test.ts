@@ -301,8 +301,8 @@ describe("KafkaEventBus", () => {
     });
     (bus as any)._kafka = mockKafka;
 
-    await bus.connect();
     bus.on("TestEvent", vi.fn());
+    await bus.connect();
     await bus.close();
 
     expect(mockProducer.disconnect).toHaveBeenCalled();
@@ -510,13 +510,9 @@ describe("KafkaEventBus", () => {
     expect(mockConsumer.connect).toHaveBeenCalledTimes(1);
   });
 
-  it("should log error and remove topic from subscribed set when subscribe fails after connect", async () => {
+  it("should throw when on() is called after connect() for a new topic", async () => {
     const mockProducer = makeMockProducer();
-    const subscribeError = new Error("subscribe failed");
-    const mockConsumer = {
-      ...makeMockConsumer(),
-      subscribe: vi.fn().mockRejectedValue(subscribeError),
-    };
+    const mockConsumer = makeMockConsumer();
     const mockKafka = {
       producer: () => mockProducer,
       consumer: () => mockConsumer,
@@ -537,22 +533,73 @@ describe("KafkaEventBus", () => {
     });
     (bus as any)._kafka = mockKafka;
 
-    // Re-configure subscribe to always reject (connect() has no pre-registered
-    // handlers so it won't call subscribe — only the on() call below will).
-    mockConsumer.subscribe.mockImplementation(async () => {
-      throw subscribeError;
-    });
-
-    // Force connect() to skip the subscribe loop (no pre-registered handlers)
+    // connect() with no pre-registered handlers → no topics subscribed.
     await bus.connect();
 
-    bus.on("NewEvent", vi.fn());
+    // Late on() for a not-yet-subscribed topic must fail loudly rather than
+    // silently dropping the handler's messages.
+    expect(() => bus.on("NewEvent", vi.fn())).toThrow(/after connect\(\)/);
 
-    // Allow the async subscribe rejection to propagate
-    await new Promise((r) => setTimeout(r, 0));
-
-    expect(mockLogger.error).toHaveBeenCalled();
+    // No subscribe was attempted and no misleading error was logged.
+    expect(mockConsumer.subscribe).not.toHaveBeenCalled();
+    expect(mockLogger.error).not.toHaveBeenCalled();
     expect((bus as any)._subscribedTopics.has("NewEvent")).toBe(false);
+  });
+
+  it("should throw when on() is called for a new topic while connect() is in progress", async () => {
+    const mockProducer = makeMockProducer();
+    const mockConsumer = makeMockConsumer();
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+    (bus as any)._kafka = mockKafka;
+
+    // Simulate an in-flight connect(): _connecting is set but _connected is
+    // still false. connect()'s subscribe loop may already have run, so a new
+    // topic registered now could never get a subscription — must throw.
+    (bus as any)._connecting = new Promise<void>(() => {});
+
+    expect(() => bus.on("NewEvent", vi.fn())).toThrow(
+      /after connect\(\) was started/,
+    );
+    expect((bus as any)._subscribedTopics.has("NewEvent")).toBe(false);
+  });
+
+  it("should allow a second handler for an already-subscribed topic after connect()", async () => {
+    const mockProducer = makeMockProducer();
+    const mockConsumer = makeMockConsumer();
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+    (bus as any)._kafka = mockKafka;
+
+    // Register before connect() so the topic is subscribed.
+    bus.on("AccountCreated", vi.fn());
+    await bus.connect();
+
+    const subscribeCallsAfterConnect = mockConsumer.subscribe.mock.calls.length;
+
+    // Adding another handler for the same (already-subscribed) event is fine
+    // and issues no new subscribe.
+    expect(() => bus.on("AccountCreated", vi.fn())).not.toThrow();
+    expect(mockConsumer.subscribe).toHaveBeenCalledTimes(
+      subscribeCallsAfterConnect,
+    );
+    expect((bus as any)._handlers.get("AccountCreated")).toHaveLength(2);
   });
 
   it("should use aggregateId as message key by default", async () => {
@@ -773,12 +820,12 @@ describe("KafkaEventBus error isolation", () => {
     });
     (bus as any)._kafka = mockKafka;
 
-    await bus.connect();
-
     bus.on("E", vi.fn());
     bus.on("E", async () => {
       throw new Error("boom");
     });
+
+    await bus.connect();
 
     await expect(
       (bus as any)._handleMessage(

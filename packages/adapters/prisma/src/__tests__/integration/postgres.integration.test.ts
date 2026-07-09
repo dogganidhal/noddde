@@ -103,35 +103,35 @@ defineUnitOfWorkContract("prisma/postgres", () => {
 });
 
 defineAdvisoryLockerContract("prisma/postgres", async () => {
-  // Need *two* independent sessions for the lock contract. Prisma multiplexes
-  // queries over an internal pool, so we cap each client to a single
-  // connection (`connection_limit=1`) to guarantee that the lock and the
-  // release land on the same pg session.
-  const pinnedUrl = `${pg_.url}${pg_.url.includes("?") ? "&" : "?"}connection_limit=1`;
-  const a = new PrismaClient({ datasources: { db: { url: pinnedUrl } } });
-  const b = new PrismaClient({ datasources: { db: { url: pinnedUrl } } });
-  await a.$connect();
-  await b.$connect();
-  let killedA = false;
+  // Need *two* independent sessions for the lock contract. `fromUrl` owns a
+  // client pinned to connection_limit=1 internally, guaranteeing that each
+  // locker's acquire()/release() land on the same pg session — no manual
+  // connection_limit workaround needed here. clientFactory supplies the
+  // dialect-specific generated client (fromUrl passes it the pinned URL).
+  const lockerA = PrismaAdvisoryLocker.fromUrl(pg_.url, "postgresql", {
+    clientFactory: (url) =>
+      new PrismaClient({
+        datasources: { db: { url } },
+      }) as unknown as SharedPrismaClient,
+  });
+  const lockerB = PrismaAdvisoryLocker.fromUrl(pg_.url, "postgresql", {
+    clientFactory: (url) =>
+      new PrismaClient({
+        datasources: { db: { url } },
+      }) as unknown as SharedPrismaClient,
+  });
   return {
-    lockerA: new PrismaAdvisoryLocker(
-      a as unknown as SharedPrismaClient,
-      "postgresql",
-    ),
-    lockerB: new PrismaAdvisoryLocker(
-      b as unknown as SharedPrismaClient,
-      "postgresql",
-    ),
-    // Disconnecting the pinned (connection_limit=1) client closes its single
-    // pg session, so the backend reclaims A's session-scoped advisory locks
-    // without any explicit release().
+    lockerA,
+    lockerB,
+    // Killing A's session = closing its owned single-connection client. That
+    // ends A's one pg session, so the backend reclaims A's session-scoped
+    // advisory locks without any explicit release() (§2.6 crash recovery).
     killSessionA: async () => {
-      killedA = true;
-      await a.$disconnect();
+      await lockerA.close();
     },
     cleanup: async () => {
-      if (!killedA) await a.$disconnect().catch(() => {});
-      await b.$disconnect().catch(() => {});
+      await lockerA.close();
+      await lockerB.close();
     },
   };
 });

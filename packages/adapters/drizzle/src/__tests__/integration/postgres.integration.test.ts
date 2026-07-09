@@ -1,4 +1,4 @@
-import { beforeAll, afterAll } from "vitest";
+import { beforeAll, afterAll, describe, it, expect } from "vitest";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import {
@@ -111,6 +111,45 @@ defineUnitOfWorkContract("drizzle/postgres", async () => {
     stateStored: adapter.stateStoredPersistence,
     uowFactory: adapter.unitOfWorkFactory,
   };
+});
+
+// Regression for ROBUSTNESS §3.1: the timestamp encoding changed from
+// `mode: "date"` to `mode: "string"` emitting `YYYY-MM-DD HH:MM:SS.fff` (no
+// `Z`). A mid-migration `noddde_outbox` table can hold rows in BOTH the old
+// ISO-with-Z format and the new space-separated format. Because `created_at`
+// is a native `TIMESTAMPTZ` column (not text), Postgres parses both string
+// formats to real timestamps, so `ORDER BY created_at` is temporal — not
+// lexicographic. This test proves that empirically.
+describe("outbox created_at ordering across mixed timestamp formats (§3.1)", () => {
+  it("orders old ISO-with-Z and new space-separated rows temporally", async () => {
+    await truncate();
+    // Insert directly (bypassing the adapter) to simulate a mid-migration
+    // table containing both encodings. Deliberately insert out of temporal
+    // order so a naive string sort would get it wrong.
+    const rows: Array<{ id: string; ts: string }> = [
+      { id: "b-new-middle", ts: "2024-01-02 00:00:00.000" }, // new format
+      { id: "a-old-earliest", ts: "2024-01-01T00:00:00.000Z" }, // old format
+      { id: "c-old-latest", ts: "2024-01-03T00:00:00.000Z" }, // old format
+    ];
+    for (const r of rows) {
+      await pool.query(
+        `INSERT INTO noddde_outbox (id, event, created_at, published_at)
+         VALUES ($1, $2::jsonb, $3, NULL)`,
+        [r.id, JSON.stringify({ name: "E", payload: {} }), r.ts],
+      );
+    }
+
+    const adapter = makeAdapter();
+    const loaded = await adapter.outboxStore!.loadUnpublished(100);
+    expect(loaded.map((e) => e.id)).toEqual([
+      "a-old-earliest",
+      "b-new-middle",
+      "c-old-latest",
+    ]);
+    // And the parsed timestamps are strictly increasing.
+    const times = loaded.map((e) => e.createdAt.getTime());
+    expect(times).toEqual([...times].sort((x, y) => x - y));
+  });
 });
 
 // Slow-tagged high-volume smoke tests (§2.3). Skipped unless

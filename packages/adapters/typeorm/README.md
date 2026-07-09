@@ -16,7 +16,7 @@ npm install @noddde/typeorm typeorm
 
 - **`TypeORMAdapter`** &mdash; Full persistence adapter for `wireDomain`: event-sourced aggregates, state-stored aggregates, sagas, snapshots, and outbox
 - **`TypeORMAdvisoryLocker`** &mdash; Distributed pessimistic locking (auto-detected from DataSource)
-- **Built-in entities** &mdash; `NodddeEventEntity`, `NodddeAggregateStateEntity`, `NodddeSagaStateEntity`, `NodddeSnapshotEntity`, `NodddeOutboxEntryEntity`, `NodddeEventIdempotencyEntity`
+- **Built-in entities** &mdash; `NodddeEventEntity`, `NodddeAggregateStateEntity`, `NodddeSagaStateEntity`, `NodddeSnapshotEntity`, `NodddeOutboxEntryEntity`, `NodddeEventIdempotencyEntity`, plus `createNodddeEntities(dialect)` for dialect-aware column types (required for MSSQL — see below)
 - **Individual persistence classes** for fine-grained control
 - **`TypeORMUnitOfWork`** &mdash; ACID transaction context
 - **`TypeORMEventIdempotencyStore`** &mdash; durable event-handler redelivery dedup, for `withIdempotency()`
@@ -52,6 +52,38 @@ const domain = await wireDomain(definition, {
   persistenceAdapter: adapter,
 });
 ```
+
+### MSSQL & Unicode column types
+
+TypeORM maps `@Column({ type: "text" })` to MSSQL's legacy `TEXT` column, which
+is codepage-limited and **silently corrupts** characters outside the basic
+multilingual plane (emoji, many CJK extension characters, etc.) in event
+payloads. On MSSQL, register the dialect-aware entities from
+`createNodddeEntities("mssql")`, which use `nvarchar(max)` for JSON/text
+columns so all Unicode round-trips losslessly:
+
+```typescript
+import { DataSource } from "typeorm";
+import { TypeORMAdapter, createNodddeEntities } from "@noddde/typeorm";
+
+const entities = createNodddeEntities("mssql");
+
+const dataSource = new DataSource({
+  type: "mssql",
+  url: process.env.DATABASE_URL,
+  entities: Object.values(entities),
+  synchronize: true,
+});
+await dataSource.initialize();
+
+const adapter = new TypeORMAdapter(dataSource);
+```
+
+`createNodddeEntities(dataSource.options.type)` is safe for every dialect — it
+returns the default entity classes unchanged for postgres/mysql/mariadb/sqlite
+(their `text` columns are already Unicode-safe) and the `nvarchar(max)` variant
+only for MSSQL. The adapter resolves each store by table name, so it works with
+whichever variant you register.
 
 ### Dedicated State Entities
 
