@@ -82,12 +82,15 @@ async function warmupKafka(brokers: string[], timeoutMs = 60_000) {
     brokers,
     clientId: `warmup-admin-${suffix}`,
   }).admin();
-  await admin.connect();
-  await admin.createTopics({
-    waitForLeaders: true,
-    topics: [{ topic: warmupTopic, numPartitions: 1 }],
-  });
-  await admin.disconnect();
+  try {
+    await admin.connect();
+    await admin.createTopics({
+      waitForLeaders: true,
+      topics: [{ topic: warmupTopic, numPartitions: 1 }],
+    });
+  } finally {
+    await admin.disconnect();
+  }
 
   const warmupBus = new KafkaEventBus({
     brokers,
