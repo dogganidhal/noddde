@@ -74,7 +74,9 @@ As of `1.0.0-rc.0`, `created_at`/`published_at` on PostgreSQL and MySQL are read
 - Existing rows written under the old format keep sorting correctly relative to new rows under `ORDER BY created_at` (verified by a regression test that inserts both formats and asserts temporal ordering — see `src/__tests__/integration/{postgres,mysql}.integration.test.ts`).
 - On MySQL specifically, the old ISO-with-`Z` shape was never actually persisted as literal text either way — MySQL's `TIMESTAMP` parser rejects a trailing `Z` outright, so there is no on-disk representation to worry about.
 
-No action is required beyond upgrading the package. SQLite is unaffected — it has always stored timestamps as `TEXT`.
+**Postgres caveat: this assumes the session `TimeZone` is `UTC`.** The new format has no explicit offset (`2024-06-01 08:00:00.000`, no `Z`), so Postgres interprets it using the connection's `TimeZone` setting — and `toDbTimestamp` builds that string from `Date#toISOString()`, which is always UTC. If your Postgres connection or database `TimeZone` is set to anything other than `UTC`, the new-format string will be parsed as wall-clock time in that zone instead, shifting the stored instant and potentially reordering it relative to old-format (`...Z`, explicitly UTC) rows. Postgres defaults to `UTC` unless configured otherwise — confirm with `SHOW TIME ZONE;`, or set it explicitly (`SET TIME ZONE 'UTC';` on the connection, or `ALTER DATABASE ... SET TIME ZONE 'UTC';`) if you're not sure.
+
+No further action is required beyond upgrading the package and confirming the above. SQLite is unaffected — it has always stored timestamps as `TEXT`.
 
 ## Peer Dependencies
 
