@@ -35,6 +35,80 @@ function makeMockProducer() {
   };
 }
 
+/**
+ * Builds a mock Kafka client for `warmup()` tests. Unlike `makeMockConsumer`
+ * / `makeMockProducer`, the producer's `send` here synchronously feeds the
+ * message straight into the consumer's captured `eachMessage` callback —
+ * simulating a broker with zero network latency so the warmup round-trip
+ * resolves deterministically without depending on real timers.
+ *
+ * Pass `neverDeliver: true` to simulate a broker that swallows the warmup
+ * publish (used by the timeout scenario).
+ */
+function createMockKafkaForWarmup(options?: { neverDeliver?: boolean }) {
+  const handlers: Record<
+    string,
+    // eslint-disable-next-line no-unused-vars
+    (event: {
+      message: { value: Buffer; offset: string };
+      topic: string;
+      partition: number;
+    }) => Promise<void>
+  > = {};
+
+  const mockProducer = {
+    send: vi.fn().mockImplementation(async ({ topic, messages }: any) => {
+      if (options?.neverDeliver) {
+        return;
+      }
+      const eachMessage = handlers["eachMessage"];
+      if (eachMessage) {
+        await eachMessage({
+          message: {
+            value: Buffer.from(messages[0].value as string),
+            offset: "0",
+          },
+          topic,
+          partition: 0,
+        } as any);
+      }
+    }),
+    connect: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn().mockResolvedValue(undefined),
+  };
+  const mockConsumer = {
+    connect: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn().mockResolvedValue(undefined),
+    subscribe: vi.fn().mockResolvedValue(undefined),
+    run: vi.fn().mockImplementation(async ({ eachMessage }: any) => {
+      handlers["eachMessage"] = eachMessage;
+    }),
+    stop: vi.fn().mockResolvedValue(undefined),
+    commitOffsets: vi.fn().mockResolvedValue(undefined),
+    events: { FETCH_START: "consumer.fetch_start" },
+    on: vi.fn().mockImplementation((_event: string, cb: () => void) => {
+      cb();
+      return () => {};
+    }),
+  };
+  const mockAdmin = {
+    connect: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn().mockResolvedValue(undefined),
+    createTopics: vi.fn().mockResolvedValue(true),
+  };
+
+  return {
+    mockKafka: {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+      admin: () => mockAdmin,
+    },
+    mockProducer,
+    mockConsumer,
+    mockAdmin,
+  };
+}
+
 describe("KafkaEventBus", () => {
   it("should publish event to topic derived from event name", async () => {
     const mockProducer = makeMockProducer();
@@ -227,8 +301,8 @@ describe("KafkaEventBus", () => {
     });
     (bus as any)._kafka = mockKafka;
 
-    await bus.connect();
     bus.on("TestEvent", vi.fn());
+    await bus.connect();
     await bus.close();
 
     expect(mockProducer.disconnect).toHaveBeenCalled();
@@ -436,13 +510,9 @@ describe("KafkaEventBus", () => {
     expect(mockConsumer.connect).toHaveBeenCalledTimes(1);
   });
 
-  it("should log error and remove topic from subscribed set when subscribe fails after connect", async () => {
+  it("should throw when on() is called after connect() for a new topic", async () => {
     const mockProducer = makeMockProducer();
-    const subscribeError = new Error("subscribe failed");
-    const mockConsumer = {
-      ...makeMockConsumer(),
-      subscribe: vi.fn().mockRejectedValue(subscribeError),
-    };
+    const mockConsumer = makeMockConsumer();
     const mockKafka = {
       producer: () => mockProducer,
       consumer: () => mockConsumer,
@@ -463,22 +533,73 @@ describe("KafkaEventBus", () => {
     });
     (bus as any)._kafka = mockKafka;
 
-    // Re-configure subscribe to always reject (connect() has no pre-registered
-    // handlers so it won't call subscribe — only the on() call below will).
-    mockConsumer.subscribe.mockImplementation(async () => {
-      throw subscribeError;
-    });
-
-    // Force connect() to skip the subscribe loop (no pre-registered handlers)
+    // connect() with no pre-registered handlers → no topics subscribed.
     await bus.connect();
 
-    bus.on("NewEvent", vi.fn());
+    // Late on() for a not-yet-subscribed topic must fail loudly rather than
+    // silently dropping the handler's messages.
+    expect(() => bus.on("NewEvent", vi.fn())).toThrow(/after connect\(\)/);
 
-    // Allow the async subscribe rejection to propagate
-    await new Promise((r) => setTimeout(r, 0));
-
-    expect(mockLogger.error).toHaveBeenCalled();
+    // No subscribe was attempted and no misleading error was logged.
+    expect(mockConsumer.subscribe).not.toHaveBeenCalled();
+    expect(mockLogger.error).not.toHaveBeenCalled();
     expect((bus as any)._subscribedTopics.has("NewEvent")).toBe(false);
+  });
+
+  it("should throw when on() is called for a new topic while connect() is in progress", async () => {
+    const mockProducer = makeMockProducer();
+    const mockConsumer = makeMockConsumer();
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+    (bus as any)._kafka = mockKafka;
+
+    // Simulate an in-flight connect(): _connecting is set but _connected is
+    // still false. connect()'s subscribe loop may already have run, so a new
+    // topic registered now could never get a subscription — must throw.
+    (bus as any)._connecting = new Promise<void>(() => {});
+
+    expect(() => bus.on("NewEvent", vi.fn())).toThrow(
+      /after connect\(\) was started/,
+    );
+    expect((bus as any)._subscribedTopics.has("NewEvent")).toBe(false);
+  });
+
+  it("should allow a second handler for an already-subscribed topic after connect()", async () => {
+    const mockProducer = makeMockProducer();
+    const mockConsumer = makeMockConsumer();
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+    (bus as any)._kafka = mockKafka;
+
+    // Register before connect() so the topic is subscribed.
+    bus.on("AccountCreated", vi.fn());
+    await bus.connect();
+
+    const subscribeCallsAfterConnect = mockConsumer.subscribe.mock.calls.length;
+
+    // Adding another handler for the same (already-subscribed) event is fine
+    // and issues no new subscribe.
+    expect(() => bus.on("AccountCreated", vi.fn())).not.toThrow();
+    expect(mockConsumer.subscribe).toHaveBeenCalledTimes(
+      subscribeCallsAfterConnect,
+    );
+    expect((bus as any)._handlers.get("AccountCreated")).toHaveLength(2);
   });
 
   it("should use aggregateId as message key by default", async () => {
@@ -699,12 +820,12 @@ describe("KafkaEventBus error isolation", () => {
     });
     (bus as any)._kafka = mockKafka;
 
-    await bus.connect();
-
     bus.on("E", vi.fn());
     bus.on("E", async () => {
       throw new Error("boom");
     });
+
+    await bus.connect();
 
     await expect(
       (bus as any)._handleMessage(
@@ -717,5 +838,123 @@ describe("KafkaEventBus error isolation", () => {
     // The Kafka consumer never commits the offset on a failed handler — broker
     // redelivers per existing retry/maxRetries semantics. Regression guard.
     expect(commitOffsets).not.toHaveBeenCalled();
+  });
+});
+
+// ### warmup performs a publish/consume round-trip on an internal topic
+// ### warmup is idempotent
+// ### warmup throws before connect
+// ### warmupOnConnect runs warmup as part of connect
+// ### warmup times out when the round-trip never completes
+describe("KafkaEventBus warmup", () => {
+  it("should create the warmup topic, dispatch, and resolve once the round-trip is observed", async () => {
+    const { mockKafka, mockAdmin, mockProducer } = createMockKafkaForWarmup();
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+    (bus as any)._kafka = mockKafka;
+
+    await bus.connect();
+    await bus.warmup();
+
+    expect(mockAdmin.createTopics).toHaveBeenCalledWith(
+      expect.objectContaining({
+        waitForLeaders: true,
+        topics: [
+          expect.objectContaining({ topic: expect.stringContaining("test") }),
+        ],
+      }),
+    );
+    expect(mockProducer.send).toHaveBeenCalled();
+  });
+
+  it("should not repeat the round-trip on a second call after success", async () => {
+    const { mockKafka, mockAdmin } = createMockKafkaForWarmup();
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+    (bus as any)._kafka = mockKafka;
+
+    await bus.connect();
+    await bus.warmup();
+    const callsAfterFirst = mockAdmin.createTopics.mock.calls.length;
+    await bus.warmup();
+
+    expect(mockAdmin.createTopics.mock.calls.length).toBe(callsAfterFirst);
+  });
+
+  it("should throw when warmup is called before connect", async () => {
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+
+    await expect(bus.warmup()).rejects.toThrow(/not connected/i);
+  });
+
+  it("should perform the warmup round-trip during connect when warmupOnConnect is true", async () => {
+    const { mockKafka, mockAdmin, mockProducer } = createMockKafkaForWarmup();
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+      warmupOnConnect: true,
+    });
+    (bus as any)._kafka = mockKafka;
+
+    await bus.connect();
+
+    expect(mockAdmin.createTopics).toHaveBeenCalled();
+    expect(mockProducer.send).toHaveBeenCalled();
+  });
+
+  it("should reject with a timeout error when the handler never observes the warmup event", async () => {
+    const { mockKafka } = createMockKafkaForWarmup({ neverDeliver: true });
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+      warmupTimeoutMs: 50,
+    });
+    (bus as any)._kafka = mockKafka;
+
+    await bus.connect();
+
+    await expect(bus.warmup()).rejects.toThrow(/timed out/i);
+  }, 10_000);
+
+  it("should clear the retry interval once warmup resolves synchronously, instead of dispatching forever", async () => {
+    vi.useFakeTimers();
+    try {
+      const { mockKafka, mockProducer } = createMockKafkaForWarmup();
+      const bus = new KafkaEventBus({
+        brokers: ["localhost:9092"],
+        clientId: "test",
+        groupId: "test-group",
+      });
+      (bus as any)._kafka = mockKafka;
+
+      await bus.connect();
+      // The mock delivers the warmup message synchronously from within the
+      // first dispatchOnce() call, so finish() runs before the interval/
+      // timeout handles would have been assigned under the old (buggy)
+      // ordering — this is exactly the race Copilot flagged.
+      await bus.warmup();
+
+      const callsAtResolution = mockProducer.send.mock.calls.length;
+
+      // Advance well past several 1s interval ticks. If the interval was
+      // never cleared (the bug), send() keeps getting called.
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(mockProducer.send.mock.calls.length).toBe(callsAtResolution);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

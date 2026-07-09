@@ -85,3 +85,15 @@ export const outbox = mysqlTable("noddde_outbox", {
     .defaultNow(),
   publishedAt: timestamp("published_at", { mode: "string", fsp: 3 }),
 });
+
+/**
+ * MySQL table definition for event handler idempotency tracking.
+ * Records dedup keys already processed so redelivered events (Kafka,
+ * RabbitMQ at-least-once semantics) can be detected and skipped.
+ */
+export const eventIdempotency = mysqlTable("noddde_event_idempotency", {
+  key: varchar("key", { length: 255 }).primaryKey(),
+  processedAt: timestamp("processed_at", { mode: "string", fsp: 3 })
+    .notNull()
+    .defaultNow(),
+});

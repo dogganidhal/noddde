@@ -2695,6 +2695,14 @@
   dependencies:
     testcontainers "^10.28.0"
 
+"@testcontainers/toxiproxy@^10.0.0":
+  version "10.28.0"
+  resolved "https://registry.yarnpkg.com/@testcontainers/toxiproxy/-/toxiproxy-10.28.0.tgz#39acfb524cc0abed8f9cbd27061a04946d7f7fd4"
+  integrity sha512-AB+RsRzUqjxe3KaZp+6qrvYEBJ4zE21GlUBoj7zjm4t2QPMNTg91dDx/70UmVdesqfBf/sjKGP+VSKBzhvfyEw==
+  dependencies:
+    testcontainers "^10.28.0"
+    toxiproxy-node-client "^4.0.0"
+
 "@tokenizer/inflate@^0.2.6":
   version "0.2.7"
   resolved "https://registry.yarnpkg.com/@tokenizer/inflate/-/inflate-0.2.7.tgz#32dd9dfc9abe457c89b3d9b760fc0690c85a103b"
@@ -5889,7 +5897,7 @@ extendable-error@^0.1.5:
   resolved "https://registry.yarnpkg.com/extendable-error/-/extendable-error-0.1.7.tgz#60b9adf206264ac920058a7395685ae4670c2b96"
   integrity sha512-UOiS2in6/Q0FK0R0q6UY9vYpQ21mr/Qn1KOnte7vsACuNJf514WvCCUHSRCPcgjPT2bAhNIJdlE6bVap1GKmeg==
 
-fast-check@^3.23.1:
+fast-check@^3.23.1, fast-check@^3.23.2:
   version "3.23.2"
   resolved "https://registry.yarnpkg.com/fast-check/-/fast-check-3.23.2.tgz#0129f1eb7e4f500f58e8290edc83c670e4a574a2"
   integrity sha512-h5+1OzzfCC3Ef7VbtKdcv7zsstUQwUDlYpUTvjeUsJAssPgLn7QzbboPtL5ro04Mq0rPOsMzl7q5hIbRs2wD1A==
@@ -10938,6 +10946,11 @@ token-types@^6.0.0:
     "@borewit/text-codec" "^0.2.1"
     "@tokenizer/token" "^0.3.0"
     ieee754 "^1.2.1"
+
+toxiproxy-node-client@^4.0.0:
+  version "4.1.0"
+  resolved "https://registry.yarnpkg.com/toxiproxy-node-client/-/toxiproxy-node-client-4.1.0.tgz#0cafa74bf281af80602a89c8978e64b1ca59b768"
+  integrity sha512-hdCvgbS6fUtzxPzrbvvE7MZ7dl5dt+c4c0d4T2G1I+clz3QEmjEvIpzObyojUY3WNdDuoYI7sT4kcTqgUVyXAQ==
 
 tr46@~0.0.3:
   version "0.0.3"

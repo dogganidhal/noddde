@@ -256,18 +256,53 @@ export class PrismaUnitOfWork implements UnitOfWork {
  * Supports PostgreSQL (pg_advisory_lock), MySQL (GET_LOCK),
  * and MariaDB (GET_LOCK, same as MySQL).
  * SQLite is not supported.
+ *
+ * IMPORTANT: advisory locks are session-scoped. A lock acquired on one DB
+ * session must be released on the SAME session, otherwise the release is a
+ * no-op and the lock leaks. Prisma multiplexes queries across an internal
+ * connection pool, so a locker built from an ordinary (default-pool)
+ * PrismaClient can `acquire()` on one connection and `release()` on another.
+ * Use {@link PrismaAdvisoryLocker.fromUrl} (recommended) to get a locker that
+ * owns a single-connection client, or ensure the PrismaClient you pass is
+ * pinned to `connection_limit=1`.
  */
-export class PrismaAdvisoryLocker implements AggregateLocker {
+export class PrismaAdvisoryLocker implements AggregateLocker, Closeable {
+  /** Advanced: wrap an existing (single-connection) PrismaClient. */
   constructor(
     prisma: PrismaClient,
     dialect: "postgresql" | "mysql" | "mariadb",
+    options?: { logger?: Logger },
   );
+  /**
+   * Recommended constructor. Builds and owns an internal PrismaClient pinned
+   * to `connection_limit=1`, guaranteeing session affinity between
+   * acquire()/release(). The returned locker owns the client lifecycle —
+   * call `close()` to disconnect it.
+   *
+   * By default the standard `@prisma/client` PrismaClient is instantiated
+   * lazily. Callers using a custom-generated client (e.g. dialect-specific
+   * output) pass `clientFactory`, which receives the connection-limit-pinned
+   * URL and returns the client instance.
+   */
+  static fromUrl(
+    url: string,
+    dialect: "postgresql" | "mysql" | "mariadb",
+    options?: {
+      logger?: Logger;
+      clientFactory?: (url: string) => PrismaClient;
+    },
+  ): PrismaAdvisoryLocker;
   acquire(
     aggregateName: string,
     aggregateId: string,
     timeoutMs?: number,
   ): Promise<void>;
   release(aggregateName: string, aggregateId: string): Promise<void>;
+  /**
+   * Disconnects the internally-owned client. No-op (does not disconnect) when
+   * the locker was constructed from a caller-owned PrismaClient. Idempotent.
+   */
+  close(): Promise<void>;
 }
 
 /**
@@ -333,6 +368,9 @@ export class PrismaOutboxStore implements OutboxStore {
 18. `release()` uses `pg_advisory_unlock` (PostgreSQL) or `RELEASE_LOCK` (MySQL/MariaDB).
 19. The lock key is derived via `fnv1a64(${aggregateName}:${aggregateId})` for PostgreSQL, or the raw composite key (truncated to 64 chars) for MySQL/MariaDB.
 20. Unsupported dialects throw at construction time with a message suggesting `InMemoryAggregateLocker`.
+21. **Session affinity via owned single-connection client.** `PrismaAdvisoryLocker.fromUrl(url, dialect, options?)` appends `connection_limit=1` to `url` (preserving any existing query string; it does not duplicate the parameter if already present) and instantiates a PrismaClient pinned to that single connection, which the locker owns. This guarantees `acquire()` and `release()` run on the same DB session. When `options.clientFactory` is provided it is invoked with the pinned URL to produce the client (used by callers with a custom-generated client); otherwise the standard `@prisma/client` `PrismaClient` is imported lazily and constructed with `{ datasources: { db: { url } } }`. `fromUrl` never mutates a caller-owned client.
+22. **`close()` lifecycle.** A locker created via `fromUrl` owns its client; `close()` calls `$disconnect()` on it and is idempotent (subsequent calls resolve without re-disconnecting). A locker created via the `constructor(prisma, dialect)` path does **not** own the client, so `close()` is a no-op — the caller remains responsible for disconnecting their PrismaClient. The class implements `Closeable`, so the engine's shutdown auto-discovery cleans up `fromUrl` lockers.
+23. **Release hardening (multiplexing detection).** The locker tracks the set of lock keys it currently believes it holds (added on successful `acquire`, removed on `release`). When releasing a key it believes it holds, it inspects the unlock result: PostgreSQL `pg_advisory_unlock` returning `false`, or MySQL/MariaDB `RELEASE_LOCK` returning `0`/`NULL`, indicates the release landed on a different session than the acquire — a connection-pool multiplexing bug. In that case `release()` throws an `Error` naming the cause and directing the caller to `fromUrl`/`connection_limit=1`. Releasing a key the locker does **not** believe it holds (e.g. a double `release()`) remains an idempotent no-op and never throws, preserving the `AggregateLocker` idempotency contract.
 
 ### Unit of Work
 

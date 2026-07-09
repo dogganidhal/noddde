@@ -5,6 +5,8 @@ export {
   NodddeSagaStateEntity,
   NodddeSnapshotEntity,
   NodddeOutboxEntryEntity,
+  createNodddeEntities,
+  type NodddeEntities,
 } from "./entities";
 export {
   TypeORMEventSourcedAggregatePersistence,
@@ -13,6 +15,10 @@ export {
   TypeORMSnapshotStore,
   TypeORMOutboxStore,
 } from "./persistence";
+export {
+  TypeORMEventIdempotencyStore,
+  NodddeEventIdempotencyEntity,
+} from "./event-idempotency";
 export { TypeORMAdvisoryLocker } from "./advisory-locker";
 export {
   TypeORMUnitOfWork,

@@ -17,6 +17,7 @@ npm install @noddde/drizzle drizzle-orm
 - **`DrizzleAdapter`** &mdash; Full persistence adapter for `wireDomain`: event-sourced aggregates, state-stored aggregates, sagas, snapshots, and outbox
 - **`DrizzleAdvisoryLocker`** &mdash; Distributed pessimistic locking (PostgreSQL/MySQL)
 - **`DrizzleSnapshotStore`** / **`DrizzleOutboxStore`** &mdash; Optional stores
+- **`DrizzleEventIdempotencyStore`** &mdash; Durable event-handler redelivery dedup, paired with `withIdempotency()`
 - **Built-in schemas** via `@noddde/drizzle/pg`, `@noddde/drizzle/sqlite`, `@noddde/drizzle/mysql`
 
 The dialect is auto-detected from your Drizzle `db` instance.
@@ -63,20 +64,58 @@ adapter.stateStored(usersTable, {
 });
 ```
 
-## Upgrading
+## Migrating: timestamp encoding change (breaking, since 1.0.0-rc.0)
 
-### Timestamp column format (pre-1.0 → 1.0.0-rc.0)
+As of `1.0.0-rc.0`, the pg/mysql schemas use `timestamp` columns in
+`mode: "string"` and the persistence layer writes a portable, driver-agnostic
+format: `YYYY-MM-DD HH:MM:SS.fff` (no `Z` suffix). Previously it used
+`mode: "date"`. This changes the string the adapter sends to the database, not
+the column type.
 
-As of `1.0.0-rc.0`, `created_at`/`published_at` on PostgreSQL and MySQL are read/written as strings (Drizzle `mode: "string"`) instead of JS `Date` objects (`mode: "date"`). Written values now look like `2024-06-01 08:00:00.000` (space-separated, no `Z`) instead of the ISO-8601-with-`Z` form the pg driver's `Date` serialization used to produce.
+**Is my data at risk?** No, for ordering. `created_at` / `published_at` are
+native `TIMESTAMPTZ` (pg) / `TIMESTAMP(3)` (mysql) columns. The database parses
+both the old and new string encodings into real timestamp values, so
+`ORDER BY created_at` (used by outbox reads) stays temporally correct even for
+a table that mixes rows written before and after the upgrade. This is covered
+by regression tests in
+`src/__tests__/integration/{postgres,mysql}.integration.test.ts`.
 
-**This is safe to deploy without a data migration.** `created_at`/`published_at` are native `TIMESTAMPTZ` (PostgreSQL) / `TIMESTAMP(3)` (MySQL) columns — the database parses any accepted textual form into the same internal temporal value before storing or comparing it, so:
+**Migration runbook:**
 
-- Existing rows written under the old format keep sorting correctly relative to new rows under `ORDER BY created_at` (verified by a regression test that inserts both formats and asserts temporal ordering — see `src/__tests__/integration/{postgres,mysql}.integration.test.ts`).
-- On MySQL specifically, the old ISO-with-`Z` shape was never actually persisted as literal text either way — MySQL's `TIMESTAMP` parser rejects a trailing `Z` outright, so there is no on-disk representation to worry about.
+1. No data migration is required — existing rows keep working and sort
+   correctly alongside newly-written rows.
+2. **Run your database in UTC** (or ensure the connection session time zone is
+   UTC). The new format omits an explicit time zone, so on `TIMESTAMPTZ` a
+   non-UTC session time zone would interpret written timestamps in that zone.
+   Every noddde `Date` is serialized from `toISOString()` (UTC), so a UTC
+   session keeps stored instants correct and consistent with any historical
+   ISO-with-`Z` rows.
+3. If you maintain your own migrations/DDL for the noddde tables, keep
+   `created_at`/`published_at` as native timestamp columns (not `text`) so the
+   database — not string comparison — determines ordering.
 
-**Postgres caveat: this assumes the session `TimeZone` is `UTC`.** The new format has no explicit offset (`2024-06-01 08:00:00.000`, no `Z`), so Postgres interprets it using the connection's `TimeZone` setting — and `toDbTimestamp` builds that string from `Date#toISOString()`, which is always UTC. If your Postgres connection or database `TimeZone` is set to anything other than `UTC`, the new-format string will be parsed as wall-clock time in that zone instead, shifting the stored instant and potentially reordering it relative to old-format (`...Z`, explicitly UTC) rows. Postgres defaults to `UTC` unless configured otherwise — confirm with `SHOW TIME ZONE;`, or set it explicitly (`SET TIME ZONE 'UTC';` on the connection, or `ALTER DATABASE ... SET TIME ZONE 'UTC';`) if you're not sure.
+### Event Handler Idempotency
 
-No further action is required beyond upgrading the package and confirming the above. SQLite is unaffected — it has always stored timestamps as `TEXT`.
+`DrizzleEventIdempotencyStore` gives `withIdempotency()` (from `@noddde/core`) a durable, restart-safe backing store, so event handlers can detect and skip duplicate deliveries under Kafka/RabbitMQ at-least-once redelivery. Like `DrizzleOutboxStore`, it's dialect-agnostic: you supply the dialect-specific `eventIdempotency` table.
+
+```typescript
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import Database from "better-sqlite3";
+import { eventIdempotency } from "@noddde/drizzle/sqlite"; // or /pg, /mysql
+import { DrizzleEventIdempotencyStore } from "@noddde/drizzle";
+import { withIdempotency } from "@noddde/core";
+
+const db = drizzle(new Database("app.db"));
+const store = new DrizzleEventIdempotencyStore(
+  db,
+  { current: null },
+  eventIdempotency,
+);
+
+const handler = withIdempotency(myEventHandler, store);
+```
+
+An optional `ttlMs` constructor argument applies lazy TTL expiry on `hasProcessed`. Call `store.removeExpired(ttlMs)` periodically (e.g. from a cron job) to sweep old rows and bound storage growth — it's never called automatically.
 
 ## Peer Dependencies
 

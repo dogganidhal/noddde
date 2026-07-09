@@ -17,6 +17,7 @@ npm install @noddde/kafka kafkajs
 - **`KafkaEventBus`** &mdash; Topic-based event publishing with consumer group fan-out, manual offset commits, configurable partition key strategy, and delivery retry tracking
 - Partition key defaults to `aggregateId` for ordered processing per aggregate
 - Session timeout and heartbeat configuration
+- Explicit `warmup()` path (and `warmupOnConnect` option) to absorb broker cold-start latency
 
 ## Usage
 
@@ -30,14 +31,40 @@ const eventBus = new KafkaEventBus({
   groupId: "my-service-group",
 });
 
-await eventBus.connect();
-
+// Do NOT call connect() yourself here: wireDomain() registers every event
+// handler via on() first, then auto-connects the bus. See "Subscribe before
+// connect()" below — subscriptions can only be established while the consumer
+// is not yet running.
 const domain = await wireDomain(definition, {
   eventBus,
 });
 
 // Clean shutdown
 await eventBus.close();
+```
+
+### Subscribe before connect()
+
+Kafka does not allow subscribing to a new topic on a consumer that is already
+running (`kafkajs` throws `Cannot subscribe to topic while consumer is
+running`). `KafkaEventBus` therefore only establishes subscriptions during
+`connect()`, from the set of handlers registered with `on()` up to that point.
+
+- **Register all handlers with `on()` before calling `connect()`.** When you
+  use `wireDomain()`, this happens automatically — it wires every handler and
+  then connects the bus for you, so you should not call `connect()` yourself.
+- Calling `on()` once `connect()` has started — whether it has resolved or is
+  still in progress — for an event whose topic is not already subscribed
+  **throws** immediately, rather than silently dropping the handler's messages.
+  Registering an additional handler for an already-subscribed event is always
+  allowed (in-process fan-out).
+
+If you construct the bus manually, connect only after all `on()` calls:
+
+```typescript
+eventBus.on("AccountCreated", handleAccountCreated);
+eventBus.on("AccountClosed", handleAccountClosed);
+await eventBus.connect(); // subscriptions activate here
 ```
 
 ### Configuration
@@ -58,67 +85,32 @@ const eventBus = new KafkaEventBus({
 });
 ```
 
-## Troubleshooting
+### Cold-start warmup
 
-### Cold-start latency on freshly-deployed clusters
+A freshly-deployed Kafka cluster is slow on its **first** end-to-end publish/consume cycle: topic auto-creation, leader election, and ISR sync all happen lazily on first use, so the first message can take far longer to be delivered than every message after it. `connect()` waits for the consumer to start polling (via kafkajs `FETCH_START`) but does not cover this broker-side cold start.
 
-`connect()` waits for the consumer's `FETCH_START` event, which guarantees the consumer is actively polling before `connect()` resolves. That only covers consumer-side readiness. On a brand-new Kafka cluster (e.g. a fresh broker in CI, or a first-ever deployment), the _broker's_ first end-to-end publish/consume round trip can be dramatically slower than subsequent ones — slow enough to exceed a typical 30s delivery expectation.
-
-This is a one-shot cold-start cost, not an ongoing issue: once a topic/partition has been touched once, later publishes are fast. If your application (or its tests) can't tolerate a slow first delivery, warm the cluster up explicitly at startup with a throwaway publish/consume cycle before serving traffic:
+`KafkaEventBus` exposes an explicit warmup path to absorb that latency before real traffic flows. `warmup()` runs a throwaway publish/consume round-trip on a dedicated internal topic (named from `clientId`) and resolves only once the round-trip is observed:
 
 ```typescript
-import { randomUUID } from "node:crypto";
-import { Kafka } from "kafkajs";
-import { KafkaEventBus } from "@noddde/kafka";
-
-async function warmupKafka(brokers: string[], timeoutMs = 60_000) {
-  // Unique per invocation: a shared topic/groupId/clientId across multiple
-  // instances or rolling restarts risks one instance's warmup message being
-  // consumed by another, or triggering consumer-group rebalances.
-  const suffix = randomUUID();
-  const warmupTopic = `__warmup_${suffix}`;
-
-  const admin = new Kafka({
-    brokers,
-    clientId: `warmup-admin-${suffix}`,
-  }).admin();
-  try {
-    await admin.connect();
-    await admin.createTopics({
-      waitForLeaders: true,
-      topics: [{ topic: warmupTopic, numPartitions: 1 }],
-    });
-  } finally {
-    await admin.disconnect();
-  }
-
-  const warmupBus = new KafkaEventBus({
-    brokers,
-    clientId: `warmup-${suffix}`,
-    groupId: `warmup-group-${suffix}`,
-  });
-  let warmedUp = false;
-  warmupBus.on(warmupTopic, async () => {
-    warmedUp = true;
-  });
-  await warmupBus.connect();
-
-  try {
-    const deadline = Date.now() + timeoutMs;
-    while (!warmedUp) {
-      if (Date.now() > deadline) {
-        throw new Error(`Kafka warmup timed out after ${timeoutMs}ms`);
-      }
-      await warmupBus.dispatch({ name: warmupTopic, payload: {} });
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-  } finally {
-    await warmupBus.close();
-  }
-}
+await eventBus.connect();
+await eventBus.warmup(); // resolves once the broker has served a full round-trip
 ```
 
-Run this once at process startup before wiring the real `KafkaEventBus`/domain. The `@noddde/kafka` integration test suite uses the same pattern (unique per-test topic, bounded `waitFor` timeout) in `beforeAll` to avoid flaking on a cold CI cluster.
+`warmup()` must be called after `connect()`. It is idempotent — after the first successful call, subsequent calls resolve immediately without repeating the round-trip, and concurrent calls are deduplicated into a single round-trip. It rejects with a timeout error if the round-trip does not complete within `warmupTimeoutMs` (default `60000`).
+
+To fold the warmup into connection, set `warmupOnConnect: true` so a single `await connect()` returns a fully warmed bus. Any warmup failure then propagates through `connect()`'s returned promise:
+
+```typescript
+const eventBus = new KafkaEventBus({
+  brokers: ["localhost:9092"],
+  clientId: "my-service",
+  groupId: "my-service-group",
+  warmupOnConnect: true, // run warmup() as part of connect()
+  warmupTimeoutMs: 60000, // optional — round-trip timeout (default 60000)
+});
+
+await eventBus.connect(); // only resolves once the broker is warm
+```
 
 ## Peer Dependencies
 

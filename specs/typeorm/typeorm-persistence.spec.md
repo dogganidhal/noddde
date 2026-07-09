@@ -463,6 +463,12 @@ export class NodddeOutboxEntryEntity {
 31. `NodddeAggregateStateEntity` maps to table `noddde_aggregate_states` with `@PrimaryColumn` composite key on `[aggregateName, aggregateId]` and a `version` column with `default: 0`.
 32. `NodddeSagaStateEntity` maps to table `noddde_saga_states` with `@PrimaryColumn` composite key on `[sagaName, sagaId]`.
 
+### Dialect-Aware Entities (Unicode safety)
+
+32a. `createNodddeEntities(dialect?)` returns the set of entity classes to register on a `DataSource`, choosing column types for the given dialect. For `"mssql"` it returns entities whose serialized-JSON/text columns (`payload`, `metadata`, `state`, `event`, `published_at`) use `nvarchar(max)` and whose string key columns use `nvarchar(255)`. For every other dialect (postgres, mysql, mariadb, sqlite, …) and when `dialect` is omitted, it returns the default statically-declared classes (whose `text` columns are already Unicode-safe there) **unchanged** — there is no schema difference from registering the exported classes directly. This exists because MSSQL maps `text` to the legacy codepage-limited `TEXT` type, which silently corrupts characters outside the basic multilingual plane (emoji, supplementary-plane Unicode). MSSQL deployments **must** register `createNodddeEntities("mssql")` to store non-BMP Unicode losslessly.
+
+32b. The persistence stores resolve their repository by **table name** (`noddde_events`, `noddde_aggregate_states`, `noddde_saga_states`, `noddde_snapshots`, `noddde_outbox`) from the DataSource's registered entity metadata, not by a fixed entity class. This lets a single adapter work with whichever entity variant is registered (default or dialect-specific). If no entity is registered for a required table, the store throws an error instructing the caller to register the noddde entities. Rows are written as plain objects so the resolved (possibly dialect-specific) entity class is used for mapping and column transformers.
+
 ### Snapshot Store
 
 33. `TypeORMSnapshotStore.save()` upserts the snapshot using `findOne` + conditional `save` (create if new, update if exists).
@@ -473,7 +479,7 @@ export class NodddeOutboxEntryEntity {
 
 ### Outbox Store
 
-38. `TypeORMOutboxStore.save()` creates `NodddeOutboxEntryEntity` instances with `JSON.stringify(entry.event)` for the event column and saves them via the repository. Runs inside active transaction via `txStore.current`.
+38. `TypeORMOutboxStore.save()` writes outbox rows (as plain objects, so the registered entity variant maps them) with `JSON.stringify(entry.event)` for the event column and saves them via the repository. Runs inside active transaction via `txStore.current`.
 39. `TypeORMOutboxStore.loadUnpublished()` returns entries where `publishedAt IS NULL` ordered by `createdAt ASC`, limited by `take: batchSize` (default 100). Deserializes event from JSON.
 40. `TypeORMOutboxStore.markPublished()` updates `publishedAt` to the current timestamp (`new Date()`) for entries matching the given IDs.
 41. `TypeORMOutboxStore.markPublishedByEventIds()` loads unpublished entries, filters by deserialized `event.metadata.eventId`, and marks matching entries as published.

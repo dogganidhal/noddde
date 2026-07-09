@@ -8,6 +8,7 @@ import {
   defineOutboxContract,
   defineUnitOfWorkContract,
   defineAdvisoryLockerContract,
+  defineScaleContract,
   startPostgres,
   type StartedPostgres,
 } from "@noddde/testing-integration";
@@ -76,8 +77,30 @@ defineSnapshotContract("drizzle/postgres", async () => {
 
 defineOutboxContract("drizzle/postgres", async () => {
   await truncate();
-  const adapter = makeAdapter();
-  return { outbox: adapter.outboxStore! };
+  const db = drizzle(pool);
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    stateStore: aggregateStates,
+    sagaStore: sagaStates,
+    snapshotStore: snapshots,
+    outboxStore: outbox,
+  });
+  return {
+    outbox: adapter.outboxStore!,
+    // Raw read of every row so the deletePublished(olderThan) cases can
+    // observe which published rows survived (there is no "load published").
+    loadAll: async () => {
+      const rows = await db.select().from(outbox);
+      return rows.map((r) => ({
+        id: r.id,
+        event: typeof r.event === "string" ? JSON.parse(r.event) : r.event,
+        aggregateName: r.aggregateName ?? undefined,
+        aggregateId: r.aggregateId ?? undefined,
+        createdAt: new Date(r.createdAt),
+        publishedAt: r.publishedAt != null ? new Date(r.publishedAt) : null,
+      }));
+    },
+  };
 });
 
 defineUnitOfWorkContract("drizzle/postgres", async () => {
@@ -90,36 +113,55 @@ defineUnitOfWorkContract("drizzle/postgres", async () => {
   };
 });
 
-describe("Drizzle Postgres — dialect-specific behaviour", () => {
-  it("orders mixed-format timestamps temporally, not lexicographically (robustness §3.1)", async () => {
-    // Regression test for packages/testing-integration/ROBUSTNESS.md §3.1: this
-    // adapter used to write timestamps as ISO-with-Z (`2024-06-01T08:00:00.000Z`,
-    // via mode: "date") and now writes space-separated, no-Z strings (via
-    // toDbTimestamp, mode: "string"). The worry was that a mid-migration table
-    // containing rows from both eras could sort incorrectly under
-    // `ORDER BY created_at` if the comparison were lexicographic (`T` > space,
-    // `Z` > nothing). Since `created_at` is a native TIMESTAMPTZ column, Postgres
-    // parses both textual forms into the same internal temporal representation
-    // before comparing, so ordering must remain correct regardless of which
-    // format wrote which row. This inserts an old-format row with a later id but
-    // earlier timestamp than a new-format row, and asserts the earlier timestamp
-    // still sorts first.
+// Regression for ROBUSTNESS §3.1: the timestamp encoding changed from
+// `mode: "date"` to `mode: "string"` emitting `YYYY-MM-DD HH:MM:SS.fff` (no
+// `Z`). A mid-migration `noddde_outbox` table can hold rows in BOTH the old
+// ISO-with-Z format and the new space-separated format. Because `created_at`
+// is a native `TIMESTAMPTZ` column (not text), Postgres parses both string
+// formats to real timestamps, so `ORDER BY created_at` is temporal — not
+// lexicographic. This test proves that empirically.
+describe("outbox created_at ordering across mixed timestamp formats (§3.1)", () => {
+  it("orders old ISO-with-Z and new space-separated rows temporally", async () => {
     await truncate();
-    await pool.query(
-      `INSERT INTO noddde_outbox (id, event, created_at) VALUES
-         ('new-format-late', $1::jsonb, '2024-06-01 12:00:00.000'::timestamptz),
-         ('old-format-early', $1::jsonb, '2024-06-01T08:00:00.000Z'::timestamptz)`,
-      [JSON.stringify({ name: "Warmup", payload: {} })],
-    );
+    // Insert directly (bypassing the adapter) to simulate a mid-migration
+    // table containing both encodings. Deliberately insert out of temporal
+    // order so a naive string sort would get it wrong.
+    const rows: Array<{ id: string; ts: string }> = [
+      { id: "b-new-middle", ts: "2024-01-02 00:00:00.000" }, // new format
+      { id: "a-old-earliest", ts: "2024-01-01T00:00:00.000Z" }, // old format
+      { id: "c-old-latest", ts: "2024-01-03T00:00:00.000Z" }, // old format
+    ];
+    for (const r of rows) {
+      await pool.query(
+        `INSERT INTO noddde_outbox (id, event, created_at, published_at)
+         VALUES ($1, $2::jsonb, $3, NULL)`,
+        [r.id, JSON.stringify({ name: "E", payload: {} }), r.ts],
+      );
+    }
 
     const adapter = makeAdapter();
-    const unpublished = await adapter.outboxStore!.loadUnpublished();
-
-    expect(unpublished.map((e) => e.id)).toEqual([
-      "old-format-early",
-      "new-format-late",
+    const loaded = await adapter.outboxStore!.loadUnpublished(100);
+    expect(loaded.map((e) => e.id)).toEqual([
+      "a-old-earliest",
+      "b-new-middle",
+      "c-old-latest",
     ]);
+    // And the parsed timestamps are strictly increasing.
+    const times = loaded.map((e) => e.createdAt.getTime());
+    expect(times).toEqual([...times].sort((x, y) => x - y));
   });
+});
+
+// Slow-tagged high-volume smoke tests (§2.3). Skipped unless
+// NODDDE_SLOW_TESTS=1 (set by the nightly workflow). One PG-backed adapter
+// is enough to catch algorithmic regressions in these paths.
+defineScaleContract("drizzle/postgres", async () => {
+  await truncate();
+  const adapter = makeAdapter();
+  return {
+    eventSourced: adapter.eventSourcedPersistence,
+    outbox: adapter.outboxStore!,
+  };
 });
 
 defineAdvisoryLockerContract("drizzle/postgres", async () => {
@@ -131,14 +173,34 @@ defineAdvisoryLockerContract("drizzle/postgres", async () => {
   const clientB = new pg.Client({ connectionString: pg_.url });
   await clientA.connect();
   await clientB.connect();
+  // Destroying the socket below makes pg emit an 'error' on the client;
+  // swallow it so it doesn't surface as an unhandled exception.
+  clientA.on("error", () => {});
   const lockerA = new DrizzleAdvisoryLocker(drizzle(clientA), "pg");
   const lockerB = new DrizzleAdvisoryLocker(drizzle(clientB), "pg");
+  let killedA = false;
   return {
     lockerA,
     lockerB,
+    killSessionA: async () => {
+      killedA = true;
+      // Sever A's TCP socket outright — the backend sees a reset (a crash),
+      // not a graceful terminate, and reclaims its session-scoped advisory
+      // locks.
+      const stream = (
+        clientA as unknown as {
+          connection?: { stream?: { destroy?: () => void } };
+        }
+      ).connection?.stream;
+      if (stream?.destroy) {
+        stream.destroy();
+      } else {
+        await clientA.end();
+      }
+    },
     cleanup: async () => {
-      await clientA.end();
-      await clientB.end();
+      if (!killedA) await clientA.end().catch(() => {});
+      await clientB.end().catch(() => {});
     },
   };
 });

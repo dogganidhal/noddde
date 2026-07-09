@@ -14,8 +14,8 @@ model NodddeEvent {
   aggregateId    String   @map("aggregate_id")
   sequenceNumber Int      @map("sequence_number")
   eventName      String   @map("event_name")
-  payload        String   @db.Text
-  metadata       String?  @db.Text
+  payload        String   @db.LongText
+  metadata       String?  @db.LongText
   createdAt      DateTime @map("created_at")
 
   @@unique([aggregateName, aggregateId, sequenceNumber])
@@ -25,7 +25,7 @@ model NodddeEvent {
 model NodddeAggregateState {
   aggregateName String @map("aggregate_name")
   aggregateId   String @map("aggregate_id")
-  state         String @db.Text
+  state         String @db.LongText
   version       Int    @default(0)
 
   @@id([aggregateName, aggregateId])
@@ -35,7 +35,7 @@ model NodddeAggregateState {
 model NodddeSagaState {
   sagaName String @map("saga_name")
   sagaId   String @map("saga_id")
-  state    String @db.Text
+  state    String @db.LongText
 
   @@id([sagaName, sagaId])
   @@map("noddde_saga_states")
@@ -44,7 +44,7 @@ model NodddeSagaState {
 model NodddeSnapshot {
   aggregateName String @map("aggregate_name")
   aggregateId   String @map("aggregate_id")
-  state         String @db.Text
+  state         String @db.LongText
   version       Int
 
   @@id([aggregateName, aggregateId])
@@ -53,7 +53,7 @@ model NodddeSnapshot {
 
 model NodddeOutboxEntry {
   id            String    @id
-  event         String    @db.Text
+  event         String    @db.LongText
   aggregateName String?   @map("aggregate_name")
   aggregateId   String?   @map("aggregate_id")
   createdAt     DateTime  @map("created_at")

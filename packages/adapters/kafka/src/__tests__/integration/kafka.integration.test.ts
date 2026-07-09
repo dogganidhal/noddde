@@ -18,40 +18,17 @@ beforeAll(async () => {
   // signal, but the broker's first end-to-end publish/consume cycle is
   // dramatically slower than subsequent ones (consistently >30s in CI
   // on a 1-broker cluster). Without this, the *first* contract test
-  // hits the contract's 30s delivery deadline. We run a throwaway
-  // publish/consume cycle here so every real test sees a hot broker.
-  const warmupTopic = `__warmup_${uniqueSuffix()}`;
-  const warmupAdmin = new Kafka({
-    brokers: kafka_.brokers,
-    clientId: "warmup-admin",
-  }).admin();
-  await warmupAdmin.connect();
-  await warmupAdmin.createTopics({
-    waitForLeaders: true,
-    topics: [{ topic: warmupTopic, numPartitions: 1 }],
-  });
-  await warmupAdmin.disconnect();
-
+  // hits the contract's 30s delivery deadline. `warmupOnConnect` runs a
+  // throwaway publish/consume cycle as part of `connect()` so every real
+  // test below sees a hot broker.
   const warmupBus = new KafkaEventBus({
     brokers: kafka_.brokers,
-    clientId: "warmup",
+    clientId: `warmup-${uniqueSuffix()}`,
     groupId: `warmup-group-${uniqueSuffix()}`,
-  });
-  let warmedUp = false;
-  warmupBus.on(warmupTopic, async () => {
-    warmedUp = true;
+    warmupOnConnect: true,
+    warmupTimeoutMs: 60_000,
   });
   await warmupBus.connect();
-  await waitFor(
-    async () => {
-      await warmupBus.dispatch({
-        name: warmupTopic,
-        payload: { warmup: true },
-      });
-      return warmedUp;
-    },
-    { timeoutMs: 60_000, intervalMs: 1000 },
-  );
   await warmupBus.close();
 }, 300_000);
 
@@ -251,6 +228,76 @@ describe("KafkaEventBus broker-specific behaviour", () => {
     await bus1.close();
     await bus2.close();
     await pub.close();
+  });
+
+  // Regression for ROBUSTNESS.md §3.5: many handlers registered *before*
+  // connect() are subscribed in a `for` loop inside connect(). This proves
+  // every one of them is wired up and receives its event — i.e. the
+  // subscribe-loop-then-run() ordering doesn't drop any pre-connect
+  // registration, no matter how many there are.
+  it("delivers events to all handlers registered before connect()", async () => {
+    const suffix = uniqueSuffix();
+    const count = 50;
+    const topics = Array.from(
+      { length: count },
+      (_, i) => `Evt_${i}_${suffix}`,
+    );
+
+    const bus = new KafkaEventBus({
+      brokers: kafka_.brokers,
+      clientId: `concurrent-on-${suffix}`,
+      groupId: `concurrent-on-group-${suffix}`,
+    });
+
+    // A per-topic "was this handler invoked?" flag.
+    const seen = new Map<string, boolean>(topics.map((t) => [t, false]));
+    // Register all handlers up front, before connect().
+    for (const topic of topics) {
+      bus.on(topic, async () => {
+        seen.set(topic, true);
+      });
+    }
+
+    // Pre-create every topic so the in-connect() subscribe() calls don't race
+    // broker-side auto-creation (same idiom as prepareTopics above).
+    const admin = new Kafka({
+      brokers: kafka_.brokers,
+      clientId: `admin-concurrent-${suffix}`,
+    }).admin();
+    await admin.connect();
+    await admin.createTopics({
+      waitForLeaders: true,
+      topics: topics.map((topic) => ({ topic, numPartitions: 1 })),
+    });
+    await admin.disconnect();
+
+    await bus.connect();
+
+    // Re-dispatch to any topic not yet observed on each poll. With
+    // `fromBeginning: false`, a message published before the consumer's
+    // per-partition offset reset lands gets skipped; re-publishing until
+    // the handler fires sidesteps that cold-start race (same idiom as the
+    // broker warmup in beforeAll). What we're asserting is that *every*
+    // pre-connect registration is subscribed and reachable — not delivery
+    // latency.
+    await waitFor(
+      async () => {
+        for (const topic of topics) {
+          if (!seen.get(topic)) {
+            await bus.dispatch({ name: topic, payload: { topic } });
+          }
+        }
+        return [...seen.values()].every(Boolean);
+      },
+      {
+        timeoutMs: 60_000,
+        intervalMs: 500,
+        message: "not every pre-connect handler received its event",
+      },
+    );
+    expect([...seen.values()].filter(Boolean)).toHaveLength(count);
+
+    await bus.close();
   });
 
   it("does not commit offset for a partition where the handler threw — redelivery occurs", async () => {

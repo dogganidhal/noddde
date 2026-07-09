@@ -78,7 +78,22 @@ defineSnapshotContract("prisma/mysql", () => {
 
 defineOutboxContract("prisma/mysql", () => {
   const adapter = makeAdapter();
-  return { outbox: adapter.outboxStore };
+  return {
+    outbox: adapter.outboxStore,
+    // Raw read of every row so the deletePublished(olderThan) cases can
+    // observe which published rows survived (there is no "load published").
+    loadAll: async () => {
+      const rows = await prisma.nodddeOutboxEntry.findMany();
+      return rows.map((r) => ({
+        id: r.id,
+        event: typeof r.event === "string" ? JSON.parse(r.event) : r.event,
+        aggregateName: r.aggregateName ?? undefined,
+        aggregateId: r.aggregateId ?? undefined,
+        createdAt: new Date(r.createdAt),
+        publishedAt: r.publishedAt != null ? new Date(r.publishedAt) : null,
+      }));
+    },
+  };
 });
 
 defineUnitOfWorkContract("prisma/mysql", () => {
@@ -91,24 +106,35 @@ defineUnitOfWorkContract("prisma/mysql", () => {
 });
 
 defineAdvisoryLockerContract("prisma/mysql", async () => {
+  // `fromUrl` owns a client pinned to connection_limit=1 internally, so each
+  // locker's acquire()/release() share one MySQL session — no manual
+  // connection_limit workaround here. clientFactory supplies the
+  // dialect-specific generated client (fromUrl passes it the pinned URL).
   const raw = mysqlUrl(mysql_);
-  const url = `${raw}${raw.includes("?") ? "&" : "?"}connection_limit=1`;
-  const a = new PrismaClient({ datasources: { db: { url } } });
-  const b = new PrismaClient({ datasources: { db: { url } } });
-  await a.$connect();
-  await b.$connect();
+  const lockerA = PrismaAdvisoryLocker.fromUrl(raw, "mysql", {
+    clientFactory: (url) =>
+      new PrismaClient({
+        datasources: { db: { url } },
+      }) as unknown as SharedPrismaClient,
+  });
+  const lockerB = PrismaAdvisoryLocker.fromUrl(raw, "mysql", {
+    clientFactory: (url) =>
+      new PrismaClient({
+        datasources: { db: { url } },
+      }) as unknown as SharedPrismaClient,
+  });
   return {
-    lockerA: new PrismaAdvisoryLocker(
-      a as unknown as SharedPrismaClient,
-      "mysql",
-    ),
-    lockerB: new PrismaAdvisoryLocker(
-      b as unknown as SharedPrismaClient,
-      "mysql",
-    ),
+    lockerA,
+    lockerB,
+    // Killing A's session = closing its owned single-connection client, which
+    // ends A's one MySQL session and releases the GET_LOCK it held without an
+    // explicit release() (§2.6 crash recovery).
+    killSessionA: async () => {
+      await lockerA.close();
+    },
     cleanup: async () => {
-      await a.$disconnect();
-      await b.$disconnect();
+      await lockerA.close();
+      await lockerB.close();
     },
   };
 });

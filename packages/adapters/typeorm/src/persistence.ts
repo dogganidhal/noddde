@@ -1,5 +1,10 @@
 /* eslint-disable no-unused-vars */
-import type { DataSource, EntityManager } from "typeorm";
+import type {
+  DataSource,
+  EntityManager,
+  Repository,
+  ObjectLiteral,
+} from "typeorm";
 import { MoreThan, IsNull, In, Not, LessThan } from "typeorm";
 import type {
   Event,
@@ -14,7 +19,7 @@ import type {
   OutboxEntry,
 } from "@noddde/core";
 import { ConcurrencyError } from "@noddde/core";
-import {
+import type {
   NodddeEventEntity,
   NodddeAggregateStateEntity,
   NodddeSagaStateEntity,
@@ -22,6 +27,39 @@ import {
   NodddeOutboxEntryEntity,
 } from "./entities";
 import type { TypeORMTransactionStore } from "./unit-of-work";
+
+/** Table names of the built-in noddde stores. */
+const TABLE = {
+  events: "noddde_events",
+  aggregateStates: "noddde_aggregate_states",
+  sagaStates: "noddde_saga_states",
+  snapshots: "noddde_snapshots",
+  outbox: "noddde_outbox",
+} as const;
+
+/**
+ * Resolves the repository for a built-in store by its table name rather than
+ * by a fixed entity class. This lets the adapter work with whichever entity
+ * variant the caller registered on the DataSource — the default classes or the
+ * dialect-specific ones from {@link createNodddeEntities} (e.g. the MSSQL
+ * `nvarchar(max)` variant) — since both map to the same table names.
+ */
+function getRepo<T extends ObjectLiteral>(
+  manager: EntityManager,
+  tableName: string,
+): Repository<T> {
+  const meta = manager.connection.entityMetadatas.find(
+    (m) => m.tableName === tableName,
+  );
+  if (!meta) {
+    throw new Error(
+      `@noddde/typeorm: no entity is registered for table "${tableName}" on ` +
+        `this DataSource. Register the noddde entities, e.g. ` +
+        `entities: Object.values(createNodddeEntities(dataSource.options.type)).`,
+    );
+  }
+  return manager.getRepository<T>(meta.target as new () => T);
+}
 
 /**
  * TypeORM-backed event-sourced aggregate persistence.
@@ -47,21 +85,19 @@ export class TypeORMEventSourcedAggregatePersistence
     if (events.length === 0) return;
 
     const manager = this.getManager();
-    const repo = manager.getRepository(NodddeEventEntity);
+    const repo = getRepo<NodddeEventEntity>(manager, TABLE.events);
 
-    const entities = events.map((event, index) => {
-      const entity = new NodddeEventEntity();
-      entity.aggregateName = aggregateName;
-      entity.aggregateId = aggregateId;
-      entity.sequenceNumber = expectedVersion + index + 1;
-      entity.eventName = event.name;
-      entity.payload = JSON.stringify(event.payload);
-      entity.metadata = event.metadata ? JSON.stringify(event.metadata) : null;
-      entity.createdAt = event.metadata?.timestamp
+    const entities = events.map((event, index) => ({
+      aggregateName,
+      aggregateId,
+      sequenceNumber: expectedVersion + index + 1,
+      eventName: event.name,
+      payload: JSON.stringify(event.payload),
+      metadata: event.metadata ? JSON.stringify(event.metadata) : null,
+      createdAt: event.metadata?.timestamp
         ? new Date(event.metadata.timestamp)
-        : new Date();
-      return entity;
-    });
+        : new Date(),
+    }));
 
     try {
       await repo.save(entities);
@@ -81,7 +117,7 @@ export class TypeORMEventSourcedAggregatePersistence
 
   async load(aggregateName: string, aggregateId: string): Promise<Event[]> {
     const manager = this.getManager();
-    const repo = manager.getRepository(NodddeEventEntity);
+    const repo = getRepo<NodddeEventEntity>(manager, TABLE.events);
 
     const rows = await repo.find({
       where: { aggregateName, aggregateId },
@@ -103,7 +139,7 @@ export class TypeORMEventSourcedAggregatePersistence
     afterVersion: number,
   ): Promise<Event[]> {
     const manager = this.getManager();
-    const repo = manager.getRepository(NodddeEventEntity);
+    const repo = getRepo<NodddeEventEntity>(manager, TABLE.events);
 
     const rows = await repo.find({
       where: {
@@ -146,40 +182,61 @@ export class TypeORMStateStoredAggregatePersistence
     expectedVersion: number,
   ): Promise<void> {
     const manager = this.getManager();
-    const repo = manager.getRepository(NodddeAggregateStateEntity);
+    const repo = getRepo<NodddeAggregateStateEntity>(
+      manager,
+      TABLE.aggregateStates,
+    );
     const serialized = JSON.stringify(state);
 
     const existing = await repo.findOne({
       where: { aggregateName, aggregateId },
     });
 
-    if (existing) {
-      if (existing.version !== expectedVersion) {
+    try {
+      if (existing) {
+        if (existing.version !== expectedVersion) {
+          throw new ConcurrencyError(
+            aggregateName,
+            aggregateId,
+            expectedVersion,
+            existing.version,
+          );
+        }
+        existing.state = serialized;
+        existing.version = expectedVersion + 1;
+        await repo.save(existing);
+      } else {
+        if (expectedVersion !== 0) {
+          throw new ConcurrencyError(
+            aggregateName,
+            aggregateId,
+            expectedVersion,
+            0,
+          );
+        }
+        await repo.save({
+          aggregateName,
+          aggregateId,
+          state: serialized,
+          version: 1,
+        });
+      }
+    } catch (error: unknown) {
+      if (error instanceof ConcurrencyError) throw error;
+      // The `findOne`-then-insert path has a TOCTOU window: two racing
+      // saves for a brand-new aggregate both see no existing row and both
+      // INSERT, violating the primary key. Map that to a ConcurrencyError
+      // so concurrent creators get the same contract as a stale version.
+      const message = error instanceof Error ? error.message : String(error);
+      if (/UNIQUE|duplicate|unique/i.test(message)) {
         throw new ConcurrencyError(
           aggregateName,
           aggregateId,
           expectedVersion,
-          existing.version,
+          -1,
         );
       }
-      existing.state = serialized;
-      existing.version = expectedVersion + 1;
-      await repo.save(existing);
-    } else {
-      if (expectedVersion !== 0) {
-        throw new ConcurrencyError(
-          aggregateName,
-          aggregateId,
-          expectedVersion,
-          0,
-        );
-      }
-      const entity = new NodddeAggregateStateEntity();
-      entity.aggregateName = aggregateName;
-      entity.aggregateId = aggregateId;
-      entity.state = serialized;
-      entity.version = 1;
-      await repo.save(entity);
+      throw error;
     }
   }
 
@@ -188,7 +245,10 @@ export class TypeORMStateStoredAggregatePersistence
     aggregateId: string,
   ): Promise<{ state: any; version: number } | null> {
     const manager = this.getManager();
-    const repo = manager.getRepository(NodddeAggregateStateEntity);
+    const repo = getRepo<NodddeAggregateStateEntity>(
+      manager,
+      TABLE.aggregateStates,
+    );
 
     const row = await repo.findOne({
       where: { aggregateName, aggregateId },
@@ -214,7 +274,7 @@ export class TypeORMSagaPersistence implements SagaPersistence {
 
   async save(sagaName: string, sagaId: string, state: any): Promise<void> {
     const manager = this.getManager();
-    const repo = manager.getRepository(NodddeSagaStateEntity);
+    const repo = getRepo<NodddeSagaStateEntity>(manager, TABLE.sagaStates);
     const serialized = JSON.stringify(state);
 
     const existing = await repo.findOne({
@@ -225,11 +285,7 @@ export class TypeORMSagaPersistence implements SagaPersistence {
       existing.state = serialized;
       await repo.save(existing);
     } else {
-      const entity = new NodddeSagaStateEntity();
-      entity.sagaName = sagaName;
-      entity.sagaId = sagaId;
-      entity.state = serialized;
-      await repo.save(entity);
+      await repo.save({ sagaName, sagaId, state: serialized });
     }
   }
 
@@ -238,7 +294,7 @@ export class TypeORMSagaPersistence implements SagaPersistence {
     sagaId: string,
   ): Promise<any | undefined | null> {
     const manager = this.getManager();
-    const repo = manager.getRepository(NodddeSagaStateEntity);
+    const repo = getRepo<NodddeSagaStateEntity>(manager, TABLE.sagaStates);
 
     const row = await repo.findOne({
       where: { sagaName, sagaId },
@@ -267,7 +323,7 @@ export class TypeORMSnapshotStore implements SnapshotStore {
     aggregateId: string,
   ): Promise<Snapshot | null> {
     const manager = this.getManager();
-    const repo = manager.getRepository(NodddeSnapshotEntity);
+    const repo = getRepo<NodddeSnapshotEntity>(manager, TABLE.snapshots);
 
     const row = await repo.findOne({
       where: { aggregateName, aggregateId },
@@ -283,7 +339,7 @@ export class TypeORMSnapshotStore implements SnapshotStore {
     snapshot: Snapshot,
   ): Promise<void> {
     const manager = this.getManager();
-    const repo = manager.getRepository(NodddeSnapshotEntity);
+    const repo = getRepo<NodddeSnapshotEntity>(manager, TABLE.snapshots);
     const serialized = JSON.stringify(snapshot.state);
 
     const existing = await repo.findOne({
@@ -295,12 +351,12 @@ export class TypeORMSnapshotStore implements SnapshotStore {
       existing.version = snapshot.version;
       await repo.save(existing);
     } else {
-      const entity = new NodddeSnapshotEntity();
-      entity.aggregateName = aggregateName;
-      entity.aggregateId = aggregateId;
-      entity.state = serialized;
-      entity.version = snapshot.version;
-      await repo.save(entity);
+      await repo.save({
+        aggregateName,
+        aggregateId,
+        state: serialized,
+        version: snapshot.version,
+      });
     }
   }
 }
@@ -321,23 +377,21 @@ export class TypeORMOutboxStore implements OutboxStore {
   async save(entries: OutboxEntry[]): Promise<void> {
     if (entries.length === 0) return;
     const manager = this.getManager();
-    const repo = manager.getRepository(NodddeOutboxEntryEntity);
-    const entities = entries.map((e) => {
-      const entity = new NodddeOutboxEntryEntity();
-      entity.id = e.id;
-      entity.event = JSON.stringify(e.event);
-      entity.aggregateName = e.aggregateName ?? null;
-      entity.aggregateId = e.aggregateId ?? null;
-      entity.createdAt = e.createdAt;
-      entity.publishedAt = e.publishedAt ?? null;
-      return entity;
-    });
+    const repo = getRepo<NodddeOutboxEntryEntity>(manager, TABLE.outbox);
+    const entities = entries.map((e) => ({
+      id: e.id,
+      event: JSON.stringify(e.event),
+      aggregateName: e.aggregateName ?? null,
+      aggregateId: e.aggregateId ?? null,
+      createdAt: e.createdAt,
+      publishedAt: e.publishedAt ?? null,
+    }));
     await repo.save(entities);
   }
 
   async loadUnpublished(batchSize = 100): Promise<OutboxEntry[]> {
     const manager = this.getManager();
-    const repo = manager.getRepository(NodddeOutboxEntryEntity);
+    const repo = getRepo<NodddeOutboxEntryEntity>(manager, TABLE.outbox);
     const rows = await repo.find({
       where: { publishedAt: IsNull() },
       order: { createdAt: "ASC" },
@@ -356,7 +410,7 @@ export class TypeORMOutboxStore implements OutboxStore {
   async markPublished(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
     const manager = this.getManager();
-    const repo = manager.getRepository(NodddeOutboxEntryEntity);
+    const repo = getRepo<NodddeOutboxEntryEntity>(manager, TABLE.outbox);
     await repo.update({ id: In(ids) }, { publishedAt: new Date() });
   }
 
@@ -378,7 +432,7 @@ export class TypeORMOutboxStore implements OutboxStore {
 
   async deletePublished(olderThan?: Date): Promise<void> {
     const manager = this.getManager();
-    const repo = manager.getRepository(NodddeOutboxEntryEntity);
+    const repo = getRepo<NodddeOutboxEntryEntity>(manager, TABLE.outbox);
     if (olderThan) {
       await repo.delete({
         publishedAt: Not(IsNull()),

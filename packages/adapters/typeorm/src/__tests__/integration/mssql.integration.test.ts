@@ -43,10 +43,9 @@ definePersistenceContract("typeorm/mssql", () => {
   return {
     eventSourced: a.eventSourcedPersistence,
     stateStored: a.stateStoredPersistence,
-    // MSSQL `TEXT` is codepage-limited; supplementary-plane chars get
-    // replaced on storage. Persisting upgrades to `nvarchar(max)` for
-    // Unicode safety is tracked separately.
-    unicodeSafe: false,
+    // The MSSQL DataSource registers the `nvarchar(max)` entity variant
+    // (createNodddeEntities("mssql")), so supplementary-plane Unicode
+    // round-trips — the contract runs with unicodeSafe defaulting to true.
   };
 });
 defineSagaContract("typeorm/mssql", () => ({
@@ -57,6 +56,35 @@ defineSnapshotContract("typeorm/mssql", () => ({
 }));
 defineOutboxContract("typeorm/mssql", () => ({
   outbox: buildAdapter(ds).outboxStore,
+  // Raw read of every row so the deletePublished(olderThan) cases can
+  // observe which published rows survived (there is no "load published").
+  // Resolve the outbox entity by table name: on MSSQL the DataSource
+  // registers the dialect-specific `nvarchar(max)` variant from
+  // createNodddeEntities("mssql"), not the exported static class.
+  loadAll: async () => {
+    const meta = ds.entityMetadatas.find(
+      (m) => m.tableName === "noddde_outbox",
+    );
+    if (!meta) throw new Error("noddde_outbox entity not registered");
+    const rows = await ds
+      .getRepository<{
+        id: string;
+        event: unknown;
+        aggregateName: string | null;
+        aggregateId: string | null;
+        createdAt: Date | string;
+        publishedAt: Date | string | null;
+      }>(meta.target)
+      .find();
+    return rows.map((r) => ({
+      id: r.id,
+      event: typeof r.event === "string" ? JSON.parse(r.event) : r.event,
+      aggregateName: r.aggregateName ?? undefined,
+      aggregateId: r.aggregateId ?? undefined,
+      createdAt: new Date(r.createdAt),
+      publishedAt: r.publishedAt != null ? new Date(r.publishedAt) : null,
+    }));
+  },
 }));
 defineUnitOfWorkContract("typeorm/mssql", () => {
   const a = buildAdapter(ds);
@@ -88,12 +116,20 @@ defineAdvisoryLockerContract("typeorm/mssql", async () => {
     options: { encrypt: false, trustServerCertificate: true },
     pool: { max: 1 },
   } as any);
+  let killedA = false;
   return {
     lockerA: new TypeORMAdvisoryLocker(a),
     lockerB: new TypeORMAdvisoryLocker(b),
-    cleanup: async () => {
+    // Destroying the DataSource closes its (single, pool max:1) connection,
+    // ending the session — MSSQL releases the session-scoped sp_getapplock,
+    // exactly as it would on a crash.
+    killSessionA: async () => {
+      killedA = true;
       await a.destroy();
-      await b.destroy();
+    },
+    cleanup: async () => {
+      if (!killedA && a.isInitialized) await a.destroy();
+      if (b.isInitialized) await b.destroy();
     },
   };
 });

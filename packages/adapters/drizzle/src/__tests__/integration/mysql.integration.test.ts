@@ -84,8 +84,28 @@ defineSnapshotContract("drizzle/mysql", async () => {
 
 defineOutboxContract("drizzle/mysql", async () => {
   await truncate();
-  const adapter = makeAdapter();
-  return { outbox: adapter.outboxStore! };
+  const db = drizzle(pool);
+  const adapter = createDrizzleAdapter(db, {
+    eventStore: events,
+    stateStore: aggregateStates,
+    sagaStore: sagaStates,
+    snapshotStore: snapshots,
+    outboxStore: outbox,
+  });
+  return {
+    outbox: adapter.outboxStore!,
+    loadAll: async () => {
+      const rows = await db.select().from(outbox);
+      return rows.map((r) => ({
+        id: r.id,
+        event: typeof r.event === "string" ? JSON.parse(r.event) : r.event,
+        aggregateName: r.aggregateName ?? undefined,
+        aggregateId: r.aggregateId ?? undefined,
+        createdAt: new Date(r.createdAt),
+        publishedAt: r.publishedAt != null ? new Date(r.publishedAt) : null,
+      }));
+    },
+  };
 });
 
 defineUnitOfWorkContract("drizzle/mysql", async () => {
@@ -98,56 +118,37 @@ defineUnitOfWorkContract("drizzle/mysql", async () => {
   };
 });
 
-describe("Drizzle MySQL — dialect-specific behaviour", () => {
-  // Regression tests for packages/testing-integration/ROBUSTNESS.md §3.1.
-
-  it("rejects the old ISO-with-Z timestamp format outright, rather than silently misordering rows", async () => {
-    // Unlike Postgres, MySQL's TIMESTAMP(3) parser does not accept a
-    // trailing "Z" — it fails the INSERT rather than storing a
-    // misinterpreted or truncated value. That means a mid-migration table
-    // can never actually contain a row written in the pre-migration
-    // `mode: "date"` ISO-with-Z shape: any write attempt in that shape
-    // fails loudly at INSERT time, so there is no silent-corruption path
-    // for `ORDER BY created_at` to expose.
+// Regression for ROBUSTNESS §3.1: the timestamp encoding changed to
+// `mode: "string"` emitting `YYYY-MM-DD HH:MM:SS.fff`. On MySQL the previous
+// encoding also produced space-separated timestamps (no `Z` — MySQL rejects
+// it), so a mid-migration `noddde_outbox` mixes rows with and without the
+// fractional-second component. `created_at` is a native `TIMESTAMP(3)` column,
+// so MySQL parses both and `ORDER BY created_at` is temporal. Proven here.
+describe("outbox created_at ordering across mixed timestamp formats (§3.1)", () => {
+  it("orders whole-second and fractional-second rows temporally", async () => {
     await truncate();
-    await expect(
-      pool.query(
-        "INSERT INTO noddde_outbox (id, event, created_at) VALUES (?, ?, ?)",
-        [
-          "z-format",
-          JSON.stringify({ name: "Warmup", payload: {} }),
-          "2024-06-01T08:00:00.000Z",
-        ],
-      ),
-    ).rejects.toThrow(/incorrect datetime value/i);
-  });
-
-  it("orders mixed-but-valid timestamp shapes temporally, not lexicographically", async () => {
-    // `T`-separated (no `Z`) and space-separated (current, `toDbTimestamp`)
-    // forms are both accepted by MySQL. Since `created_at` is a native
-    // TIMESTAMP(3) column, MySQL parses both into the same internal
-    // representation before comparing, so ordering must remain correct
-    // regardless of which shape wrote which row.
-    await truncate();
-    await pool.query(
-      "INSERT INTO noddde_outbox (id, event, created_at) VALUES (?, ?, ?), (?, ?, ?)",
-      [
-        "new-format-late",
-        JSON.stringify({ name: "Warmup", payload: {} }),
-        "2024-06-01 12:00:00.000",
-        "old-format-early",
-        JSON.stringify({ name: "Warmup", payload: {} }),
-        "2024-06-01T08:00:00.000",
-      ],
-    );
+    const rows: Array<{ id: string; ts: string }> = [
+      { id: "b-frac-middle", ts: "2024-01-02 00:00:00.500" }, // new format
+      { id: "a-whole-earliest", ts: "2024-01-01 00:00:00" }, // old format
+      { id: "c-frac-latest", ts: "2024-01-03 00:00:00.250" }, // new format
+    ];
+    for (const r of rows) {
+      await pool.query(
+        `INSERT INTO noddde_outbox (id, event, created_at, published_at)
+         VALUES (?, ?, ?, NULL)`,
+        [r.id, JSON.stringify({ name: "E", payload: {} }), r.ts],
+      );
+    }
 
     const adapter = makeAdapter();
-    const unpublished = await adapter.outboxStore!.loadUnpublished();
-
-    expect(unpublished.map((e) => e.id)).toEqual([
-      "old-format-early",
-      "new-format-late",
+    const loaded = await adapter.outboxStore!.loadUnpublished(100);
+    expect(loaded.map((e) => e.id)).toEqual([
+      "a-whole-earliest",
+      "b-frac-middle",
+      "c-frac-latest",
     ]);
+    const times = loaded.map((e) => e.createdAt.getTime());
+    expect(times).toEqual([...times].sort((x, y) => x - y));
   });
 });
 
@@ -169,12 +170,20 @@ defineAdvisoryLockerContract("drizzle/mysql", async () => {
   });
   const lockerA = new DrizzleAdvisoryLocker(drizzle(connA), "mysql");
   const lockerB = new DrizzleAdvisoryLocker(drizzle(connB), "mysql");
+  let killedA = false;
   return {
     lockerA,
     lockerB,
+    killSessionA: async () => {
+      killedA = true;
+      // destroy() closes the socket immediately (no COM_QUIT) — a crash,
+      // not a graceful disconnect. MySQL releases GET_LOCK held by the
+      // session when it dies.
+      connA.destroy();
+    },
     cleanup: async () => {
-      await connA.end();
-      await connB.end();
+      if (!killedA) await connA.end().catch(() => {});
+      await connB.end().catch(() => {});
     },
   };
 });

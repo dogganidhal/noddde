@@ -33,7 +33,9 @@
     "@testcontainers/mysql": "^10.0.0",
     "@testcontainers/postgresql": "^10.0.0",
     "@testcontainers/rabbitmq": "^10.0.0",
+    "@testcontainers/toxiproxy": "^10.0.0",
     "eslint": "^8.56.0",
+    "fast-check": "^3.23.2",
     "testcontainers": "^10.0.0",
     "typescript": "^5.3.3",
     "vitest": "^4.1.0"

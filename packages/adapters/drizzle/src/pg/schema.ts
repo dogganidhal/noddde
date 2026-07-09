@@ -90,3 +90,18 @@ export const outbox = pgTable("noddde_outbox", {
     mode: "string",
   }),
 });
+
+/**
+ * PostgreSQL table definition for event handler idempotency tracking.
+ * Records dedup keys already processed so redelivered events (Kafka,
+ * RabbitMQ at-least-once semantics) can be detected and skipped.
+ */
+export const eventIdempotency = pgTable("noddde_event_idempotency", {
+  key: text("key").primaryKey(),
+  processedAt: timestamp("processed_at", {
+    withTimezone: true,
+    mode: "string",
+  })
+    .notNull()
+    .defaultNow(),
+});

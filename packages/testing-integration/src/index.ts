@@ -11,6 +11,7 @@
 export * from "./containers/index.js";
 export * from "./contracts/persistence-contract.js";
 export * from "./contracts/outbox-contract.js";
+export * from "./contracts/scale-contract.js";
 export * from "./contracts/saga-contract.js";
 export * from "./contracts/snapshot-contract.js";
 export * from "./contracts/unit-of-work-contract.js";
