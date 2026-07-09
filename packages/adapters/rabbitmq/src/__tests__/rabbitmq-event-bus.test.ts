@@ -191,6 +191,50 @@ describe("RabbitMqEventBus", () => {
     expect(mockChannel.assertExchange).toHaveBeenCalledTimes(1);
   });
 
+  it("does not misclassify a queue-argument PRECONDITION_FAILED as an exchangeType mismatch", async () => {
+    const mockChannel = {
+      assertExchange: vi.fn().mockResolvedValue(undefined),
+      assertQueue: vi
+        .fn()
+        .mockRejectedValue(
+          new Error(
+            "Operation failed: QueueDeclare; 406 (PRECONDITION_FAILED) with message " +
+              "\"PRECONDITION_FAILED - inequivalent arg 'durable' for queue 'noddde.TestEvent' in vhost '/': received 'true' but current is 'false'\"",
+          ),
+        ),
+      prefetch: vi.fn(),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    const mockConnection = {
+      createConfirmChannel: vi.fn().mockResolvedValue(mockChannel),
+      on: vi.fn(),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const amqplib = await import("amqplib");
+    (amqplib.default.connect as ReturnType<typeof vi.fn>).mockResolvedValue(
+      mockConnection,
+    );
+
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      resilience: { maxAttempts: 3, initialDelayMs: 1, maxDelayMs: 1 },
+    });
+    bus.on("TestEvent", vi.fn());
+
+    // This PRECONDITION_FAILED comes from assertQueue, not assertExchange —
+    // must not be mistaken for the sticky exchangeType error, and must go
+    // through the normal (transient-failure) retry path instead.
+    let caught: Error | undefined;
+    try {
+      await bus.connect();
+    } catch (error) {
+      caught = error as Error;
+    }
+    expect(caught?.message).not.toMatch(/exchangeType after deployment/i);
+    expect(mockChannel.assertQueue).toHaveBeenCalledTimes(3);
+  });
+
   it("should retry connection with exponential backoff", async () => {
     const bus = new RabbitMqEventBus({
       url: "amqp://localhost:5672",
