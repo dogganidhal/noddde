@@ -274,11 +274,17 @@ export function definePersistenceContract(
     // rather than silently corrupting the stream. See
     // `docs/content/docs/persistence/payload-shapes.mdx`.
     describe("JSON payload edge cases", () => {
-      // Recursive generator of JSON-safe values. Strings are drawn from
-      // printable ASCII (fast-check's default `string()` unit) so this
-      // sweep stays dialect-agnostic — NUL bytes, lone surrogates and
-      // codepage-limited columns get their own explicit cases below rather
-      // than making the property flaky per backend. Doubles exclude NaN and
+      // Strings (and object keys) are drawn explicitly from printable ASCII
+      // (0x20–0x7e). `fc.string()` on its own generates arbitrary Unicode
+      // including control bytes and lone surrogates, which would let this
+      // sweep overlap the explicit NUL / encoding edge-case tests below and
+      // flake per-dialect. Constraining the alphabet keeps the property
+      // dialect-agnostic; the sharp characters get their own dedicated cases.
+      const printableAscii = fc
+        .array(fc.integer({ min: 0x20, max: 0x7e }), { maxLength: 24 })
+        .map((codes) => String.fromCharCode(...codes));
+
+      // Recursive generator of JSON-safe values. Doubles exclude NaN and
       // Infinity, which `JSON.stringify` turns into `null` (a corruption the
       // property would otherwise trip over).
       const jsonSafeValue = fc.letrec<{ value: unknown }>((tie) => ({
@@ -288,9 +294,9 @@ export function definePersistenceContract(
           fc.boolean(),
           fc.integer(),
           fc.double({ noNaN: true, noDefaultInfinity: true }),
-          fc.string(),
+          printableAscii,
           fc.array(tie("value"), { maxLength: 6 }),
-          fc.dictionary(fc.string(), tie("value"), { maxKeys: 6 }),
+          fc.dictionary(printableAscii, tie("value"), { maxKeys: 6 }),
         ),
       })).value;
 

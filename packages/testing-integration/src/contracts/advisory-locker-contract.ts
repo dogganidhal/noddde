@@ -91,8 +91,10 @@ export function defineAdvisoryLockerContract(
     // session A's connection with the lock still held and proves session B
     // can then acquire it. Skipped for adapters that don't expose a
     // `killSessionA` hook.
-    it("auto-releases the lock when the holding session is terminated without release()", async () => {
-      if (!ctx.killSessionA) return;
+    it("auto-releases the lock when the holding session is terminated without release()", async (t) => {
+      // Skip (not silently pass) when the adapter didn't wire the kill hook,
+      // so an omitted `killSessionA` shows up as skipped rather than green.
+      t.skip(!ctx.killSessionA, "adapter did not provide killSessionA");
       await ctx.lockerA.acquire("Order", "o-crash");
 
       // Sanity check: while A holds it, B cannot acquire within a short
@@ -102,7 +104,7 @@ export function defineAdvisoryLockerContract(
       ).rejects.toBeInstanceOf(LockTimeoutError);
 
       // Kill A's session abruptly. No release() is called.
-      await ctx.killSessionA();
+      await ctx.killSessionA!();
 
       // The server must have reclaimed the lock on session death, so B
       // now acquires it within the timeout.

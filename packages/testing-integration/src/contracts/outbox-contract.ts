@@ -156,8 +156,11 @@ export function defineOutboxContract(
       const t3 = new Date("2024-01-03T00:00:00.000Z");
       const cutoff = new Date("2024-01-02T12:00:00.000Z");
 
-      it("removes only published entries created before the cutoff", async () => {
-        if (!ctx.loadAll) return; // unobservable without a raw read
+      it("removes only published entries created before the cutoff", async (t) => {
+        // Skip (not silently pass) when the adapter didn't wire the raw-read
+        // hook — otherwise a forgotten `loadAll` would drop this coverage
+        // while still reporting green.
+        t.skip(!ctx.loadAll, "adapter did not provide loadAll");
         await ctx.outbox.save([
           {
             id: "a",
@@ -182,13 +185,13 @@ export function defineOutboxContract(
 
         await ctx.outbox.deletePublished(cutoff);
 
-        const remaining = (await ctx.loadAll()).map((e) => e.id).sort();
+        const remaining = (await ctx.loadAll!()).map((e) => e.id).sort();
         // a (t1) and b (t2) precede the cutoff → gone. c (t3) survives.
         expect(remaining).toEqual(["c"]);
       });
 
-      it("never deletes unpublished entries even when older than the cutoff", async () => {
-        if (!ctx.loadAll) return;
+      it("never deletes unpublished entries even when older than the cutoff", async (t) => {
+        t.skip(!ctx.loadAll, "adapter did not provide loadAll");
         await ctx.outbox.save([
           {
             id: "pub-old",
@@ -210,7 +213,7 @@ export function defineOutboxContract(
         // the unpublished one must be untouched regardless of its age.
         await ctx.outbox.deletePublished(t3);
 
-        const remaining = (await ctx.loadAll()).map((e) => e.id).sort();
+        const remaining = (await ctx.loadAll!()).map((e) => e.id).sort();
         expect(remaining).toEqual(["unpub-old"]);
       });
     });

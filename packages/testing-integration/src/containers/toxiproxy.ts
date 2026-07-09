@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import {
   ToxiProxyContainer,
   type StartedToxiProxyContainer,
@@ -23,12 +22,14 @@ export interface Proxy {
    * immediately and refuses new ones — a full broker outage / hard TCP
    * drop from the client's point of view. Re-enable to bring it back.
    */
+  // eslint-disable-next-line no-unused-vars -- param name in a type signature
   setEnabled: (enabled: boolean) => Promise<void>;
   /**
    * Reset the peer on the next byte in the given direction — simulates a
    * connection dropped mid-transfer (RST) rather than a clean close.
    * Defaults to the downstream (broker → client) direction.
    */
+  // eslint-disable-next-line no-unused-vars -- param name in a type signature
   resetPeer: (direction?: "upstream" | "downstream") => Promise<void>;
   /** Removes every toxic previously added to this proxy. */
   clearToxics: () => Promise<void>;
@@ -41,6 +42,7 @@ export interface StartedToxiproxy {
    * shared Docker network, e.g. `"rabbitmq:5672"`). Returns the front-side
    * `host:port` the client should connect to, plus fault-injection controls.
    */
+  // eslint-disable-next-line no-unused-vars -- param name in a type signature
   createProxy: (opts: { name: string; upstream: string }) => Promise<Proxy>;
   stop: () => Promise<void>;
 }
