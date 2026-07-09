@@ -55,6 +55,17 @@ const eventBus = new RabbitMqEventBus({
 });
 ```
 
+## Troubleshooting
+
+### Changing `exchangeType` after deployment
+
+`exchangeType` (`"topic"` | `"fanout"`) is sticky once the exchange has been created on the broker — RabbitMQ exchanges are immutable, so `assertExchange` fails with `PRECONDITION_FAILED` if you ask for a different type on an exchange that already exists with a different one. This surfaces both on initial `connect()` and on any later reconnect.
+
+If you need to change `exchangeType` for an existing deployment, pick one of:
+
+- Delete the existing exchange manually (e.g. via the RabbitMQ management UI or `rabbitmqadmin delete exchange name=<exchangeName>`) before deploying the new `exchangeType`. Note this drops any bindings on that exchange.
+- Configure a new `exchangeName` instead of reusing the old one, so the adapter creates a fresh exchange with the new type.
+
 ## Peer Dependencies
 
 - `amqplib` >= 0.10.0

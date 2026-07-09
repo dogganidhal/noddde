@@ -10,6 +10,45 @@ import { Instrumentation, NodddeLogger } from "@noddde/engine";
 import type { ChannelModel, ConfirmChannel } from "amqplib";
 import amqplib from "amqplib";
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * True if `error` is amqplib's PRECONDITION_FAILED specifically for the
+ * exchange's `type` argument, which `assertExchange` throws when an exchange
+ * already exists with a different type than requested.
+ *
+ * Only call this on an error caught directly around `assertExchange` —
+ * `assertQueue`/`bindQueue` (see `_setupConsumer`) can throw the same
+ * PRECONDITION_FAILED code for unrelated queue-argument mismatches. And
+ * `assertExchange` itself can throw PRECONDITION_FAILED for *other*
+ * inequivalent exchange arguments (durable, autoDelete, arguments) —
+ * match the exact "arg 'type'" shape RabbitMQ reports so those don't get
+ * mislabeled with "different type" guidance.
+ */
+function isExchangeTypeMismatch(error: unknown): boolean {
+  const message = errorMessage(error);
+  return (
+    (message.includes("PRECONDITION_FAILED") ||
+      message.includes("PRECONDITION-FAILED")) &&
+    /inequivalent arg 'type' for exchange/i.test(message)
+  );
+}
+
+/** Thrown when `assertExchange` fails because of a sticky exchangeType mismatch — not transient, so callers should not retry. */
+class ExchangeTypeMismatchError extends Error {
+  constructor(exchangeName: string, exchangeType: string, cause: unknown) {
+    super(
+      `Failed to assert exchange "${exchangeName}": an exchange with this name already ` +
+        `exists with a different type than the configured exchangeType ("${exchangeType}"). ` +
+        `RabbitMQ exchanges cannot be changed in place — see the "Changing exchangeType after ` +
+        `deployment" section in the @noddde/rabbitmq README. Original error: ${errorMessage(cause)}`,
+      { cause },
+    );
+  }
+}
+
 /**
  * Configuration for the RabbitMqEventBus.
  */
@@ -162,38 +201,67 @@ export class RabbitMqEventBus implements EventBus, Connectable {
 
     let lastError: Error | undefined;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      let connection: ChannelModel | undefined;
       try {
-        this._connection = await amqplib.connect(this._url);
+        connection = await amqplib.connect(this._url);
+        this._connection = connection;
 
-        // Register mid-session reconnection handlers
-        this._connection.on("error", (err: Error) => {
-          this._logger.warn("Connection error", { error: String(err.message) });
-        });
-        this._connection.on("close", () => {
-          if (!this._closed) {
-            this._handleUnexpectedClose();
-          }
-        });
-
-        this._channel = await this._connection.createConfirmChannel();
+        const channel = await connection.createConfirmChannel();
+        this._channel = channel;
 
         // Set prefetch for backpressure control
-        await this._channel.prefetch(this._prefetchCount);
+        await channel.prefetch(this._prefetchCount);
 
-        await this._channel.assertExchange(
-          this._exchangeName,
-          this._exchangeType,
-          { durable: true },
-        );
+        try {
+          await channel.assertExchange(this._exchangeName, this._exchangeType, {
+            durable: true,
+          });
+        } catch (error) {
+          if (isExchangeTypeMismatch(error)) {
+            throw new ExchangeTypeMismatchError(
+              this._exchangeName,
+              this._exchangeType,
+              error,
+            );
+          }
+          throw error;
+        }
 
         // Activate consumers for handlers registered before connect()
         for (const [eventName] of this._handlers.entries()) {
           await this._setupConsumer(eventName);
         }
 
+        // Register mid-session reconnection handlers only once setup has
+        // fully succeeded. Registering earlier means a failed attempt's
+        // own cleanup close() (below) would trigger _handleUnexpectedClose()
+        // and spin up a spurious background reconnection loop.
+        connection.on("error", (err: Error) => {
+          this._logger.warn("Connection error", { error: String(err.message) });
+        });
+        connection.on("close", () => {
+          if (!this._closed) {
+            this._handleUnexpectedClose();
+          }
+        });
+
         this._connected = true;
         return;
       } catch (error) {
+        // Setup failed this attempt — close whatever was opened so we don't
+        // leak a socket/channel per retry (no reconnection handlers are
+        // attached yet, so this can't trigger _handleUnexpectedClose()).
+        if (connection) {
+          await connection.close().catch(() => {});
+        }
+        this._connection = null;
+        this._channel = null;
+
+        if (error instanceof ExchangeTypeMismatchError) {
+          // Not transient: a different exchangeType will never succeed on
+          // retry against the same exchangeName. Fail fast with guidance.
+          throw error;
+        }
         lastError = error as Error;
         if (attempt < maxAttempts - 1) {
           const delay = Math.min(initialDelay * Math.pow(2, attempt), maxDelay);

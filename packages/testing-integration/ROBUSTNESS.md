@@ -26,21 +26,15 @@ _All items in this category have been addressed (failure injection, concurrent s
 
 ## 3. Plausible bugs the suite doesn't exercise
 
-Things that look fragile under scrutiny but pass today. Each gets a hypothesis and a test to prove or disprove it.
-
-### 3.6 RabbitMQ exchange/queue assertion across config changes
-
-If a user changes `exchangeType` from `"topic"` to `"fanout"` between deployments without manually deleting the exchange, `assertExchange` will throw with PRECONDITION_FAILED. We don't test this.
-
-**Next step:** document the constraint in the package README. Optionally add a test that asserts the failure mode is clear.
+_All items in this category have been addressed, including §3.6 (RabbitMQ `exchangeType` change now fails fast with a clear error and is documented in the package README)._
 
 ---
 
 ## 4. Recommended ordering
 
-Almost everything on this list has landed: all of Section 1 (MSSQL Unicode-safe entities, Prisma advisory-lock session affinity, Kafka cold-start warmup), all of Section 2 (failure injection via Toxiproxy, the advisory-lock crash-recovery case, the concurrent-save race, the `deletePublished(olderThan)` coverage, the property-based JSON edge-case sweep, the slow-tagged scale smoke tests, and the handler-idempotency primitive), and the plausible-bug items §3.1, §3.2, §3.3, §3.4, and §3.5.
+Everything on this list has landed: all of Section 1 (MSSQL Unicode-safe entities, Prisma advisory-lock session affinity, Kafka cold-start warmup), all of Section 2 (failure injection via Toxiproxy, the advisory-lock crash-recovery case, the concurrent-save race, the `deletePublished(olderThan)` coverage, the property-based JSON edge-case sweep, the slow-tagged scale smoke tests, and the handler-idempotency primitive), and all of Section 3 (§3.1 through §3.6).
 
-The only item left is **§3.6 (RabbitMQ exchange/queue assertion across config changes)** — do it as time allows, then delete this file.
+Per the note below, this file can now be deleted.
 
 ---
 
