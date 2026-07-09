@@ -1,5 +1,15 @@
 # @noddde/testing
 
+## 1.0.0-rc.1
+
+### Patch Changes
+
+- Updated dependencies [69b9817]
+- Updated dependencies [54a763d]
+- Updated dependencies [e6d3e39]
+  - @noddde/core@1.0.0-rc.1
+  - @noddde/engine@1.0.0-rc.1
+
 ## 1.0.0-rc.0
 
 ### Major Changes

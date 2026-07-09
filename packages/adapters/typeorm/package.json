@@ -1,6 +1,6 @@
 {
   "name": "@noddde/typeorm",
-  "version": "1.0.0-rc.0",
+  "version": "1.0.0-rc.1",
   "description": "TypeORM persistence adapter for noddde",
   "license": "MIT",
   "author": "Nidhal Dogga",
@@ -51,13 +51,13 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@noddde/core": "1.0.0-rc.0"
+    "@noddde/core": "1.0.0-rc.1"
   },
   "peerDependencies": {
     "typeorm": ">=0.3.0"
   },
   "devDependencies": {
-    "@noddde/testing-integration": "0.0.1-rc.0",
+    "@noddde/testing-integration": "0.0.1-rc.1",
     "@noddde/typescript-config": "0.0.0",
     "@types/pg": "^8.11.0",
     "better-sqlite3": "^11.0.0",

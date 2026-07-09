@@ -1,6 +1,6 @@
 {
   "name": "@noddde/sample-hotel-booking",
-  "version": "0.0.2-rc.0",
+  "version": "0.0.2-rc.1",
   "private": true,
   "scripts": {
     "build": "tsc",
@@ -13,11 +13,11 @@
     "start": "docker compose up -d && tsx src/main.ts"
   },
   "dependencies": {
-    "@noddde/core": "1.0.0-rc.0",
-    "@noddde/engine": "1.0.0-rc.0",
-    "@noddde/drizzle": "1.0.0-rc.0",
-    "@noddde/rabbitmq": "1.0.0-rc.0",
-    "@noddde/testing": "1.0.0-rc.0",
+    "@noddde/core": "1.0.0-rc.1",
+    "@noddde/engine": "1.0.0-rc.1",
+    "@noddde/drizzle": "1.0.0-rc.1",
+    "@noddde/rabbitmq": "1.0.0-rc.1",
+    "@noddde/testing": "1.0.0-rc.1",
     "drizzle-orm": "^0.30.0",
     "pg": "^8.13.0",
     "fastify": "^5.0.0",

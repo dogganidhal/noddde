@@ -23,6 +23,11 @@
   },
   "changesets": [
     "fix-adapter-bugs-from-integration-tests",
+    "fix-robustness-bugs-102-103-112-115",
+    "robustness-warmup-idempotency-nats-benchmark",
+    "saga-atomicity-core",
+    "saga-atomicity-engine",
+    "typeorm-state-stored-concurrent-create",
     "v1-0-0-rc"
   ]
 }
