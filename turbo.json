@@ -3,6 +3,7 @@
   "globalDependencies": ["**/.env.*local"],
   "globalEnv": [
     "NODE_ENV",
+    "CODEARTIFACT_AUTH_TOKEN",
     "DATABASE_URL",
     "EVENT_BUS",
     "RABBITMQ_URL",

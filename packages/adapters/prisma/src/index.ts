@@ -6,6 +6,7 @@ export {
   PrismaSnapshotStore,
   PrismaOutboxStore,
 } from "./persistence";
+export { PrismaEventIdempotencyStore } from "./event-idempotency";
 export { PrismaAdvisoryLocker } from "./advisory-locker";
 export {
   PrismaUnitOfWork,

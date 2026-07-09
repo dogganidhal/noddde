@@ -60,6 +60,17 @@ export interface KafkaEventBusConfig {
    * Provided via `@noddde/engine` `Instrumentation`.
    */
   instrumentation?: Instrumentation;
+  /**
+   * When `true`, `connect()` automatically performs a `warmup()` round-trip
+   * before resolving, so the returned promise only settles once the broker
+   * has passed cold-start latency. Default: `false`.
+   */
+  warmupOnConnect?: boolean;
+  /**
+   * Timeout in milliseconds for the `warmup()` publish/consume round-trip
+   * before it rejects. Default: `60000`.
+   */
+  warmupTimeoutMs?: number;
 }
 
 export class KafkaEventBus implements EventBus, Connectable {
@@ -73,6 +84,16 @@ export class KafkaEventBus implements EventBus, Connectable {
 
   /** Publishes an event to the Kafka topic derived from the event name. */
   dispatch<TEvent extends Event>(event: TEvent): Promise<void>;
+
+  /**
+   * Performs a throwaway publish/consume round-trip on a dedicated internal
+   * topic to force the Kafka cluster past cold-start latency (topic creation,
+   * leader election, ISR sync) before real traffic flows. Must be called
+   * after `connect()`. Idempotent: after the first successful call,
+   * subsequent calls resolve immediately without repeating the round-trip.
+   * Rejects if the round-trip doesn't complete within `warmupTimeoutMs`.
+   */
+  warmup(): Promise<void>;
 
   /** Disconnects producer and consumer, clears handlers. Idempotent. */
   close(): Promise<void>;
@@ -128,6 +149,14 @@ export class KafkaEventBus implements EventBus, Connectable {
 
 19. **Framework logger** -- All internal logging uses the `Logger` interface from `@noddde/core`. The logger is resolved from `config.logger` or defaults to `new NodddeLogger("warn", "noddde:kafka")` from `@noddde/engine`. All log calls pass structured context data as the second parameter (e.g., `{ eventName }`, `{ topic }`, `{ error: String(err) }`). No `console.log`, `console.warn`, or `console.error` calls exist in the implementation.
 
+### Warmup
+
+20. **Explicit warmup round-trip** -- `warmup()` addresses broker-side cold-start latency that `connect()`'s `FETCH_START` wait does not cover (a freshly-deployed cluster's first end-to-end publish/consume cycle can take far longer than subsequent ones). It uses a uniquely-named internal topic (derived from `clientId`) and repeatedly dispatches a throwaway event to that topic (on a 1-second interval) until an internal handler observes it. `warmup()` must be called after `connect()`; calling it before `connect()` or after `close()` throws the same "not connected" error as `dispatch()`.
+21. **Idempotent** -- After the first successful `warmup()` call, subsequent calls resolve immediately without repeating the round-trip. Concurrent overlapping calls are deduplicated via an in-flight promise mutex, mirroring `connect()`'s dedup pattern — the second caller awaits the first rather than starting a parallel round-trip.
+22. **warmupOnConnect config** -- When `warmupOnConnect: true`, the warmup topic is created and its subscription registered _before_ `consumer.run()` starts during `connect()` (kafkajs forbids subscribing to a new topic once the consumer is running), and `connect()` then calls `warmup()` internally before its own returned promise resolves — so callers that opt in get a fully warmed bus from a single `await connect()`.
+23. **Warmup timeout** -- If the round-trip doesn't complete within `warmupTimeoutMs` (default `60000`), `warmup()` rejects with a timeout error rather than hanging indefinitely.
+24. **Late warmup() without warmupOnConnect** -- If `warmup()` is called explicitly after `connect()` resolved without `warmupOnConnect` configured, the warmup topic's subscription was not set up before `consumer.run()` started. Since kafkajs forbids subscribing while the consumer is running, `warmup()` handles this by stopping the consumer (`consumer.stop()`), provisioning the warmup topic and subscription, and restarting the fetch loop (`consumer.run()` again) before performing the round-trip. This is scoped only to the warmup topic — it does not fix late `on()` registration for other event names (see robustness §3.4, out of scope here).
+
 ## Invariants
 
 - All dispatched events are serialized as JSON (must be JSON-serializable).
@@ -139,6 +168,7 @@ export class KafkaEventBus implements EventBus, Connectable {
 - Topic names follow the pattern `${topicPrefix}${eventName}`.
 - Message key defaults to `event.metadata?.aggregateId` (stringified) for per-aggregate partition ordering.
 - No `console.*` calls exist in the implementation — all logging goes through the `Logger` interface.
+- `warmup()` performs at most one real round-trip per bus instance; repeat calls after success are no-ops.
 
 ## Edge Cases
 
@@ -154,6 +184,13 @@ export class KafkaEventBus implements EventBus, Connectable {
 - **Dispatch with metadata.aggregateId**: Message key is `String(aggregateId)` by default.
 - **Custom partitionKeyStrategy function**: Function receives the full event, returns key or `null`.
 - **No logger provided**: Defaults to `NodddeLogger("warn", "noddde:kafka")`.
+- **warmup() before connect()**: Throws the "not connected" error.
+- **warmup() after close()**: Throws the "not connected" error.
+- **warmup() called twice concurrently**: Both calls resolve once the single in-flight round-trip completes; only one round-trip is performed.
+- **warmup() called after a prior successful warmup()**: Resolves immediately; no additional round-trip, no additional topic creation.
+- **warmup() round-trip exceeds warmupTimeoutMs**: Rejects with a timeout error; does not hang indefinitely.
+- **warmupOnConnect: true with broker unreachable**: `connect()` rejects with the warmup failure (propagated), consistent with `connect()` surfacing connection errors.
+- **warmup() called explicitly without warmupOnConnect**: The warmup topic wasn't subscribed before `consumer.run()` started during `connect()`, so `warmup()` stops the consumer, provisions the topic and subscription, and restarts the fetch loop before performing the round-trip — verified against a real broker, not just mocks.
 
 ## Integration Points
 
@@ -895,5 +932,300 @@ describe("KafkaEventBus", () => {
       expect.objectContaining({ eventName: "TestEvent" }),
     );
   });
+});
+```
+
+### warmup performs a publish/consume round-trip on an internal topic
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { KafkaEventBus } from "@noddde/kafka";
+
+function createMockKafka() {
+  const handlers: Record<
+    string,
+    (payload: { message: { value: Buffer } }) => Promise<void>
+  > = {};
+  const mockProducer = {
+    send: vi.fn(async ({ topic, messages }) => {
+      const eachMessage = handlers["eachMessage"];
+      if (eachMessage) {
+        await eachMessage({
+          message: {
+            value: Buffer.from(messages[0].value as string),
+            offset: "0",
+          },
+          topic,
+          partition: 0,
+        } as any);
+      }
+    }),
+    connect: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn().mockResolvedValue(undefined),
+  };
+  const mockConsumer = {
+    connect: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn().mockResolvedValue(undefined),
+    subscribe: vi.fn().mockResolvedValue(undefined),
+    run: vi.fn().mockImplementation(async ({ eachMessage }) => {
+      handlers["eachMessage"] = eachMessage;
+    }),
+    stop: vi.fn().mockResolvedValue(undefined),
+    commitOffsets: vi.fn().mockResolvedValue(undefined),
+    events: { FETCH_START: "consumer.fetch_start" },
+    on: vi.fn().mockImplementation((_event, cb) => {
+      cb();
+      return () => {};
+    }),
+  };
+  const mockAdmin = {
+    connect: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn().mockResolvedValue(undefined),
+    createTopics: vi.fn().mockResolvedValue(true),
+  };
+  return {
+    mockKafka: {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+      admin: () => mockAdmin,
+    },
+    mockProducer,
+    mockConsumer,
+    mockAdmin,
+  };
+}
+
+describe("KafkaEventBus warmup", () => {
+  it("should create the warmup topic, dispatch, and resolve once the round-trip is observed", async () => {
+    const { mockKafka, mockAdmin, mockProducer } = createMockKafka();
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+    (bus as any)._kafka = mockKafka;
+
+    await bus.connect();
+    await bus.warmup();
+
+    expect(mockAdmin.createTopics).toHaveBeenCalledWith(
+      expect.objectContaining({
+        waitForLeaders: true,
+        topics: [
+          expect.objectContaining({ topic: expect.stringContaining("test") }),
+        ],
+      }),
+    );
+    expect(mockProducer.send).toHaveBeenCalled();
+  });
+});
+```
+
+### warmup is idempotent
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { KafkaEventBus } from "@noddde/kafka";
+
+describe("KafkaEventBus warmup", () => {
+  it("should not repeat the round-trip on a second call after success", async () => {
+    const handlers: Record<string, (payload: any) => Promise<void>> = {};
+    const mockProducer = {
+      send: vi.fn(async ({ topic, messages }) => {
+        const eachMessage = handlers["eachMessage"];
+        if (eachMessage) {
+          await eachMessage({
+            message: {
+              value: Buffer.from(messages[0].value as string),
+              offset: "0",
+            },
+            topic,
+            partition: 0,
+          });
+        }
+      }),
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+    };
+    const mockConsumer = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      subscribe: vi.fn().mockResolvedValue(undefined),
+      run: vi.fn().mockImplementation(async ({ eachMessage }) => {
+        handlers["eachMessage"] = eachMessage;
+      }),
+      stop: vi.fn().mockResolvedValue(undefined),
+      commitOffsets: vi.fn().mockResolvedValue(undefined),
+      events: { FETCH_START: "consumer.fetch_start" },
+      on: vi.fn().mockImplementation((_event, cb) => {
+        cb();
+        return () => {};
+      }),
+    };
+    const mockAdmin = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      createTopics: vi.fn().mockResolvedValue(true),
+    };
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+      admin: () => mockAdmin,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+    (bus as any)._kafka = mockKafka;
+
+    await bus.connect();
+    await bus.warmup();
+    const callsAfterFirst = mockAdmin.createTopics.mock.calls.length;
+    await bus.warmup();
+
+    expect(mockAdmin.createTopics.mock.calls.length).toBe(callsAfterFirst);
+  });
+});
+```
+
+### warmup throws before connect
+
+```ts
+import { describe, it, expect } from "vitest";
+import { KafkaEventBus } from "@noddde/kafka";
+
+describe("KafkaEventBus warmup", () => {
+  it("should throw when warmup is called before connect", async () => {
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+
+    await expect(bus.warmup()).rejects.toThrow(/not connected/i);
+  });
+});
+```
+
+### warmupOnConnect runs warmup as part of connect
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { KafkaEventBus } from "@noddde/kafka";
+
+describe("KafkaEventBus warmup", () => {
+  it("should perform the warmup round-trip during connect when warmupOnConnect is true", async () => {
+    const handlers: Record<string, (payload: any) => Promise<void>> = {};
+    const mockProducer = {
+      send: vi.fn(async ({ topic, messages }) => {
+        const eachMessage = handlers["eachMessage"];
+        if (eachMessage) {
+          await eachMessage({
+            message: {
+              value: Buffer.from(messages[0].value as string),
+              offset: "0",
+            },
+            topic,
+            partition: 0,
+          });
+        }
+      }),
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+    };
+    const mockConsumer = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      subscribe: vi.fn().mockResolvedValue(undefined),
+      run: vi.fn().mockImplementation(async ({ eachMessage }) => {
+        handlers["eachMessage"] = eachMessage;
+      }),
+      stop: vi.fn().mockResolvedValue(undefined),
+      commitOffsets: vi.fn().mockResolvedValue(undefined),
+      events: { FETCH_START: "consumer.fetch_start" },
+      on: vi.fn().mockImplementation((_event, cb) => {
+        cb();
+        return () => {};
+      }),
+    };
+    const mockAdmin = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      createTopics: vi.fn().mockResolvedValue(true),
+    };
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+      admin: () => mockAdmin,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+      warmupOnConnect: true,
+    });
+    (bus as any)._kafka = mockKafka;
+
+    await bus.connect();
+
+    expect(mockAdmin.createTopics).toHaveBeenCalled();
+    expect(mockProducer.send).toHaveBeenCalled();
+  });
+});
+```
+
+### warmup times out when the round-trip never completes
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { KafkaEventBus } from "@noddde/kafka";
+
+describe("KafkaEventBus warmup", () => {
+  it("should reject with a timeout error when the handler never observes the warmup event", async () => {
+    const mockProducer = {
+      // Never invokes eachMessage — simulates a broker that swallows the warmup publish.
+      send: vi.fn().mockResolvedValue(undefined),
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+    };
+    const mockConsumer = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      subscribe: vi.fn().mockResolvedValue(undefined),
+      run: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+      commitOffsets: vi.fn().mockResolvedValue(undefined),
+      events: { FETCH_START: "consumer.fetch_start" },
+      on: vi.fn().mockImplementation((_event, cb) => {
+        cb();
+        return () => {};
+      }),
+    };
+    const mockAdmin = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      createTopics: vi.fn().mockResolvedValue(true),
+    };
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+      admin: () => mockAdmin,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+      warmupTimeoutMs: 50,
+    });
+    (bus as any)._kafka = mockKafka;
+
+    await bus.connect();
+
+    await expect(bus.warmup()).rejects.toThrow(/timed out/i);
+  }, 10_000);
 });
 ```

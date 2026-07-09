@@ -12,6 +12,7 @@ import type {
 import { createDrizzleAdapter } from "./builder";
 
 export { DrizzleSnapshotStore, DrizzleOutboxStore } from "./persistence";
+export { DrizzleEventIdempotencyStore } from "./event-idempotency";
 export {
   createDrizzleAdapter,
   type DrizzleAdapterConfig,
