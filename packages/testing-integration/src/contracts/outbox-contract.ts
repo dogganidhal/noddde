@@ -1,8 +1,17 @@
-import type { OutboxStore } from "@noddde/core";
+import type { OutboxEntry, OutboxStore } from "@noddde/core";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
 export interface OutboxContractContext {
   outbox: OutboxStore;
+  /**
+   * Optional escape hatch that returns *every* entry (published and
+   * unpublished) via a raw read. The `OutboxStore` interface has no
+   * "load published" method, so the `deletePublished(olderThan)` coverage
+   * can't observe which published rows survived a cleanup without it.
+   * Adapters wire this to a direct table read. When omitted, the
+   * `deletePublished(olderThan)` cases are skipped for that adapter.
+   */
+  loadAll?: () => Promise<OutboxEntry[]>;
   cleanup?: () => Promise<void>;
 }
 
@@ -131,6 +140,82 @@ export function defineOutboxContract(
       await ctx.outbox.save(entries);
       const batch = await ctx.outbox.loadUnpublished(2);
       expect(batch).toHaveLength(2);
+    });
+
+    // The no-arg `deletePublished()` above deletes every published entry.
+    // The `olderThan` overload adds a temporal predicate that compares the
+    // cutoff against `createdAt` — a path that is dialect-sensitive (TypeORM
+    // `LessThan`, Drizzle `lt(...createdAt, toDbTimestamp(...))`) and, on
+    // MySQL, historically at risk of string-vs-string collation surprises.
+    // These two cases pin the comparison down. They need a raw read of
+    // surviving rows (there's no "load published"), so they defer to the
+    // optional `loadAll` hook and skip when the adapter doesn't provide one.
+    describe("deletePublished(olderThan)", () => {
+      const t1 = new Date("2024-01-01T00:00:00.000Z");
+      const t2 = new Date("2024-01-02T00:00:00.000Z");
+      const t3 = new Date("2024-01-03T00:00:00.000Z");
+      const cutoff = new Date("2024-01-02T12:00:00.000Z");
+
+      it("removes only published entries created before the cutoff", async (t) => {
+        // Skip (not silently pass) when the adapter didn't wire the raw-read
+        // hook — otherwise a forgotten `loadAll` would drop this coverage
+        // while still reporting green.
+        t.skip(!ctx.loadAll, "adapter did not provide loadAll");
+        await ctx.outbox.save([
+          {
+            id: "a",
+            event: { name: "E", payload: {} },
+            createdAt: t1,
+            publishedAt: null,
+          },
+          {
+            id: "b",
+            event: { name: "E", payload: {} },
+            createdAt: t2,
+            publishedAt: null,
+          },
+          {
+            id: "c",
+            event: { name: "E", payload: {} },
+            createdAt: t3,
+            publishedAt: null,
+          },
+        ]);
+        await ctx.outbox.markPublished(["a", "b", "c"]);
+
+        await ctx.outbox.deletePublished(cutoff);
+
+        const remaining = (await ctx.loadAll!()).map((e) => e.id).sort();
+        // a (t1) and b (t2) precede the cutoff → gone. c (t3) survives.
+        expect(remaining).toEqual(["c"]);
+      });
+
+      it("never deletes unpublished entries even when older than the cutoff", async (t) => {
+        t.skip(!ctx.loadAll, "adapter did not provide loadAll");
+        await ctx.outbox.save([
+          {
+            id: "pub-old",
+            event: { name: "E", payload: {} },
+            createdAt: t1,
+            publishedAt: null,
+          },
+          {
+            id: "unpub-old",
+            event: { name: "E", payload: {} },
+            createdAt: t1,
+            publishedAt: null,
+          },
+        ]);
+        // Only the first is published; the second stays pending.
+        await ctx.outbox.markPublished(["pub-old"]);
+
+        // Cutoff well after both entries — the published one is eligible,
+        // the unpublished one must be untouched regardless of its age.
+        await ctx.outbox.deletePublished(t3);
+
+        const remaining = (await ctx.loadAll!()).map((e) => e.id).sort();
+        expect(remaining).toEqual(["unpub-old"]);
+      });
     });
   });
 }

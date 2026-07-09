@@ -2,6 +2,7 @@ import {
   RabbitMQContainer,
   type StartedRabbitMQContainer,
 } from "@testcontainers/rabbitmq";
+import type { StartedNetwork } from "testcontainers";
 
 export interface StartedRabbitMq {
   container: StartedRabbitMQContainer;
@@ -13,10 +14,20 @@ export interface StartedRabbitMq {
 }
 
 export async function startRabbitMq(
-  opts: { image?: string } = {},
+  opts: {
+    image?: string;
+    /** Join a shared network so a Toxiproxy sidecar can reach it by alias. */
+    network?: StartedNetwork;
+    /** In-network hostname aliases (e.g. `["rabbitmq"]`) for proxy upstreams. */
+    networkAliases?: string[];
+  } = {},
 ): Promise<StartedRabbitMq> {
   const image = opts.image ?? "rabbitmq:3.13-management-alpine";
-  const container = await new RabbitMQContainer(image).start();
+  let builder = new RabbitMQContainer(image);
+  if (opts.network) builder = builder.withNetwork(opts.network);
+  if (opts.networkAliases)
+    builder = builder.withNetworkAliases(...opts.networkAliases);
+  const container = await builder.start();
   return {
     container,
     url: container.getAmqpUrl(),

@@ -1,0 +1,71 @@
+---
+title: Supported Payload Shapes
+description: What event and state payloads can safely round-trip through persistence — and how unsupported shapes fail.
+---
+
+Every persistence adapter serializes event payloads and aggregate state to
+JSON before writing them, and parses them back on load. The framework's
+contract is therefore: **payloads must be JSON-serializable values.** Inside
+that boundary, round-trip fidelity is guaranteed and enforced by the shared
+persistence contract (including a `fast-check` property-based sweep over
+arbitrary JSON documents).
+
+This page documents exactly what "JSON-serializable" means here, and how the
+adapters behave at the edges.
+
+## Fully supported
+
+These round-trip byte-for-byte on every adapter and dialect:
+
+- Objects and arrays, arbitrarily nested.
+- Strings, including Unicode and emoji (except MSSQL with the legacy `TEXT`
+  column type — see the [TypeORM adapter](/docs/persistence/typeorm) notes).
+- Numbers, including floating-point values such as `0.1 + 0.2` and the full
+  `double` range up to `Number.MAX_VALUE`. (JavaScript numbers are IEEE-754
+  doubles; JSON preserves them exactly.)
+- `null`.
+- Booleans.
+
+## Unsupported — surfaced as a clear error
+
+These are **not** JSON-serializable. The framework does not silently corrupt
+them; `save()` rejects with an error so the problem is visible immediately:
+
+| Shape             | What happens                                                         |
+| ----------------- | -------------------------------------------------------------------- |
+| `BigInt`          | `JSON.stringify` throws `TypeError`; `save()` rejects.               |
+| Circular refs     | `JSON.stringify` throws `TypeError`; `save()` rejects.               |
+| `undefined` value | Dropped by JSON (standard JS behavior) — model it as `null` instead. |
+
+## Unsupported — silently altered by JSON semantics
+
+These follow standard `JSON.stringify` behavior and are therefore **lost or
+transformed** rather than erroring. Don't put them in payloads:
+
+- `Map` / `Set` → serialize to `{}` (their contents are dropped).
+- `Date` objects → serialize to an ISO string (they don't come back as
+  `Date`). Store ISO strings explicitly if you need dates in a payload.
+- `NaN` / `Infinity` → serialize to `null`.
+- `-0` → comes back as `0`.
+- Functions, symbols → dropped.
+
+## Dialect-specific limits
+
+The contract asserts each adapter either round-trips a value **or** surfaces
+a clear failure — never silent data loss. Known boundaries:
+
+- **NUL bytes (`\u0000`) in strings.** Postgres `text` columns reject them;
+  `jsonb` and other backends may round-trip the escaped form. Where the
+  backend can't store it, `save()` rejects — it is never silently stripped.
+- **Large payloads (~1MB+).** `jsonb` (Postgres), `json` (MySQL, via
+  Drizzle/Prisma), and unbounded `text` hold a megabyte comfortably. A
+  fixed-size `TEXT` column — notably TypeORM on MySQL (64KB) — raises a
+  "Data too long" error rather than truncating. Prefer a `json`/`jsonb`
+  column type for large payloads.
+
+## Recommendation
+
+Keep payloads to plain JSON: objects, arrays, strings, finite numbers,
+booleans, and `null`. If you need richer types (dates, big integers, binary),
+encode them explicitly (ISO strings, decimal strings, base64) at the domain
+boundary. This keeps behavior identical across every adapter and dialect.

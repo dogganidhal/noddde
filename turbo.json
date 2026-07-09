@@ -10,6 +10,7 @@
     "NATS_URL",
     "INTEGRATION",
     "CI",
+    "NODDDE_SLOW_TESTS",
     "TESTCONTAINERS_HOST_OVERRIDE",
     "TESTCONTAINERS_RYUK_DISABLED"
   ],
@@ -31,7 +32,7 @@
     "test:integration": {
       "dependsOn": ["^build"],
       "cache": false,
-      "env": ["INTEGRATION", "CI"]
+      "env": ["INTEGRATION", "CI", "NODDDE_SLOW_TESTS"]
     },
     "typecheck": {
       "dependsOn": ["^build"]

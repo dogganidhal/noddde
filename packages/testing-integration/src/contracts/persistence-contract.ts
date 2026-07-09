@@ -5,6 +5,7 @@ import type {
 } from "@noddde/core";
 import { ConcurrencyError } from "@noddde/core";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import fc from "fast-check";
 
 /**
  * Factory returned to the contract suite for a single test. The factory
@@ -195,6 +196,230 @@ export function definePersistenceContract(
         );
         const tail = await ctx.eventSourced.loadAfterVersion("Order", "o-6", 1);
         expect(tail.map((e) => e.name)).toEqual(["B", "C"]);
+      });
+    });
+
+    describe("concurrency", () => {
+      // The existing optimistic-concurrency tests race two saves
+      // *sequentially* (save, then a second save with a stale
+      // expectedVersion). This exercises the genuinely concurrent path:
+      // two save() calls to the same stream at the same expectedVersion,
+      // fired without awaiting between them. Exactly one must win; the
+      // loser must reject with ConcurrencyError (proving the unique
+      // constraint on (aggregate, version) is what arbitrates, not luck).
+      //
+      // Looped a handful of times because a race only surfaces reliably
+      // under repetition — a single pass can let one call fully commit
+      // before the other reaches the database.
+      it("rejects with ConcurrencyError when two save() calls race on the same stream", async () => {
+        for (let i = 0; i < 10; i++) {
+          const id = `o-race-${i}`;
+          const results = await Promise.allSettled([
+            ctx.eventSourced.save(
+              "Order",
+              id,
+              [{ name: "OrderPlaced", payload: { by: "A" } }],
+              0,
+            ),
+            ctx.eventSourced.save(
+              "Order",
+              id,
+              [{ name: "OrderPlaced", payload: { by: "B" } }],
+              0,
+            ),
+          ]);
+
+          const fulfilled = results.filter((r) => r.status === "fulfilled");
+          const rejected = results.filter(
+            (r): r is PromiseRejectedResult => r.status === "rejected",
+          );
+          expect(fulfilled).toHaveLength(1);
+          expect(rejected).toHaveLength(1);
+          expect(rejected[0]?.reason).toBeInstanceOf(ConcurrencyError);
+
+          // The winner's single event is the only one persisted at v1.
+          const loaded = await ctx.eventSourced.load("Order", id);
+          expect(loaded).toHaveLength(1);
+          expect(loaded[0]?.name).toBe("OrderPlaced");
+        }
+      });
+
+      it("rejects with ConcurrencyError when two state-stored saves race on the same aggregate", async () => {
+        for (let i = 0; i < 10; i++) {
+          const id = `a-race-${i}`;
+          const results = await Promise.allSettled([
+            ctx.stateStored.save("Account", id, { balance: 1 }, 0),
+            ctx.stateStored.save("Account", id, { balance: 2 }, 0),
+          ]);
+
+          const fulfilled = results.filter((r) => r.status === "fulfilled");
+          const rejected = results.filter(
+            (r): r is PromiseRejectedResult => r.status === "rejected",
+          );
+          expect(fulfilled).toHaveLength(1);
+          expect(rejected).toHaveLength(1);
+          expect(rejected[0]?.reason).toBeInstanceOf(ConcurrencyError);
+
+          const loaded = await ctx.stateStored.load("Account", id);
+          expect(loaded?.version).toBe(1);
+        }
+      });
+    });
+
+    // The framework's payload contract is "any JSON-serializable value".
+    // A single hard-coded Unicode case can't prove that; a property-based
+    // sweep over structurally-arbitrary JSON documents can. These tests
+    // also pin down the *boundaries* of the contract — the shapes that are
+    // NOT JSON-serializable (BigInt, circular) must surface a clear error
+    // rather than silently corrupting the stream. See
+    // `docs/content/docs/persistence/payload-shapes.mdx`.
+    describe("JSON payload edge cases", () => {
+      // Strings (and object keys) are drawn explicitly from printable ASCII
+      // (0x20–0x7e). `fc.string()` on its own generates arbitrary Unicode
+      // including control bytes and lone surrogates, which would let this
+      // sweep overlap the explicit NUL / encoding edge-case tests below and
+      // flake per-dialect. Constraining the alphabet keeps the property
+      // dialect-agnostic; the sharp characters get their own dedicated cases.
+      const printableAscii = fc
+        .array(fc.integer({ min: 0x20, max: 0x7e }), { maxLength: 24 })
+        .map((codes) => String.fromCharCode(...codes));
+
+      // Recursive generator of JSON-safe values. Doubles exclude NaN and
+      // Infinity, which `JSON.stringify` turns into `null` (a corruption the
+      // property would otherwise trip over).
+      const jsonSafeValue = fc.letrec<{ value: unknown }>((tie) => ({
+        value: fc.oneof(
+          { depthSize: "small" },
+          fc.constant(null),
+          fc.boolean(),
+          fc.integer(),
+          fc.double({ noNaN: true, noDefaultInfinity: true }),
+          printableAscii,
+          fc.array(tie("value"), { maxLength: 6 }),
+          fc.dictionary(printableAscii, tie("value"), { maxKeys: 6 }),
+        ),
+      })).value;
+
+      it("roundtrips arbitrary JSON-serializable payloads (property-based)", async () => {
+        let n = 0;
+        await fc.assert(
+          fc.asyncProperty(jsonSafeValue, async (value) => {
+            const id = `o-fc-${n++}`;
+            const payload = { value };
+            await ctx.eventSourced.save(
+              "Order",
+              id,
+              [{ name: "E", payload }],
+              0,
+            );
+            const [loaded] = await ctx.eventSourced.load("Order", id);
+            expect(loaded?.payload).toEqual(payload);
+          }),
+          { numRuns: 40 },
+        );
+      });
+
+      it("roundtrips floating-point values without precision loss", async () => {
+        const payload = {
+          classic: 0.1 + 0.2, // 0.30000000000000004
+          maxSafe: Number.MAX_SAFE_INTEGER,
+          tiny: 5e-324,
+          large: 1.7976931348623157e308,
+          negZero: -0,
+        };
+        await ctx.eventSourced.save(
+          "Order",
+          "o-float",
+          [{ name: "E", payload }],
+          0,
+        );
+        const [loaded] = await ctx.eventSourced.load("Order", "o-float");
+        // -0 is not JSON-representable and comes back as 0; assert the rest
+        // survive bit-for-bit.
+        expect(loaded?.payload).toMatchObject({
+          classic: 0.1 + 0.2,
+          maxSafe: Number.MAX_SAFE_INTEGER,
+          tiny: 5e-324,
+          large: 1.7976931348623157e308,
+        });
+      });
+
+      it("stores a large (~1MB) string payload without silently truncating it", async () => {
+        // Backends diverge on capacity: jsonb / json / unbounded text hold a
+        // megabyte fine, but a fixed `TEXT` column (TypeORM on MySQL caps at
+        // 64KB) raises "Data too long". Either is acceptable — a loud error
+        // or a lossless round-trip. What's forbidden is a save that
+        // "succeeds" but silently truncates the payload.
+        const big = "x".repeat(1_000_000);
+        try {
+          await ctx.eventSourced.save(
+            "Order",
+            "o-big",
+            [{ name: "E", payload: { big } }],
+            0,
+          );
+        } catch {
+          // A clear capacity error is fine; nothing should be persisted.
+          expect(await ctx.eventSourced.load("Order", "o-big")).toEqual([]);
+          return;
+        }
+        const [loaded] = await ctx.eventSourced.load("Order", "o-big");
+        expect((loaded?.payload as { big: string }).big).toHaveLength(
+          1_000_000,
+        );
+      });
+
+      it("surfaces a clear error for BigInt payloads instead of corrupting the stream", async () => {
+        await expect(
+          ctx.eventSourced.save(
+            "Order",
+            "o-bigint",
+            // BigInt is not JSON-serializable — JSON.stringify throws.
+            [{ name: "E", payload: { n: 1n } as unknown as object }],
+            0,
+          ),
+        ).rejects.toThrow();
+        // Nothing was partially persisted.
+        expect(await ctx.eventSourced.load("Order", "o-bigint")).toEqual([]);
+      });
+
+      it("surfaces a clear error for circular references", async () => {
+        const circular: Record<string, unknown> = { a: 1 };
+        circular.self = circular;
+        await expect(
+          ctx.eventSourced.save(
+            "Order",
+            "o-circular",
+            [{ name: "E", payload: circular }],
+            0,
+          ),
+        ).rejects.toThrow();
+        expect(await ctx.eventSourced.load("Order", "o-circular")).toEqual([]);
+      });
+
+      it("never silently corrupts a NUL byte embedded in a string payload", async () => {
+        // Build the NUL explicitly so the source file stays free of raw
+        // control bytes. Backends diverge here: Postgres `text` rejects a
+        // NUL outright, some column types round-trip it, others could strip
+        // it. The one outcome the contract forbids is silent corruption —
+        // a save that "succeeds" but loses the byte. So: either the save
+        // rejects (a clear, catchable failure) or the value comes back
+        // byte-for-byte.
+        const original = `before${String.fromCharCode(0)}after`;
+        try {
+          await ctx.eventSourced.save(
+            "Order",
+            "o-nul",
+            [{ name: "E", payload: { s: original } }],
+            0,
+          );
+        } catch {
+          // Rejecting is an acceptable, non-silent failure mode.
+          expect(await ctx.eventSourced.load("Order", "o-nul")).toEqual([]);
+          return;
+        }
+        const [loaded] = await ctx.eventSourced.load("Order", "o-nul");
+        expect((loaded?.payload as { s: string }).s).toBe(original);
       });
     });
 
