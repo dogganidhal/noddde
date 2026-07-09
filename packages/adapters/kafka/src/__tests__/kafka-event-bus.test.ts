@@ -472,6 +472,32 @@ describe("KafkaEventBus", () => {
     expect((bus as any)._subscribedTopics.has("NewEvent")).toBe(false);
   });
 
+  it("should throw when on() is called for a new topic while connect() is in progress", async () => {
+    const mockProducer = makeMockProducer();
+    const mockConsumer = makeMockConsumer();
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+    (bus as any)._kafka = mockKafka;
+
+    // Simulate an in-flight connect(): _connecting is set but _connected is
+    // still false. connect()'s subscribe loop may already have run, so a new
+    // topic registered now could never get a subscription — must throw.
+    (bus as any)._connecting = new Promise<void>(() => {});
+
+    expect(() => bus.on("NewEvent", vi.fn())).toThrow(
+      /after connect\(\) was started/,
+    );
+    expect((bus as any)._subscribedTopics.has("NewEvent")).toBe(false);
+  });
+
   it("should allow a second handler for an already-subscribed topic after connect()", async () => {
     const mockProducer = makeMockProducer();
     const mockConsumer = makeMockConsumer();

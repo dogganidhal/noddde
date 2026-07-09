@@ -52,10 +52,11 @@ running`). `KafkaEventBus` therefore only establishes subscriptions during
 - **Register all handlers with `on()` before calling `connect()`.** When you
   use `wireDomain()`, this happens automatically — it wires every handler and
   then connects the bus for you, so you should not call `connect()` yourself.
-- Calling `on()` **after** `connect()` for an event whose topic is not already
-  subscribed **throws** immediately, rather than silently dropping the
-  handler's messages. Registering an additional handler for an
-  already-subscribed event is always allowed (in-process fan-out).
+- Calling `on()` once `connect()` has started — whether it has resolved or is
+  still in progress — for an event whose topic is not already subscribed
+  **throws** immediately, rather than silently dropping the handler's messages.
+  Registering an additional handler for an already-subscribed event is always
+  allowed (in-process fan-out).
 
 If you construct the bus manually, connect only after all `on()` calls:
 

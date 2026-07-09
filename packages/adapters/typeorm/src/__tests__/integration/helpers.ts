@@ -36,7 +36,16 @@ export async function truncateAll(ds: DataSource): Promise<void> {
     "noddde_events",
   ]) {
     const meta = ds.entityMetadatas.find((m) => m.tableName === table);
-    if (meta) await ds.getRepository(meta.target).clear();
+    // Fail loudly rather than silently skipping: a missing table means the
+    // entities weren't registered, and quietly not clearing it would make
+    // tests order-dependent / flaky instead of surfacing the misconfiguration.
+    if (!meta) {
+      throw new Error(
+        `truncateAll: no entity registered for table "${table}" — ` +
+          "register the noddde entities on the DataSource.",
+      );
+    }
+    await ds.getRepository(meta.target).clear();
   }
 }
 
