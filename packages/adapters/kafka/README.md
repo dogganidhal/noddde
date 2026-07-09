@@ -67,12 +67,21 @@ const eventBus = new KafkaEventBus({
 This is a one-shot cold-start cost, not an ongoing issue: once a topic/partition has been touched once, later publishes are fast. If your application (or its tests) can't tolerate a slow first delivery, warm the cluster up explicitly at startup with a throwaway publish/consume cycle before serving traffic:
 
 ```typescript
+import { randomUUID } from "node:crypto";
 import { Kafka } from "kafkajs";
 import { KafkaEventBus } from "@noddde/kafka";
 
-async function warmupKafka(brokers: string[]) {
-  const warmupTopic = "__warmup";
-  const admin = new Kafka({ brokers, clientId: "warmup-admin" }).admin();
+async function warmupKafka(brokers: string[], timeoutMs = 60_000) {
+  // Unique per invocation: a shared topic/groupId/clientId across multiple
+  // instances or rolling restarts risks one instance's warmup message being
+  // consumed by another, or triggering consumer-group rebalances.
+  const suffix = randomUUID();
+  const warmupTopic = `__warmup_${suffix}`;
+
+  const admin = new Kafka({
+    brokers,
+    clientId: `warmup-admin-${suffix}`,
+  }).admin();
   await admin.connect();
   await admin.createTopics({
     waitForLeaders: true,
@@ -82,8 +91,8 @@ async function warmupKafka(brokers: string[]) {
 
   const warmupBus = new KafkaEventBus({
     brokers,
-    clientId: "warmup",
-    groupId: "warmup-group",
+    clientId: `warmup-${suffix}`,
+    groupId: `warmup-group-${suffix}`,
   });
   let warmedUp = false;
   warmupBus.on(warmupTopic, async () => {
@@ -91,15 +100,22 @@ async function warmupKafka(brokers: string[]) {
   });
   await warmupBus.connect();
 
-  while (!warmedUp) {
-    await warmupBus.dispatch({ name: warmupTopic, payload: {} });
-    await new Promise((r) => setTimeout(r, 1000));
+  try {
+    const deadline = Date.now() + timeoutMs;
+    while (!warmedUp) {
+      if (Date.now() > deadline) {
+        throw new Error(`Kafka warmup timed out after ${timeoutMs}ms`);
+      }
+      await warmupBus.dispatch({ name: warmupTopic, payload: {} });
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  } finally {
+    await warmupBus.close();
   }
-  await warmupBus.close();
 }
 ```
 
-Run this once at process startup before wiring the real `KafkaEventBus`/domain. The `@noddde/kafka` integration test suite uses the same pattern in `beforeAll` to avoid flaking on a cold CI cluster.
+Run this once at process startup before wiring the real `KafkaEventBus`/domain. The `@noddde/kafka` integration test suite uses the same pattern (unique per-test topic, bounded `waitFor` timeout) in `beforeAll` to avoid flaking on a cold CI cluster.
 
 ## Peer Dependencies
 
