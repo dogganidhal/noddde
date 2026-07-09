@@ -66,14 +66,16 @@ defineOutboxContract("typeorm/mssql", () => ({
       (m) => m.tableName === "noddde_outbox",
     );
     if (!meta) throw new Error("noddde_outbox entity not registered");
-    const rows = await ds.getRepository<{
-      id: string;
-      event: unknown;
-      aggregateName: string | null;
-      aggregateId: string | null;
-      createdAt: Date | string;
-      publishedAt: Date | string | null;
-    }>(meta.target).find();
+    const rows = await ds
+      .getRepository<{
+        id: string;
+        event: unknown;
+        aggregateName: string | null;
+        aggregateId: string | null;
+        createdAt: Date | string;
+        publishedAt: Date | string | null;
+      }>(meta.target)
+      .find();
     return rows.map((r) => ({
       id: r.id,
       event: typeof r.event === "string" ? JSON.parse(r.event) : r.event,
