@@ -169,17 +169,21 @@ describe("NatsEventBus inbox subject benchmark (robustness §3.3)", () => {
     const heapDeltaMb = (memAfter.heapUsed - memBefore.heapUsed) / 1024 / 1024;
     const rssDeltaMb = (memAfter.rss - memBefore.rss) / 1024 / 1024;
 
-    // Each subscription gets exactly one inbox subject (one per registered
-    // event name) — this is the quantity the issue is concerned about.
-    const inboxCount = eventNames.length;
+    // This is the subscription count, not a live measurement of NATS
+    // server-side inbox subjects — the adapter creates exactly one inbox
+    // subject per subscription by design (see nats-event-bus.spec.md,
+    // Behavioral Requirement 6b), so the two numbers are equal, but this
+    // variable measures what we actually registered, not what the server
+    // reports.
+    const subscriptionCount = eventNames.length;
 
     // eslint-disable-next-line no-console -- benchmark test, not library code; result must be visible in CI/local logs.
     console.log(
-      `[nats inbox benchmark] subscriptions=${inboxCount} connectMs=${connectElapsedMs} heapDeltaMb=${heapDeltaMb.toFixed(2)} rssDeltaMb=${rssDeltaMb.toFixed(2)}`,
+      `[nats inbox benchmark] subscriptions=${subscriptionCount} connectMs=${connectElapsedMs} heapDeltaMb=${heapDeltaMb.toFixed(2)} rssDeltaMb=${rssDeltaMb.toFixed(2)}`,
     );
 
     // Sanity: every subscription actually registered (no silent drops).
-    expect(inboxCount).toBe(SUBSCRIPTION_COUNT);
+    expect(subscriptionCount).toBe(SUBSCRIPTION_COUNT);
     // A few KB per subscription (inbox subject string + consumer/subscription
     // bookkeeping) is expected; several hundred bytes-per-sub would indicate
     // no problem, tens of MB total would indicate a real one.

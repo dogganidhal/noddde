@@ -44,7 +44,14 @@ export class PrismaEventIdempotencyStore implements EventIdempotencyStore {
       this.ttlMs != null &&
       Date.now() - record.processedAt.getTime() > this.ttlMs
     ) {
-      await executor.nodddeEventIdempotencyRecord.delete({ where: { key } });
+      // deleteMany, not delete: a concurrent hasProcessed() call or a
+      // removeExpired() sweep may have already removed this row between
+      // the findUnique above and here. delete() throws P2025 (record not
+      // found) in that case; deleteMany() is a no-op, which is the
+      // correct outcome — the record is gone either way.
+      await executor.nodddeEventIdempotencyRecord.deleteMany({
+        where: { key },
+      });
       return false;
     }
 

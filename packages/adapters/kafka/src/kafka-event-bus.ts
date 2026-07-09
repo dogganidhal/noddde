@@ -227,7 +227,12 @@ export class KafkaEventBus implements EventBus, Connectable {
     } finally {
       await admin.disconnect();
     }
+    // Append rather than overwrite, consistent with on()'s registry
+    // semantics — a collision with a user-registered handler for this
+    // (extremely unlikely) synthetic event name must not silently drop it.
+    const existingHandlers = this._handlers.get(this._warmupEventName) ?? [];
     this._handlers.set(this._warmupEventName, [
+      ...existingHandlers,
       async () => {
         for (const resolveWaiter of this._warmupWaiters) {
           resolveWaiter();
