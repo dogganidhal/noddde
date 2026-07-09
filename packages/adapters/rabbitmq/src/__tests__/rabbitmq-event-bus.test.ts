@@ -189,6 +189,85 @@ describe("RabbitMqEventBus", () => {
     );
     // Not transient: must not burn through the configured retry attempts.
     expect(mockChannel.assertExchange).toHaveBeenCalledTimes(1);
+    // The connection opened this attempt must be closed, not leaked.
+    expect(mockConnection.close).toHaveBeenCalledTimes(1);
+    // Reconnection handlers are only registered after setup succeeds, so
+    // this cleanup close() can't spuriously trigger _handleUnexpectedClose().
+    expect(mockConnection.on).not.toHaveBeenCalled();
+  });
+
+  it("does not misclassify a non-type exchange-argument PRECONDITION_FAILED (e.g. durable) as an exchangeType mismatch", async () => {
+    const mockChannel = {
+      assertExchange: vi
+        .fn()
+        .mockRejectedValue(
+          new Error(
+            "Operation failed: ExchangeDeclare; 406 (PRECONDITION_FAILED) with message " +
+              "\"PRECONDITION_FAILED - inequivalent arg 'durable' for exchange 'my-domain-events' in vhost '/': received 'false' but current is 'true'\"",
+          ),
+        ),
+      prefetch: vi.fn(),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    const mockConnection = {
+      createConfirmChannel: vi.fn().mockResolvedValue(mockChannel),
+      on: vi.fn(),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const amqplib = await import("amqplib");
+    (amqplib.default.connect as ReturnType<typeof vi.fn>).mockResolvedValue(
+      mockConnection,
+    );
+
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      exchangeName: "my-domain-events",
+      resilience: { maxAttempts: 3, initialDelayMs: 1, maxDelayMs: 1 },
+    });
+
+    // A `durable` mismatch is a real (if different) footgun, but not the
+    // "sticky exchangeType" case — it must not get that specific guidance,
+    // and must go through the normal retry path.
+    let caught: Error | undefined;
+    try {
+      await bus.connect();
+    } catch (error) {
+      caught = error as Error;
+    }
+    expect(caught?.message).not.toMatch(/exchangeType after deployment/i);
+    expect(mockChannel.assertExchange).toHaveBeenCalledTimes(3);
+  });
+
+  it("closes the connection opened during a failed attempt instead of leaking it", async () => {
+    const mockChannel = {
+      assertExchange: vi.fn().mockResolvedValue(undefined),
+      prefetch: vi.fn().mockRejectedValue(new Error("transient failure")),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    const mockConnection = {
+      createConfirmChannel: vi.fn().mockResolvedValue(mockChannel),
+      on: vi.fn(),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const amqplib = await import("amqplib");
+    (amqplib.default.connect as ReturnType<typeof vi.fn>).mockResolvedValue(
+      mockConnection,
+    );
+
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      resilience: { maxAttempts: 2, initialDelayMs: 1, maxDelayMs: 1 },
+    });
+
+    await expect(bus.connect()).rejects.toThrow("transient failure");
+
+    // Every failed attempt opens its own connection — each must be closed.
+    expect(mockConnection.close).toHaveBeenCalledTimes(2);
+    // Handlers are never registered since setup never succeeded on any
+    // attempt, so the close() calls above can't trigger a reconnection loop.
+    expect(mockConnection.on).not.toHaveBeenCalled();
   });
 
   it("does not misclassify a queue-argument PRECONDITION_FAILED as an exchangeType mismatch", async () => {
