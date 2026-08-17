@@ -35,6 +35,15 @@ function makeMockProducer() {
   };
 }
 
+/** Builds a minimal mock admin client for topic-provisioning tests. */
+function makeMockAdmin() {
+  return {
+    connect: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn().mockResolvedValue(undefined),
+    createTopics: vi.fn().mockResolvedValue(true),
+  };
+}
+
 /**
  * Builds a mock Kafka client for `warmup()` tests. Unlike `makeMockConsumer`
  * / `makeMockProducer`, the producer's `send` here synchronously feeds the
@@ -289,9 +298,11 @@ describe("KafkaEventBus", () => {
   it("should disconnect and clear handlers on close", async () => {
     const mockProducer = makeMockProducer();
     const mockConsumer = makeMockConsumer();
+    const mockAdmin = makeMockAdmin();
     const mockKafka = {
       producer: () => mockProducer,
       consumer: () => mockConsumer,
+      admin: () => mockAdmin,
     };
 
     const bus = new KafkaEventBus({
@@ -449,9 +460,11 @@ describe("KafkaEventBus", () => {
         capturedEachMessage = eachMessage;
       }),
     };
+    const mockAdmin = makeMockAdmin();
     const mockKafka = {
       producer: () => mockProducer,
       consumer: () => mockConsumer,
+      admin: () => mockAdmin,
     };
 
     const bus = new KafkaEventBus({
@@ -575,9 +588,11 @@ describe("KafkaEventBus", () => {
   it("should allow a second handler for an already-subscribed topic after connect()", async () => {
     const mockProducer = makeMockProducer();
     const mockConsumer = makeMockConsumer();
+    const mockAdmin = makeMockAdmin();
     const mockKafka = {
       producer: () => mockProducer,
       consumer: () => mockConsumer,
+      admin: () => mockAdmin,
     };
 
     const bus = new KafkaEventBus({
@@ -808,9 +823,11 @@ describe("KafkaEventBus error isolation", () => {
         return () => {};
       }),
     };
+    const mockAdmin = makeMockAdmin();
     const mockKafka = {
       producer: () => mockProducer,
       consumer: () => mockConsumer,
+      admin: () => mockAdmin,
     };
 
     const bus = new KafkaEventBus({
@@ -827,11 +844,17 @@ describe("KafkaEventBus error isolation", () => {
 
     await bus.connect();
 
+    // Below the retry cap (1st attempt, default cap is 5), the legacy
+    // behavior is unchanged: re-throw, don't commit.
     await expect(
       (bus as any)._handleMessage(
         "E",
         JSON.stringify({ name: "E", payload: {} }),
-        "topic:0:42",
+        {
+          topic: "topic",
+          partition: 0,
+          offset: "42",
+        },
       ),
     ).rejects.toThrow();
 
@@ -956,5 +979,401 @@ describe("KafkaEventBus warmup", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// ### connect() provisions topics for registered handlers
+describe("KafkaEventBus topic provisioning", () => {
+  it("should provision the topic for every event registered before connect(), using topicPartitions", async () => {
+    const mockProducer = makeMockProducer();
+    const mockConsumer = makeMockConsumer();
+    const mockAdmin = makeMockAdmin();
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+      admin: () => mockAdmin,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+      topicPartitions: 7,
+    });
+    (bus as any)._kafka = mockKafka;
+
+    bus.on("AccountCreated", vi.fn());
+    bus.on("OrderPlaced", vi.fn());
+    await bus.connect();
+
+    expect(mockAdmin.createTopics).toHaveBeenCalledWith(
+      expect.objectContaining({
+        waitForLeaders: true,
+        topics: expect.arrayContaining([
+          { topic: "AccountCreated", numPartitions: 7 },
+          { topic: "OrderPlaced", numPartitions: 7 },
+        ]),
+      }),
+    );
+    expect(mockAdmin.connect).toHaveBeenCalledTimes(1);
+    expect(mockAdmin.disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("should not call admin.createTopics when no handlers are registered before connect()", async () => {
+    const mockProducer = makeMockProducer();
+    const mockConsumer = makeMockConsumer();
+    const mockAdmin = makeMockAdmin();
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+      admin: () => mockAdmin,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+    (bus as any)._kafka = mockKafka;
+
+    await bus.connect();
+
+    expect(mockAdmin.createTopics).not.toHaveBeenCalled();
+  });
+
+  it("should default topicPartitions to 3 when not configured", async () => {
+    const mockProducer = makeMockProducer();
+    const mockConsumer = makeMockConsumer();
+    const mockAdmin = makeMockAdmin();
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+      admin: () => mockAdmin,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+    (bus as any)._kafka = mockKafka;
+
+    bus.on("AccountCreated", vi.fn());
+    await bus.connect();
+
+    expect(mockAdmin.createTopics).toHaveBeenCalledWith(
+      expect.objectContaining({
+        topics: [{ topic: "AccountCreated", numPartitions: 3 }],
+      }),
+    );
+  });
+});
+
+// ### wire format carries a versioned content-type header
+describe("KafkaEventBus wire format", () => {
+  it("should publish every dispatched message with the versioned content-type header", async () => {
+    const mockProducer = makeMockProducer();
+    const mockConsumer = makeMockConsumer();
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+    (bus as any)._kafka = mockKafka;
+
+    await bus.connect();
+    await bus.dispatch({ name: "AccountCreated", payload: { id: "acc-1" } });
+
+    expect(mockProducer.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: [
+          expect.objectContaining({
+            headers: {
+              "content-type": "application/vnd.noddde.event+json; version=1",
+            },
+          }),
+        ],
+      }),
+    );
+  });
+});
+
+// ### dead-letter queue: exhausted retries are parked, not discarded
+describe("KafkaEventBus dead letter queue", () => {
+  it("should park a message to its DLQ topic once the retry cap is exceeded, then allow the offset to commit", async () => {
+    const mockProducer = makeMockProducer();
+    const mockConsumer = makeMockConsumer();
+    const mockAdmin = makeMockAdmin();
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+      admin: () => mockAdmin,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+      resilience: { maxRetries: 2 },
+    });
+    (bus as any)._kafka = mockKafka;
+
+    bus.on("E", async () => {
+      throw new Error("boom");
+    });
+    await bus.connect();
+
+    const rawValue = JSON.stringify({ name: "E", payload: { n: 1 } });
+    const location = { topic: "E", partition: 0, offset: "10" };
+
+    // Attempts 1 and 2 stay within the cap: re-thrown, no park.
+    await expect(
+      (bus as any)._handleMessage("E", rawValue, location),
+    ).rejects.toThrow("boom");
+    await expect(
+      (bus as any)._handleMessage("E", rawValue, location),
+    ).rejects.toThrow("boom");
+    expect(mockProducer.send).not.toHaveBeenCalledWith(
+      expect.objectContaining({ topic: "E.dlq" }),
+    );
+
+    // Attempt 3 exceeds the cap of 2: parked, resolves instead of throwing.
+    await expect(
+      (bus as any)._handleMessage("E", rawValue, location),
+    ).resolves.toBeUndefined();
+
+    expect(mockProducer.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        topic: "E.dlq",
+        messages: [
+          expect.objectContaining({
+            value: rawValue,
+            headers: expect.objectContaining({
+              "x-noddde-dlq-error": "boom",
+              "x-noddde-dlq-attempts": "3",
+              "x-noddde-dlq-original-topic": "E",
+              "x-noddde-dlq-original-partition": "0",
+              "x-noddde-dlq-original-offset": "10",
+            }),
+          }),
+        ],
+      }),
+    );
+    expect(mockAdmin.createTopics).toHaveBeenCalledWith(
+      expect.objectContaining({
+        topics: expect.arrayContaining([
+          expect.objectContaining({ topic: "E.dlq" }),
+        ]),
+      }),
+    );
+  });
+
+  it("should use a configurable DLQ topic suffix", async () => {
+    const mockProducer = makeMockProducer();
+    const mockConsumer = makeMockConsumer();
+    const mockAdmin = makeMockAdmin();
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+      admin: () => mockAdmin,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+      resilience: { maxRetries: 0 },
+      dlqTopicSuffix: ".parked",
+    });
+    (bus as any)._kafka = mockKafka;
+    bus.on("E", async () => {
+      throw new Error("boom");
+    });
+    await bus.connect();
+
+    await (bus as any)._handleMessage(
+      "E",
+      JSON.stringify({ name: "E", payload: {} }),
+      { topic: "E", partition: 0, offset: "0" },
+    );
+
+    expect(mockProducer.send).toHaveBeenCalledWith(
+      expect.objectContaining({ topic: "E.parked" }),
+    );
+  });
+
+  it("should default the retry cap to 5 when resilience.maxRetries is not configured", async () => {
+    const mockProducer = makeMockProducer();
+    const mockConsumer = makeMockConsumer();
+    const mockAdmin = makeMockAdmin();
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+      admin: () => mockAdmin,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+    (bus as any)._kafka = mockKafka;
+    bus.on("E", async () => {
+      throw new Error("boom");
+    });
+    await bus.connect();
+
+    const rawValue = JSON.stringify({ name: "E", payload: {} });
+    const location = { topic: "E", partition: 0, offset: "0" };
+
+    for (let i = 0; i < 5; i++) {
+      await expect(
+        (bus as any)._handleMessage("E", rawValue, location),
+      ).rejects.toThrow("boom");
+    }
+    // 6th attempt exceeds the default cap of 5.
+    await expect(
+      (bus as any)._handleMessage("E", rawValue, location),
+    ).resolves.toBeUndefined();
+    expect(mockProducer.send).toHaveBeenCalledWith(
+      expect.objectContaining({ topic: "E.dlq" }),
+    );
+  });
+
+  it("should park a poison (unparseable) message to the DLQ when its location is known", async () => {
+    const mockProducer = makeMockProducer();
+    const mockConsumer = makeMockConsumer();
+    const mockAdmin = makeMockAdmin();
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+      admin: () => mockAdmin,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+    (bus as any)._kafka = mockKafka;
+    bus.on("E", vi.fn());
+    await bus.connect();
+
+    await (bus as any)._handleMessage("E", "not valid json {{{", {
+      topic: "E",
+      partition: 0,
+      offset: "5",
+    });
+
+    expect(mockProducer.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        topic: "E.dlq",
+        messages: [
+          expect.objectContaining({
+            value: "not valid json {{{",
+            headers: expect.objectContaining({ "x-noddde-dlq-attempts": "1" }),
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("should fall back to re-throwing the original error when the DLQ publish itself fails", async () => {
+    const mockProducer = {
+      ...makeMockProducer(),
+      send: vi.fn().mockRejectedValue(new Error("broker unreachable")),
+    };
+    const mockConsumer = makeMockConsumer();
+    const mockAdmin = makeMockAdmin();
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+      admin: () => mockAdmin,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+      resilience: { maxRetries: 0 },
+    });
+    (bus as any)._kafka = mockKafka;
+    bus.on("E", async () => {
+      throw new Error("boom");
+    });
+    await bus.connect();
+
+    // maxRetries: 0 means attempt 1 already exceeds the cap, so parking is
+    // attempted immediately; the DLQ publish rejects, so the original
+    // handler error is re-thrown instead (offset stays uncommitted).
+    await expect(
+      (bus as any)._handleMessage(
+        "E",
+        JSON.stringify({ name: "E", payload: {} }),
+        { topic: "E", partition: 0, offset: "0" },
+      ),
+    ).rejects.toThrow("boom");
+  });
+});
+
+// ### head-of-line blocking: a failing message on one topic doesn't block another
+describe("KafkaEventBus cross-topic isolation", () => {
+  it("should let topic B keep making progress after topic A's message exhausts retries and is parked", async () => {
+    const mockProducer = makeMockProducer();
+    const mockConsumer = makeMockConsumer();
+    const mockAdmin = makeMockAdmin();
+    const mockKafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+      admin: () => mockAdmin,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+      resilience: { maxRetries: 0 },
+    });
+    (bus as any)._kafka = mockKafka;
+
+    const topicBReceived: unknown[] = [];
+    bus.on("TopicA", async () => {
+      throw new Error("always fails");
+    });
+    bus.on("TopicB", async (event) => {
+      topicBReceived.push(event.payload);
+    });
+    await bus.connect();
+
+    // TopicA's message exhausts its (zero) retry budget on the first
+    // attempt and is parked — _handleMessage resolves rather than
+    // throwing, so a caller looping over messages (i.e. the shared
+    // eachMessage callback) is never interrupted by it.
+    await expect(
+      (bus as any)._handleMessage(
+        "TopicA",
+        JSON.stringify({ name: "TopicA", payload: {} }),
+        { topic: "TopicA", partition: 0, offset: "0" },
+      ),
+    ).resolves.toBeUndefined();
+
+    // TopicB's messages process normally, interleaved with TopicA's.
+    for (let i = 0; i < 3; i++) {
+      await (bus as any)._handleMessage(
+        "TopicB",
+        JSON.stringify({ name: "TopicB", payload: { n: i } }),
+        { topic: "TopicB", partition: 0, offset: String(i) },
+      );
+    }
+
+    expect(topicBReceived).toEqual([{ n: 0 }, { n: 1 }, { n: 2 }]);
+    expect(mockProducer.send).toHaveBeenCalledWith(
+      expect.objectContaining({ topic: "TopicA.dlq" }),
+    );
   });
 });
