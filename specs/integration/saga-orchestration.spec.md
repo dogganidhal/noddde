@@ -15,9 +15,7 @@ depends_on:
   - core/engine/implementations/in-memory-saga-persistence
   - core/edd/event-bus
   - core/cqrs/command/command-bus
-docs:
-  - sagas/overview.mdx
-  - patterns/order-fulfillment.mdx
+docs: [process-managers/sagas.mdx]
 ---
 
 # Saga Orchestration

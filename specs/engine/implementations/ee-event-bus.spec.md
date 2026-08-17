@@ -2,12 +2,11 @@
 title: "EventEmitterEventBus"
 module: engine/implementations/ee-event-bus
 source_file: packages/engine/src/implementations/ee-event-bus.ts
-status: ready
+status: implemented
 exports: [EventEmitterEventBus, EventEmitterEventBusConfig]
 depends_on:
   [edd/event-bus, edd/event, infrastructure/closeable, infrastructure/logger]
-docs:
-  - infrastructure/in-memory-implementations.mdx
+docs: [event-bus/in-memory.mdx]
 ---
 
 # EventEmitterEventBus

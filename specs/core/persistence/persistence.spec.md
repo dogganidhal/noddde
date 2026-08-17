@@ -19,8 +19,7 @@ exports:
     everyNEvents,
   ]
 depends_on: [id, edd/event]
-docs:
-  - domain-configuration/persistence.mdx
+docs: [running/persistence.mdx]
 ---
 
 # Persistence Interface Contracts

@@ -5,8 +5,7 @@ source_file: packages/core/src/edd/event-metadata.ts
 status: implemented
 exports: [EventMetadata]
 depends_on: [id]
-docs:
-  - events/event-metadata.mdx
+docs: [core-concepts/messages-and-types.mdx]
 ---
 
 # EventMetadata

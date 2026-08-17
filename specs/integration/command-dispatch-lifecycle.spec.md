@@ -14,8 +14,7 @@ depends_on:
   - core/engine/domain
   - core/engine/implementations/in-memory-aggregate-persistence
   - core/edd/event-bus
-docs:
-  - commands/dispatching.mdx
+docs: [modeling/routing-and-dispatch.mdx]
 ---
 
 # Command Dispatch Lifecycle

@@ -1,5 +1,3 @@
-/* eslint-disable no-unused-vars */
-
 /**
  * Interface for background processes that can be drained during shutdown.
  * Examples: outbox relay, event replay workers, scheduled cleanup jobs.

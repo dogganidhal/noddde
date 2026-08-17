@@ -5,8 +5,7 @@ source_file: packages/engine/src/implementations/in-memory-saga-persistence.ts
 status: implemented
 exports: [InMemorySagaPersistence]
 depends_on: [engine/domain]
-docs:
-  - infrastructure/in-memory-implementations.mdx
+docs: [running/persistence.mdx]
 ---
 
 # InMemorySagaPersistence

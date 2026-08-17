@@ -141,7 +141,7 @@ describe("generateDomain", () => {
     const domainPath = path.join(tmpDir, "bank-account/domain/domain.ts");
     const content = await readFile(domainPath, "utf-8");
     expect(content).toContain("defineDomain");
-    expect(content).toContain("BankAccountInfrastructure");
+    expect(content).toContain("export const definition");
     expect(content).toContain("BankAccount");
     expect(content).toContain("BankAccountProjection");
   });
@@ -154,7 +154,7 @@ describe("generateDomain", () => {
     expect(content).toContain("wireDomain");
     expect(content).toContain("InMemoryCommandBus");
     expect(content).toContain("EventEmitterEventBus");
-    expect(content).toContain("bankAccountDomain");
+    expect(content).toContain("definition");
   });
 
   it("does not overwrite existing files", async () => {
@@ -175,7 +175,7 @@ describe("generateDomain", () => {
     const domainPath = path.join(tmpDir, "bank-account/domain/domain.ts");
     const content = await readFile(domainPath, "utf-8");
     expect(content).toContain("BankAccount");
-    expect(content).toContain("bankAccountDomain");
+    expect(content).toContain("export const definition");
   });
 
   it("rejects invalid names", async () => {

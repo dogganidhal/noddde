@@ -5,8 +5,7 @@ source_file: packages/core/src/cqrs/command/command.ts
 status: implemented
 exports: [Command, AggregateCommand, StandaloneCommand, DefineCommands]
 depends_on: [id]
-docs:
-  - commands/defining-commands.mdx
+docs: [core-concepts/messages-and-types.mdx]
 ---
 
 # Command, AggregateCommand, StandaloneCommand & DefineCommands

@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import type { Closeable } from "../infrastructure/closeable";
 import type { Event } from "./event";
 

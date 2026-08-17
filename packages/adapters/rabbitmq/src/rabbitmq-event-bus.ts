@@ -8,8 +8,12 @@ import type {
 import type { Event, Instrumentation } from "@noddde/core";
 import { NoopInstrumentation } from "@noddde/core";
 import { NodddeLogger } from "@noddde/engine";
-import type { ChannelModel, ConfirmChannel } from "amqplib";
+import type { ChannelModel, ConfirmChannel, ConsumeMessage } from "amqplib";
 import amqplib from "amqplib";
+import { createHash } from "node:crypto";
+
+/** The versioned, stable wire-format content type for published events. */
+const EVENT_CONTENT_TYPE = "application/vnd.noddde.event+json; version=1";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -64,10 +68,13 @@ export interface RabbitMqEventBusConfig {
    */
   exchangeType?: "topic" | "fanout";
   /**
-   * Queue name prefix for consumer queues (default: "noddde").
-   * Queues are named "${queuePrefix}.${eventName}".
+   * Queue name prefix for consumer queues. **Required** — two different
+   * services sharing a prefix become competing consumers on identical
+   * queues and each silently loses roughly half its events. Queues are
+   * named "${queuePrefix}.${eventName}". Matches Kafka's required
+   * `groupId` and NATS's required `consumerGroup`.
    */
-  queuePrefix?: string;
+  queuePrefix: string;
   /**
    * Number of unacknowledged messages the broker may send to this consumer (default: 10).
    * Provides backpressure control via channel.prefetch().
@@ -102,7 +109,10 @@ export interface RabbitMqEventBusConfig {
  *
  * @example
  * ```ts
- * const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+ * const bus = new RabbitMqEventBus({
+ *   url: "amqp://localhost:5672",
+ *   queuePrefix: "my-service",
+ * });
  * await bus.connect();
  * bus.on("AccountCreated", async (event) => { ... });
  * ```
@@ -158,15 +168,32 @@ export class RabbitMqEventBus implements EventBus, Connectable {
    */
   private readonly _deliveryCounts: Map<string, number> = new Map();
 
+  /**
+   * Per-aggregateId promise chains used to serialize handler invocation for
+   * deliveries that share `event.metadata.aggregateId` within this
+   * consumer, even though `channel.consume` may invoke its callback
+   * concurrently up to `prefetchCount`. Entries are removed once a chain
+   * drains so this map never grows unboundedly.
+   * @internal
+   */
+  private readonly _aggregateChains: Map<string, Promise<void>> = new Map();
+
+  /** Dead-letter exchange name, asserted only when `resilience.maxRetries` is configured. */
+  private readonly _dlxName: string;
+  /** Dead-letter queue name, bound to `_dlxName`. */
+  private readonly _dlqName: string;
+
   constructor(config: RabbitMqEventBusConfig) {
     this._config = config;
     this._url = config.url;
     this._exchangeName = config.exchangeName ?? "noddde.events";
     this._exchangeType = config.exchangeType ?? "topic";
-    this._queuePrefix = config.queuePrefix ?? "noddde";
+    this._queuePrefix = config.queuePrefix;
     this._prefetchCount = config.prefetchCount ?? 10;
     this._logger = config.logger ?? new NodddeLogger("warn", "noddde:rabbitmq");
     this._instrumentation = config.instrumentation ?? new NoopInstrumentation();
+    this._dlxName = `${this._exchangeName}.dlx`;
+    this._dlqName = `${this._queuePrefix}.dlq`;
   }
 
   /**
@@ -241,6 +268,19 @@ export class RabbitMqEventBus implements EventBus, Connectable {
           this._logger.warn("Connection error", { error: String(err.message) });
         });
         connection.on("close", () => {
+          if (!this._closed) {
+            this._handleUnexpectedClose();
+          }
+        });
+        // A channel can be killed independently of the connection (e.g. the
+        // broker closes it with PRECONDITION_FAILED after an ack/nack on a
+        // stale channel post-reconnect). Only connection-level close would
+        // otherwise trigger reconnection, silently wedging every consumer
+        // on a dead channel while `_connected` stays true.
+        channel.on("error", (err: Error) => {
+          this._logger.warn("Channel error", { error: String(err.message) });
+        });
+        channel.on("close", () => {
           if (!this._closed) {
             this._handleUnexpectedClose();
           }
@@ -331,15 +371,23 @@ export class RabbitMqEventBus implements EventBus, Connectable {
         });
 
         this._channel = await this._connection.createConfirmChannel();
+        const channel = this._channel;
 
         // Set prefetch for backpressure control
-        await this._channel.prefetch(this._prefetchCount);
+        await channel.prefetch(this._prefetchCount);
 
-        await this._channel.assertExchange(
-          this._exchangeName,
-          this._exchangeType,
-          { durable: true },
-        );
+        await channel.assertExchange(this._exchangeName, this._exchangeType, {
+          durable: true,
+        });
+
+        channel.on("error", (err: Error) => {
+          this._logger.warn("Channel error", { error: String(err.message) });
+        });
+        channel.on("close", () => {
+          if (!this._closed) {
+            this._handleUnexpectedClose();
+          }
+        });
 
         // Re-establish consumers for all registered handlers
         for (const [eventName] of this._handlers.entries()) {
@@ -401,8 +449,15 @@ export class RabbitMqEventBus implements EventBus, Connectable {
 
     // If already connected, set up consumer now; otherwise deferred to connect()
     if (this._connected) {
-      this._setupConsumer(eventName).catch(() => {
-        // Consumer setup failure is non-fatal; the handler is still registered
+      this._setupConsumer(eventName).catch((error: unknown) => {
+        // Consumer setup failure is non-fatal — the handler is still
+        // registered, and the full reconnection path (which unconditionally
+        // re-runs _setupConsumer for every registered event name) will
+        // retry this the next time the connection cycles.
+        this._logger.error(
+          `Failed to set up consumer for "${eventName}". Handler remains registered but inactive until the next reconnection.`,
+          { eventName, error: String(error) },
+        );
       });
     }
   }
@@ -425,6 +480,7 @@ export class RabbitMqEventBus implements EventBus, Connectable {
       ?.eventId;
     this._channel.publish(this._exchangeName, event.name, body, {
       persistent: true,
+      contentType: EVENT_CONTENT_TYPE,
       ...(messageId !== undefined ? { messageId } : {}),
     });
     await this._channel.waitForConfirms();
@@ -551,80 +607,189 @@ export class RabbitMqEventBus implements EventBus, Connectable {
    * Sets up a durable queue and consumer for the given event name.
    * Binds the queue to the exchange with the event name as routing key.
    *
-   * If `resilience.maxRetries` is configured, tracks delivery attempts
-   * using an in-memory `Map<string, number>` keyed by a stable message
-   * identifier (`messageId` from properties, or a base64 hash of the content).
-   * Messages exceeding the limit are acknowledged and discarded to prevent
-   * poison message loops. Note: the counter resets on consumer restart,
-   * which is acceptable since restarted consumers also reset their processing state.
+   * Captures the `ConfirmChannel` instance into a local `channel` at
+   * subscribe time and uses only that captured instance for every
+   * `ack`/`nack` in this consumer's callback — never `this._channel`, which
+   * a mid-session reconnect can replace with a different channel whose
+   * delivery tags are unrelated to this one's in-flight messages.
    *
-   * All `channel.ack()` and `channel.nack()` calls are wrapped in try/catch
-   * to handle stale channels during reconnection without crashing the consumer.
+   * Deliveries sharing `event.metadata.aggregateId` are serialized via
+   * `_aggregateChains` so their handlers run one-at-a-time in delivery
+   * order, even though the broker may invoke this callback concurrently up
+   * to `prefetchCount`.
    */
   private async _setupConsumer(eventName: string): Promise<void> {
-    if (!this._channel) {
+    const channel = this._channel;
+    if (!channel) {
       return;
     }
 
     const queueName = `${this._queuePrefix}.${eventName}`;
     const maxRetries = this._config.resilience?.maxRetries;
 
-    await this._channel.assertQueue(queueName, { durable: true });
-    await this._channel.bindQueue(queueName, this._exchangeName, eventName);
+    if (maxRetries !== undefined) {
+      await this._assertDeadLetterTopology(channel);
+    }
 
-    await this._channel.consume(queueName, async (msg) => {
+    await channel.assertQueue(queueName, { durable: true });
+    await channel.bindQueue(queueName, this._exchangeName, eventName);
+
+    await channel.consume(queueName, async (msg) => {
       if (!msg) return;
 
-      // Track delivery count in-memory; x-death headers are only populated
-      // when a dead-letter exchange is configured, which is not the case here.
-      let msgId: string | undefined;
-      if (maxRetries !== undefined) {
-        const resolvedId: string =
-          (msg.properties.messageId as string | undefined) ??
-          msg.content.toString("base64").slice(0, 32);
-        msgId = resolvedId;
-        const count = (this._deliveryCounts.get(resolvedId) ?? 0) + 1;
-        this._deliveryCounts.set(resolvedId, count);
-        if (count > maxRetries) {
-          this._logger.warn(
-            `Message for "${eventName}" exceeded maxRetries (${maxRetries}). Discarding.`,
-            { eventName, maxRetries, count },
-          );
-          try {
-            this._channel?.ack(msg);
-          } catch {
-            /* stale channel */
-          }
-          return;
-        }
+      const aggregateId = this._peekAggregateId(msg.content);
+      const process = () =>
+        this._processDelivery(channel, eventName, msg, maxRetries);
+
+      if (aggregateId === undefined) {
+        await process();
+        return;
       }
 
-      try {
-        const result = await this._handleMessage(eventName, msg.content);
-        // Always ack: either successful processing or poison message (deserialization failure)
-        try {
-          this._channel?.ack(msg);
-        } catch (err) {
-          this._logger.error(`Failed to ack message for "${eventName}".`, {
-            eventName,
-            error: String(err),
-          });
-        }
-        // Prune the delivery count entry after successful ack
-        if (msgId !== undefined) {
-          this._deliveryCounts.delete(msgId);
-        }
-        void result;
-      } catch {
-        try {
-          this._channel?.nack(msg, false, true);
-        } catch (err) {
-          this._logger.error(`Failed to nack message for "${eventName}".`, {
-            eventName,
-            error: String(err),
-          });
-        }
+      const prior = this._aggregateChains.get(aggregateId) ?? Promise.resolve();
+      const next = prior.then(process);
+      this._aggregateChains.set(aggregateId, next);
+      await next;
+      if (this._aggregateChains.get(aggregateId) === next) {
+        this._aggregateChains.delete(aggregateId);
       }
     });
+  }
+
+  /**
+   * Best-effort extraction of `event.metadata.aggregateId` from a raw
+   * message body, used only to decide same-aggregate serialization.
+   * Returns `undefined` on parse failure or absent aggregateId — such
+   * deliveries are simply not serialized against anything; `_handleMessage`
+   * performs the authoritative parse (and poison-message handling) later.
+   */
+  private _peekAggregateId(content: Buffer): string | undefined {
+    try {
+      const event = JSON.parse(content.toString()) as Event;
+      const aggregateId = event.metadata?.aggregateId;
+      return aggregateId !== undefined ? String(aggregateId) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Processes a single delivery: enforces `maxRetries` (dead-lettering on
+   * exhaustion), invokes `_handleMessage`, and acks/nacks on the captured
+   * `channel`. Never throws — all failures (handler errors, stale-channel
+   * ack/nack errors) are caught and logged internally, so callers (the
+   * consumer callback and the per-aggregate promise chain) can rely on this
+   * always resolving.
+   */
+  private async _processDelivery(
+    channel: ConfirmChannel,
+    eventName: string,
+    msg: ConsumeMessage,
+    maxRetries: number | undefined,
+  ): Promise<void> {
+    let retryKey: string | undefined;
+    if (maxRetries !== undefined) {
+      // A stable messageId survives redelivery, so it is preferred. Without
+      // one, hash the *entire* body (never a truncated prefix): same-type
+      // events sharing a long common JSON prefix would otherwise hash
+      // identically regardless of payload, misclassifying healthy distinct
+      // messages as retries of one "poison" key.
+      retryKey =
+        (msg.properties.messageId as string | undefined) ??
+        createHash("sha256").update(msg.content).digest("hex");
+      const count = (this._deliveryCounts.get(retryKey) ?? 0) + 1;
+      this._deliveryCounts.set(retryKey, count);
+      if (count > maxRetries) {
+        this._logger.warn(
+          `Message for "${eventName}" exceeded maxRetries (${maxRetries}). Dead-lettering.`,
+          { eventName, maxRetries, count },
+        );
+        this._deliveryCounts.delete(retryKey);
+        await this._deadLetter(
+          channel,
+          eventName,
+          msg,
+          "max-retries-exceeded",
+          count,
+        );
+        return;
+      }
+    }
+
+    try {
+      await this._handleMessage(eventName, msg.content);
+      try {
+        channel.ack(msg);
+      } catch (err) {
+        this._logger.warn(
+          `Failed to ack message for "${eventName}" on a stale channel; the broker will redeliver.`,
+          { eventName, error: String(err) },
+        );
+      }
+      if (retryKey !== undefined) {
+        this._deliveryCounts.delete(retryKey);
+      }
+    } catch {
+      try {
+        channel.nack(msg, false, true);
+      } catch (err) {
+        this._logger.warn(
+          `Failed to nack message for "${eventName}" on a stale channel; the broker will redeliver.`,
+          { eventName, error: String(err) },
+        );
+      }
+    }
+  }
+
+  /**
+   * Publishes an exhausted-retry message to the dead-letter exchange with
+   * failure metadata headers, then acks it off its source queue. Dead-letter
+   * publish is best-effort — if it fails, the error is logged and the
+   * original message is still acked so it never loops forever.
+   */
+  private async _deadLetter(
+    channel: ConfirmChannel,
+    eventName: string,
+    msg: ConsumeMessage,
+    reason: string,
+    attempts: number,
+  ): Promise<void> {
+    try {
+      channel.publish(this._dlxName, eventName, msg.content, {
+        persistent: true,
+        headers: {
+          "x-original-event-name": eventName,
+          "x-death-reason": reason,
+          "x-attempts": attempts,
+          "x-original-timestamp": new Date().toISOString(),
+        },
+      });
+    } catch (err) {
+      this._logger.error(
+        `Failed to publish dead-lettered message for "${eventName}".`,
+        { eventName, error: String(err) },
+      );
+    }
+    try {
+      channel.ack(msg);
+    } catch (err) {
+      this._logger.warn(
+        `Failed to ack dead-lettered message for "${eventName}" on a stale channel; the broker will redeliver.`,
+        { eventName, error: String(err) },
+      );
+    }
+  }
+
+  /**
+   * Asserts the fanout dead-letter exchange and its single catch-all queue.
+   * Only called when `resilience.maxRetries` is configured. Idempotent —
+   * safe to call once per registered event name.
+   */
+  private async _assertDeadLetterTopology(
+    channel: ConfirmChannel,
+  ): Promise<void> {
+    await channel.assertExchange(this._dlxName, "fanout", { durable: true });
+    await channel.assertQueue(this._dlqName, { durable: true });
+    await channel.bindQueue(this._dlqName, this._dlxName, "");
   }
 }

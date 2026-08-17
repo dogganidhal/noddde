@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import type { DataSource, EntityManager } from "typeorm";
 import type { Event, UnitOfWork, UnitOfWorkFactory } from "@noddde/core";
 

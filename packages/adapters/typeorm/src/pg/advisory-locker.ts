@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import type { DataSource } from "typeorm";
 import type { AggregateLocker } from "@noddde/core";
 import { LockTimeoutError, fnv1a64 } from "@noddde/core";

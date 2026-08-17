@@ -5,8 +5,7 @@ source_file: packages/core/src/cqrs/command/command-bus.ts
 status: implemented
 exports: [CommandBus, CommandHandlerRegistry]
 depends_on: [cqrs/command/command]
-docs:
-  - commands/dispatching.mdx
+docs: [modeling/routing-and-dispatch.mdx]
 ---
 
 # CommandBus

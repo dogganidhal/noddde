@@ -221,4 +221,57 @@ describe("RabbitMqEventBus broker-specific behaviour", () => {
     await probeCh.close();
     await probeConn.close();
   });
+
+  it("dead-letters a message that exhausts maxRetries, with failure metadata headers", async () => {
+    const suffix = uniqueSuffix();
+    const exchange = `noddde.events.${suffix}`;
+    const queuePrefix = `noddde.${suffix}`;
+    const eventName = `Poison_${suffix}`;
+
+    const bus = new RabbitMqEventBus({
+      url: rmq_.url,
+      exchangeName: exchange,
+      queuePrefix,
+      resilience: { maxRetries: 1 },
+    });
+    let attempts = 0;
+    bus.on(eventName, async () => {
+      attempts++;
+      throw new Error("always fails");
+    });
+    await bus.connect();
+    await bus.dispatch({ name: eventName, payload: { poison: true } });
+
+    // maxRetries=1 → delivery 1 (count=1) runs the handler, fails, and
+    // requeues. Delivery 2 (count=2) exceeds the limit and is dead-lettered
+    // *without* invoking the handler again — so attempts stops at 1.
+    await waitFor(() => attempts >= 1, { timeoutMs: 15_000, intervalMs: 100 });
+
+    const dlqName = `${queuePrefix}.dlq`;
+    const probeConn = await amqplib.connect(rmq_.url);
+    const probeCh = await probeConn.createChannel();
+
+    let dlqMsg: any = false;
+    await waitFor(
+      async () => {
+        dlqMsg = await probeCh.get(dlqName, { noAck: true });
+        return dlqMsg !== false;
+      },
+      { timeoutMs: 15_000, intervalMs: 200 },
+    );
+
+    expect(dlqMsg).not.toBe(false);
+    expect(JSON.parse(dlqMsg.content.toString())).toMatchObject({
+      name: eventName,
+      payload: { poison: true },
+    });
+    expect(dlqMsg.properties.headers).toMatchObject({
+      "x-original-event-name": eventName,
+      "x-death-reason": "max-retries-exceeded",
+    });
+
+    await probeCh.close();
+    await probeConn.close();
+    await bus.close();
+  });
 });

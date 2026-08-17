@@ -10,7 +10,7 @@ exports:
   ]
 depends_on: [engine/domain, edd/event, core/persistence/event-reader]
 docs:
-  - infrastructure/in-memory-implementations.mdx
+  - running/persistence.mdx
   - read-model/projection-rebuild.mdx
 ---
 

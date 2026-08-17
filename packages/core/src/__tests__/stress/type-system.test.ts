@@ -13,7 +13,6 @@
  *   yarn workspace @noddde/core typecheck:stress   # tsc --noEmit (real type check)
  *   yarn workspace @noddde/core test               # runtime smoke (expectTypeOf is type-only)
  */
-/* eslint-disable no-unused-vars */
 import { describe, it, expectTypeOf } from "vitest";
 import type {
   Aggregate,

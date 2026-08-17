@@ -50,6 +50,19 @@ export type SagaTestResult<TState, TCommands extends Command> = {
 export type DomainSpy = {
   /** All events dispatched via the event bus, in order. */
   publishedEvents: Event[];
-  /** All commands dispatched via the command bus, in order. */
+  /** All commands dispatched via the command bus, in order (success, swallowed, or errored). */
   dispatchedCommands: Command[];
+  /**
+   * Commands dispatched while no handler was registered for their `name`.
+   * These are the only dispatch errors `testDomain` suppresses; the command
+   * still appears in `dispatchedCommands`.
+   */
+  unhandledCommands: Command[];
+  /**
+   * Commands whose registered handler threw or rejected. The error is
+   * captured here AND rethrown from `commandBus.dispatch` — so a saga
+   * reaction command that fails business validation is visible both via the
+   * spy and via the ordinary throw/log path the runtime already uses.
+   */
+  commandErrors: Array<{ command: Command; error: Error }>;
 };

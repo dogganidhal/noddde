@@ -40,6 +40,9 @@
   "files": [
     "dist"
   ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "tsup",
     "build:watch": "tsup --watch",
@@ -51,8 +54,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@noddde/core": "1.0.0-rc.1",
-    "@noddde/engine": "1.0.0-rc.1"
+    "@noddde/core": "^1.0.0-rc.1",
+    "@noddde/engine": "^1.0.0-rc.1"
   },
   "peerDependencies": {
     "kafkajs": ">=2.0.0"

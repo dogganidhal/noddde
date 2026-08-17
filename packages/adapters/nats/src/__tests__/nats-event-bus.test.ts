@@ -214,6 +214,7 @@ describe("NatsEventBus", () => {
     const maxDeliverCalls: number[] = [];
     const mockOpts = {
       durable: vi.fn(),
+      deliverGroup: vi.fn(),
       manualAck: vi.fn(),
       filterSubject: vi.fn(),
       maxAckPending: vi.fn(),
@@ -446,6 +447,7 @@ describe("NatsEventBus", () => {
     const natsModule = await import("nats");
     const mockOpts = {
       durable: vi.fn(),
+      deliverGroup: vi.fn(),
       manualAck: vi.fn(),
       filterSubject: vi.fn(),
       maxAckPending: vi.fn(),
@@ -475,6 +477,7 @@ describe("NatsEventBus", () => {
   it("should use consumerGroup as prefix in durable consumer name", async () => {
     const mockOpts = {
       durable: vi.fn(),
+      deliverGroup: vi.fn(),
       manualAck: vi.fn(),
       filterSubject: vi.fn(),
       maxAckPending: vi.fn(),
@@ -511,6 +514,7 @@ describe("NatsEventBus", () => {
     const durableNames: string[] = [];
     const mockOpts = {
       durable: vi.fn((name: string) => durableNames.push(name)),
+      deliverGroup: vi.fn(),
       manualAck: vi.fn(),
       filterSubject: vi.fn(),
       maxAckPending: vi.fn(),
@@ -568,6 +572,7 @@ describe("NatsEventBus", () => {
 
     const mockOpts = {
       durable: vi.fn(),
+      deliverGroup: vi.fn(),
       manualAck: vi.fn(),
       filterSubject: vi.fn(),
       maxAckPending: vi.fn(),
@@ -736,5 +741,196 @@ describe("NatsEventBus error isolation", () => {
     // Regression guard: nak is called on handler failure, ack is not.
     expect(nak).toHaveBeenCalledOnce();
     expect(ack).not.toHaveBeenCalled();
+  });
+});
+
+// ### JetStream consumer sets deliverGroup equal to the durable name
+describe("NatsEventBus queue group", () => {
+  it("should set deliverGroup to the durable name so replicas compete for messages", async () => {
+    const mockOpts = {
+      durable: vi.fn(),
+      deliverGroup: vi.fn(),
+      manualAck: vi.fn(),
+      filterSubject: vi.fn(),
+      maxAckPending: vi.fn(),
+      deliverTo: vi.fn(),
+    };
+    const mockSub = (async function* () {})();
+    const mockJs = { subscribe: vi.fn().mockResolvedValue(mockSub) };
+
+    const natsModule = await import("nats");
+    vi.spyOn(natsModule, "consumerOpts").mockReturnValue(mockOpts as any);
+
+    const bus = new NatsEventBus({
+      servers: "localhost:4222",
+      consumerGroup: "order-service",
+    });
+    (bus as any)._js = mockJs;
+    (bus as any)._connected = true;
+
+    bus.on("AccountCreated", vi.fn());
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(mockOpts.deliverGroup).toHaveBeenCalledWith(
+      "order-service_AccountCreated",
+    );
+
+    vi.restoreAllMocks();
+  });
+});
+
+// ### already-subscribed guard prevents a second js.subscribe for the same event name
+describe("NatsEventBus already-subscribed guard", () => {
+  it("should not resubscribe when a second handler is registered for an already-subscribed event", async () => {
+    const mockOpts = {
+      durable: vi.fn(),
+      deliverGroup: vi.fn(),
+      manualAck: vi.fn(),
+      filterSubject: vi.fn(),
+      maxAckPending: vi.fn(),
+      deliverTo: vi.fn(),
+    };
+    const mockSub = (async function* () {})();
+    const mockJs = { subscribe: vi.fn().mockResolvedValue(mockSub) };
+
+    const natsModule = await import("nats");
+    vi.spyOn(natsModule, "consumerOpts").mockReturnValue(mockOpts as any);
+
+    const bus = new NatsEventBus({
+      servers: "localhost:4222",
+      consumerGroup: "test-group",
+    });
+    (bus as any)._js = mockJs;
+    (bus as any)._connected = true;
+
+    const first = vi.fn();
+    const second = vi.fn();
+    bus.on("AccountCreated", first);
+    await new Promise((r) => setTimeout(r, 10));
+    bus.on("AccountCreated", second);
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(mockJs.subscribe).toHaveBeenCalledOnce();
+
+    const event = { name: "AccountCreated", payload: {} };
+    await (bus as any)._handleMessage("AccountCreated", JSON.stringify(event));
+    expect(first).toHaveBeenCalledWith(event);
+    expect(second).toHaveBeenCalledWith(event);
+
+    vi.restoreAllMocks();
+  });
+});
+
+// ### stream creation throws when subjectPrefix is not set
+describe("NatsEventBus subject prefix safety", () => {
+  it("should throw at connect() when streamName is set without subjectPrefix", async () => {
+    const natsModule = await import("nats");
+    vi.spyOn(natsModule, "connect").mockResolvedValue({
+      jetstream: () => ({}),
+      jetstreamManager: vi.fn().mockResolvedValue({
+        streams: { info: vi.fn().mockRejectedValue(new Error("not found")) },
+      }),
+      drain: vi.fn(),
+      isClosed: vi.fn().mockReturnValue(false),
+    } as any);
+
+    const bus = new NatsEventBus({
+      servers: "localhost:4222",
+      consumerGroup: "test-group",
+      streamName: "noddde-events",
+    });
+
+    await expect(bus.connect()).rejects.toThrow(/subjectPrefix/i);
+
+    vi.restoreAllMocks();
+  });
+
+  it("should normalize a prefix without a trailing dot to match one with a trailing dot", async () => {
+    const bus1 = new NatsEventBus({
+      servers: "localhost:4222",
+      consumerGroup: "g1",
+      streamName: "s1",
+      subjectPrefix: "myapp",
+    });
+    const bus2 = new NatsEventBus({
+      servers: "localhost:4222",
+      consumerGroup: "g2",
+      streamName: "s2",
+      subjectPrefix: "myapp.",
+    });
+
+    expect((bus1 as any)._buildSubjectsForStream()).toEqual(["myapp.>"]);
+    expect((bus2 as any)._buildSubjectsForStream()).toEqual(["myapp.>"]);
+  });
+});
+
+// ### exhausted-retry message is published to the dead-letter subject before being termed
+describe("NatsEventBus dead-letter handling", () => {
+  it("should publish to the DLQ subject and term when delivery count reaches maxRetries", async () => {
+    const publish = vi.fn().mockResolvedValue({ seq: 1, stream: "test" });
+    const bus = new NatsEventBus({
+      servers: "localhost:4222",
+      consumerGroup: "test-group",
+      resilience: { maxRetries: 2 },
+    });
+    (bus as any)._js = { publish };
+    bus.on("TestEvent", async () => {
+      throw new Error("boom");
+    });
+
+    const event = { name: "TestEvent", payload: {} };
+    const term = vi.fn();
+    const nak = vi.fn();
+    const ack = vi.fn();
+    const msg = {
+      data: new TextEncoder().encode(JSON.stringify(event)),
+      info: { deliveryCount: 2 },
+      term,
+      nak,
+      ack,
+    };
+    const sub = (async function* () {
+      yield msg;
+    })();
+
+    await (bus as any)._consumeSubscription(sub, "TestEvent");
+
+    expect(publish).toHaveBeenCalledWith(
+      "dlq.TestEvent",
+      expect.anything(),
+      expect.objectContaining({ headers: expect.anything() }),
+    );
+    expect(term).toHaveBeenCalledOnce();
+    expect(nak).not.toHaveBeenCalled();
+  });
+
+  it("should nak with an increasing delay derived from delivery count", async () => {
+    const bus = new NatsEventBus({
+      servers: "localhost:4222",
+      consumerGroup: "test-group",
+      resilience: { maxRetries: 5 },
+    });
+    bus.on("TestEvent", async () => {
+      throw new Error("boom");
+    });
+
+    const event = { name: "TestEvent", payload: {} };
+    const nak = vi.fn();
+    const msg = {
+      data: new TextEncoder().encode(JSON.stringify(event)),
+      info: { deliveryCount: 2 },
+      term: vi.fn(),
+      nak,
+      ack: vi.fn(),
+    };
+    const sub = (async function* () {
+      yield msg;
+    })();
+
+    await (bus as any)._consumeSubscription(sub, "TestEvent");
+
+    expect(nak).toHaveBeenCalledOnce();
+    const delayArg = nak.mock.calls[0]![0];
+    expect(delayArg).toBeGreaterThan(0);
   });
 });

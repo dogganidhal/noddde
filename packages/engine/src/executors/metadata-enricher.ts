@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Event, ID, Instrumentation } from "@noddde/core";
 import { uuidv7 } from "../uuid";

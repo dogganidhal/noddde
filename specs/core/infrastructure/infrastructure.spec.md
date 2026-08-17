@@ -5,10 +5,7 @@ source_file: packages/core/src/infrastructure/index.ts
 status: implemented
 exports: [Infrastructure, FrameworkInfrastructure, CQRSInfrastructure]
 depends_on: [cqrs/command/command-bus, cqrs/query/query-bus, edd/event-bus]
-docs:
-  - infrastructure/overview.mdx
-  - infrastructure/custom-infrastructure.mdx
-  - infrastructure/cqrs-infrastructure.mdx
+docs: [running/infrastructure.mdx]
 ---
 
 # Infrastructure & CQRSInfrastructure

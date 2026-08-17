@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import type { ID, Saga, SagaTypes, CQRSInfrastructure } from "@noddde/core";
 import { NoopLogger } from "@noddde/engine";
 import type { SagaTestResult } from "./types";
