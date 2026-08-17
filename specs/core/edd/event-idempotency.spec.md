@@ -5,8 +5,7 @@ source_file: packages/core/src/edd/event-idempotency.ts
 status: implemented
 exports: [EventIdempotencyStore, WithIdempotencyOptions, withIdempotency]
 depends_on: [edd/event, edd/event-handler, infrastructure/index]
-docs:
-  - events/event-handlers.mdx
+docs: [] # TODO: no docs page yet
 ---
 
 # EventIdempotencyStore & withIdempotency

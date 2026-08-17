@@ -40,10 +40,7 @@ depends_on:
   - persistence/idempotency
   - persistence/outbox
 docs:
-  - domain-configuration/overview.mdx
-  - domain-configuration/write-model.mdx
-  - domain-configuration/read-model.mdx
-  - domain-configuration/infrastructure.mdx
+  - running/domain-configuration.mdx
   - read-model/projection-rebuild.mdx
 ---
 

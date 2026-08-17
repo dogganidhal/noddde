@@ -5,8 +5,7 @@ source_file: packages/core/src/infrastructure/logger.ts
 status: implemented
 exports: [Logger, LogLevel]
 depends_on: []
-docs:
-  - infrastructure/logging.mdx
+docs: [running/logging.mdx]
 ---
 
 # Logger & LogLevel

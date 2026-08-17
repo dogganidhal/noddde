@@ -5,8 +5,7 @@ source_file: packages/adapters/prisma/src/event-idempotency.ts
 status: implemented
 exports: [PrismaEventIdempotencyStore]
 depends_on: [edd/event-idempotency]
-docs:
-  - events/event-handlers.mdx
+docs: [] # TODO: no docs page yet
 ---
 
 # PrismaEventIdempotencyStore

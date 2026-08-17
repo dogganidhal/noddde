@@ -16,7 +16,7 @@ depends_on:
   - core/ddd/projection
   - core/ddd/saga
 docs:
-  - domain-configuration/overview.mdx
+  - running/domain-configuration.mdx
   - getting-started/quick-start.mdx
 ---
 

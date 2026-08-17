@@ -8,8 +8,7 @@ exports:
   - createInMemoryUnitOfWork
 depends_on:
   - persistence/unit-of-work
-docs:
-  - domain-configuration/unit-of-work.mdx
+docs: [running/persistence.mdx]
 ---
 
 # InMemoryUnitOfWork
