@@ -32,6 +32,7 @@ import type {
   UnitOfWork,
   UnitOfWorkFactory,
   IdempotencyStore,
+  UpcasterMap,
   ViewStore,
   ViewStoreFactory,
   OutboxStore,
@@ -113,6 +114,7 @@ import {
   PerAggregatePersistenceResolver,
 } from "./aggregate-persistence-resolver";
 import type { AggregatePersistenceResolver } from "./aggregate-persistence-resolver";
+import { runUowCompletionHooks } from "./uow-completion-hooks";
 import type { RebuildContext } from "./projection-rebuild";
 import {
   EventReaderUnavailableError,
@@ -838,6 +840,25 @@ export class Domain<
       resolvedProjections.set(name, resolvedProjection);
     }
 
+    // Step 5.7b: Fail loud on unwired projection view stores.
+    // Strong-consistency projections cannot function at all without a
+    // viewStore -- a misconfiguration must be impossible to miss, so this
+    // throws synchronously before any command/query/event registration.
+    // Eventual-consistency projections without a viewStore only warn: they
+    // may be legitimately unused in a given deployment.
+    for (const [name, projection] of resolvedProjections) {
+      if (resolvedViewStoreFactories.has(name)) continue;
+      if (projection.consistency === "strong") {
+        throw new Error(
+          `Projection "${name}" uses strong consistency but has no viewStore configured. ` +
+            `Set DomainWiring.projections["${name}"].viewStore.`,
+        );
+      }
+      domainLog.warn(
+        `Projection "${name}" has no viewStore wired; it will not receive live events.`,
+      );
+    }
+
     // Step 5.8b: Resolve outbox store
     if (wiring.outbox) {
       this._outboxStore = await wiring.outbox.store();
@@ -1250,20 +1271,28 @@ export class Domain<
       });
 
       const remaining = Math.max(0, deadline - Date.now());
-      const timeoutRace = new Promise<void>((resolve) =>
-        setTimeout(resolve, remaining),
-      );
+      let timer!: ReturnType<typeof setTimeout>;
+      const timeoutRace = new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, remaining);
+      });
       await Promise.race([drainPromise, timeoutRace]);
+      // Clear the deadline timer as soon as the race settles -- on the
+      // common fast path (drain wins well before the deadline), an
+      // uncleared timer would otherwise keep the event loop alive for up
+      // to the remainder of timeoutMs after shutdown() has resolved.
+      clearTimeout(timer);
     }
 
     // Phase 2: Drain outbox relay
     if (this._outboxRelay) {
       const remaining = Math.max(0, deadline - Date.now());
       const drainRelay = this._outboxRelay.drain();
-      const timeoutRace = new Promise<void>((resolve) =>
-        setTimeout(resolve, remaining),
-      );
+      let timer!: ReturnType<typeof setTimeout>;
+      const timeoutRace = new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, remaining);
+      });
       await Promise.race([drainRelay, timeoutRace]);
+      clearTimeout(timer);
     }
 
     // Phase 3: Close the event bus (clears all handlers, idempotent)
@@ -1312,39 +1341,76 @@ export class Domain<
       }
 
       const uow = this._unitOfWorkFactory();
+      let committed = false;
+      let hooksRan = false;
 
-      return await this._uowStorage.run(uow, async () => {
+      // Runs the UoW completion hooks exactly once, outside the ALS scope
+      // and BEFORE publishing -- so a deferred pessimistic-lock release (or
+      // other onUowSettled/onUowCommitted hook) is never held across the
+      // publish loop. A hook failure is swallowed (logged) so it can never
+      // block publishing from proceeding. Mirrors SagaExecutor's
+      // runHooksOnce.
+      const runHooksOnce = async (): Promise<void> => {
+        if (hooksRan) return;
+        hooksRan = true;
         try {
-          const result = await fn();
-          const events = await uow.commit();
-          for (const e of events) {
-            await this._infrastructure.eventBus.dispatch(e);
-          }
-
-          // Best-effort post-dispatch outbox marking
-          if (this._outboxStore && events.length > 0) {
-            try {
-              const eventIds = events
-                .map((e) => e.metadata?.eventId)
-                .filter((id): id is string => id != null);
-              if (eventIds.length > 0) {
-                await this._outboxStore.markPublishedByEventIds(eventIds);
-              }
-            } catch {
-              // Best-effort: relay will catch unpublished entries
-            }
-          }
-
-          return result;
+          await runUowCompletionHooks(uow, committed);
         } catch (error) {
-          try {
-            await uow.rollback();
-          } catch {
-            // UoW may already be completed if commit failed
-          }
-          throw error;
+          this._infrastructure.logger.error("UoW completion hooks failed.", {
+            error: String(error),
+          });
         }
-      });
+      };
+
+      try {
+        const { result, events } = await this._uowStorage.run(uow, async () => {
+          try {
+            const result = await fn();
+            const events = await uow.commit();
+            committed = true;
+            return { result, events };
+          } catch (error) {
+            try {
+              await uow.rollback();
+            } catch {
+              // UoW may already be completed if commit failed
+            }
+            throw error;
+          }
+        });
+
+        await runHooksOnce();
+
+        // Publish and outbox-marking run AFTER the ALS scope has exited, so
+        // a standalone handler reacting to one of these events and
+        // dispatching a command does not observe the just-completed `uow`
+        // via uowStorage.getStore() (which would throw "UnitOfWork already
+        // completed"). It takes the implicit-UoW path instead.
+        for (const e of events) {
+          await this._infrastructure.eventBus.dispatch(e);
+        }
+
+        // Best-effort post-dispatch outbox marking
+        if (this._outboxStore && events.length > 0) {
+          try {
+            const eventIds = events
+              .map((e) => e.metadata?.eventId)
+              .filter((id): id is string => id != null);
+            if (eventIds.length > 0) {
+              await this._outboxStore.markPublishedByEventIds(eventIds);
+            }
+          } catch {
+            // Best-effort: relay will catch unpublished entries
+          }
+        }
+
+        return result;
+      } finally {
+        // Safety net for the failure path (fn() or commit() throws before
+        // runHooksOnce is reached above) -- ensures the hooks still run
+        // exactly once even when the UoW rolled back.
+        await runHooksOnce();
+      }
     } finally {
       this._releaseOperation();
     }
@@ -1595,6 +1661,18 @@ export class Domain<
     const logger =
       options.logger ?? this._infrastructure.logger.child("projection-rebuild");
 
+    const aggregateUpcasters = new Map<string, UpcasterMap>();
+    for (const [aggregateName, aggregate] of Object.entries(
+      this.definition.writeModel.aggregates,
+    )) {
+      if ((aggregate as Aggregate).upcasters) {
+        aggregateUpcasters.set(
+          aggregateName,
+          (aggregate as Aggregate).upcasters!,
+        );
+      }
+    }
+
     const ctx: RebuildContext = {
       projectionName: name,
       projection,
@@ -1603,6 +1681,7 @@ export class Domain<
       eventReader,
       eventBus: this._infrastructure.eventBus,
       subscriptionRegistry: this._projectionSubscriptions,
+      aggregateUpcasters,
       logger,
     };
 

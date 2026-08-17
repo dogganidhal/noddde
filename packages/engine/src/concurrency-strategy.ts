@@ -1,6 +1,13 @@
 /* eslint-disable no-unused-vars */
-import type { AggregateLocker, Event, ID, Logger } from "@noddde/core";
+import type {
+  AggregateLocker,
+  Event,
+  ID,
+  Logger,
+  UnitOfWork,
+} from "@noddde/core";
 import { ConcurrencyError } from "@noddde/core";
+import { onUowSettled } from "./uow-completion-hooks";
 
 /**
  * Internal strategy interface for aggregate concurrency control.
@@ -25,6 +32,20 @@ export interface ConcurrencyStrategy {
     aggregateId: ID,
     attempt: () => Promise<Event[]>,
   ): Promise<Event[]>;
+
+  /**
+   * Optional hook for the explicit-UoW path: acquires whatever guard the
+   * strategy provides (e.g. a pessimistic lock) and defers its release
+   * until the owning UoW settles (commit or rollback), rather than until
+   * this call returns. Strategies with nothing to hold (e.g. optimistic)
+   * do not implement it. Performs no retry — the caller runs the
+   * lifecycle exactly once after acquiring.
+   */
+  acquireForUow?(
+    aggregateName: string,
+    aggregateId: ID,
+    uow: UnitOfWork,
+  ): Promise<void>;
 }
 
 /**
@@ -116,6 +137,34 @@ export class PessimisticConcurrencyStrategy implements ConcurrencyStrategy {
       });
     }
   }
+
+  /**
+   * Acquires the lock and defers its release until `uow` settles (commit
+   * or rollback), instead of releasing when this call returns. No retry —
+   * matches {@link execute}'s no-retry contract.
+   */
+  async acquireForUow(
+    aggregateName: string,
+    aggregateId: ID,
+    uow: UnitOfWork,
+  ): Promise<void> {
+    this.logger?.debug("Acquiring lock for owning UoW.", {
+      aggregateName,
+      aggregateId: String(aggregateId),
+    });
+    await this.locker.acquire(aggregateName, aggregateId, this.timeoutMs);
+    this.logger?.debug("Lock acquired for owning UoW.", {
+      aggregateName,
+      aggregateId: String(aggregateId),
+    });
+    onUowSettled(uow, async () => {
+      await this.locker.release(aggregateName, aggregateId);
+      this.logger?.debug("Lock released after owning UoW settled.", {
+        aggregateName,
+        aggregateId: String(aggregateId),
+      });
+    });
+  }
 }
 
 /**
@@ -137,5 +186,21 @@ export class PerAggregateConcurrencyStrategy implements ConcurrencyStrategy {
   ): Promise<Event[]> {
     const strategy = this.strategies.get(aggregateName) ?? this.defaultStrategy;
     return strategy.execute(aggregateName, aggregateId, attempt);
+  }
+
+  /**
+   * Delegates to the resolved per-aggregate strategy's `acquireForUow` when
+   * present; no-op otherwise, so composite configurations route correctly
+   * regardless of which concrete strategy backs a given aggregate.
+   */
+  async acquireForUow(
+    aggregateName: string,
+    aggregateId: ID,
+    uow: UnitOfWork,
+  ): Promise<void> {
+    const strategy = this.strategies.get(aggregateName) ?? this.defaultStrategy;
+    if (strategy.acquireForUow) {
+      await strategy.acquireForUow(aggregateName, aggregateId, uow);
+    }
   }
 }

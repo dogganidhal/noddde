@@ -895,6 +895,131 @@ describe("rebuildProjection: onProgress callback", () => {
   });
 });
 
+describe("rebuildProjection: upcasting", () => {
+  it("should upcast stored V1 events before invoking the reducer", async () => {
+    // V2 shape: `name` was split into `firstName`/`lastName`. A projection
+    // written against V2 must never see raw V1 payloads during rebuild.
+    type UserView = { id: string; firstName: string; lastName: string };
+    type UserEvent = DefineEvents<{
+      UserRegistered: { id: string; firstName: string; lastName: string };
+    }>;
+    type UserCommand = DefineCommands<{
+      RegisterUser: { id: string; firstName: string; lastName: string };
+    }>;
+    type UserQuery = DefineQueries<{
+      GetUser: { payload: { id: string }; result: UserView | null };
+    }>;
+
+    const User = defineAggregate<{
+      state: UserView | null;
+      commands: UserCommand;
+      events: UserEvent;
+      infrastructure: {};
+    }>({
+      name: "User",
+      initialState: () => null,
+      decide: {
+        RegisterUser: (cmd) => ({
+          name: "UserRegistered",
+          payload: cmd.payload,
+        }),
+      },
+      evolve: {
+        UserRegistered: (p) => ({
+          id: p.id,
+          firstName: p.firstName,
+          lastName: p.lastName,
+        }),
+      },
+      upcasters: {
+        UserRegistered: [
+          // V1 -> V2: `name: "Ada Lovelace"` becomes firstName/lastName.
+          // Upcaster chain steps receive the raw payload (not the full
+          // event), per `UpcasterMap`'s `(payload: V1) => V2` contract.
+          (payload: any) => {
+            if ("name" in payload) {
+              const [firstName, ...rest] = payload.name.split(" ");
+              return {
+                id: payload.id,
+                firstName,
+                lastName: rest.join(" "),
+              };
+            }
+            return payload;
+          },
+        ],
+      },
+    });
+
+    const UserSummary = defineProjection<{
+      events: UserEvent;
+      queries: UserQuery;
+      view: UserView;
+      infrastructure: {};
+    }>({
+      on: {
+        UserRegistered: {
+          id: (e) => e.payload.id,
+          // A V1 payload with no firstName/lastName would silently write
+          // `undefined` here if rebuild did not upcast first.
+          reduce: (e) => ({
+            id: e.payload.id,
+            firstName: e.payload.firstName,
+            lastName: e.payload.lastName,
+          }),
+        },
+      },
+      queryHandlers: {},
+    });
+
+    const { InMemoryEventSourcedAggregatePersistence } = await import(
+      "@noddde/engine"
+    );
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+    const factory = new InMemoryViewStoreFactory<UserView>();
+    const def = defineDomain({
+      writeModel: { aggregates: { User } },
+      readModel: { projections: { UserSummary } },
+    });
+    const domain = await wireDomain(def, {
+      aggregates: { persistence: () => persistence },
+      projections: { UserSummary: { viewStore: factory } },
+    });
+
+    // Write a raw V1 event directly to the store, bypassing the aggregate's
+    // decide/evolve (which only knows the current, V2 shape) — this
+    // simulates events written before the schema evolved.
+    await persistence.save(
+      "User",
+      "u-1",
+      [
+        {
+          name: "UserRegistered",
+          payload: { id: "u-1", name: "Ada Lovelace" } as any,
+          metadata: {
+            eventId: "evt-1",
+            aggregateName: "User",
+            aggregateId: "u-1",
+          } as any,
+        },
+      ],
+      0,
+    );
+
+    const result = await domain.rebuildProjection("UserSummary");
+
+    expect(result.eventsApplied).toBe(1);
+    const view = await factory.getForContext().load("u-1");
+    expect(view).toEqual({
+      id: "u-1",
+      firstName: "Ada",
+      lastName: "Lovelace",
+    });
+
+    await domain.shutdown();
+  });
+});
+
 describe("rebuildProjection: type-level name inference", () => {
   it("should reject unknown projection names at compile time", async () => {
     type KnownView = { id: string };

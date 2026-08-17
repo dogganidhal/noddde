@@ -119,6 +119,8 @@ During aggregate rehydration (loading events from persistence to rebuild state),
 
 New events produced by decide handlers automatically get `metadata.version` set to the current version for their event name.
 
+The same upcasting happens during [projection rebuild](/docs/read-model/projection-rebuild): `Domain.rebuildProjection` resolves each replayed event's `metadata.aggregateName`, applies that aggregate's upcaster chain, and only then invokes the projection's reducer — so rebuilt views are derived from current-shape payloads, exactly as aggregate state is. Live event-bus delivery to projections and sagas does **not** upcast; those handlers receive events at their stored schema version. That is a known limitation of the current version, not an intended asymmetry.
+
 ## Type Safety
 
 The upcaster API provides compile-time safety at multiple levels:

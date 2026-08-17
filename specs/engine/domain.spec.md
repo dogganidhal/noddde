@@ -330,7 +330,7 @@ interface ConcurrencyStrategy {
 **Both strategies apply to both UoW paths**:
 
 - **Implicit UoW** (normal commands): The strategy wraps the full attempt including UoW creation and commit.
-- **Explicit UoW** (`withUnitOfWork`): The strategy wraps just the lifecycle call (not UoW creation/commit). For optimistic, this is a pass-through since `ConcurrencyError` happens at commit time (outside the strategy). For pessimistic, the lock still serializes access to the aggregate during the load phase.
+- **Explicit UoW** (`withUnitOfWork`, or a saga's atomic UoW): For optimistic, the strategy still just wraps the lifecycle call — this is a pass-through, since `ConcurrencyError` happens at commit time (outside the strategy). For pessimistic, the lock is acquired before the lifecycle runs and held until the OWNING UoW settles (commit or rollback), not released when the lifecycle call returns — see `specs/engine/executors/command-lifecycle-executor.spec.md` requirements 12/12a. This closes a defect where the lock previously protected only the load phase and was released before the actual write (which happens later, at the owning UoW's commit), allowing a second command to acquire the lock and load stale state before the first command's write had landed — exactly the interleaving pessimistic locking exists to prevent.
 
 **Default behavior**: `concurrency: { maxRetries: 3 }` (without `strategy` field) defaults to optimistic. Omitting `concurrency` entirely defaults to optimistic with 0 retries.
 
@@ -393,6 +393,14 @@ When `infrastructure.outbox` is configured:
 
 When outbox is configured, after the explicit UoW commits and events are dispatched, call `outboxStore.markPublishedByEventIds(eventIds)` (best-effort, errors swallowed). This marks the outbox entries written during the UoW as published, preventing the relay from re-dispatching them.
 
+### Domain.withUnitOfWork() -- Event Publishing Runs Outside the UoW's AsyncLocalStorage Scope
+
+`withUnitOfWork(fn)` creates a UoW, then executes `fn()` and `uow.commit()` inside `this._uowStorage.run(uow, ...)` (so commands dispatched by `fn()` can find the ambient UoW and enlist on it via the explicit-UoW path in `CommandLifecycleExecutor`). Historically, event publishing (`for (const e of events) { await eventBus.dispatch(e); }`) and the outbox post-dispatch marking (above) ALSO ran inside that same `uowStorage.run(...)` callback, after `commit()`.
+
+1. **Publish and outbox-marking run after `uowStorage.run(...)` returns, not nested inside it** -- `withUnitOfWork` captures the commit result (`events`) from inside the ALS scope, but performs the publish loop and outbox marking after that scope has exited. `uow.rollback()` on failure is likewise attempted inside the scope (it's part of settling the UoW), but nothing downstream of settlement runs while `uow` is still the ambient `AsyncLocalStorage` value.
+2. **Rationale -- re-entrant dispatch from a standalone event handler** -- A standalone event handler (registered with `processModel.standaloneEventHandlers`, handed `infrastructure.commandBus` by design) that reacts to an event published from `withUnitOfWork` and dispatches a command must NOT observe the just-completed `uow` via `uowStorage.getStore()`. Before this fix, it would: `CommandLifecycleExecutor` would take the explicit-UoW path (since `getStore()` returned the completed `uow`), and `uow.enlist(...)` would throw `"UnitOfWork already completed"` -- swallowed into a log by the event bus, so the command silently never ran. After this fix, `uowStorage.getStore()` returns `undefined` for that re-entrant dispatch (the ALS scope has already exited), so the command takes the implicit-UoW path and succeeds with its own fresh UoW -- identical behavior to a handler reacting to an event from a plain `dispatchCommand()`.
+3. **`runUowCompletionHooks(uow, committed)` is invoked exactly once, after settlement, outside the ALS scope, and BEFORE the publish loop** -- This runs any deferred lock releases or deferred snapshot saves that aggregate commands dispatched inside `fn()` registered via `onUowSettled`/`onUowCommitted` (see `specs/engine/executors/command-lifecycle-executor.spec.md` requirement 14a) on this UoW. `committed` is `true` only if `uow.commit()` actually returned; on any failure path (including a failure inside `fn()` itself), it is `false` and only `onUowSettled` hooks run (e.g., lock release) -- `onUowCommitted` hooks (e.g., snapshot save) do not. **Ordering is load-bearing, not incidental:** a deferred pessimistic-lock release MUST run before the publish loop, never after. If it ran after, the lock would still be held while events are being published, and a standalone handler (or any re-entrant path) reacting to one of those events by dispatching a command against the SAME aggregate would queue behind that still-held lock -- with no `lockTimeoutMs` configured, this deadlocks `withUnitOfWork` forever; with one configured, it silently loses the re-entrant command to a `LockTimeoutError` swallowed by the event bus, reintroducing the exact "handler dispatches a command, nothing happens" failure class this fix exists to close. `SagaExecutor` (see `specs/engine/executors/saga-executor.spec.md` requirements 13-15) follows this same hooks-before-publish ordering; `withUnitOfWork` MUST match it exactly, not merely run the hooks "somewhere after settlement."
+
 ### defineDomain() -- Identity Function
 
 `defineDomain` lives in `@noddde/core`. See [`ddd/domain-definition`](../core/ddd/domain-definition.spec.md#behavioral-requirements) for its behavioral requirements. `@noddde/engine` re-exports it unchanged.
@@ -453,6 +461,14 @@ When `wiring.aggregates` is per-aggregate, each aggregate can have its own snaps
 
 In global mode, the same snapshot config applies to all event-sourced aggregates (existing behavior).
 
+### Domain.init() -- Fail Loud on Unwired Projection View Stores
+
+During `init()`, after `resolvedViewStoreFactories` is built (step 5.8 area) and before command/query handler registration:
+
+1. **Strong-consistency projection with no wired `ViewStoreFactory` throws at init** -- For every projection with `consistency === "strong"`, `init()` requires a resolvable entry in `resolvedViewStoreFactories`. If missing, `init()` throws synchronously (before any command/query/event registration, before `wireDomain` returns) with a descriptive `Error` naming the projection and stating that `DomainWiring.projections["<name>"].viewStore` (or the projection's own `viewStore` field) must be configured for a strong-consistency projection. This replaces the previous silent behavior of filtering the unwired strong projection out of `onEventsProduced`'s scope with no diagnostic -- a strong-consistency projection is the mode a user picks specifically because they cannot tolerate staleness, so a misconfiguration that leaves it permanently stale must be impossible to miss.
+2. **Eventual-consistency projection with no wired `ViewStoreFactory` warns, does not throw** -- For every projection with `consistency !== "strong"` (i.e., `"eventual"` or unset), if `resolvedViewStoreFactories` has no entry, `init()` logs a `warn`-level message via the domain's logger (e.g. `` `Projection "<name>" has no viewStore wired; it will not receive live events.` ``) and proceeds -- the projection is still skipped from event-bus subscription (step 11's existing `if (!viewStoreInstance) continue;`), matching prior behavior, but the skip is no longer silent. This is deliberately a warning, not a throw: an eventual-consistency projection with no store might be legitimately unused in a given deployment (e.g., feature-flagged off, or query-only via a different projection), whereas a strong-consistency projection with no store cannot function AT ALL and always indicates a wiring mistake.
+3. **Ordering** -- Both checks run during `init()`, before step 6 (command handler registration) and before `13b`'s bus auto-connect, so a misconfiguration is surfaced before the domain accepts any traffic, not on the first query against the broken projection.
+
 ## Invariants
 
 - `Domain.infrastructure` must not be accessed before `init()` completes. The `!` non-null assertion on the private fields indicates they are set during init.
@@ -506,6 +522,10 @@ In global mode, the same snapshot config applies to all event-sourced aggregates
 - **wireDomain projection viewStore not provided for projection with identity** -- Throws an error (same as today when `Projection.viewStore` is missing for a projection with `identity`).
 - **wireDomain projection viewStore as a function** -- Type error at compile time and rejected at runtime: only `ViewStoreFactory` instances (anything with a callable `getForContext` method) are accepted. The legacy `(infra) => ViewStore` shorthand has been removed.
 - **defineDomain edge cases** -- See [`ddd/domain-definition`](../core/ddd/domain-definition.spec.md#edge-cases).
+- **Strong-consistency projection, `viewStore` omitted from both wiring and definition** -- `wireDomain`/`init()` throws synchronously, before the domain is usable. No command can be dispatched against a domain in this state.
+- **Eventual-consistency projection, `viewStore` omitted** -- `init()` succeeds, but logs a `warn`. The projection never receives live events (pre-existing skip behavior) and its query handlers (if any) will only ever see whatever a manual `rebuildProjection` or external write populated -- typically nothing.
+- **Standalone event handler dispatches a command in reaction to an event published by `withUnitOfWork`** -- Succeeds via its own implicit UoW. Does not throw `"UnitOfWork already completed"` (see the new `Domain.withUnitOfWork() -- Event Publishing Runs Outside the UoW's AsyncLocalStorage Scope` section above).
+- **Pessimistic concurrency inside `withUnitOfWork`, second command targets the same aggregate before the first's `withUnitOfWork` call resolves** -- The second command's lock acquisition blocks (or times out per `lockTimeoutMs`) until the first `withUnitOfWork` call's UoW actually commits or rolls back, not merely until the first command's lifecycle function returns.
 
 ## Integration Points
 
@@ -1931,6 +1951,349 @@ describe("InferProjectionMapQueries", () => {
     expectTypeOf<Queries>().toMatchTypeOf<
       { name: "GetItem" } | { name: "GetOrder" }
     >();
+  });
+});
+```
+
+### init throws when a strong-consistency projection has no wired viewStore
+
+```ts
+import { describe, it, expect } from "vitest";
+import { defineDomain, defineAggregate, defineProjection } from "@noddde/core";
+import { wireDomain } from "@noddde/engine";
+import type {
+  AggregateTypes,
+  DefineCommands,
+  DefineEvents,
+  DefineQueries,
+  Infrastructure,
+} from "@noddde/core";
+
+type ItemEvent = DefineEvents<{ ItemCreated: { id: string } }>;
+type ItemCommand = DefineCommands<{ CreateItem: { id: string } }>;
+type ItemQuery = DefineQueries<{
+  GetItem: { payload: { id: string }; result: { id: string } | null };
+}>;
+type ItemTypes = AggregateTypes & {
+  state: { id: string } | null;
+  commands: ItemCommand;
+  events: ItemEvent;
+  infrastructure: Infrastructure;
+};
+
+const Item = defineAggregate<ItemTypes>({
+  initialState: null,
+  decide: {
+    CreateItem: (cmd) => ({
+      name: "ItemCreated",
+      payload: { id: cmd.payload.id },
+    }),
+  },
+  evolve: { ItemCreated: (p) => ({ id: p.id }) },
+});
+
+const StrongSummary = defineProjection<{
+  events: ItemEvent;
+  queries: ItemQuery;
+  view: { id: string };
+  infrastructure: Infrastructure;
+}>({
+  consistency: "strong",
+  on: {
+    ItemCreated: {
+      id: (e) => e.payload.id,
+      reduce: (e) => ({ id: e.payload.id }),
+    },
+  },
+  queryHandlers: {},
+});
+
+describe("Domain.init: fail loud on unwired strong-consistency projection", () => {
+  it("should throw during wireDomain when no viewStore is wired for a strong projection", async () => {
+    const def = defineDomain({
+      writeModel: { aggregates: { Item } },
+      readModel: { projections: { StrongSummary } },
+    });
+
+    // No `projections: { StrongSummary: { viewStore: ... } }` wiring at all.
+    await expect(wireDomain(def)).rejects.toThrow(/StrongSummary/);
+  });
+});
+```
+
+### init warns (does not throw) when an eventual-consistency projection has no wired viewStore
+
+```ts
+import { describe, it, expect } from "vitest";
+import { defineDomain, defineAggregate, defineProjection } from "@noddde/core";
+import { wireDomain } from "@noddde/engine";
+import type {
+  AggregateTypes,
+  DefineCommands,
+  DefineEvents,
+  DefineQueries,
+  Infrastructure,
+  Logger,
+} from "@noddde/core";
+
+type ItemEvent = DefineEvents<{ ItemCreated: { id: string } }>;
+type ItemCommand = DefineCommands<{ CreateItem: { id: string } }>;
+type ItemQuery = DefineQueries<{
+  GetItem: { payload: { id: string }; result: { id: string } | null };
+}>;
+type ItemTypes = AggregateTypes & {
+  state: { id: string } | null;
+  commands: ItemCommand;
+  events: ItemEvent;
+  infrastructure: Infrastructure;
+};
+
+const Item = defineAggregate<ItemTypes>({
+  initialState: null,
+  decide: {
+    CreateItem: (cmd) => ({
+      name: "ItemCreated",
+      payload: { id: cmd.payload.id },
+    }),
+  },
+  evolve: { ItemCreated: (p) => ({ id: p.id }) },
+});
+
+const EventualSummary = defineProjection<{
+  events: ItemEvent;
+  queries: ItemQuery;
+  view: { id: string };
+  infrastructure: Infrastructure;
+}>({
+  on: {
+    ItemCreated: {
+      id: (e) => e.payload.id,
+      reduce: (e) => ({ id: e.payload.id }),
+    },
+  },
+  queryHandlers: {},
+});
+
+describe("Domain.init: warn on unwired eventual-consistency projection", () => {
+  it("should not throw, and should log a warning naming the projection", async () => {
+    const warnings: string[] = [];
+    const logger: Logger = {
+      debug: () => {},
+      info: () => {},
+      warn: (message: string) => warnings.push(message),
+      error: () => {},
+      child: () => logger,
+    };
+
+    const def = defineDomain({
+      writeModel: { aggregates: { Item } },
+      readModel: { projections: { EventualSummary } },
+    });
+
+    // No `projections: { EventualSummary: { viewStore: ... } }` wiring.
+    const domain = await wireDomain(def, { logger });
+
+    expect(domain).toBeDefined();
+    expect(warnings.some((w) => w.includes("EventualSummary"))).toBe(true);
+  });
+});
+```
+
+### withUnitOfWork: pessimistic lock is released before publish, so a same-aggregate re-entrant dispatch does not deadlock
+
+> Regression guard for the hooks-before-publish ordering (requirement 3 above). If the lock release hook ran AFTER the publish loop instead of before it, this test would time out (or, with `lockTimeoutMs` set as it is here, resolve with a swallowed `LockTimeoutError` and the target's state never updated) instead of completing quickly with the aggregate updated twice.
+
+```ts
+import { describe, it, expect } from "vitest";
+import { defineDomain, defineAggregate } from "@noddde/core";
+import {
+  wireDomain,
+  InMemoryEventSourcedAggregatePersistence,
+  InMemoryAggregateLocker,
+  InMemoryCommandBus,
+  EventEmitterEventBus,
+  InMemoryQueryBus,
+} from "@noddde/engine";
+import type {
+  AggregateTypes,
+  DefineCommands,
+  DefineEvents,
+  Infrastructure,
+} from "@noddde/core";
+
+type CounterEvent = DefineEvents<{ Bumped: { by: number } }>;
+type CounterCommand = DefineCommands<{ Bump: { by: number } }>;
+type CounterTypes = AggregateTypes & {
+  state: { total: number };
+  commands: CounterCommand;
+  events: CounterEvent;
+  infrastructure: Infrastructure;
+};
+
+const Counter = defineAggregate<CounterTypes>({
+  initialState: { total: 0 },
+  decide: {
+    Bump: (cmd) => ({ name: "Bumped", payload: { by: cmd.payload.by } }),
+  },
+  evolve: {
+    Bumped: (p, s) => ({ total: s.total + p.by }),
+  },
+});
+
+describe("Domain.withUnitOfWork: pessimistic lock released before publish", () => {
+  it("should let a same-aggregate re-entrant dispatch proceed instead of deadlocking on the still-held lock", async () => {
+    const sharedPersistence = new InMemoryEventSourcedAggregatePersistence();
+
+    const definition = defineDomain({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      processModel: {
+        standaloneEventHandlers: {
+          Bumped: async (event, infrastructure) => {
+            // Re-entrant dispatch against the SAME aggregate the just-committed
+            // withUnitOfWork call targeted.
+            if (event.payload.by === 1) {
+              await infrastructure.commandBus.dispatch({
+                name: "Bump",
+                targetAggregateId: "c-1",
+                payload: { by: 100 },
+              });
+            }
+          },
+        },
+      },
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => sharedPersistence,
+        concurrency: {
+          strategy: "pessimistic",
+          locker: new InMemoryAggregateLocker(),
+          lockTimeoutMs: 500,
+        },
+      },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    await domain.withUnitOfWork(async () => {
+      await domain.dispatchCommand({
+        name: "Bump",
+        targetAggregateId: "c-1",
+        payload: { by: 1 },
+      });
+    });
+
+    const events = await sharedPersistence.load("Counter", "c-1");
+    expect(events).toHaveLength(2);
+    expect(events[1]!.payload).toEqual({ by: 100 });
+  });
+});
+```
+
+### withUnitOfWork: a standalone handler can dispatch a command in reaction to a published event
+
+```ts
+import { describe, it, expect } from "vitest";
+import { defineDomain, defineAggregate } from "@noddde/core";
+import {
+  wireDomain,
+  InMemoryEventSourcedAggregatePersistence,
+  InMemoryCommandBus,
+  EventEmitterEventBus,
+  InMemoryQueryBus,
+} from "@noddde/engine";
+import type {
+  AggregateTypes,
+  DefineCommands,
+  DefineEvents,
+  Infrastructure,
+} from "@noddde/core";
+
+type SourceEvent = DefineEvents<{ SourceDone: { id: string } }>;
+type SourceCommand = DefineCommands<{ FinishSource: { id: string } }>;
+type SourceTypes = AggregateTypes & {
+  state: { done: boolean } | null;
+  commands: SourceCommand;
+  events: SourceEvent;
+  infrastructure: Infrastructure;
+};
+
+const Source = defineAggregate<SourceTypes>({
+  initialState: null,
+  decide: {
+    FinishSource: (cmd) => ({
+      name: "SourceDone",
+      payload: { id: cmd.targetAggregateId as string },
+    }),
+  },
+  evolve: { SourceDone: () => ({ done: true }) },
+});
+
+type TargetEvent = DefineEvents<{ TargetUpdated: { id: string } }>;
+type TargetCommand = DefineCommands<{ UpdateTarget: { id: string } }>;
+type TargetTypes = AggregateTypes & {
+  state: { updated: boolean } | null;
+  commands: TargetCommand;
+  events: TargetEvent;
+  infrastructure: Infrastructure;
+};
+
+const Target = defineAggregate<TargetTypes>({
+  initialState: null,
+  decide: {
+    UpdateTarget: (cmd) => ({
+      name: "TargetUpdated",
+      payload: { id: cmd.targetAggregateId as string },
+    }),
+  },
+  evolve: { TargetUpdated: () => ({ updated: true }) },
+});
+
+describe("Domain.withUnitOfWork: re-entrant dispatch from a standalone event handler", () => {
+  it("should let a standalone handler dispatch a command against a second aggregate without throwing", async () => {
+    const sharedPersistence = new InMemoryEventSourcedAggregatePersistence();
+
+    const definition = defineDomain({
+      writeModel: { aggregates: { Source, Target } },
+      readModel: { projections: {} },
+      processModel: {
+        standaloneEventHandlers: {
+          SourceDone: async (event, infrastructure) => {
+            await infrastructure.commandBus.dispatch({
+              name: "UpdateTarget",
+              targetAggregateId: event.payload.id,
+              payload: { id: event.payload.id },
+            });
+          },
+        },
+      },
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: { persistence: () => sharedPersistence },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    await domain.withUnitOfWork(async () => {
+      await domain.dispatchCommand({
+        name: "FinishSource",
+        targetAggregateId: "s-1",
+        payload: { id: "s-1" },
+      });
+    });
+
+    const targetEvents = await sharedPersistence.load("Target", "s-1");
+    expect(targetEvents).toHaveLength(1);
+    expect(targetEvents[0]!.name).toBe("TargetUpdated");
   });
 });
 ```

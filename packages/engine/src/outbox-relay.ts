@@ -24,6 +24,12 @@ export interface OutboxRelayOptions {
  * If the node crashes after database commit but before event publishing,
  * the relay picks up unpublished entries on restart.
  *
+ * The guarantee is scoped to what the wired {@link EventBus} reports: an entry
+ * is marked published only when `dispatch()` resolves, so a bus that swallows
+ * handler errors and always resolves (e.g. `EventEmitterEventBus`) yields
+ * at-least-once at the transport level but not against in-process handler
+ * failures. See `specs/engine/outbox-relay.spec.md` for the full scope note.
+ *
  * Created and managed by the Domain. Not exported to consumers directly
  * (but exported from `@noddde/engine` for testing).
  */
@@ -115,6 +121,9 @@ export class OutboxRelay implements BackgroundProcess {
         });
       }
       return dispatched;
+    } catch (error) {
+      this.logger?.error("Outbox poll failed.", { error });
+      return 0;
     } finally {
       this.processing = false;
     }
