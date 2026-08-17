@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import type { ID, ViewStore } from "@noddde/core";
 
 /**

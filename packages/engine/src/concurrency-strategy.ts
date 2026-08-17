@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import type { AggregateLocker, Event, ID, Logger } from "@noddde/core";
 import { ConcurrencyError } from "@noddde/core";
 

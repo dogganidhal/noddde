@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import type { PrismaClient } from "@prisma/client";
 import type { EventIdempotencyStore } from "@noddde/core";
 import type { PrismaTransactionStore } from "./unit-of-work";

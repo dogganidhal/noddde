@@ -74,7 +74,9 @@ type TestDomainResult = {
 
 type DomainSpy = {
   publishedEvents: Event[]; // All events dispatched via the event bus
-  dispatchedCommands: Command[]; // All commands dispatched via the command bus
+  dispatchedCommands: Command[]; // All commands dispatched, whatever the outcome
+  unhandledCommands: Command[]; // Commands with no registered handler (suppressed)
+  commandErrors: Array<{ command: Command; error: Error }>; // Handler threw -- recorded and rethrown
 };
 ```
 
@@ -127,7 +129,35 @@ expect(spy.dispatchedCommands).toContainEqual({
 });
 ```
 
-Commands dispatched by sagas that have no registered handler are captured by the spy but do not throw. This lets you test saga orchestration without wiring every downstream aggregate.
+Commands dispatched by sagas that have no registered handler are captured by the spy but do not throw. This lets you test saga orchestration without wiring every downstream aggregate. They also land in `spy.unhandledCommands`, so you can assert on the reaction even though nothing handled it:
+
+```ts title="__tests__/unhandled-commands.test.ts"
+expect(spy.unhandledCommands).toContainEqual(
+  expect.objectContaining({ name: "RequestPayment" }),
+);
+```
+
+## Spy: Command Errors
+
+A missing handler is the _only_ dispatch failure the harness suppresses. If a command's handler runs and throws -- a `decide` handler rejecting a business rule, say -- the error is recorded on `spy.commandErrors` **and** rethrown, so it never vanishes:
+
+```ts title="__tests__/command-errors.test.ts"
+const { domain, spy } = await testDomain({
+  aggregates: { LockedThing },
+});
+
+await expect(
+  domain.dispatchCommand({
+    name: "Touch",
+    targetAggregateId: "t-1",
+    payload: { by: "test" },
+  }),
+).rejects.toThrow("cannot touch a locked thing");
+
+expect(spy.commandErrors[0]!.error.message).toBe("cannot touch a locked thing");
+```
+
+Errors from saga reaction commands are the one case that does not surface as a rejected promise -- the event bus isolates and logs handler errors rather than rejecting -- so `spy.commandErrors` is how you assert on them.
 
 ## Testing Projection Views
 

@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import type { Event } from "./event";
 import type { EventHandler } from "./event-handler";
 import type { Infrastructure } from "../infrastructure";

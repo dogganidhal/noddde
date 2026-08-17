@@ -1,5 +1,3 @@
-/* eslint-disable no-unused-vars */
-
 /**
  * Interface for infrastructure components that hold resources requiring
  * cleanup (database connections, file handles, timers, etc.).

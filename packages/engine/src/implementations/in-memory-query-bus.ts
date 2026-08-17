@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import type { Query, QueryBus, QueryResult } from "@noddde/core";
 
 /** Handler function type for query bus registration. */
