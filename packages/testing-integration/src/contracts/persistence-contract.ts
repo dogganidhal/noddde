@@ -28,6 +28,49 @@ export interface PersistenceContractContext {
    * flag exists because some legacy column types do.
    */
   unicodeSafe?: boolean;
+  /**
+   * Set to `"lossy"` for adapter-dialect combinations whose payload column
+   * is a database-native JSON type that re-serializes numbers through its
+   * own storage engine rather than passing the original text through
+   * untouched (e.g. MySQL's `JSON` column, which stores DOUBLE values with
+   * fewer significant digits than IEEE-754 needs for guaranteed round-trip
+   * of an arbitrary double). Adapters that store payloads as an opaque
+   * string/text column (Prisma, TypeORM, Drizzle/sqlite, Drizzle/pg's
+   * `jsonb` in practice) are unaffected and should leave this `"exact"`
+   * (the default) — this is specifically about a JSON engine re-parsing
+   * and re-emitting numeric literals. Only affects the property-based
+   * sweep's floating-point leaves; structural corruption (wrong keys,
+   * wrong types, dropped values) still fails either way.
+   */
+  jsonNumberPrecision?: "exact" | "lossy";
+}
+
+/**
+ * Recursively rounds every finite number in `value` to `precision`
+ * significant digits, leaving strings/booleans/null/structure untouched.
+ * Used to compare a JSON payload against its round-tripped copy when the
+ * storage engine doesn't guarantee bit-exact double fidelity (see
+ * {@link PersistenceContractContext.jsonNumberPrecision}) — comparing two
+ * values put through the same rounding still catches any real corruption
+ * (dropped keys, wrong types, wrong array length) while tolerating the
+ * storage engine's own numeric re-serialization.
+ */
+function roundForLossyCompare(value: unknown, precision = 12): unknown {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Number(value.toPrecision(precision));
+  }
+  if (Array.isArray(value)) {
+    return value.map((v) => roundForLossyCompare(v, precision));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [
+        k,
+        roundForLossyCompare(v, precision),
+      ]),
+    );
+  }
+  return value;
 }
 
 export type PersistenceContractFactory = () =>
@@ -350,6 +393,7 @@ export function definePersistenceContract(
 
       it("roundtrips arbitrary JSON-serializable payloads (property-based)", async () => {
         let n = 0;
+        const lossy = ctx.jsonNumberPrecision === "lossy";
         await fc.assert(
           fc.asyncProperty(jsonSafeValue, async (value) => {
             const id = `o-fc-${n++}`;
@@ -361,7 +405,13 @@ export function definePersistenceContract(
               0,
             );
             const [loaded] = await ctx.eventSourced.load("Order", id);
-            expect(loaded?.payload).toEqual(payload);
+            if (lossy) {
+              expect(roundForLossyCompare(loaded?.payload)).toEqual(
+                roundForLossyCompare(payload),
+              );
+            } else {
+              expect(loaded?.payload).toEqual(payload);
+            }
           }),
           { numRuns: 40 },
         );

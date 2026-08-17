@@ -67,6 +67,13 @@ definePersistenceContract("drizzle/mysql", async () => {
   return {
     eventSourced: adapter.eventSourcedPersistence,
     stateStored: adapter.stateStoredPersistence,
+    // MySQL's native `json` column type re-parses and re-emits numeric
+    // literals through its own storage engine (fewer significant digits
+    // than IEEE-754 doubles need for guaranteed round-trip). Now that
+    // payload/state are stored as native JSON (fixes #130 finding 2's
+    // double-encoding bug) instead of an opaque stringified blob, this
+    // adapter-dialect combination is genuinely subject to that limitation.
+    jsonNumberPrecision: "lossy",
   };
 });
 

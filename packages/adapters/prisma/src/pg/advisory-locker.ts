@@ -2,6 +2,7 @@
 import type { PrismaClient } from "@prisma/client";
 import type { AggregateLocker } from "@noddde/core";
 import { LockTimeoutError, fnv1a64 } from "@noddde/core";
+import { KeyedMutex } from "../keyed-mutex";
 
 /**
  * PostgreSQL advisory lock implementation for Prisma.
@@ -9,6 +10,11 @@ import { LockTimeoutError, fnv1a64 } from "@noddde/core";
  * Uses `pg_advisory_lock` (blocking) and `pg_try_advisory_lock` (with timeout polling)
  * via Prisma's `$queryRawUnsafe`. The lock key is a 64-bit FNV-1a hash of
  * `aggregateName:aggregateId`.
+ *
+ * Composes a per-process {@link KeyedMutex} in front of the DB-level lock:
+ * PG advisory locks are re-entrant per session, so two concurrent commands
+ * sharing one pinned connection (see `PrismaAdvisoryLocker.fromUrl`) would
+ * otherwise both "acquire" successfully.
  *
  * @internal Used by {@link PrismaAdvisoryLocker}. Not part of the public API.
  */
@@ -21,9 +27,26 @@ export class PostgresLocker implements AggregateLocker {
    */
   private readonly _held = new Set<string>();
 
+  private readonly localMutex = new KeyedMutex();
+
   constructor(private readonly prisma: PrismaClient) {}
 
   async acquire(
+    aggregateName: string,
+    aggregateId: string,
+    timeoutMs?: number,
+  ): Promise<void> {
+    const localKey = `${aggregateName}:${aggregateId}`;
+    await this.localMutex.lock(localKey);
+    try {
+      await this.acquireDb(aggregateName, aggregateId, timeoutMs);
+    } catch (error) {
+      this.localMutex.unlock(localKey);
+      throw error;
+    }
+  }
+
+  private async acquireDb(
     aggregateName: string,
     aggregateId: string,
     timeoutMs?: number,
@@ -60,6 +83,18 @@ export class PostgresLocker implements AggregateLocker {
   }
 
   async release(aggregateName: string, aggregateId: string): Promise<void> {
+    const localKey = `${aggregateName}:${aggregateId}`;
+    try {
+      await this.releaseDb(aggregateName, aggregateId);
+    } finally {
+      this.localMutex.unlock(localKey);
+    }
+  }
+
+  private async releaseDb(
+    aggregateName: string,
+    aggregateId: string,
+  ): Promise<void> {
     const hashKey = fnv1a64(`${aggregateName}:${aggregateId}`);
     const keyStr = hashKey.toString();
     const believedHeld = this._held.has(keyStr);

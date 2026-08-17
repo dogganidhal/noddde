@@ -562,6 +562,10 @@ model NodddeOutboxEntry {
 63. `PrismaUnitOfWork.commit()` runs its enlisted-operations loop inside `await this.txStore.als.run(tx, async () => { for (const op of ops) await op(); })` instead of assigning `txStore.current = tx`. Two `PrismaUnitOfWork` instances committing concurrently no longer cross-contaminate.
 64. This is a breaking change to `PrismaTransactionStore`'s shape; direct construction (bypassing `PrismaAdapter`) must switch to `{ als: new AsyncLocalStorage() }`.
 
+### Advisory locker per-process mutex (fixes #131 finding 2's residual hole)
+
+66a. `PostgresLocker` and `MySQLLocker` (Prisma) compose a per-process keyed mutex (`KeyedMutex`, `packages/adapters/prisma/src/keyed-mutex.ts`) in front of the DB-level lock. `acquire()` takes the local mutex for `${aggregateName}:${aggregateId}` before issuing the DB-level acquire; `release()` issues the DB-level release before releasing the local mutex. This closes the residual re-entrancy hole the issue calls out even for the already-correct `fromUrl()`-pinned-session design: PG/MySQL advisory locks are session-scoped, not call-scoped, so two concurrent commands sharing one pinned connection would otherwise both "acquire" the same DB lock. Discovered by the shared `AdvisoryLockerContract`'s new same-locker-instance reentrancy test, which applies uniformly across all three adapters.
+
 ### MySQL column sizing (fixes #130 finding 3 — VARCHAR(191) truncation)
 
 65. The shipped `prisma/schema.prisma` (SQLite dev schema) carries a prominent comment above every unbounded-length `String` field (`payload`, `metadata`, `state`, `event`) pointing to `prisma/integration/mysql.prisma`, which already annotates the same fields `@db.LongText` for MySQL deployments. There is no single `schema.prisma` that is simultaneously valid for SQLite and MySQL native-type attributes (`@db.LongText` is not a valid SQLite native type), so the fix is documentation-at-the-source plus the already-correct dialect-specific integration schema — not a change to the base schema's provider.
