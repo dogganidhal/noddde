@@ -6,8 +6,8 @@ status: implemented
 exports: [Event, DefineEvents]
 depends_on: [edd/event-metadata]
 docs:
-  - events/defining-events.mdx
-  - events/event-sourcing.mdx
+  - core-concepts/messages-and-types.mdx
+  - core-concepts/cqrs-and-event-sourcing.mdx
 ---
 
 # Event & DefineEvents

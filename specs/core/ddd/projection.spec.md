@@ -2,7 +2,7 @@
 title: "ProjectionTypes, Projection, ProjectionEventHandler, DeleteView, defineProjection & Infer Utilities"
 module: ddd/projection
 source_file: packages/core/src/ddd/projection.ts
-status: ready
+status: implemented
 exports:
   [
     ProjectionTypes,
@@ -27,10 +27,8 @@ depends_on:
     persistence/view-store,
   ]
 docs:
-  - projections/overview.mdx
-  - projections/functional-projections.mdx
-  - projections/connecting-events.mdx
-  - projections/view-persistence.mdx
+  - read-model/projections.mdx
+  - read-model/view-persistence.mdx
 ---
 
 # ProjectionTypes, Projection, ProjectionEventHandler, defineProjection & Infer Utilities

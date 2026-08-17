@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import type { ID } from "../id";
 import { Event } from "../edd/event";
 import { Command } from "../cqrs/command/command";

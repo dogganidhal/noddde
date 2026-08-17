@@ -125,5 +125,67 @@ describe.skipIf(!slowTestsEnabled())(
 
       await bus.close();
     }, 90_000);
+
+    it("survives an outage while a handler is still in flight, without a silent ack-loss or a wedged consumer", async () => {
+      // Regression test for the ack/nack-on-stale-channel bug: the consume
+      // callback used to resolve `this._channel` dynamically at ack time,
+      // so a handler still running when a reconnect replaces the channel
+      // would ack its delivery tag against the *new* channel — either
+      // silently acking an unrelated message (event loss) or getting the
+      // new channel killed with PRECONDITION_FAILED (which, since only
+      // connection-level close triggered reconnection, wedged every
+      // consumer with `_connected` still true). The fix captures the
+      // channel at subscribe time and swallows stale ack/nack errors.
+      const suffix = uniqueSuffix();
+      const subject = `InFlight_${suffix}`;
+      const bus = makeBus(suffix);
+
+      const received: unknown[] = [];
+      let handlerStarted = 0;
+      bus.on(subject, async (e) => {
+        handlerStarted++;
+        // Long enough to still be running when the outage below hits.
+        await sleep(2000);
+        received.push(e);
+      });
+      await bus.connect();
+
+      await bus.dispatch({ name: subject, payload: { n: 0 } });
+      await waitFor(() => handlerStarted >= 1, { timeoutMs: 15_000 });
+
+      // Sever the connection while the handler above is mid-flight — its
+      // eventual ack will target a now-stale channel once reconnection
+      // replaces `this._channel`.
+      await proxy.setEnabled(false);
+      await sleep(1500);
+      await proxy.setEnabled(true);
+
+      // The original delivery is not lost: since its ack never reached the
+      // broker (the channel it was captured on died), the broker redelivers
+      // it once the consumer resubscribes on the new channel/connection.
+      await waitFor(() => received.length >= 1, {
+        timeoutMs: 30_000,
+        intervalMs: 500,
+      });
+
+      // Prove the consumer is not wedged: a *fresh* message dispatched after
+      // recovery must still be delivered. Before the fix, a channel killed
+      // by PRECONDITION_FAILED left `_connected === true` with a dead
+      // channel and no path back — every subsequent message would be lost.
+      await waitFor(
+        async () => {
+          try {
+            await bus.dispatch({ name: subject, payload: { n: 1 } });
+          } catch {
+            // still reconnecting — dispatch rejects until the channel is back
+          }
+          return received.length >= 2;
+        },
+        { timeoutMs: 30_000, intervalMs: 750 },
+      );
+      expect(received.length).toBeGreaterThanOrEqual(2);
+
+      await bus.close();
+    }, 90_000);
   },
 );

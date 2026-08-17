@@ -12,8 +12,7 @@ depends_on:
   - core/ddd/projection
   - core/edd/event-bus
   - core/engine/domain
-docs:
-  - projections/connecting-events.mdx
+docs: [read-model/projections.mdx]
 ---
 
 # Event-to-Projection Flow

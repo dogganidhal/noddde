@@ -6,8 +6,8 @@ status: implemented
 exports: [ViewStore, ViewStoreFactory, createViewStoreFactory]
 depends_on: [core/id]
 docs:
-  - projections/overview.mdx
-  - projections/view-persistence.mdx
+  - read-model/projections.mdx
+  - read-model/view-persistence.mdx
   - read-model/projection-rebuild.mdx
 ---
 

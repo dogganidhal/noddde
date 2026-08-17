@@ -8,8 +8,7 @@ exports:
   - OutboxStore
 depends_on:
   - edd/event
-docs:
-  - domain-configuration/infrastructure.mdx
+docs: [running/outbox-pattern.mdx]
 ---
 
 # OutboxStore & OutboxEntry

@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
   AggregateCommand,

@@ -2,7 +2,7 @@
 title: "KafkaEventBus"
 module: adapters/kafka/kafka-event-bus
 source_file: packages/adapters/kafka/src/kafka-event-bus.ts
-status: ready
+status: implemented
 exports: [KafkaEventBus, KafkaEventBusConfig]
 depends_on:
   - core/edd/event-bus
@@ -16,7 +16,7 @@ docs: []
 
 # KafkaEventBus
 
-> Kafka-backed EventBus implementation using `kafkajs`. Publishes domain events to Kafka topics and delivers them to registered handlers via consumer groups. Provides at-least-once delivery with partition-level ordering. Suitable for distributed, multi-process deployments where durable event streaming is required.
+> Kafka-backed EventBus implementation using `kafkajs`. Publishes domain events to Kafka topics and delivers them to registered handlers via consumer groups. Provides at-least-once delivery with ordering **only** among events sharing the same event name and the same partition key (see "Ordering Guarantees" below — this is narrower than "partition-level ordering" and does **not** cover ordering across different event names for the same aggregate). Suitable for distributed, multi-process deployments where durable event streaming is required.
 
 ## Type Contract
 
@@ -40,11 +40,34 @@ export interface KafkaEventBusConfig {
   groupId: string;
   /** Optional prefix prepended to event names to form topic names (e.g., "noddde." → "noddde.AccountCreated"). */
   topicPrefix?: string;
+  /**
+   * Number of partitions used when a topic (event topic or DLQ topic) is
+   * auto-provisioned by this bus. Default: `3`. Ignored for topics that
+   * already exist (provisioning is idempotent and never alters an existing
+   * topic's partition count).
+   */
+  topicPartitions?: number;
+  /**
+   * Replication factor used when a topic is auto-provisioned by this bus.
+   * Default: `undefined` (broker's `default.replication.factor` applies).
+   */
+  replicationFactor?: number;
+  /**
+   * Suffix appended to a message's original topic to form its dead-letter
+   * topic name (e.g., topic `"OrderPlaced"` → DLQ topic
+   * `"OrderPlaced.dlq"`). Default: `".dlq"`.
+   */
+  dlqTopicSuffix?: string;
   /** Consumer session timeout in milliseconds (default: 30000). Increase if handlers are slow to avoid rebalances. */
   sessionTimeout?: number;
   /** Consumer heartbeat interval in milliseconds (default: 3000). Must be less than sessionTimeout / 3. */
   heartbeatInterval?: number;
-  /** Connection resilience configuration (default: maxAttempts=6, initialDelayMs=300, maxDelayMs=30000). Mapped to kafkajs retry options. */
+  /**
+   * Connection resilience configuration (default: maxAttempts=6, initialDelayMs=300, maxDelayMs=30000). Mapped to kafkajs retry options.
+   * `resilience.maxRetries` governs handler-failure redelivery attempts before a message is parked to the DLQ topic (see "Dead Letter Queue" below).
+   * Unlike the generic `BrokerResilience` doc ("no limit" when unset), **this adapter defaults `maxRetries` to `5` when unset** — an unbounded
+   * retry count would let a single poison message retry-crash-rebalance the shared consumer forever, starving every other subscribed topic.
+   */
   resilience?: BrokerResilience;
   /**
    * Strategy for deriving the Kafka message key from an event.
@@ -105,78 +128,110 @@ export class KafkaEventBus implements EventBus, Connectable {
 ### Dispatch
 
 1. **Topic derivation** -- `dispatch(event)` publishes to a Kafka topic named `${topicPrefix}${event.name}` (default prefix is empty, so topic = event name).
-2. **JSON serialization** -- The full event object (`{ name, payload, metadata? }`) is serialized as JSON in the message value.
-3. **Message key via partition key strategy** -- The message key is derived from the `partitionKeyStrategy` config option. Default strategy is `"aggregateId"`: uses `event.metadata?.aggregateId` (stringified via `String()`) when present, falls back to `null` (round-robin partition assignment). When a custom function is provided, it receives the full event and returns the key string or `null`. This ensures per-aggregate ordering by default, which is the correct default for event sourcing.
+2. **JSON serialization, versioned wire format** -- The full event object (`{ name, payload, metadata? }`) is serialized as JSON in the message value. This JSON-of-the-full-Event-object layout is a **versioned, stable wire contract**: every published message (including DLQ messages, see below) carries a Kafka header `content-type: application/vnd.noddde.event+json; version=1`. Consumers/tooling reading raw Kafka messages outside this bus should branch on this header rather than assuming an unversioned format. Because `JSON.stringify` is used, `Date`, `Map`, `BigInt`, and `undefined` values inside `payload` serialize lossily (a `Date` becomes an ISO string, `undefined` fields are dropped, `Map`/`BigInt` throw or serialize unexpectedly) — event payloads should be restricted to JSON-serializable values.
+3. **Message key via partition key strategy** -- The message key is derived from the `partitionKeyStrategy` config option. Default strategy is `"aggregateId"`: uses `event.metadata?.aggregateId` (stringified via `String()`) when present, falls back to `null` (round-robin partition assignment). When a custom function is provided, it receives the full event and returns the key string or `null`. This ensures per-aggregate ordering **among events sharing the same event name** by default (see "Ordering Guarantees").
 4. **Producer acknowledgment** -- `dispatch` awaits the producer `send()` and resolves when Kafka acknowledges receipt (at-least-once for the publish side).
 5. **Dispatch before connect throws** -- Calling `dispatch` before `connect()` throws an error.
+6. **Topic provisioning is connect()-time, not dispatch-time, for the common case** -- `dispatch` does not itself provision topics (see "Topic Provisioning"): the target topic is provisioned during `connect()` for every event name that has a registered `on()` handler at that point. A publish-only bus that dispatches an event name it never registered a handler for is **out of scope for auto-provisioning in this pass** and still relies on broker auto-create defaults for that specific topic — a documented, deliberate scope cut (the audited failure mode is subscriber-side: an under-partitioned topic silently defeating `partitionKeyStrategy` / consumer-group scale-out for a service that _consumes_ it).
+
+### Ordering Guarantees
+
+7. **Per-(event name, partition key) ordering only** -- Kafka guarantees ordering only within a single partition. Since each event name maps to its own topic (`${topicPrefix}${eventName}`, unchanged from prior versions — this is not a topology redesign) and the message key is the partition key, this bus guarantees ordering **only among events of the same name sharing the same partition key** (by default, `event.metadata?.aggregateId`). It explicitly does **not** guarantee ordering across different event names for the same aggregate: e.g. `OrderPlaced` then `OrderShipped` for the same order live on independent topics/partitions with independent consumer fetch timing and can be delivered or processed in either relative order.
+8. **Consumers must be order-tolerant and idempotent** -- Any handler that observes multiple event types for one aggregate (most commonly a projection) must be written to tolerate out-of-order delivery across event names and to be idempotent under redelivery — e.g. by guarding on `event.metadata.sequenceNumber`, which `EventMetadata` already carries. This bus does not enforce or detect such guards; it is a consumer-side responsibility this spec calls out explicitly so it is not silently assumed away.
+
+### Topic Provisioning
+
+9. **Provisioning at connect()** -- `connect()` provisions (via `admin.createTopics`) the Kafka topic for every event name registered via `on()` before `connect()` was called, using `topicPartitions` (default `3`) partitions and `replicationFactor` (default: broker default) when set. This runs once, in a single batched `admin.createTopics` call, before the consumer subscribes — so a shared broker's default `auto.create.topics.enable` (and its usually-1-partition default) never silently caps this bus's partition count or defeats `partitionKeyStrategy` / consumer-group scale-out.
+10. **Idempotent, additive provisioning** -- Provisioning a topic that already exists is a no-op (kafkajs's `createTopics` does not alter an existing topic's partition count or error). Each topic is provisioned at most once per bus instance lifetime (tracked in-memory); repeated `dispatch()` calls to the same topic, or `on()` registrations sharing a topic, do not trigger repeated admin round-trips.
+11. **DLQ topics are provisioned lazily, on first use** -- A message's DLQ topic (see "Dead Letter Queue") is provisioned the first time a message for that topic needs to be parked, not eagerly at `connect()` (most topics never produce a DLQ message).
+12. **Publish-only topics are a documented scope cut** -- An event name that is only ever `dispatch()`-ed and never has an `on()` handler registered on this bus is not auto-provisioned by this bus; it relies on the broker's own topic auto-create/manual-provisioning. This is a deliberate, narrower scope than "every topic this bus ever touches" — see item 6.
 
 ### Subscription / Handler Registration
 
-6. **on registers handlers by event name** -- `on(eventName, handler)` stores the handler in an internal registry keyed by event name. Multiple handlers per event name are supported (fan-out within the same process).
-7. **Consumer subscription** -- When `connect()` is called, the consumer subscribes to the topic `${topicPrefix}${eventName}` for each registered event name. Registering an additional handler via `on()` once `connect()` has started is supported **only** for an event name whose topic is already subscribed (this simply appends another handler for in-process fan-out). Calling `on()` for an event name whose topic is **not** already subscribed **throws** an `Error` once `connect()` has started — this covers both the fully-connected state **and** the in-progress state (`connect()` awaited but not yet resolved), because `connect()` subscribes only the topics known when it runs its subscribe loop, so an `on()` that races an in-flight `connect()` could register a handler that never gets a subscription. kafkajs also forbids subscribing to a new topic on a running consumer (`Cannot subscribe to topic while consumer is running`). The thrown message instructs the caller to register all handlers before `connect()`. The adapter does **not** attempt (and does not pretend) to subscribe late: there is no silent-loss path and no misleading "will be retried" log.
-8. **Message deserialization with poison message protection** -- Incoming Kafka messages are deserialized from JSON. Deserialization is wrapped in try/catch. If `JSON.parse` throws (malformed message), the error is logged and the offset is committed (message skipped). Poison messages must never block the partition via infinite redelivery.
-9. **Isolated parallel handler invocation** -- Handlers for the same event are invoked concurrently via `Promise.allSettled()` (not `Promise.all()`). This guarantees that **every registered handler runs to completion** even when some of them fail — siblings are never silenced or short-circuited by an earlier rejection. After all handlers settle, the bus iterates the rejected results and logs each one individually via the framework `Logger` at `error` level with structured fields (see "Per-handler error logging" below). If at least one handler rejected, `_handleMessage` then propagates a failure (re-throwing the first rejection's reason) so the outer consumer loop skips the offset commit and Kafka redelivers per the existing retry / maxRetries policy. Handlers that already completed will re-execute on redelivery — consumers must be idempotent. This differs from `EventEmitterEventBus` (which invokes sequentially within a single process) because broker adapters operate in distributed contexts where independent handlers (projections, sagas) should not block each other.
+12. **on registers handlers by event name** -- `on(eventName, handler)` stores the handler in an internal registry keyed by event name. Multiple handlers per event name are supported (fan-out within the same process).
+13. **Consumer subscription** -- When `connect()` is called, the consumer subscribes to the topic `${topicPrefix}${eventName}` for each registered event name. Registering an additional handler via `on()` once `connect()` has started is supported **only** for an event name whose topic is already subscribed (this simply appends another handler for in-process fan-out). Calling `on()` for an event name whose topic is **not** already subscribed **throws** an `Error` once `connect()` has started — this covers both the fully-connected state **and** the in-progress state (`connect()` awaited but not yet resolved), because `connect()` subscribes only the topics known when it runs its subscribe loop, so an `on()` that races an in-flight `connect()` could register a handler that never gets a subscription. kafkajs also forbids subscribing to a new topic on a running consumer (`Cannot subscribe to topic while consumer is running`). The thrown message instructs the caller to register all handlers before `connect()`. The adapter does **not** attempt (and does not pretend) to subscribe late: there is no silent-loss path and no misleading "will be retried" log.
+14. **Message deserialization with poison message protection** -- Incoming Kafka messages are deserialized from JSON. Deserialization is wrapped in try/catch. If `JSON.parse` throws (malformed message): the error is logged; when the message's topic/partition/offset location is known (real consumer delivery), the raw message is best-effort parked to the DLQ topic (see "Dead Letter Queue") with a "deserialize failed" reason before the offset is committed; when location is unavailable (e.g. a direct unit-test call to `_handleMessage` with only 2 arguments), the message is simply skipped as before. Poison messages never block the partition via infinite redelivery — they are never retried, since a re-fetch of the same bytes can never parse successfully.
+15. **Isolated parallel handler invocation** -- Handlers for the same event are invoked concurrently via `Promise.allSettled()` (not `Promise.all()`). This guarantees that **every registered handler runs to completion** even when some of them fail — siblings are never silenced or short-circuited by an earlier rejection. After all handlers settle, the bus iterates the rejected results and logs each one individually via the framework `Logger` at `error` level with structured fields (see "Per-handler error logging" below). This differs from `EventEmitterEventBus` (which invokes sequentially within a single process) because broker adapters operate in distributed contexts where independent handlers (projections, sagas) should not block each other.
 
-   9c. **Per-handler error logging** -- For each rejected handler, the bus calls `logger.error(message, fields)` exactly once with:
+    If at least one handler rejected and the message's topic/partition/offset location is known (real consumer delivery — see "Dead Letter Queue" and item 22 for the bounded-retry-then-park behavior this enables), the bus does **not** always re-throw: below the retry cap it re-throws (skipping the offset commit, same as before); once the cap is exceeded it parks the message to the DLQ and returns normally so the offset commits and consumption proceeds to the next message. When location is unknown (direct unit-test calls without the 3rd argument), the legacy contract is preserved unconditionally: the first rejection is always re-thrown immediately, with no cap and no DLQ involvement.
 
-   - `eventName: string` — from `event.name`.
-   - `eventId?: string` — from `event.metadata?.eventId` when present.
-   - `handlerName: string` — read from the handler's `name` property; falls back to `event.name` when anonymous.
-   - `error: { name, message, stack? }` — extracted from the caught exception. Non-`Error` rejection values are coerced via `String(value)` into `message`.
-   - `traceId?: string` and `spanId?: string` — populated from the active OpenTelemetry span via the configured `Instrumentation` instance. Absent when no span is active or when `@opentelemetry/api` is not installed.
-     9b. **maxRetries delivery limit** -- If `resilience.maxRetries` is configured, track delivery attempts using a custom Kafka header (`x-noddde-delivery-count`). On each message receipt, read the header, increment it, and check against `maxRetries`. If the count exceeds `maxRetries`, log a warning and commit the offset (skip the message). This prevents handler-level poison messages from blocking the partition indefinitely.
+    **Per-handler error logging** -- For each rejected handler, the bus calls `logger.error(message, fields)` exactly once with:
 
-10. **Explicit offset commit after handlers** -- The consumer is configured with `autoCommit: false` in `consumer.run()`. After all handlers for a message have completed successfully (all promises in the `Promise.all` resolved), the offset is committed explicitly via `consumer.commitOffsets([{ topic, partition, offset: nextOffset }])` where `nextOffset` is `message.offset + 1` (as a string). This provides at-least-once delivery. Without explicit `commitOffsets()`, offsets are never persisted to Kafka and every consumer restart would reprocess all messages. After committing, the delivery count entry for this offset is pruned from the `_deliveryCounts` map to prevent unbounded memory growth.
+    - `eventName: string` — from `event.name`.
+    - `eventId?: string` — from `event.metadata?.eventId` when present.
+    - `handlerName: string` — read from the handler's `name` property; falls back to `event.name` when anonymous.
+    - `error: { name, message, stack? }` — extracted from the caught exception. Non-`Error` rejection values are coerced via `String(value)` into `message`.
+    - `traceId?: string` and `spanId?: string` — populated from the active OpenTelemetry span via the configured `Instrumentation` instance. Absent when no span is active or when `@opentelemetry/api` is not installed.
+
+16. **Explicit offset commit after handlers** -- The consumer is configured with `autoCommit: false` in `consumer.run()`. The offset is committed explicitly via `consumer.commitOffsets([{ topic, partition, offset: nextOffset }])` (where `nextOffset` is `message.offset + 1`, as a string) once `_handleMessage` resolves without throwing — either because every handler succeeded, or because a failing message was parked to the DLQ (see item 15). This provides at-least-once delivery for a message still in its retry window, and "processed exactly once more, successfully or parked" for a message that has exhausted retries. Without explicit `commitOffsets()`, offsets are never persisted to Kafka and every consumer restart would reprocess all messages. After committing, the delivery count entry for this offset is pruned from the `_deliveryCounts` map to prevent unbounded memory growth.
+
+### Dead Letter Queue
+
+17. **DLQ destination** -- Each Kafka topic has an associated dead-letter topic named `${topic}${dlqTopicSuffix}` (default suffix `.dlq`, configurable). The DLQ topic is provisioned (see "Topic Provisioning") the first time a message needs to be parked to it.
+18. **Bounded retries before parking** -- When a message's handler(s) fail, delivery attempts for that exact offset are counted in-memory (`_deliveryCounts`, keyed by `topic:partition:offset`). The cap is `resilience.maxRetries` when configured, otherwise a built-in default of `5` (this adapter intentionally does **not** inherit the generic "unset = infinite redelivery" default described on `BrokerResilience`, because unbounded redelivery of a failing message is exactly the head-of-line-blocking failure mode this DLQ mechanism exists to prevent). While the attempt count is at or below the cap, the existing behavior applies: the message is re-thrown and redelivered. Once the count exceeds the cap, the message is parked instead of re-thrown.
+19. **DLQ message contents** -- The parked message published to the DLQ topic carries the **original, unmodified message value** (the same raw bytes that failed to process) plus Kafka headers carrying failure metadata: `content-type` (same versioned content-type as any other published message), `x-noddde-dlq-error` (the failure's message string), `x-noddde-dlq-attempts` (the number of delivery attempts made, as a string), `x-noddde-dlq-original-topic`, `x-noddde-dlq-original-partition`, `x-noddde-dlq-original-offset` (the message's original coordinates, so an operator can correlate it back to the source topic), and `x-noddde-dlq-timestamp` (ISO-8601, when the message was parked). A `logger.error` call is also emitted at the moment of parking with the same fields. This lets operators inspect and replay the exact failed payload rather than losing it to a bare warning log.
+20. **Parking is best-effort but never silent** -- If the DLQ publish itself fails (e.g. broker unreachable), the bus logs the DLQ failure and falls back to the pre-DLQ behavior for that attempt: re-throw the original rejection so the offset is not committed and Kafka redelivers. The message is never silently dropped by a DLQ-publish failure — worst case it continues retrying (and re-attempting to park) like before this feature existed.
+21. **maxRetries delivery limit is unified with the DLQ cap** -- There is a single delivery-attempt counter and a single cap (see item 18); there is no separate, lower-level "skip without parking" path — the old behavior of silently discarding an exhausted-retries message (logging a warning and committing the offset with the payload gone) no longer exists. Every exhausted-retries message is parked, not just logged.
 
 ### Backpressure
 
-11. **Session timeout and heartbeat configuration** -- `connect()` passes `sessionTimeout` and `heartbeatInterval` to the kafkajs consumer constructor. Defaults: 30000ms session timeout, 3000ms heartbeat interval. This prevents consumer rebalances when handlers are slow.
+22. **Session timeout and heartbeat configuration** -- `connect()` passes `sessionTimeout` and `heartbeatInterval` to the kafkajs consumer constructor. Defaults: 30000ms session timeout, 3000ms heartbeat interval. This prevents consumer rebalances when handlers are slow.
+23. **Bounded retry limits the blast radius of a single bad message across topics** -- Because a single shared kafkajs consumer serves every subscribed topic (`consumer.run()` is called once, with one `eachMessage` callback), a message that keeps getting re-thrown out of `eachMessage` causes kafkajs's own retry/crash/rebalance cycle, which stalls fetch progress for **every** subscribed topic, not just the failing one — this bus does not achieve true per-partition isolation (that would require `eachBatch` with per-partition concurrency, out of scope for this pass). The DLQ cap (item 18) bounds this blast radius: instead of an indefinitely failing message causing indefinite crash/rebalance churn across all topics, at most `maxRetries` (default `5`) rounds of it occur before the message is parked and consumption of **all** topics — including the one that was failing — proceeds normally again.
 
 ### Connection Lifecycle
 
-12. **connect establishes producer and consumer** -- `connect()` creates and connects the Kafka producer and consumer. The `resilience` config option (if provided) is mapped to kafkajs retry options: `maxAttempts-1` → `retries`, `initialDelayMs` → `initialRetryTime`, `maxDelayMs` → `maxRetryTime`. These are passed to the `new Kafka()` constructor. kafkajs handles reconnection natively.
-13. **connect is idempotent and concurrent-safe** -- Calling `connect()` when already connected is a no-op. Concurrent `connect()` calls are deduplicated via a connection promise mutex — the second call awaits the first rather than starting a parallel connection attempt.
-14. **close disconnects cleanly** -- `close()` first calls `consumer.stop()` to halt message processing and allow in-flight handlers to complete, then disconnects the producer and consumer, and clears the handler registry. After `close()`, dispatch and on throw. The `stop()` → `disconnect()` sequence prevents unhandled promise rejections from in-flight handlers.
-15. **close is idempotent** -- Calling `close()` multiple times has no additional effect.
+24. **connect establishes producer and consumer** -- `connect()` creates and connects the Kafka producer and consumer. The `resilience` config option (if provided) is mapped to kafkajs retry options: `maxAttempts-1` → `retries`, `initialDelayMs` → `initialRetryTime`, `maxDelayMs` → `maxRetryTime`. These are passed to the `new Kafka()` constructor. kafkajs handles reconnection natively.
+25. **connect is idempotent and concurrent-safe** -- Calling `connect()` when already connected is a no-op. Concurrent `connect()` calls are deduplicated via a connection promise mutex — the second call awaits the first rather than starting a parallel connection attempt.
+26. **close disconnects cleanly** -- `close()` first calls `consumer.stop()` to halt message processing and allow in-flight handlers to complete, then disconnects the producer and consumer, and clears the handler registry. After `close()`, dispatch and on throw. The `stop()` → `disconnect()` sequence prevents unhandled promise rejections from in-flight handlers.
+27. **close is idempotent** -- Calling `close()` multiple times has no additional effect.
 
 ### Error Handling
 
-16. **Handler errors propagate as message-level failure** -- After `Promise.allSettled` settles every registered handler and each rejection has been logged individually, `_handleMessage` re-throws the first rejected handler's reason. The outer consumer loop catches this and skips the offset commit, enabling Kafka redelivery per the existing retry / maxRetries policy. All sibling handlers ran to completion before this re-throw — none are silenced by an earlier rejection.
-17. **Serialization errors on dispatch** -- If event serialization fails, `dispatch` rejects with the serialization error.
-18. **Connection errors on dispatch** -- If the broker is unreachable during `dispatch`, the promise rejects with a connection error.
+28. **Handler errors propagate as message-level failure (until the retry cap)** -- After `Promise.allSettled` settles every registered handler and each rejection has been logged individually, `_handleMessage` re-throws the first rejected handler's reason **unless** the retry cap has just been exceeded, in which case it parks to the DLQ and resolves instead (see "Dead Letter Queue"). When it re-throws, the outer consumer loop catches this and skips the offset commit, enabling Kafka redelivery. All sibling handlers ran to completion before any re-throw — none are silenced by an earlier rejection.
+29. **Serialization errors on dispatch** -- If event serialization fails, `dispatch` rejects with the serialization error.
+30. **Connection errors on dispatch** -- If the broker is unreachable during `dispatch`, the promise rejects with a connection error.
 
 ### Logging
 
-19. **Framework logger** -- All internal logging uses the `Logger` interface from `@noddde/core`. The logger is resolved from `config.logger` or defaults to `new NodddeLogger("warn", "noddde:kafka")` from `@noddde/engine`. All log calls pass structured context data as the second parameter (e.g., `{ eventName }`, `{ topic }`, `{ error: String(err) }`). No `console.log`, `console.warn`, or `console.error` calls exist in the implementation.
+31. **Framework logger** -- All internal logging uses the `Logger` interface from `@noddde/core`. The logger is resolved from `config.logger` or defaults to `new NodddeLogger("warn", "noddde:kafka")` from `@noddde/engine`. All log calls pass structured context data as the second parameter (e.g., `{ eventName }`, `{ topic }`, `{ error: String(err) }`). No `console.log`, `console.warn`, or `console.error` calls exist in the implementation.
 
 ### Warmup
 
-20. **Explicit warmup round-trip** -- `warmup()` addresses broker-side cold-start latency that `connect()`'s `FETCH_START` wait does not cover (a freshly-deployed cluster's first end-to-end publish/consume cycle can take far longer than subsequent ones). It uses a uniquely-named internal topic (derived from `clientId`) and repeatedly dispatches a throwaway event to that topic (on a 1-second interval) until an internal handler observes it. `warmup()` must be called after `connect()`; calling it before `connect()` or after `close()` throws the same "not connected" error as `dispatch()`.
-21. **Idempotent** -- After the first successful `warmup()` call, subsequent calls resolve immediately without repeating the round-trip. Concurrent overlapping calls are deduplicated via an in-flight promise mutex, mirroring `connect()`'s dedup pattern — the second caller awaits the first rather than starting a parallel round-trip.
-22. **warmupOnConnect config** -- When `warmupOnConnect: true`, the warmup topic is created and its subscription registered _before_ `consumer.run()` starts during `connect()` (kafkajs forbids subscribing to a new topic once the consumer is running), and `connect()` then calls `warmup()` internally before its own returned promise resolves — so callers that opt in get a fully warmed bus from a single `await connect()`.
-23. **Warmup timeout** -- If the round-trip doesn't complete within `warmupTimeoutMs` (default `60000`), `warmup()` rejects with a timeout error rather than hanging indefinitely.
-24. **Late warmup() without warmupOnConnect** -- If `warmup()` is called explicitly after `connect()` resolved without `warmupOnConnect` configured, the warmup topic's subscription was not set up before `consumer.run()` started. Since kafkajs forbids subscribing while the consumer is running, `warmup()` handles this by stopping the consumer (`consumer.stop()`), provisioning the warmup topic and subscription, and restarting the fetch loop (`consumer.run()` again) before performing the round-trip. This is scoped only to the warmup topic — it does not fix late `on()` registration for other event names (see robustness §3.4, out of scope here).
+32. **Explicit warmup round-trip** -- `warmup()` addresses broker-side cold-start latency that `connect()`'s `FETCH_START` wait does not cover (a freshly-deployed cluster's first end-to-end publish/consume cycle can take far longer than subsequent ones). It uses a uniquely-named internal topic (derived from `clientId`) and repeatedly dispatches a throwaway event to that topic (on a 1-second interval) until an internal handler observes it. `warmup()` must be called after `connect()`; calling it before `connect()` or after `close()` throws the same "not connected" error as `dispatch()`.
+33. **Idempotent** -- After the first successful `warmup()` call, subsequent calls resolve immediately without repeating the round-trip. Concurrent overlapping calls are deduplicated via an in-flight promise mutex, mirroring `connect()`'s dedup pattern — the second caller awaits the first rather than starting a parallel round-trip.
+34. **warmupOnConnect config** -- When `warmupOnConnect: true`, the warmup topic is created and its subscription registered _before_ `consumer.run()` starts during `connect()` (kafkajs forbids subscribing to a new topic once the consumer is running), and `connect()` then calls `warmup()` internally before its own returned promise resolves — so callers that opt in get a fully warmed bus from a single `await connect()`.
+35. **Warmup timeout** -- If the round-trip doesn't complete within `warmupTimeoutMs` (default `60000`), `warmup()` rejects with a timeout error rather than hanging indefinitely.
+36. **Late warmup() without warmupOnConnect** -- If `warmup()` is called explicitly after `connect()` resolved without `warmupOnConnect` configured, the warmup topic's subscription was not set up before `consumer.run()` started. Since kafkajs forbids subscribing while the consumer is running, `warmup()` handles this by stopping the consumer (`consumer.stop()`), provisioning the warmup topic and subscription, and restarting the fetch loop (`consumer.run()` again) before performing the round-trip. This is scoped only to the warmup topic — it does not fix late `on()` registration for other event names (see robustness §3.4, out of scope here).
 
 ## Invariants
 
 - All dispatched events are serialized as JSON (must be JSON-serializable).
+- Every published message (event topics and DLQ topics alike) carries the `content-type: application/vnd.noddde.event+json; version=1` header.
 - Handlers registered via `on()` receive the full `Event` object.
-- Offset commits happen only after every handler for the message has settled and none rejected.
+- Offset commits happen only after `_handleMessage` resolves without throwing — every handler succeeded, or a failing message was parked to the DLQ.
 - All registered handlers for an event delivery run to completion, even when some fail (per-handler isolation via `Promise.allSettled`).
 - Each handler failure produces exactly one `logger.error` call with structured fields.
 - The bus does not deduplicate events (same event dispatched twice = two deliveries).
-- Topic names follow the pattern `${topicPrefix}${eventName}`.
-- Message key defaults to `event.metadata?.aggregateId` (stringified) for per-aggregate partition ordering.
+- Topic names follow the pattern `${topicPrefix}${eventName}` — unchanged; this bus routes per event name, not per aggregate type.
+- Message key defaults to `event.metadata?.aggregateId` (stringified) for ordering **among same-named events sharing that key** — not across event names (see "Ordering Guarantees").
+- Every event topic with a registered `on()` handler, and every DLQ topic actually used, is provisioned via `admin.createTopics` (idempotently, at most once per bus instance) rather than left to broker auto-create defaults. Publish-only topics with no registered handler are a documented exception (see Topic Provisioning item 12).
+- A message that exhausts its retry cap (`resilience.maxRetries`, default `5`) is parked to `${topic}${dlqTopicSuffix}` with failure metadata headers — never silently discarded.
 - No `console.*` calls exist in the implementation — all logging goes through the `Logger` interface.
 - `warmup()` performs at most one real round-trip per bus instance; repeat calls after success are no-ops.
 
 ## Edge Cases
 
 - **No handler registered for a consumed topic**: Message is acknowledged (committed) with no processing.
-- **Handler throws**: Offset is not committed, message will be redelivered on next poll.
+- **Handler throws, retry cap not yet exceeded**: Offset is not committed, message will be redelivered on next poll.
+- **Handler throws repeatedly past the retry cap**: The message is parked to the DLQ topic with failure metadata headers, then the offset commits and consumption proceeds to the next message — it is not redelivered again and is not silently dropped.
+- **DLQ publish itself fails**: The bus logs the DLQ failure and re-throws the original handler rejection, falling back to normal (uncapped-for-this-attempt) redelivery rather than losing the message.
+- **Dispatch to an event name with a registered `on()` handler**: The topic was already provisioned during `connect()` (via `admin.createTopics`, `topicPartitions` partitions) — `dispatch()` itself does no provisioning work.
+- **Dispatch to an event name with no registered handler on this bus (publish-only)**: Not auto-provisioned by this bus (documented scope cut); relies on broker auto-create defaults for that topic.
 - **Dispatch with no payload**: Events with `payload: undefined` are serialized as `{"name":"X","payload":null}`.
-- **Multiple handlers for same event**: All handlers are invoked in parallel via `Promise.allSettled()`. Every handler runs to completion. Each rejection is logged individually. If at least one rejected, the offset is not committed (enabling redelivery). Handlers that already completed will re-execute on redelivery.
-- **Two handlers, one throws**: Both handlers run; one error log is emitted with the failed handler's name; offset is not committed → broker redelivers.
+- **Dispatch with a non-JSON-serializable payload value** (`Date`, `Map`, `BigInt`, `undefined` field): Serializes lossily per `JSON.stringify` semantics (e.g. `Date` → ISO string, `undefined` fields dropped) — documented as a caveat of the versioned wire format, not validated or rejected by the bus.
+- **Multiple handlers for same event**: All handlers are invoked in parallel via `Promise.allSettled()`. Every handler runs to completion. Each rejection is logged individually. If at least one rejected and the retry cap isn't exceeded, the offset is not committed (enabling redelivery). Handlers that already completed will re-execute on redelivery.
+- **Two handlers, one throws**: Both handlers run; one error log is emitted with the failed handler's name; offset is not committed → broker redelivers (until the retry cap, then DLQ).
+- **A message on one topic keeps failing**: Bounded by the retry cap (default `5`), after which it is parked and consumption of that topic — and every other topic sharing the consumer — proceeds; see Backpressure item 23 for why full per-message-only isolation isn't achieved without `eachBatch`.
 - **on() called before connect()**: Handlers are buffered; subscriptions happen when `connect()` is called.
 - **on() called after connect() (or while connect() is in progress) for a new topic**: Throws an `Error` — kafkajs cannot subscribe to a new topic on a running consumer, and a handler registered after `connect()`'s subscribe loop would never get a subscription, so its events would be silently lost. The caller must register all handlers before `connect()`.
 - **on() called after connect() for an already-subscribed topic**: Allowed. Appends an additional handler for that event name (in-process fan-out); no new subscribe is issued.
@@ -193,6 +248,7 @@ export class KafkaEventBus implements EventBus, Connectable {
 - **warmup() round-trip exceeds warmupTimeoutMs**: Rejects with a timeout error; does not hang indefinitely.
 - **warmupOnConnect: true with broker unreachable**: `connect()` rejects with the warmup failure (propagated), consistent with `connect()` surfacing connection errors.
 - **warmup() called explicitly without warmupOnConnect**: The warmup topic wasn't subscribed before `consumer.run()` started during `connect()`, so `warmup()` stops the consumer, provisions the topic and subscription, and restarts the fetch loop before performing the round-trip — verified against a real broker, not just mocks.
+- **Malformed (unparseable) message with a known topic/partition/offset**: Parked to the DLQ (best-effort) with a "deserialize failed" reason, then the offset commits. With no location (direct 2-arg `_handleMessage` test call), the message is just skipped as before.
 
 ## Integration Points
 
@@ -1229,5 +1285,267 @@ describe("KafkaEventBus warmup", () => {
 
     await expect(bus.warmup()).rejects.toThrow(/timed out/i);
   }, 10_000);
+});
+```
+
+### connect() provisions topics for registered handlers
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { KafkaEventBus } from "@noddde/kafka";
+
+describe("KafkaEventBus topic provisioning", () => {
+  it("should provision the topic for every event registered before connect(), using topicPartitions", async () => {
+    const mockAdmin = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      createTopics: vi.fn().mockResolvedValue(true),
+    };
+    const mockKafka = {
+      producer: () => ({
+        send: vi.fn().mockResolvedValue(undefined),
+        connect: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined),
+      }),
+      consumer: () => ({
+        connect: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined),
+        subscribe: vi.fn().mockResolvedValue(undefined),
+        run: vi.fn().mockResolvedValue(undefined),
+        stop: vi.fn().mockResolvedValue(undefined),
+        events: { FETCH_START: "consumer.fetch_start" },
+        on: vi.fn().mockImplementation((_e, cb) => {
+          cb();
+          return () => {};
+        }),
+      }),
+      admin: () => mockAdmin,
+    };
+
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+      topicPartitions: 7,
+    });
+    (bus as any)._kafka = mockKafka;
+
+    bus.on("AccountCreated", vi.fn());
+    bus.on("OrderPlaced", vi.fn());
+    await bus.connect();
+
+    expect(mockAdmin.createTopics).toHaveBeenCalledWith(
+      expect.objectContaining({
+        waitForLeaders: true,
+        topics: expect.arrayContaining([
+          { topic: "AccountCreated", numPartitions: 7 },
+          { topic: "OrderPlaced", numPartitions: 7 },
+        ]),
+      }),
+    );
+  });
+});
+```
+
+### wire format carries a versioned content-type header
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { KafkaEventBus } from "@noddde/kafka";
+
+describe("KafkaEventBus wire format", () => {
+  it("should publish every dispatched message with the versioned content-type header", async () => {
+    const mockProducer = {
+      send: vi.fn().mockResolvedValue(undefined),
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+    };
+    const mockConsumer = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      subscribe: vi.fn().mockResolvedValue(undefined),
+      run: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+    };
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+    });
+    (bus as any)._kafka = {
+      producer: () => mockProducer,
+      consumer: () => mockConsumer,
+    };
+
+    await bus.connect();
+    await bus.dispatch({ name: "AccountCreated", payload: { id: "acc-1" } });
+
+    expect(mockProducer.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: [
+          expect.objectContaining({
+            headers: {
+              "content-type": "application/vnd.noddde.event+json; version=1",
+            },
+          }),
+        ],
+      }),
+    );
+  });
+});
+```
+
+### dead-letter queue parks a message once the retry cap is exceeded
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { KafkaEventBus } from "@noddde/kafka";
+
+describe("KafkaEventBus dead letter queue", () => {
+  it("should park a message to its DLQ topic once the retry cap is exceeded, then allow the offset to commit", async () => {
+    const mockProducer = {
+      send: vi.fn().mockResolvedValue(undefined),
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+    };
+    const mockAdmin = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      createTopics: vi.fn().mockResolvedValue(true),
+    };
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+      resilience: { maxRetries: 2 },
+    });
+    (bus as any)._kafka = {
+      producer: () => mockProducer,
+      consumer: () => ({
+        connect: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined),
+        subscribe: vi.fn().mockResolvedValue(undefined),
+        run: vi.fn().mockResolvedValue(undefined),
+        stop: vi.fn().mockResolvedValue(undefined),
+        events: { FETCH_START: "consumer.fetch_start" },
+        on: vi.fn().mockImplementation((_e, cb) => {
+          cb();
+          return () => {};
+        }),
+      }),
+      admin: () => mockAdmin,
+    };
+
+    bus.on("E", async () => {
+      throw new Error("boom");
+    });
+    await bus.connect();
+
+    const rawValue = JSON.stringify({ name: "E", payload: { n: 1 } });
+    const location = { topic: "E", partition: 0, offset: "10" };
+
+    await expect(
+      (bus as any)._handleMessage("E", rawValue, location),
+    ).rejects.toThrow("boom");
+    await expect(
+      (bus as any)._handleMessage("E", rawValue, location),
+    ).rejects.toThrow("boom");
+
+    // Attempt 3 exceeds the cap of 2: parked, resolves instead of throwing.
+    await expect(
+      (bus as any)._handleMessage("E", rawValue, location),
+    ).resolves.toBeUndefined();
+
+    expect(mockProducer.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        topic: "E.dlq",
+        messages: [
+          expect.objectContaining({
+            value: rawValue,
+            headers: expect.objectContaining({
+              "x-noddde-dlq-error": "boom",
+              "x-noddde-dlq-attempts": "3",
+              "x-noddde-dlq-original-topic": "E",
+              "x-noddde-dlq-original-partition": "0",
+              "x-noddde-dlq-original-offset": "10",
+            }),
+          }),
+        ],
+      }),
+    );
+  });
+});
+```
+
+### a failing message on one topic does not block another topic's progress
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { KafkaEventBus } from "@noddde/kafka";
+
+describe("KafkaEventBus cross-topic isolation", () => {
+  it("should let topic B keep making progress after topic A's message exhausts retries and is parked", async () => {
+    const mockProducer = {
+      send: vi.fn().mockResolvedValue(undefined),
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+    };
+    const mockAdmin = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      createTopics: vi.fn().mockResolvedValue(true),
+    };
+    const bus = new KafkaEventBus({
+      brokers: ["localhost:9092"],
+      clientId: "test",
+      groupId: "test-group",
+      resilience: { maxRetries: 0 },
+    });
+    (bus as any)._kafka = {
+      producer: () => mockProducer,
+      consumer: () => ({
+        connect: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined),
+        subscribe: vi.fn().mockResolvedValue(undefined),
+        run: vi.fn().mockResolvedValue(undefined),
+        stop: vi.fn().mockResolvedValue(undefined),
+        events: { FETCH_START: "consumer.fetch_start" },
+        on: vi.fn().mockImplementation((_e, cb) => {
+          cb();
+          return () => {};
+        }),
+      }),
+      admin: () => mockAdmin,
+    };
+
+    const topicBReceived: unknown[] = [];
+    bus.on("TopicA", async () => {
+      throw new Error("always fails");
+    });
+    bus.on("TopicB", async (event) => {
+      topicBReceived.push(event.payload);
+    });
+    await bus.connect();
+
+    // Exhausts its (zero) retry budget on the first attempt and is parked —
+    // _handleMessage resolves rather than throwing.
+    await expect(
+      (bus as any)._handleMessage(
+        "TopicA",
+        JSON.stringify({ name: "TopicA", payload: {} }),
+        { topic: "TopicA", partition: 0, offset: "0" },
+      ),
+    ).resolves.toBeUndefined();
+
+    for (let i = 0; i < 3; i++) {
+      await (bus as any)._handleMessage(
+        "TopicB",
+        JSON.stringify({ name: "TopicB", payload: { n: i } }),
+        { topic: "TopicB", partition: 0, offset: String(i) },
+      );
+    }
+
+    expect(topicBReceived).toEqual([{ n: 0 }, { n: 1 }, { n: 2 }]);
+  });
 });
 ```

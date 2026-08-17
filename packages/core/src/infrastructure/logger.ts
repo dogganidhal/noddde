@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 /**
  * Log levels ordered by severity. `'silent'` suppresses all output.
  */

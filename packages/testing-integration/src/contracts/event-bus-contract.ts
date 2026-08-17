@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import type { Connectable, EventBus } from "@noddde/core";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { uniqueSuffix, waitFor } from "../utils.js";

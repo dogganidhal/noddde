@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import type { AggregateLocker } from "@noddde/core";
 import { PostgresLocker } from "./pg/advisory-locker";
 import { MySQLLocker } from "./mysql/advisory-locker";

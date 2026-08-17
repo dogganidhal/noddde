@@ -6,10 +6,11 @@
     "build": "tsc",
     "lint": "eslint . --max-warnings 0",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "test:unit": "vitest run --testPathPattern=unit",
-    "test:slice": "vitest run --testPathPattern=slice",
-    "test:integration": "vitest run --testPathPattern=integration",
+    "test:unit": "vitest run src/__tests__/unit",
+    "test:slice": "vitest run src/__tests__/slice",
+    "test:integration": "vitest run src/__tests__/integration",
     "start": "docker compose up -d && tsx src/main.ts"
   },
   "dependencies": {

@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import type { ID } from "../id";
 import type { Event } from "../edd";
 

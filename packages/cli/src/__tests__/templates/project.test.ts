@@ -52,10 +52,12 @@ describe("project templates", () => {
   });
 
   describe("tsconfig.json", () => {
-    it("generates valid JSON extending noddde base", () => {
+    it("generates valid JSON with inlined compiler options (no dependency on the private typescript-config package)", () => {
       const result = tsconfigTemplate();
       const config = JSON.parse(result);
-      expect(config.extends).toBe("@noddde/typescript-config/base.json");
+      expect(config.extends).toBeUndefined();
+      expect(config.compilerOptions.strict).toBe(true);
+      expect(config.compilerOptions.module).toBe("NodeNext");
       expect(config.compilerOptions.outDir).toBe("dist");
       expect(config.include).toContain("src");
     });

@@ -5,8 +5,7 @@ source_file: packages/core/src/id.ts
 status: implemented
 exports: [ID]
 depends_on: []
-docs:
-  - concepts/id-types.mdx
+docs: [core-concepts/id-types.mdx]
 ---
 
 # ID

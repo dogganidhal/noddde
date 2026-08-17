@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import type { AggregateLocker, ID } from "@noddde/core";
 import { LockTimeoutError } from "@noddde/core";
 

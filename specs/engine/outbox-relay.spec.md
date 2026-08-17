@@ -94,12 +94,14 @@ class OutboxRelay implements BackgroundProcess {
 - The relay never creates, modifies, or deletes outbox entries except via `markPublished`.
 - The timer is always cleaned up by `stop()`. No timer leaks.
 - `processOnce()` never rejects. Every failure mode it can encounter (a rejecting `loadUnpublished`, or a rejecting `dispatch`/`markPublished` for an individual entry) is caught internally and surfaces only via the return value and the injected `Logger` — the poll loop started by `start()` can therefore never produce an unhandled promise rejection.
+- A handler failure is invisible to the relay by design: the relay only observes whether `eventBus.dispatch()` rejects, not what registered handlers did. Bus implementations that isolate handler errors (e.g. `EventEmitterEventBus`, whose per-handler isolation is documented in BR 7 of `core/edd/event-bus`) resolve `dispatch()` regardless of handler outcome, so the relay marks the entry published even if every handler for that event threw.
 
 ## Edge Cases
 
 - **No unpublished entries** -- `processOnce()` returns 0 immediately.
 - **All dispatches fail** -- Returns 0. No entries marked published. All entries remain for retry.
 - **Partial batch failure** -- Successfully dispatched entries are marked published. Failed entries remain unpublished.
+- **Handler throws but dispatch() resolves** -- With a bus that isolates handler errors, the entry is still marked published; this is not treated as a dispatch failure and is not retried.
 - **start() called twice** -- Second call is a no-op. Only one timer runs.
 - **stop() called without start()** -- No-op.
 - **stop() then start()** -- Restarts polling with a fresh timer.
@@ -174,22 +176,81 @@ describe("OutboxRelay", () => {
 
 ### processOnce is bounded by what the bus reports (in-process bus swallows handler errors)
 
+`EventEmitterEventBus.dispatch()` isolates handler errors internally (see BR 7 of `core/edd/event-bus`) and never rejects because of a throwing handler, so this scenario exercises BR #2 with a broker-style fake bus whose `dispatch()` itself rejects — the failure mode the relay actually guards against (e.g. a Kafka/RabbitMQ/NATS adapter that fails to publish because the connection dropped).
+
 ```ts
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
+import { OutboxRelay } from "../../outbox-relay";
+import { InMemoryOutboxStore } from "@noddde/engine";
+import type { EventBus, Event } from "@noddde/core";
+
+describe("OutboxRelay", () => {
+  it("should skip entries whose dispatch rejects and process the rest", async () => {
+    const store = new InMemoryOutboxStore();
+    const dispatched: Event[] = [];
+    // Fake broker-style bus: dispatch() itself rejects for one event,
+    // unlike EventEmitterEventBus where only handlers can throw.
+    const eventBus: EventBus = {
+      async dispatch(event: Event) {
+        if (event.name === "FailEvent") {
+          throw new Error("Broker connection dropped");
+        }
+        dispatched.push(event);
+      },
+      on() {},
+      async close() {},
+    };
+    const relay = new OutboxRelay(store, eventBus);
+
+    await store.save([
+      {
+        id: "fail",
+        event: { name: "FailEvent", payload: {} },
+        createdAt: new Date("2025-01-01T00:00:00.000Z"),
+        publishedAt: null,
+      },
+      {
+        id: "success",
+        event: { name: "SuccessEvent", payload: {} },
+        createdAt: new Date("2025-01-01T00:00:01.000Z"),
+        publishedAt: null,
+      },
+    ]);
+
+    const count = await relay.processOnce();
+
+    expect(count).toBe(1);
+    expect(dispatched).toHaveLength(1);
+
+    // Failed entry should still be unpublished — dispatch() rejecting is the
+    // only failure mode the relay can detect and retry.
+    const remaining = await store.loadUnpublished();
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]!.id).toBe("fail");
+  });
+});
+```
+
+### processOnce marks entries published even when a handler throws
+
+`EventBus` implementations (e.g. `EventEmitterEventBus`) isolate handler errors so that `dispatch()` resolves even if a registered handler throws — that isolation happens inside the bus, below the relay. From the relay's perspective the dispatch succeeded, so the entry is marked published; a handler failure is invisible to the relay by design and is not retried.
+
+```ts
+import { describe, it, expect } from "vitest";
 import { OutboxRelay } from "../../outbox-relay";
 import { InMemoryOutboxStore, EventEmitterEventBus } from "@noddde/engine";
 import type { Event } from "@noddde/core";
 
 describe("OutboxRelay", () => {
-  it("should mark all entries published even when a handler throws — handler errors are isolated by the bus", async () => {
+  it("should mark all entries published even when a handler throws", async () => {
     const store = new InMemoryOutboxStore();
     const eventBus = new EventEmitterEventBus();
     const relay = new OutboxRelay(store, eventBus);
 
-    // First event handler throws — but EventEmitterEventBus isolates handler
-    // errors so dispatch() resolves regardless, and the relay marks both entries published.
+    // Handler throws, but EventEmitterEventBus isolates handler errors so
+    // dispatch() still resolves — the relay never sees the failure.
     eventBus.on("FailEvent", () => {
-      throw new Error("Dispatch failed");
+      throw new Error("Handler failed");
     });
     const dispatched: Event[] = [];
     eventBus.on("SuccessEvent", (event: Event) => dispatched.push(event));
@@ -211,11 +272,12 @@ describe("OutboxRelay", () => {
 
     const count = await relay.processOnce();
 
-    // Both entries dispatched successfully — handler isolation means dispatch() never rejects.
+    // Both entries dispatched successfully from the relay's point of view.
     expect(count).toBe(2);
     expect(dispatched).toHaveLength(1);
 
-    // Both entries are now published — the relay has no way to detect handler failure.
+    // Both entries are now published — the relay has no way to detect
+    // handler failure, only dispatch()-level rejection.
     const remaining = await store.loadUnpublished();
     expect(remaining).toHaveLength(0);
   });

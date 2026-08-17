@@ -10,10 +10,10 @@ export function transitionHandlersIndexTemplate(): string {
 export function transitionHandlerTemplate(ctx: TemplateContext): string {
   return `import type { ${ctx.name}SagaState } from "../state.js";
 
-// TODO: once event types are wired in the saga def, replace with:
-// import type { InferSagaOnEntry } from "@noddde/core";
+// TODO: once the real event type is wired in the saga def, replace with:
+// import type { InferSagaEventHandler } from "@noddde/core";
 // import type { ${ctx.name}SagaDef } from "../saga.js";
-// export const onStartEvent: InferSagaOnEntry<${ctx.name}SagaDef, "StartEvent"> = { ... };
+// export const onStartEvent: InferSagaEventHandler<${ctx.name}SagaDef, "${ctx.name}Started"> = (event, state) => ({ ... });
 
 /** Handles the initial event that starts the ${ctx.name} saga. */
 export function onStartEvent(

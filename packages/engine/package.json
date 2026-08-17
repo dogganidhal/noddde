@@ -40,18 +40,22 @@
   "files": [
     "dist"
   ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "lint": "eslint . --max-warnings 0",
     "build": "tsup",
     "build:watch": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "typecheck:stress": "tsc --noEmit -p tsconfig.stress.json",
+    "typecheck:tests": "tsc --noEmit -p tsconfig.tests.json",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@noddde/core": "1.0.0-rc.1"
+    "@noddde/core": "^1.0.0-rc.1"
   },
   "peerDependencies": {
     "@opentelemetry/api": "^1.0.0"
