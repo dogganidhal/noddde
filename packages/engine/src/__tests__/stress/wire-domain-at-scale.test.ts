@@ -15,7 +15,6 @@
  *   yarn workspace @noddde/engine typecheck:stress
  *   yarn workspace @noddde/engine test
  */
-/* eslint-disable no-unused-vars */
 import { describe, it, expectTypeOf } from "vitest";
 import { defineDomain } from "@noddde/core";
 import type {

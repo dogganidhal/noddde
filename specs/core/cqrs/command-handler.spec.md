@@ -6,8 +6,8 @@ status: implemented
 exports: [StandaloneCommandHandler]
 depends_on: [cqrs/command/command, infrastructure/index]
 docs:
-  - commands/handling-commands.mdx
-  - commands/standalone-commands.mdx
+  - modeling/command-handlers.mdx
+  - process-managers/standalone-commands.mdx
 ---
 
 # StandaloneCommandHandler

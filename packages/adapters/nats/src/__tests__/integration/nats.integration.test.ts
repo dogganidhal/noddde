@@ -133,6 +133,101 @@ describe("NatsEventBus broker-specific behaviour", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────
+// Multi-instance scale-out (queue group / competing consumers, issue #134)
+// ─────────────────────────────────────────────────────────────────────
+
+describe("NatsEventBus multi-instance scale-out", () => {
+  it("two replicas with the same consumerGroup both connect() without a duplicate-subscription error", async () => {
+    const suffix = uniqueSuffix();
+    const subject = `Scale_${suffix}`;
+    const streamName = `noddde_scale_${suffix}`;
+    const consumerGroup = `scale-group-${suffix}`;
+    const subjectPrefix = `noddde.${suffix}.`;
+
+    const bus1 = new NatsEventBus({
+      servers: nats_.url,
+      consumerGroup,
+      streamName,
+      subjectPrefix,
+    });
+    bus1.on(subject, async () => {});
+    await bus1.connect();
+
+    const bus2 = new NatsEventBus({
+      servers: nats_.url,
+      consumerGroup,
+      streamName,
+      subjectPrefix,
+    });
+    bus2.on(subject, async () => {});
+
+    // The whole point of the fix: this must NOT reject with
+    // "duplicate subscription" now that both replicas bind to the same
+    // durable via a shared deliver (queue) group.
+    await expect(bus2.connect()).resolves.toBeUndefined();
+
+    await bus1.close();
+    await bus2.close();
+  });
+
+  it("splits messages across two replicas instead of delivering every message to both", async () => {
+    const suffix = uniqueSuffix();
+    const subject = `ScaleSplit_${suffix}`;
+    const streamName = `noddde_scalesplit_${suffix}`;
+    const consumerGroup = `scale-split-group-${suffix}`;
+    const subjectPrefix = `noddde.${suffix}.`;
+    const MESSAGE_COUNT = 20;
+
+    const bus1 = new NatsEventBus({
+      servers: nats_.url,
+      consumerGroup,
+      streamName,
+      subjectPrefix,
+    });
+    const bus2 = new NatsEventBus({
+      servers: nats_.url,
+      consumerGroup,
+      streamName,
+      subjectPrefix,
+    });
+
+    let receivedByBus1 = 0;
+    let receivedByBus2 = 0;
+    bus1.on(subject, async () => {
+      receivedByBus1++;
+    });
+    bus2.on(subject, async () => {
+      receivedByBus2++;
+    });
+
+    await bus1.connect();
+    await bus2.connect();
+
+    for (let i = 0; i < MESSAGE_COUNT; i++) {
+      await bus1.dispatch({ name: subject, payload: { i } });
+    }
+
+    await waitFor(() => receivedByBus1 + receivedByBus2 >= MESSAGE_COUNT, {
+      timeoutMs: 20_000,
+    });
+    // Give any stray duplicate delivery a moment to show up before asserting.
+    await new Promise((r) => setTimeout(r, 500));
+
+    // Competing consumers: every message goes to exactly one replica, so the
+    // total across both must equal what was sent, not double it.
+    expect(receivedByBus1 + receivedByBus2).toBe(MESSAGE_COUNT);
+    // With 20 messages split across 2 queue-group members, both should have
+    // picked up at least one — this is what proves load is actually shared,
+    // not just that boot didn't fail.
+    expect(receivedByBus1).toBeGreaterThan(0);
+    expect(receivedByBus2).toBeGreaterThan(0);
+
+    await bus1.close();
+    await bus2.close();
+  }, 30_000);
+});
+
+// ─────────────────────────────────────────────────────────────────────
 // Inbox subject benchmark (robustness §3.3 / GitHub issue #114)
 // ─────────────────────────────────────────────────────────────────────
 

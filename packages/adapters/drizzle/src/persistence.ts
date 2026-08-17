@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import { eq, and, asc, gt, isNull, isNotNull, inArray, lt } from "drizzle-orm";
 
 /**

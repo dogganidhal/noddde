@@ -7,4 +7,8 @@ module.exports = {
     project: "./tsconfig.lint.json",
     tsconfigRootDir: __dirname,
   },
+  rules: {
+    // The CLI's whole job is printing to the terminal.
+    "no-console": "off",
+  },
 };

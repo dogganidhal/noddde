@@ -384,7 +384,12 @@ export function definePersistenceContract(
           fc.constant(null),
           fc.boolean(),
           fc.integer(),
-          fc.double({ noNaN: true, noDefaultInfinity: true }),
+          // JSON has no negative zero: JSON.stringify(-0) === "0", so every
+          // JSON-backed store normalizes -0 to +0 on roundtrip. Map it away
+          // here rather than asserting a distinction no dialect preserves.
+          fc
+            .double({ noNaN: true, noDefaultInfinity: true })
+            .map((n) => (n === 0 ? 0 : n)),
           printableAscii,
           fc.array(tie("value"), { maxLength: 6 }),
           fc.dictionary(printableAscii, tie("value"), { maxKeys: 6 }),

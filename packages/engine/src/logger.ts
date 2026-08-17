@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import type { Logger, LogLevel } from "@noddde/core";
 
 /** Numeric severity constants for level comparison. */

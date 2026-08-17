@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import {
   defineDomain,
   type Aggregate,
@@ -60,6 +59,22 @@ export type TestDomainResult<
 };
 
 /**
+ * True when `error` is exactly the "no handler registered" error
+ * `InMemoryCommandBus` throws for `commandName` — scoped to that command's
+ * own name so a real thrown error that merely resembles the message (for a
+ * *different* command) is never mistaken for a missing handler.
+ */
+function isMissingHandlerError(
+  error: unknown,
+  commandName: string,
+): error is Error {
+  return (
+    error instanceof Error &&
+    error.message === `No handler registered for command: ${commandName}`
+  );
+}
+
+/**
  * Creates a pre-wired domain for slice testing. Automatically provides
  * in-memory implementations for all buses and persistence, and installs
  * spies on the event bus and command bus to capture everything that
@@ -95,6 +110,8 @@ export async function testDomain<
 ): Promise<TestDomainResult<TInfrastructure>> {
   const publishedEvents: Event[] = [];
   const dispatchedCommands: Command[] = [];
+  const unhandledCommands: Command[] = [];
+  const commandErrors: Array<{ command: Command; error: Error }> = [];
 
   const eventBus = new EventEmitterEventBus();
   const originalEventDispatch = eventBus.dispatch.bind(eventBus);
@@ -105,18 +122,30 @@ export async function testDomain<
     await originalEventDispatch(event);
   };
 
-  const commandBus = new InMemoryCommandBus();
-  const originalCommandDispatch = commandBus.dispatch.bind(commandBus);
-  commandBus.dispatch = async (command: Command): Promise<void> => {
+  // Shared bookkeeping for both dispatch entry points below: pushes the
+  // command, then partitions the outcome into unhandledCommands (suppressed)
+  // or commandErrors (recorded + rethrown).
+  const recordDispatch = async <T>(
+    command: Command,
+    dispatch: () => Promise<T>,
+  ): Promise<T> => {
     dispatchedCommands.push(command);
     try {
-      await originalCommandDispatch(command);
-    } catch {
-      // Silently swallow "no handler registered" errors.
-      // In slice tests, not all commands need a registered handler —
-      // the spy captures the command for assertions regardless.
+      return await dispatch();
+    } catch (error) {
+      if (isMissingHandlerError(error, command.name)) {
+        unhandledCommands.push(command);
+        return undefined as T;
+      }
+      commandErrors.push({ command, error: error as Error });
+      throw error;
     }
   };
+
+  const commandBus = new InMemoryCommandBus();
+  const originalCommandDispatch = commandBus.dispatch.bind(commandBus);
+  commandBus.dispatch = (command: Command): Promise<void> =>
+    recordDispatch(command, () => originalCommandDispatch(command));
 
   const definition = defineDomain<TInfrastructure>({
     writeModel: {
@@ -149,11 +178,32 @@ export async function testDomain<
       : {}),
   });
 
+  // `domain.dispatchCommand` routes commands with a matching aggregate
+  // `decide` handler directly to the command executor, bypassing
+  // `commandBus.dispatch` entirely (see @noddde/engine's Domain.dispatchCommand).
+  // Wrap it too, but only for those aggregate-routed command names, so
+  // commands that *do* fall through to the (already-spied) commandBus
+  // aren't double-counted.
+  const aggregateCommandNames = new Set(
+    Object.values(config.aggregates ?? {}).flatMap((aggregate) =>
+      Object.keys(aggregate.decide),
+    ),
+  );
+  const originalDispatchCommand = domain.dispatchCommand.bind(domain);
+  (domain as { dispatchCommand: unknown }).dispatchCommand = (
+    command: Command,
+  ) =>
+    aggregateCommandNames.has(command.name)
+      ? recordDispatch(command, () => originalDispatchCommand(command as any))
+      : originalDispatchCommand(command as any);
+
   return {
     domain,
     spy: {
       publishedEvents,
       dispatchedCommands,
+      unhandledCommands,
+      commandErrors,
     },
   };
 }

@@ -2,7 +2,7 @@
 title: "RabbitMqEventBus"
 module: adapters/rabbitmq/rabbitmq-event-bus
 source_file: packages/adapters/rabbitmq/src/rabbitmq-event-bus.ts
-status: ready
+status: implemented
 exports: [RabbitMqEventBus, RabbitMqEventBusConfig]
 depends_on:
   - core/edd/event-bus
@@ -17,6 +17,18 @@ docs: []
 # RabbitMqEventBus
 
 > RabbitMQ-backed EventBus implementation using `amqplib`. Publishes domain events to a RabbitMQ exchange and delivers them to registered handlers via bound queues. Provides at-least-once delivery with manual acknowledgment. Suitable for distributed deployments where reliable message brokering with flexible routing is required.
+
+## Topology & Ordering Guarantee
+
+Routing stays **per-event-name**: each event name gets its own durable queue named `${queuePrefix}.${eventName}`, bound to the exchange with the event name as routing key. There is no per-aggregate-type topology — `EventBus.on(eventName, handler)` has no aggregate-type concept, so this bus cannot route by aggregate type without new core surface.
+
+**The actual ordering guarantee is narrower than "queue order" and must be stated precisely:**
+
+- Ordering is guaranteed **only within a single event name**, and only because this bus internally serializes deliveries that share the same `event.metadata.aggregateId` (see Behavioral Requirement 8d). Without that serialization, `channel.consume` invokes its callback concurrently up to `prefetchCount` (default 10), so two deliveries for the same aggregate could otherwise run their handlers out of order or overlapping even within one queue.
+- Ordering across **different event names is never guaranteed**, even for the same aggregate — each event name has its own queue, consumed independently. A `BankAccountOpened` and a later `MoneyDeposited` for the same account can be delivered/processed in either order relative to each other.
+- Consequently, **projections or sagas that fold multiple event types for one aggregate must be order-tolerant and idempotent** — guard state transitions with `event.metadata.sequenceNumber` (or equivalent) rather than assuming arrival order matches causal order.
+
+This is a deliberate scope decision: real per-aggregate-type topology is a bigger redesign gated on new `EventBus` surface, tracked separately. This spec only guarantees same-event-name ordering is not silently violated by concurrent handler execution.
 
 ## Type Contract
 
@@ -37,8 +49,14 @@ export interface RabbitMqEventBusConfig {
   exchangeName?: string;
   /** Exchange type: "topic" (default) or "fanout". Topic uses event name as routing key. */
   exchangeType?: "topic" | "fanout";
-  /** Queue name prefix for consumer queues (default: "noddde"). Queues are named "${queuePrefix}.${eventName}". */
-  queuePrefix?: string;
+  /**
+   * Queue name prefix for consumer queues. **Required** — two different
+   * services with the same prefix become competing consumers on identical
+   * queues and each silently loses roughly half its events. Queues are
+   * named "${queuePrefix}.${eventName}". Matches Kafka's required `groupId`
+   * and NATS's required `consumerGroup`.
+   */
+  queuePrefix: string;
   /** Number of unacknowledged messages the broker may send to this consumer (default: 10). Provides backpressure control via channel.prefetch(). */
   prefetchCount?: number;
   /** Connection resilience configuration (default: maxAttempts=3, initialDelayMs=1000, maxDelayMs=30000). amqplib has no built-in reconnection — retry is implemented manually with exponential backoff. */
@@ -78,6 +96,7 @@ export class RabbitMqEventBus implements EventBus, Connectable {
 2. **JSON serialization** -- The full event object (`{ name, payload, metadata? }`) is serialized as JSON in the message body (Buffer).
 3. **Persistent messages with stable messageId** -- Messages are published with `{ persistent: true }` (delivery mode 2) so they survive broker restarts. When `event.metadata?.eventId` is present, it is set as `properties.messageId` on the published message. This provides consumers with a stable, globally unique identifier for retry tracking instead of relying on content-derived fallback hashes. When metadata is absent, `messageId` is omitted (no crash).
    3b. **Publisher confirms** -- After publishing, `dispatch()` awaits `channel.waitForConfirms()` to ensure the broker has accepted the message. This guarantees at-least-once delivery on the publish side. Without publisher confirms, `channel.publish()` is fire-and-forget and messages can be silently dropped.
+   3c. **Wire format content type** -- Published messages carry `properties.contentType = "application/vnd.noddde.event+json; version=1"`. The JSON-of-the-full-`Event`-object wire format is a versioned, stable contract: consumers may rely on this shape across noddde versions within the same major content-type version. Caveat: `Date`, `Map`, `BigInt`, and `undefined` values inside `payload`/`metadata` serialize lossily through `JSON.stringify` (e.g., `Date` becomes an ISO string, `undefined` fields are dropped) — producers that need lossless round-tripping must pre-serialize those fields themselves.
 4. **Dispatch before connect throws** -- Calling `dispatch` before `connect()` throws an error.
 
 ### Subscription / Handler Registration
@@ -86,6 +105,7 @@ export class RabbitMqEventBus implements EventBus, Connectable {
 6. **Queue binding** -- When subscriptions are activated (after `connect()`), a durable queue named `${queuePrefix}.${eventName}` is asserted and bound to the exchange with `eventName` as the routing key.
 7. **Consumer setup** -- A consumer is started on the queue. Incoming messages are deserialized from JSON and passed to all registered handlers.
    7b. **Message deserialization with poison message protection** -- Deserialization is wrapped in try/catch. If `JSON.parse` throws (malformed message), the error is logged and the message is acknowledged (skipped). Poison messages must never block the queue via infinite nack/requeue loops.
+   7c. **Consumer setup failure is logged, not silently swallowed** -- If `_setupConsumer` rejects (called either from `on()` when already connected, or from the connect/reconnect activation loop), the failure is logged via `this._logger.error` with the event name and error. When `on()` triggers the failed setup, the handler registration itself is unaffected (still registered) — the queue/consumer simply isn't active yet. The existing full-reconnection path (Requirement 11b) re-runs `_setupConsumer` for every registered event name unconditionally, so a consumer that failed to activate is retried the next time the connection cycles, without needing a separate per-event retry mechanism.
 8. **Isolated parallel handler invocation** -- Handlers for the same event are invoked concurrently via `Promise.allSettled()` (not `Promise.all()`). This guarantees that **every registered handler runs to completion** even when some of them fail — siblings are never silenced or short-circuited by an earlier rejection. After all handlers settle, the bus iterates the rejected results and logs each one individually via the framework `Logger` at `error` level with structured fields (see "Per-handler error logging" below). If at least one handler rejected, `_handleMessage` then propagates a failure (re-throwing the first rejection's reason) so the outer consume callback calls `channel.nack(msg, false, true)` for requeue per current behavior (capped by the in-memory `maxRetries` counter). Handlers that already completed will re-execute on redelivery — consumers must be idempotent. This differs from `EventEmitterEventBus` (which invokes sequentially within a single process) because broker adapters operate in distributed contexts where independent handlers should not block each other.
 
    8c. **Per-handler error logging** -- For each rejected handler, the bus calls `logger.error(message, fields)` exactly once with:
@@ -95,9 +115,13 @@ export class RabbitMqEventBus implements EventBus, Connectable {
    - `handlerName: string` — read from the handler's `name` property; falls back to `event.name` when anonymous.
    - `error: { name, message, stack? }` — extracted from the caught exception. Non-`Error` rejection values are coerced via `String(value)` into `message`.
    - `traceId?: string` and `spanId?: string` — populated from the active OpenTelemetry span via the configured `Instrumentation` instance. Absent when no span is active or when `@opentelemetry/api` is not installed.
-     8b. **maxRetries delivery limit** -- If `resilience.maxRetries` is configured, track delivery attempts using an in-memory `Map<string, number>` keyed by a stable message identifier (e.g., `messageId` from properties, or a hash of the content). On each message receipt, increment the count and check against `maxRetries`. If the count exceeds `maxRetries`, log a warning and ack the message (discard it). This prevents handler-level poison messages from blocking the queue indefinitely via infinite nack/requeue. Note: the in-memory counter resets on consumer restart, which is acceptable since restarted consumers also reset their processing state. The previous `x-death` header approach does not work without a dead-letter exchange configured.
+     8b. **maxRetries delivery limit** -- If `resilience.maxRetries` is configured, track delivery attempts using an in-memory `Map<string, number>` keyed by a stable message identifier. When `msg.properties.messageId` is present, that value is the key (stable across redeliveries). When it is absent, the key is a **full-content hash** (`sha256` of the entire message body, not a truncated prefix) — hashing the whole body means distinct messages of the same event type essentially never collide, while a genuinely redelivered message (identical body) still hashes to the same key so its count keeps accumulating. A truncated content-prefix key must never be used: same-type events sharing a long common JSON prefix (e.g. `{"name":"OrderPlaced","payload":{...`) would otherwise hash identically regardless of payload, causing healthy messages 4-10 under a burst at default `prefetch: 10` to be misclassified as retries of one "poison" key and discarded. On each message receipt, increment the count and check against `maxRetries`. If the count exceeds `maxRetries`, log a warning and route the message to the dead-letter queue (Requirement 8e) instead of silently dropping it, then delete its entry from the counter map. This prevents handler-level poison messages from blocking the queue indefinitely via infinite nack/requeue, without leaking counter-map entries for discarded keys. Note: the in-memory counter resets on consumer restart, which is acceptable since restarted consumers also reset their processing state.
+     8c. **Delivery counter pruning** -- A message's entry in the delivery-count map is deleted both on successful processing (existing behavior) and on discard past `maxRetries` (new) — a key must never remain in the map once its message has been terminally resolved (acked, or dead-lettered), otherwise a since-resolved key could accumulate stale count and misfire on an unrelated future collision.
+     8d. **Per-aggregate in-order, isolated-by-aggregate delivery** -- Within one queue's consumer, deliveries whose `event.metadata?.aggregateId` is present are serialized: an internal `Map<string, Promise<void>>` chains each delivery for a given `aggregateId` onto the previous one, so their handler invocations run strictly one-at-a-time in delivery order, even though `channel.consume`'s callback itself may be invoked concurrently up to `prefetchCount`. Deliveries for _different_ `aggregateId` values (or with no `aggregateId` in metadata) are never serialized against each other and continue to process concurrently up to `prefetchCount`. Each aggregateId's chain entry is removed from the map once that chain drains (no pending deliveries left for it), so the map never grows unboundedly. This is the guarantee referenced in "Topology & Ordering Guarantee" above — it is what makes same-event-name-and-aggregate ordering actually hold, closing the gap where concurrent `prefetch` delivery could otherwise reorder or overlap handler execution for one aggregate.
+     8e. **Dead-letter queue for exhausted retries** -- When `resilience.maxRetries` is configured, `connect()`/reconnect also assert a fanout dead-letter exchange named `"${exchangeName}.dlx"` and a durable queue named `"${queuePrefix}.dlq"` bound to it. When a message's delivery count exceeds `maxRetries` (Requirement 8b), instead of just acking it away, the bus publishes it to the dead-letter exchange with headers carrying failure metadata — `x-original-event-name`, `x-death-reason`, `x-attempts`, `x-original-timestamp` — and only then acks the original message off its source queue. If the dead-letter publish itself fails, the error is logged and the original message is still acked (never left to loop forever), because dead-lettering is a best-effort inspectability aid, not a delivery guarantee. Exhausted-retry messages are therefore inspectable and replayable from `${queuePrefix}.dlq` rather than silently gone.
 
-9. **Manual ack after handlers** -- The message is acknowledged (`channel.ack(msg)`) only after all handlers have completed successfully (all promises in the `Promise.all` resolved). All `channel.ack()` and `channel.nack()` calls are wrapped in try/catch — if the channel closed during reconnection, the error is logged but does not crash the consumer callback.
+9. **Manual ack after handlers, on the channel that delivered the message** -- The message is acknowledged (`channel.ack(msg)`) only after all handlers have completed successfully (all promises in the `Promise.all` resolved). Critically, `_setupConsumer` captures the `ConfirmChannel` instance into a local `channel` variable at subscribe time and every `ack`/`nack` call in that consumer's callback uses that captured `channel`, never `this._channel`. AMQP delivery tags are scoped to the channel that issued them: `_reconnectPersistently` replaces `this._channel` with a brand-new channel on every reconnect, so resolving the channel dynamically at ack time (`this._channel?.ack(msg)`) would ack an in-flight message's delivery tag against a _different_ channel after a reconnect — either silently acking an unrelated message on the new channel (event loss) or causing the broker to close the new channel with `PRECONDITION_FAILED` (wedging every consumer on it, since only connection-level close triggers reconnection). All `channel.ack()` and `channel.nack()` calls are wrapped in try/catch — if the captured channel is stale (a reconnect happened since this delivery started), the ack/nack error is logged at `warn` (not `error`) and swallowed, since the broker will redeliver the message on the new channel/connection regardless.
+   9b. **Channel-level error/close listeners feed the same reconnection path** -- Immediately after each new `ConfirmChannel` is created (both in `_connectWithRetry` and `_reconnectPersistently`), `error` and `close` listeners are registered on it, mirroring the connection-level listeners: on an unexpected channel close (`!this._closed`), the bus routes into `_handleUnexpectedClose()` exactly as an unexpected connection close does. Without this, a channel killed by a `PRECONDITION_FAILED` (see Requirement 9 above) would leave `_connected === true` with a dead channel and no path back to a healthy state.
 
 ### Backpressure
 
@@ -113,7 +137,7 @@ export class RabbitMqEventBus implements EventBus, Connectable {
 
 ### Error Handling
 
-15. **Handler errors cause nack** -- After `Promise.allSettled` settles every registered handler and each rejection has been logged individually, `_handleMessage` re-throws the first rejected handler's reason. The outer consume callback catches this and calls `channel.nack(msg, false, true)` for requeue per current behavior (capped by the in-memory `maxRetries` counter). The `nack()` call is wrapped in try/catch — if the channel is stale (closed during reconnection), the error is logged. All sibling handlers ran to completion before this re-throw — none are silenced by an earlier rejection.
+15. **Handler errors cause nack, on the captured channel** -- After `Promise.allSettled` settles every registered handler and each rejection has been logged individually, `_handleMessage` re-throws the first rejected handler's reason. The outer consume callback catches this and calls `channel.nack(msg, false, true)` (the captured channel from Requirement 9, not `this._channel`) for requeue per current behavior (capped by the in-memory `maxRetries` counter, Requirement 8b). The `nack()` call is wrapped in try/catch — if the captured channel is stale (closed during reconnection), the error is logged at `warn` and swallowed. All sibling handlers ran to completion before this re-throw — none are silenced by an earlier rejection.
 16. **Serialization errors on dispatch** -- If event serialization fails, `dispatch` rejects with the serialization error.
 17. **Connection errors on dispatch** -- If the channel is closed or RabbitMQ is unreachable, `dispatch` rejects with a connection error.
 
@@ -133,7 +157,13 @@ export class RabbitMqEventBus implements EventBus, Connectable {
 - Queues are durable (survive broker restarts).
 - Messages are persistent (survive broker restarts).
 - Published messages include `messageId` from `event.metadata.eventId` when available.
+- Published messages include `contentType: "application/vnd.noddde.event+json; version=1"`.
 - No `console.*` calls exist in the implementation — all logging goes through the `Logger` interface.
+- `queuePrefix` is a required config field — there is no default. Two buses must use different `queuePrefix` values to avoid becoming competing consumers on the same queue.
+- `ack`/`nack` for a given delivery are always called on the `ConfirmChannel` instance that delivered that message, never on a `this._channel` resolved dynamically at ack time.
+- Deliveries sharing the same `event.metadata.aggregateId` within one queue's consumer always have their handlers invoked strictly one-at-a-time, in delivery order.
+- The delivery-count map used for `maxRetries` never retains an entry for a message that has been terminally resolved (acked or dead-lettered).
+- A retry-tracking key derived from message content is always a hash of the full body, never a truncated prefix.
 
 ## Edge Cases
 
@@ -152,6 +182,13 @@ export class RabbitMqEventBus implements EventBus, Connectable {
 - **close() during active reconnection**: The reconnection loop checks `_closed` before each attempt and exits cleanly. No leaked timers, no unhandled promise rejections.
 - **Dispatch during reconnection**: Rejects immediately with a connection error (same as dispatch before connect).
 - **Broker recovers after extended outage**: Reconnection succeeds eventually because the loop is unbounded; backoff is capped at `maxDelayMs` so attempts remain frequent enough to detect recovery.
+- **In-flight message spans a reconnect**: A handler still running when the channel/connection is replaced acks/nacks on its originally-captured (now stale) channel; that call is caught and swallowed (logged at `warn`), and the message is redelivered by the broker on the new channel once its original channel's unacked messages are considered lost (or, for a clean connection replacement, is not lost at all if the ack lands before staleness) — net effect: the message is processed exactly once from the handler's perspective, never silently vanished.
+- **Burst of same-type messages without `messageId`**: Each gets a full-content-hash retry key; since bodies differ, none collides with another, so none is misclassified as exceeding `maxRetries`.
+- **A message is genuinely redelivered past `maxRetries`**: Its retry key (stable `messageId`, or content hash for an identical redelivered body) accumulates count across deliveries and is dead-lettered once the count exceeds `maxRetries`.
+- **Two events for the same `aggregateId` arrive back-to-back**: Second delivery's handler invocation does not start until the first's has fully settled, even though both may have been handed to the consumer callback concurrently by the broker.
+- **Two events for different `aggregateId`s (or no `aggregateId`) arrive back-to-back**: Both process concurrently, up to `prefetchCount`; the aggregate-serialization map never blocks unrelated aggregates.
+- **`_setupConsumer` fails while already connected** (e.g., transient broker error when `on()` is called after `connect()`): The error is logged via `this._logger.error`; the handler stays registered but inactive until the next full reconnection cycle re-runs `_setupConsumer` for it.
+- **Constructing `RabbitMqEventBusConfig` without `queuePrefix`**: A TypeScript compile-time error (required field).
 
 ## Integration Points
 
@@ -919,7 +956,7 @@ describe("RabbitMqEventBus", () => {
 
 ### dispatch rejects during active reconnection
 
-```ts
+````ts
 import { describe, it, expect, vi } from "vitest";
 import { RabbitMqEventBus } from "@noddde/rabbitmq";
 import type { Logger } from "@noddde/core";
@@ -948,4 +985,306 @@ describe("RabbitMqEventBus", () => {
     ).rejects.toThrow(/not connected/i);
   });
 });
+
+### dispatch sets contentType on published messages
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { RabbitMqEventBus } from "@noddde/rabbitmq";
+
+describe("RabbitMqEventBus", () => {
+  it("should set contentType to the versioned noddde event content type", async () => {
+    const mockChannel = {
+      publish: vi.fn().mockReturnValue(true),
+      waitForConfirms: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
+    (bus as any)._connection = {};
+    (bus as any)._channel = mockChannel;
+    (bus as any)._connected = true;
+
+    await bus.dispatch({ name: "TestEvent", payload: {} });
+
+    const publishOptions = mockChannel.publish.mock.calls[0]![3];
+    expect(publishOptions.contentType).toBe(
+      "application/vnd.noddde.event+json; version=1",
+    );
+  });
+});
+````
+
+### same-aggregateId deliveries run strictly one at a time in delivery order
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { RabbitMqEventBus } from "@noddde/rabbitmq";
+
+describe("RabbitMqEventBus aggregate ordering", () => {
+  it("should serialize handler execution for deliveries sharing an aggregateId", async () => {
+    const mockChannel = {
+      assertExchange: vi.fn().mockResolvedValue(undefined),
+      assertQueue: vi.fn().mockResolvedValue({ queue: "test" }),
+      bindQueue: vi.fn().mockResolvedValue(undefined),
+      ack: vi.fn(),
+      nack: vi.fn(),
+      close: vi.fn().mockResolvedValue(undefined),
+      consume: vi.fn(),
+    };
+
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
+    (bus as any)._channel = mockChannel;
+
+    const order: string[] = [];
+    let overlapping = false;
+    let active = false;
+    bus.on("Moved", async (e: any) => {
+      if (active) overlapping = true;
+      active = true;
+      await new Promise((r) => setTimeout(r, e.payload.slow ? 30 : 5));
+      order.push(e.payload.tag);
+      active = false;
+    });
+
+    let consumeCallback: (msg: any) => Promise<void> = async () => {};
+    mockChannel.consume = vi.fn(async (_q, cb) => {
+      consumeCallback = cb;
+      return { consumerTag: "t" };
+    }) as any;
+
+    await (bus as any)._setupConsumer("Moved");
+
+    const makeMsg = (tag: string, slow: boolean) => ({
+      content: Buffer.from(
+        JSON.stringify({
+          name: "Moved",
+          payload: { tag, slow },
+          metadata: { aggregateId: "acc-1" },
+        }),
+      ),
+      properties: {},
+      fields: { deliveryTag: tag },
+    });
+
+    // Fire both without awaiting the first — simulates concurrent delivery
+    // up to prefetch. The slow first delivery must still finish before the
+    // second one's handler starts.
+    const p1 = consumeCallback(makeMsg("first", true));
+    const p2 = consumeCallback(makeMsg("second", false));
+    await Promise.all([p1, p2]);
+
+    expect(order).toEqual(["first", "second"]);
+    expect(overlapping).toBe(false);
+  });
+
+  it("should not serialize deliveries for different aggregateIds against each other", async () => {
+    const mockChannel = {
+      assertExchange: vi.fn().mockResolvedValue(undefined),
+      assertQueue: vi.fn().mockResolvedValue({ queue: "test" }),
+      bindQueue: vi.fn().mockResolvedValue(undefined),
+      ack: vi.fn(),
+      nack: vi.fn(),
+      close: vi.fn().mockResolvedValue(undefined),
+      consume: vi.fn(),
+    };
+
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
+    (bus as any)._channel = mockChannel;
+
+    let concurrentPeak = 0;
+    let inFlight = 0;
+    bus.on("Moved", async () => {
+      inFlight++;
+      concurrentPeak = Math.max(concurrentPeak, inFlight);
+      await new Promise((r) => setTimeout(r, 20));
+      inFlight--;
+    });
+
+    let consumeCallback: (msg: any) => Promise<void> = async () => {};
+    mockChannel.consume = vi.fn(async (_q, cb) => {
+      consumeCallback = cb;
+      return { consumerTag: "t" };
+    }) as any;
+
+    await (bus as any)._setupConsumer("Moved");
+
+    const makeMsg = (aggregateId: string) => ({
+      content: Buffer.from(
+        JSON.stringify({
+          name: "Moved",
+          payload: {},
+          metadata: { aggregateId },
+        }),
+      ),
+      properties: {},
+      fields: { deliveryTag: aggregateId },
+    });
+
+    await Promise.all([
+      consumeCallback(makeMsg("acc-1")),
+      consumeCallback(makeMsg("acc-2")),
+    ]);
+
+    expect(concurrentPeak).toBe(2);
+  });
+});
+```
+
+### maxRetries without messageId does not misclassify a burst of distinct messages as poison, but a genuinely-redelivered body is dead-lettered
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { RabbitMqEventBus } from "@noddde/rabbitmq";
+
+describe("RabbitMqEventBus retry key", () => {
+  it("should not discard 10 distinct same-type messages with no messageId", async () => {
+    const mockChannel = {
+      assertExchange: vi.fn().mockResolvedValue(undefined),
+      assertQueue: vi.fn().mockResolvedValue({ queue: "test" }),
+      bindQueue: vi.fn().mockResolvedValue(undefined),
+      ack: vi.fn(),
+      nack: vi.fn(),
+      publish: vi.fn().mockReturnValue(true),
+      close: vi.fn().mockResolvedValue(undefined),
+      consume: vi.fn(),
+    };
+
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+      resilience: { maxRetries: 3 },
+    });
+    (bus as any)._channel = mockChannel;
+
+    const handler = vi.fn();
+    bus.on("Burst", handler);
+
+    let consumeCallback: (msg: any) => Promise<void> = async () => {};
+    mockChannel.consume = vi.fn(async (_q, cb) => {
+      consumeCallback = cb;
+      return { consumerTag: "t" };
+    }) as any;
+
+    await (bus as any)._setupConsumer("Burst");
+
+    for (let i = 0; i < 10; i++) {
+      await consumeCallback({
+        content: Buffer.from(JSON.stringify({ name: "Burst", payload: { i } })),
+        properties: {},
+        fields: { deliveryTag: i, redelivered: false },
+      });
+    }
+
+    expect(handler).toHaveBeenCalledTimes(10);
+    expect(mockChannel.ack).toHaveBeenCalledTimes(10);
+  });
+
+  it("should dead-letter a message redelivered past maxRetries", async () => {
+    const mockChannel = {
+      assertExchange: vi.fn().mockResolvedValue(undefined),
+      assertQueue: vi.fn().mockResolvedValue({ queue: "test" }),
+      bindQueue: vi.fn().mockResolvedValue(undefined),
+      ack: vi.fn(),
+      nack: vi.fn(),
+      publish: vi.fn().mockReturnValue(true),
+      close: vi.fn().mockResolvedValue(undefined),
+      consume: vi.fn(),
+    };
+
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+      resilience: { maxRetries: 2 },
+    });
+    (bus as any)._channel = mockChannel;
+
+    bus.on("Poison", async () => {
+      throw new Error("always fails");
+    });
+
+    let consumeCallback: (msg: any) => Promise<void> = async () => {};
+    mockChannel.consume = vi.fn(async (_q, cb) => {
+      consumeCallback = cb;
+      return { consumerTag: "t" };
+    }) as any;
+
+    await (bus as any)._setupConsumer("Poison");
+
+    const content = Buffer.from(
+      JSON.stringify({ name: "Poison", payload: { fixed: true } }),
+    );
+    const msg = {
+      content,
+      properties: {},
+      fields: { deliveryTag: 1, redelivered: false },
+    };
+
+    await consumeCallback(msg); // attempt 1
+    await consumeCallback(msg); // attempt 2
+    await consumeCallback(msg); // attempt 3 — exceeds maxRetries=2
+
+    expect(mockChannel.publish).toHaveBeenCalledWith(
+      expect.stringContaining("dlx"),
+      "Poison",
+      content,
+      expect.objectContaining({
+        headers: expect.objectContaining({ "x-original-event-name": "Poison" }),
+      }),
+    );
+  });
+});
+```
+
+### consumer setup failure is logged and retried on the next reconnection cycle
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { RabbitMqEventBus } from "@noddde/rabbitmq";
+import type { Logger } from "@noddde/core";
+
+describe("RabbitMqEventBus consumer setup failure", () => {
+  it("should log an error via the framework logger when _setupConsumer fails", async () => {
+    const mockLogger: Logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      child: vi.fn().mockReturnThis(),
+    };
+
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+      logger: mockLogger,
+    });
+    (bus as any)._connected = true;
+    (bus as any)._channel = {
+      assertQueue: vi.fn().mockRejectedValue(new Error("boom")),
+    };
+
+    bus.on("FailsToSetup", vi.fn());
+
+    // on() fires _setupConsumer without awaiting it — flush microtasks.
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.stringContaining("FailsToSetup"),
+      expect.objectContaining({ eventName: "FailsToSetup" }),
+    );
+  });
+});
+```
+
+```
+
 ```

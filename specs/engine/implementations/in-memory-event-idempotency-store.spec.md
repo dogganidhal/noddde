@@ -5,8 +5,7 @@ source_file: packages/engine/src/implementations/in-memory-event-idempotency-sto
 status: implemented
 exports: [InMemoryEventIdempotencyStore]
 depends_on: [edd/event-idempotency]
-docs:
-  - events/event-handlers.mdx
+docs: [] # TODO: no docs page yet
 ---
 
 # InMemoryEventIdempotencyStore

@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import { eq, lte } from "drizzle-orm";
 import type { EventIdempotencyStore } from "@noddde/core";
 import type { DrizzleTransactionStore } from "./index";

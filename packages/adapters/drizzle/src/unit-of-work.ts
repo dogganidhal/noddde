@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import { sql } from "drizzle-orm";
 import type { Event, UnitOfWork, UnitOfWorkFactory } from "@noddde/core";
 import type { DrizzleTransactionStore } from "./index";

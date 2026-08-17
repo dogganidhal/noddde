@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import { sql } from "drizzle-orm";
 import type { AggregateLocker } from "@noddde/core";
 import { LockTimeoutError, fnv1a64 } from "@noddde/core";

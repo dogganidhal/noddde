@@ -5,8 +5,7 @@ source_file: packages/engine/src/implementations/in-memory-query-bus.ts
 status: implemented
 exports: [InMemoryQueryBus]
 depends_on: [cqrs/query/query-bus, cqrs/query/query, cqrs/query/query-handler]
-docs:
-  - infrastructure/in-memory-implementations.mdx
+docs: [running/infrastructure.mdx]
 ---
 
 # InMemoryQueryBus

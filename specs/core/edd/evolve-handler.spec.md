@@ -5,8 +5,7 @@ source_file: packages/core/src/edd/event-sourcing-handler.ts
 status: implemented
 exports: [EvolveHandler]
 depends_on: [edd/event]
-docs:
-  - events/evolve-handlers.mdx
+docs: [modeling/state-and-events.mdx]
 ---
 
 # EvolveHandler

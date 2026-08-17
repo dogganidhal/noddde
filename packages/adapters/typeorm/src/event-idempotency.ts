@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import { Entity, PrimaryColumn, Column, LessThanOrEqual } from "typeorm";
 import type { DataSource, EntityManager } from "typeorm";
 import type { EventIdempotencyStore } from "@noddde/core";

@@ -5,8 +5,7 @@ source_file: packages/adapters/typeorm/src/event-idempotency.ts
 status: implemented
 exports: [TypeORMEventIdempotencyStore, NodddeEventIdempotencyEntity]
 depends_on: [edd/event-idempotency]
-docs:
-  - events/event-handlers.mdx
+docs: [] # TODO: no docs page yet
 ---
 
 # TypeORMEventIdempotencyStore

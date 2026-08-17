@@ -8,8 +8,7 @@ exports:
   - UnitOfWorkFactory
 depends_on:
   - edd/event
-docs:
-  - domain-configuration/unit-of-work.mdx
+docs: [running/persistence.mdx]
 ---
 
 # UnitOfWork Interface & UnitOfWorkFactory

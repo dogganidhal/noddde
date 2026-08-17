@@ -39,8 +39,11 @@
   "sideEffects": false,
   "files": [
     "dist",
-    "prisma"
+    "prisma/schema.prisma"
   ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "prisma generate && tsup",
     "build:watch": "tsup --watch",
@@ -54,7 +57,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@noddde/core": "1.0.0-rc.1"
+    "@noddde/core": "^1.0.0-rc.1"
   },
   "peerDependencies": {
     "@prisma/client": ">=5.0.0"

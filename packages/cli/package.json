@@ -27,21 +27,32 @@
   },
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
     }
   },
   "files": [
     "dist"
   ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "lint": "eslint . --max-warnings 0",
     "build": "tsup",
     "build:watch": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest"
   },
   "dependencies": {
@@ -51,8 +62,8 @@
     "typescript": "^5.3.3"
   },
   "devDependencies": {
-    "@noddde/core": "1.0.0-rc.1",
-    "@noddde/engine": "1.0.0-rc.1",
+    "@noddde/core": "^1.0.0-rc.1",
+    "@noddde/engine": "^1.0.0-rc.1",
     "@noddde/typescript-config": "0.0.0",
     "eslint": "^8.56.0",
     "vitest": "^4.1.0"

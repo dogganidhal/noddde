@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import type { PrismaClient } from "@prisma/client";
 import type { AggregateLocker } from "@noddde/core";
 import { LockTimeoutError } from "@noddde/core";

@@ -39,13 +39,21 @@ describe("saga templates", () => {
 
   it("generates saga.ts with on map API (not associations/handlers)", () => {
     const result = sagaTemplate(ctx);
-    expect(result).toContain('import { defineSaga } from "@noddde/core"');
+    expect(result).toContain(
+      'import { defineSaga, DefineEvents } from "@noddde/core"',
+    );
     expect(result).toContain("type OrderFulfillmentSagaDef = {");
     expect(result).toContain("export const OrderFulfillmentSaga = defineSaga");
-    expect(result).toContain("startedBy:");
+    expect(result).toContain('startedBy: ["OrderFulfillmentStarted"]');
     expect(result).toContain("on:");
     expect(result).not.toContain("associations:");
     expect(result).not.toContain("handlers:");
+  });
+
+  it("startedBy is a non-empty tuple of real event names, never an empty array", () => {
+    const result = sagaTemplate(ctx);
+    expect(result).not.toMatch(/startedBy:\s*\[\s*\]/);
+    expect(result).not.toMatch(/startedBy:\s*\[\s*\/\//);
   });
 
   it("generates on-entries barrel", () => {
@@ -54,12 +62,12 @@ describe("saga templates", () => {
     expect(result).toContain("on-start-event.js");
   });
 
-  it("generates standalone on-entry handler with InferSagaOnEntry comment", () => {
+  it("generates standalone on-entry handler with InferSagaEventHandler comment", () => {
     const result = transitionHandlerTemplate(ctx);
     expect(result).toContain("export function onStartEvent");
     expect(result).toContain("OrderFulfillmentSagaState");
     expect(result).toContain('status: "started"');
-    expect(result).toContain("InferSagaOnEntry");
+    expect(result).toContain("InferSagaEventHandler");
   });
 
   it("uses .js extensions for all local imports", () => {

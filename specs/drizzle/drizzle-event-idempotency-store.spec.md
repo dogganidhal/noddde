@@ -5,8 +5,7 @@ source_file: packages/adapters/drizzle/src/event-idempotency.ts
 status: implemented
 exports: [DrizzleEventIdempotencyStore]
 depends_on: [edd/event-idempotency]
-docs:
-  - events/event-handlers.mdx
+docs: [] # TODO: no docs page yet
 ---
 
 # DrizzleEventIdempotencyStore
