@@ -81,7 +81,13 @@ describe("PrismaAdvisoryLocker constructor (caller-owned client)", () => {
   it("warns via the provided logger about session affinity", () => {
     const client = makeMockClient();
     const warn = vi.fn();
-    const logger = { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() };
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn,
+      error: vi.fn(),
+      child: vi.fn().mockReturnThis(),
+    };
     new PrismaAdvisoryLocker(client, "postgresql", { logger });
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0]?.[0]).toMatch(/connection_limit=1/);
