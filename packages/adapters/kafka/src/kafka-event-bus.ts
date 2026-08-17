@@ -24,11 +24,32 @@ export interface KafkaEventBusConfig {
    * For example, "noddde." → "noddde.AccountCreated".
    */
   topicPrefix?: string;
+  /**
+   * Number of partitions used when a topic (event topic or DLQ topic) is
+   * auto-provisioned by this bus. Default: 3. Ignored for topics that
+   * already exist.
+   */
+  topicPartitions?: number;
+  /**
+   * Replication factor used when a topic is auto-provisioned by this bus.
+   * Default: undefined (broker's default.replication.factor applies).
+   */
+  replicationFactor?: number;
+  /**
+   * Suffix appended to a message's original topic to form its dead-letter
+   * topic name (e.g. "OrderPlaced" -> "OrderPlaced.dlq"). Default: ".dlq".
+   */
+  dlqTopicSuffix?: string;
   /** Consumer session timeout in milliseconds (default: 30000). Increase if handlers are slow to avoid rebalances. */
   sessionTimeout?: number;
   /** Consumer heartbeat interval in milliseconds (default: 3000). Must be less than sessionTimeout / 3. */
   heartbeatInterval?: number;
-  /** Connection resilience configuration (default: maxAttempts=6, initialDelayMs=300, maxDelayMs=30000). Mapped to kafkajs retry options. */
+  /**
+   * Connection resilience configuration (default: maxAttempts=6, initialDelayMs=300, maxDelayMs=30000). Mapped to kafkajs retry options.
+   * `resilience.maxRetries` governs handler-failure redelivery attempts before a message is parked to the DLQ topic. Unlike the generic
+   * BrokerResilience doc ("no limit" when unset), this adapter defaults `maxRetries` to `5` when unset, to bound how long a poison message
+   * can crash/rebalance the shared consumer before being parked.
+   */
   resilience?: BrokerResilience;
   /**
    * Strategy for deriving the Kafka message key from an event.
@@ -57,12 +78,27 @@ export interface KafkaEventBusConfig {
   warmupTimeoutMs?: number;
 }
 
+/** Content-type header value applied to every message this bus publishes (event topics and DLQ topics alike). */
+const WIRE_CONTENT_TYPE = "application/vnd.noddde.event+json; version=1";
+
+/**
+ * Default cap on handler-failure delivery attempts before a message is
+ * parked to its DLQ topic, used when `resilience.maxRetries` is not
+ * configured. Deliberately finite (unlike the generic BrokerResilience
+ * "unset = infinite redelivery" default) so a single poison message can
+ * never crash/rebalance the shared consumer forever.
+ */
+const DEFAULT_MAX_RETRIES = 5;
+
 /**
  * Kafka-backed EventBus implementation using `kafkajs`.
  *
  * Publishes domain events to Kafka topics and delivers them to registered
  * handlers via consumer groups. Provides at-least-once delivery with
- * partition-level ordering.
+ * ordering only among events sharing the same event name and partition key
+ * (see the spec's "Ordering Guarantees" section) — NOT across different
+ * event names for the same aggregate. Consumers of multiple event types for
+ * one aggregate must be order-tolerant and idempotent.
  *
  * Usage:
  * 1. Construct the bus with config.
@@ -114,6 +150,8 @@ export class KafkaEventBus implements EventBus, Connectable {
    * Entries are never purged — suitable for short-lived consumer sessions.
    */
   private readonly _deliveryCounts: Map<string, number> = new Map();
+  /** Topics (event topics and DLQ topics) already provisioned via `admin.createTopics` by this bus instance. */
+  private readonly _provisionedTopics: Set<string> = new Set();
 
   constructor(config: KafkaEventBusConfig) {
     this._config = config;
@@ -178,6 +216,18 @@ export class KafkaEventBus implements EventBus, Connectable {
           await this._provisionWarmupTopic();
         }
 
+        // Provision (idempotently) the Kafka topic for every event name
+        // registered via on() before connect() — one batched admin call —
+        // so a shared broker's auto-create defaults (usually 1 partition)
+        // never silently cap this bus's partition count or defeat
+        // partitionKeyStrategy / consumer-group scale-out. The warmup topic
+        // is provisioned separately above, via _provisionWarmupTopic().
+        await this._provisionTopics(
+          [...this._handlers.keys()]
+            .filter((name) => name !== this._warmupEventName)
+            .map((name) => this._topicName(name)),
+        );
+
         // Subscribe to topics for all handlers registered before connect
         // (including the warmup handler registered just above, if provisioned).
         for (const eventName of this._handlers.keys()) {
@@ -227,6 +277,7 @@ export class KafkaEventBus implements EventBus, Connectable {
     } finally {
       await admin.disconnect();
     }
+    this._provisionedTopics.add(warmupTopic);
     // Append rather than overwrite, consistent with on()'s registry
     // semantics — a collision with a user-registered handler for this
     // (extremely unlikely) synthetic event name must not silently drop it.
@@ -239,6 +290,43 @@ export class KafkaEventBus implements EventBus, Connectable {
         }
       },
     ]);
+  }
+
+  /**
+   * Idempotently provisions the given topics via the admin client, using
+   * `topicPartitions` (default 3) partitions and `replicationFactor` when
+   * configured. Topics already provisioned by this bus instance (tracked in
+   * `_provisionedTopics`) are skipped — kafkajs's `createTopics` is itself
+   * idempotent (a no-op for an existing topic, it never alters its
+   * partition count), but batching the admin round-trip only for genuinely
+   * new topics keeps repeated calls (e.g. from `dispatch()`) cheap.
+   */
+  private async _provisionTopics(topics: string[]): Promise<void> {
+    const pending = topics.filter((t) => !this._provisionedTopics.has(t));
+    if (pending.length === 0) {
+      return;
+    }
+
+    const admin = this._kafka.admin();
+    await admin.connect();
+    try {
+      await admin.createTopics({
+        waitForLeaders: true,
+        topics: pending.map((topic) => ({
+          topic,
+          numPartitions: this._config.topicPartitions ?? 3,
+          ...(this._config.replicationFactor !== undefined && {
+            replicationFactor: this._config.replicationFactor,
+          }),
+        })),
+      });
+    } finally {
+      await admin.disconnect();
+    }
+
+    for (const topic of pending) {
+      this._provisionedTopics.add(topic);
+    }
   }
 
   /**
@@ -287,7 +375,11 @@ export class KafkaEventBus implements EventBus, Connectable {
           ? topic.slice(prefix.length)
           : topic;
         const offsetKey = `${topic}:${partition}:${message.offset}`;
-        await this._handleMessage(eventName, rawValue, offsetKey);
+        await this._handleMessage(eventName, rawValue, {
+          topic,
+          partition,
+          offset: message.offset,
+        });
 
         // Explicitly commit the offset after all handlers succeeded.
         // Without this, kafkajs never persists offsets when autoCommit is false.
@@ -371,6 +463,11 @@ export class KafkaEventBus implements EventBus, Connectable {
    * The full event object is serialized as JSON.
    * The message key is derived from the `partitionKeyStrategy` config option
    * (default: `"aggregateId"` — uses `event.metadata?.aggregateId`).
+   * Topics for events with a registered handler are provisioned during
+   * `connect()` (see `_provisionTopics`). A publish-only topic that was
+   * never registered via `on()` is NOT auto-provisioned here (out of scope
+   * for this pass — see spec note); such a bus still relies on broker
+   * auto-create defaults for that specific topic.
    *
    * @throws If called before `connect()` or after `close()`.
    */
@@ -389,6 +486,7 @@ export class KafkaEventBus implements EventBus, Connectable {
         {
           key,
           value,
+          headers: { "content-type": WIRE_CONTENT_TYPE },
         },
       ],
     });
@@ -549,49 +647,46 @@ export class KafkaEventBus implements EventBus, Connectable {
 
   /**
    * Internal method that deserializes an incoming Kafka message and invokes
-   * all registered handlers for the given event name concurrently via `Promise.all`.
-   * Exposed as a private method (accessible via `(bus as any)._handleMessage`)
-   * so tests can simulate message delivery without a real Kafka cluster.
+   * all registered handlers for the given event name concurrently via
+   * `Promise.allSettled`. Exposed as a private method (accessible via
+   * `(bus as any)._handleMessage`) so tests can simulate message delivery
+   * without a real Kafka cluster.
    *
-   * Poison message protection: if `JSON.parse` throws, the error is logged and
-   * the method returns without throwing (allowing the consumer to commit the
-   * offset and skip the malformed message). Poison messages will not block
-   * the partition via infinite redelivery.
+   * Poison message protection: if `JSON.parse` throws, the error is logged
+   * and (when `location` is known) the raw message is best-effort parked to
+   * the DLQ topic, then the method returns without throwing (allowing the
+   * consumer to commit the offset and skip the malformed message). Poison
+   * messages are never retried — a re-fetch of the same bytes can never
+   * parse successfully.
    *
-   * maxRetries enforcement: if `resilience.maxRetries` is configured, the delivery
-   * count for the given offset key is incremented on each call. If the count exceeds
-   * `maxRetries`, a warning is logged and the method returns (skipping the message).
-   *
-   * If any handler rejects, the error propagates and the consumer will not commit
-   * the offset, enabling redelivery. Handlers that already completed will re-execute
-   * on redelivery — consumers must be idempotent.
+   * Handler failures: below the retry cap (`resilience.maxRetries`, default
+   * `DEFAULT_MAX_RETRIES`), the first rejection is re-thrown as before —
+   * the outer consumer loop skips the offset commit and Kafka redelivers.
+   * Once the cap is exceeded, the message is parked to the DLQ topic and
+   * this method returns normally instead of throwing, so the offset commits
+   * and the shared consumer proceeds to the next message rather than
+   * perpetually crash/rebalance-looping on the same one.
    *
    * @param eventName - The event name derived from the Kafka topic.
    * @param rawValue - The raw JSON string from the Kafka message value.
-   * @param offsetKey - Optional unique key for the message (topic:partition:offset).
-   *   Used for maxRetries tracking. When omitted (e.g., in direct test calls),
-   *   maxRetries enforcement is skipped.
+   * @param location - The message's topic/partition/offset. Used for
+   *   delivery-count tracking and DLQ parking. When omitted (e.g. direct
+   *   unit-test calls with only 2 arguments), the legacy contract applies
+   *   unconditionally: on failure, the first rejection is always re-thrown
+   *   immediately, with no cap and no DLQ involvement.
    */
   private async _handleMessage(
     eventName: string,
     rawValue: string,
-    offsetKey?: string,
+    location?: { topic: string; partition: number; offset: string },
   ): Promise<void> {
-    // Fix 4: maxRetries enforcement via in-memory delivery count.
-    const maxRetries = this._config.resilience?.maxRetries;
-    if (maxRetries !== undefined && offsetKey !== undefined) {
-      const current = (this._deliveryCounts.get(offsetKey) ?? 0) + 1;
-      this._deliveryCounts.set(offsetKey, current);
-      if (current > maxRetries) {
-        this._logger.warn(
-          `Message at ${offsetKey} exceeded maxRetries (${maxRetries}). Skipping.`,
-          { offsetKey, maxRetries, deliveryCount: current },
-        );
-        return;
-      }
-    }
+    const offsetKey = location
+      ? `${location.topic}:${location.partition}:${location.offset}`
+      : undefined;
 
-    // Fix 3: Poison message protection — catch JSON parse errors and skip.
+    // Poison message protection — catch JSON parse errors and skip. Never
+    // retried (re-parsing the same bytes can never succeed), so this is
+    // parked directly rather than going through the retry-count/cap path.
     let event: Event;
     try {
       event = JSON.parse(rawValue) as Event;
@@ -600,6 +695,16 @@ export class KafkaEventBus implements EventBus, Connectable {
         `Failed to deserialize message for event "${eventName}". Skipping poison message.`,
         { eventName, error: String(err) },
       );
+      if (location !== undefined) {
+        await this._parkToDlq(location, eventName, rawValue, err, 1).catch(
+          (dlqErr: unknown) => {
+            this._logger.error(
+              `Failed to park poison message to DLQ; message is skipped without a DLQ copy.`,
+              { eventName, error: String(dlqErr) },
+            );
+          },
+        );
+      }
       return;
     }
 
@@ -648,9 +753,92 @@ export class KafkaEventBus implements EventBus, Connectable {
       }
     }
 
-    if (firstRejection !== undefined) {
+    if (firstRejection === undefined) {
+      return;
+    }
+
+    // Legacy contract: no location means no cap, no DLQ — always re-throw.
+    if (location === undefined || offsetKey === undefined) {
       throw firstRejection;
     }
+
+    const maxRetries =
+      this._config.resilience?.maxRetries ?? DEFAULT_MAX_RETRIES;
+    const attempt = (this._deliveryCounts.get(offsetKey) ?? 0) + 1;
+    this._deliveryCounts.set(offsetKey, attempt);
+
+    if (attempt <= maxRetries) {
+      throw firstRejection;
+    }
+
+    try {
+      await this._parkToDlq(
+        location,
+        eventName,
+        rawValue,
+        firstRejection,
+        attempt,
+      );
+    } catch (dlqErr) {
+      this._logger.error(
+        `Failed to park exhausted-retry message to DLQ topic; leaving offset uncommitted for redelivery.`,
+        { eventName, error: String(dlqErr) },
+      );
+      throw firstRejection;
+    }
+    this._deliveryCounts.delete(offsetKey);
+  }
+
+  /**
+   * Publishes the original, unmodified message value to the message's DLQ
+   * topic (`${location.topic}${dlqTopicSuffix}`), with Kafka headers
+   * carrying failure metadata so operators can inspect and replay the
+   * payload. Also provisions the DLQ topic on first use. Emits a
+   * `logger.error` at the moment of parking.
+   */
+  private async _parkToDlq(
+    location: { topic: string; partition: number; offset: string },
+    eventName: string,
+    rawValue: string,
+    error: unknown,
+    attempts: number,
+  ): Promise<void> {
+    const dlqTopic = `${location.topic}${this._config.dlqTopicSuffix ?? ".dlq"}`;
+    await this._provisionTopics([dlqTopic]);
+
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const timestamp = new Date().toISOString();
+
+    await this._producer!.send({
+      topic: dlqTopic,
+      messages: [
+        {
+          value: rawValue,
+          headers: {
+            "content-type": WIRE_CONTENT_TYPE,
+            "x-noddde-dlq-error": errorMessage,
+            "x-noddde-dlq-attempts": String(attempts),
+            "x-noddde-dlq-original-topic": location.topic,
+            "x-noddde-dlq-original-partition": String(location.partition),
+            "x-noddde-dlq-original-offset": location.offset,
+            "x-noddde-dlq-timestamp": timestamp,
+          },
+        },
+      ],
+    });
+
+    this._logger.error(
+      `Message for event "${eventName}" exhausted retries; parked to DLQ topic "${dlqTopic}".`,
+      {
+        eventName,
+        dlqTopic,
+        attempts,
+        error: errorMessage,
+        originalTopic: location.topic,
+        originalPartition: location.partition,
+        originalOffset: location.offset,
+      },
+    );
   }
 
   /**

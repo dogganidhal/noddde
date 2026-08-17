@@ -26,7 +26,10 @@ describe("RabbitMqEventBus", () => {
       close: vi.fn().mockResolvedValue(undefined),
     };
 
-    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
     (bus as any)._connection = mockConnection;
     (bus as any)._channel = mockChannel;
     (bus as any)._connected = true;
@@ -49,7 +52,10 @@ describe("RabbitMqEventBus", () => {
       close: vi.fn().mockResolvedValue(undefined),
     };
 
-    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
     (bus as any)._connection = {};
     (bus as any)._channel = mockChannel;
     (bus as any)._connected = true;
@@ -61,7 +67,10 @@ describe("RabbitMqEventBus", () => {
   });
 
   it("should throw when dispatching before connect", async () => {
-    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
 
     await expect(
       bus.dispatch({ name: "TestEvent", payload: {} }),
@@ -70,7 +79,10 @@ describe("RabbitMqEventBus", () => {
 
   it("should invoke registered handler when event is consumed", async () => {
     const handler = vi.fn();
-    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
 
     bus.on("AccountCreated", handler);
 
@@ -85,7 +97,10 @@ describe("RabbitMqEventBus", () => {
 
   it("should invoke all handlers concurrently via Promise.all", async () => {
     const results: string[] = [];
-    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
 
     bus.on("TestEvent", async () => {
       await new Promise((r) => setTimeout(r, 50));
@@ -108,7 +123,10 @@ describe("RabbitMqEventBus", () => {
   });
 
   it("should reject if any handler throws during parallel invocation", async () => {
-    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
 
     const successHandler = vi.fn();
     bus.on("TestEvent", successHandler);
@@ -130,6 +148,7 @@ describe("RabbitMqEventBus", () => {
       assertExchange: vi.fn().mockResolvedValue(undefined),
       prefetch: vi.fn(),
       waitForConfirms: vi.fn().mockResolvedValue(undefined),
+      on: vi.fn(),
       close: vi.fn().mockResolvedValue(undefined),
     };
     const mockConnection = {
@@ -145,6 +164,7 @@ describe("RabbitMqEventBus", () => {
 
     const bus = new RabbitMqEventBus({
       url: "amqp://localhost:5672",
+      queuePrefix: "test",
       prefetchCount: 20,
     });
 
@@ -179,6 +199,7 @@ describe("RabbitMqEventBus", () => {
 
     const bus = new RabbitMqEventBus({
       url: "amqp://localhost:5672",
+      queuePrefix: "test",
       exchangeName: "my-domain-events",
       exchangeType: "fanout",
       resilience: { maxAttempts: 5, initialDelayMs: 1, maxDelayMs: 1 },
@@ -222,6 +243,7 @@ describe("RabbitMqEventBus", () => {
 
     const bus = new RabbitMqEventBus({
       url: "amqp://localhost:5672",
+      queuePrefix: "test",
       exchangeName: "my-domain-events",
       resilience: { maxAttempts: 3, initialDelayMs: 1, maxDelayMs: 1 },
     });
@@ -258,6 +280,7 @@ describe("RabbitMqEventBus", () => {
 
     const bus = new RabbitMqEventBus({
       url: "amqp://localhost:5672",
+      queuePrefix: "test",
       resilience: { maxAttempts: 2, initialDelayMs: 1, maxDelayMs: 1 },
     });
 
@@ -297,6 +320,7 @@ describe("RabbitMqEventBus", () => {
 
     const bus = new RabbitMqEventBus({
       url: "amqp://localhost:5672",
+      queuePrefix: "test",
       resilience: { maxAttempts: 3, initialDelayMs: 1, maxDelayMs: 1 },
     });
     bus.on("TestEvent", vi.fn());
@@ -317,6 +341,7 @@ describe("RabbitMqEventBus", () => {
   it("should retry connection with exponential backoff", async () => {
     const bus = new RabbitMqEventBus({
       url: "amqp://localhost:5672",
+      queuePrefix: "test",
       resilience: {
         maxAttempts: 3,
         initialDelayMs: 100,
@@ -333,7 +358,10 @@ describe("RabbitMqEventBus", () => {
     const mockChannel = { close: vi.fn().mockResolvedValue(undefined) };
     const mockConnection = { close: vi.fn().mockResolvedValue(undefined) };
 
-    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
     (bus as any)._connection = mockConnection;
     (bus as any)._channel = mockChannel;
     (bus as any)._connected = true;
@@ -353,7 +381,10 @@ describe("RabbitMqEventBus", () => {
     const mockChannel = { close: vi.fn().mockResolvedValue(undefined) };
     const mockConnection = { close: vi.fn().mockResolvedValue(undefined) };
 
-    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
     (bus as any)._connection = mockConnection;
     (bus as any)._channel = mockChannel;
     (bus as any)._connected = true;
@@ -363,7 +394,10 @@ describe("RabbitMqEventBus", () => {
   });
 
   it("should nack message when handler throws", async () => {
-    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
 
     bus.on("FailEvent", async () => {
       throw new Error("handler failed");
@@ -385,7 +419,10 @@ describe("RabbitMqEventBus", () => {
       close: vi.fn().mockResolvedValue(undefined),
     };
 
-    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
     (bus as any)._connection = {};
     (bus as any)._channel = mockChannel;
     (bus as any)._connected = true;
@@ -412,6 +449,7 @@ describe("RabbitMqEventBus", () => {
       assertExchange: vi.fn().mockResolvedValue(undefined),
       prefetch: vi.fn(),
       waitForConfirms: vi.fn().mockResolvedValue(undefined),
+      on: vi.fn(),
       close: vi.fn().mockResolvedValue(undefined),
     };
     const mockConnection = {
@@ -426,7 +464,10 @@ describe("RabbitMqEventBus", () => {
       mockConnection,
     );
 
-    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
     await bus.connect();
 
     expect(mockConnection.createConfirmChannel).toHaveBeenCalled();
@@ -440,7 +481,10 @@ describe("RabbitMqEventBus", () => {
       close: vi.fn().mockResolvedValue(undefined),
     };
 
-    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
     (bus as any)._connection = {};
     (bus as any)._channel = mockChannel;
     (bus as any)._connected = true;
@@ -457,7 +501,10 @@ describe("RabbitMqEventBus", () => {
   });
 
   it("should ack and skip poison messages that fail deserialization", async () => {
-    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
     const handler = vi.fn();
     bus.on("TestEvent", handler);
 
@@ -476,6 +523,7 @@ describe("RabbitMqEventBus", () => {
       assertExchange: vi.fn().mockResolvedValue(undefined),
       prefetch: vi.fn(),
       waitForConfirms: vi.fn().mockResolvedValue(undefined),
+      on: vi.fn(),
       close: vi.fn().mockResolvedValue(undefined),
     };
     const mockConnection = {
@@ -489,7 +537,10 @@ describe("RabbitMqEventBus", () => {
       mockConnection,
     );
 
-    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
     await bus.connect();
 
     expect(mockConnection.on).toHaveBeenCalledWith(
@@ -509,6 +560,7 @@ describe("RabbitMqEventBus", () => {
       assertExchange: vi.fn().mockResolvedValue(undefined),
       prefetch: vi.fn(),
       waitForConfirms: vi.fn().mockResolvedValue(undefined),
+      on: vi.fn(),
       close: vi.fn().mockResolvedValue(undefined),
     };
     const mockConnection = {
@@ -524,7 +576,10 @@ describe("RabbitMqEventBus", () => {
       mockConnection,
     );
 
-    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
     await bus.connect();
 
     expect(bus._connected).toBe(true);
@@ -545,12 +600,14 @@ describe("RabbitMqEventBus", () => {
       waitForConfirms: vi.fn().mockResolvedValue(undefined),
       ack: vi.fn(),
       nack: vi.fn(),
+      publish: vi.fn().mockReturnValue(true),
       close: vi.fn().mockResolvedValue(undefined),
       consume: vi.fn().mockResolvedValue({ consumerTag: "tag" }),
     };
 
     const bus = new RabbitMqEventBus({
       url: "amqp://localhost:5672",
+      queuePrefix: "test",
       resilience: { maxRetries: 2 },
     });
     (bus as any)._channel = mockChannel;
@@ -596,6 +653,7 @@ describe("RabbitMqEventBus", () => {
     // Inject a failing handler
     const failingBus = new RabbitMqEventBus({
       url: "amqp://localhost:5672",
+      queuePrefix: "test",
       resilience: { maxRetries: 2 },
     });
     (failingBus as any)._channel = mockChannel;
@@ -617,11 +675,22 @@ describe("RabbitMqEventBus", () => {
     await retryCallback(makeFailMsg(retryMsgId));
     expect(mockChannel.nack).toHaveBeenCalledTimes(1);
 
-    // Delivery 3 — exceeds maxRetries (2), should be discarded via ack
+    // Delivery 3 — exceeds maxRetries (2), should be dead-lettered + acked
     mockChannel.ack.mockClear();
     mockChannel.nack.mockClear();
+    mockChannel.publish.mockClear();
     await retryCallback(makeFailMsg(retryMsgId));
-    expect(mockChannel.ack).toHaveBeenCalledTimes(1); // discarded
+    expect(mockChannel.publish).toHaveBeenCalledWith(
+      expect.stringContaining("dlx"),
+      "RetryEvent",
+      expect.any(Buffer),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "x-original-event-name": "RetryEvent",
+        }),
+      }),
+    );
+    expect(mockChannel.ack).toHaveBeenCalledTimes(1); // discarded off source queue
     expect(mockChannel.nack).not.toHaveBeenCalled();
     // Handler not called on discard
     expect(failHandler).toHaveBeenCalledTimes(2); // only first two deliveries
@@ -642,7 +711,10 @@ describe("RabbitMqEventBus", () => {
       consume: vi.fn().mockResolvedValue({ consumerTag: "tag" }),
     };
 
-    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
     (bus as any)._channel = mockChannel;
 
     const handler = vi.fn().mockResolvedValue(undefined);
@@ -680,7 +752,10 @@ describe("RabbitMqEventBus", () => {
       consume: vi.fn().mockResolvedValue({ consumerTag: "tag" }),
     };
 
-    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
     (bus as any)._channel = mockChannel;
 
     bus.on("StaleNackEvent", async () => {
@@ -716,7 +791,10 @@ describe("RabbitMqEventBus", () => {
       consume: vi.fn().mockResolvedValue({ consumerTag: "tag" }),
     };
 
-    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
     (bus as any)._channel = mockChannel;
 
     const handler = vi.fn();
@@ -747,7 +825,10 @@ describe("RabbitMqEventBus", () => {
       close: vi.fn().mockResolvedValue(undefined),
     };
 
-    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
     (bus as any)._connection = {};
     (bus as any)._channel = mockChannel;
     (bus as any)._connected = true;
@@ -775,7 +856,10 @@ describe("RabbitMqEventBus", () => {
       close: vi.fn().mockResolvedValue(undefined),
     };
 
-    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
     (bus as any)._connection = {};
     (bus as any)._channel = mockChannel;
     (bus as any)._connected = true;
@@ -797,6 +881,7 @@ describe("RabbitMqEventBus", () => {
 
     const bus = new RabbitMqEventBus({
       url: "amqp://localhost:5672",
+      queuePrefix: "test",
       logger: mockLogger,
     });
 
@@ -840,6 +925,7 @@ describe("RabbitMqEventBus", () => {
 
       const bus = new RabbitMqEventBus({
         url: "amqp://localhost:5672",
+        queuePrefix: "test",
         resilience: { maxAttempts: 2, initialDelayMs: 100, maxDelayMs: 1000 },
         logger: mockLogger,
       });
@@ -883,6 +969,7 @@ describe("RabbitMqEventBus", () => {
       // Verify the bus accepts the resilience config
       void new RabbitMqEventBus({
         url: "amqp://localhost:5672",
+        queuePrefix: "test",
         resilience: {
           maxAttempts: 2,
           initialDelayMs: 1000,
@@ -925,6 +1012,7 @@ describe("RabbitMqEventBus", () => {
 
       const bus = new RabbitMqEventBus({
         url: "amqp://localhost:5672",
+        queuePrefix: "test",
         resilience: { maxAttempts: 2, initialDelayMs: 100, maxDelayMs: 1000 },
         logger: mockLogger,
       });
@@ -966,6 +1054,7 @@ describe("RabbitMqEventBus", () => {
 
     const bus = new RabbitMqEventBus({
       url: "amqp://localhost:5672",
+      queuePrefix: "test",
       logger: mockLogger,
     });
 
@@ -982,7 +1071,10 @@ describe("RabbitMqEventBus", () => {
 // ### sibling handler completes when an earlier handler throws (Promise.allSettled)
 describe("RabbitMqEventBus error isolation", () => {
   it("should run every handler to completion even when an earlier one throws", async () => {
-    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
 
     const before = vi.fn();
     const after = vi.fn();
@@ -1016,6 +1108,7 @@ describe("RabbitMqEventBus error isolation", () => {
     };
     const bus = new RabbitMqEventBus({
       url: "amqp://localhost:5672",
+      queuePrefix: "test",
       logger,
     });
 
@@ -1066,7 +1159,10 @@ describe("RabbitMqEventBus error isolation", () => {
       close: vi.fn().mockResolvedValue(undefined),
     };
 
-    const bus = new RabbitMqEventBus({ url: "amqp://localhost:5672" });
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
     (bus as any)._connection = {};
     (bus as any)._channel = mockChannel;
     (bus as any)._connected = true;
@@ -1092,5 +1188,322 @@ describe("RabbitMqEventBus error isolation", () => {
     // Regression guard: nack with requeue=true on failure, ack is not called.
     expect(nack).toHaveBeenCalledWith(msg, false, true);
     expect(ack).not.toHaveBeenCalled();
+  });
+});
+
+// ### dispatch sets contentType on published messages
+describe("RabbitMqEventBus wire format", () => {
+  it("should set contentType to the versioned noddde event content type", async () => {
+    const mockChannel = {
+      publish: vi.fn().mockReturnValue(true),
+      waitForConfirms: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
+    (bus as any)._connection = {};
+    (bus as any)._channel = mockChannel;
+    (bus as any)._connected = true;
+
+    await bus.dispatch({ name: "TestEvent", payload: {} });
+
+    const publishOptions = mockChannel.publish.mock.calls[0]![3];
+    expect(publishOptions.contentType).toBe(
+      "application/vnd.noddde.event+json; version=1",
+    );
+  });
+});
+
+// ### same-aggregateId deliveries run strictly one at a time in delivery order
+describe("RabbitMqEventBus aggregate ordering", () => {
+  it("should serialize handler execution for deliveries sharing an aggregateId", async () => {
+    const mockChannel = {
+      assertExchange: vi.fn().mockResolvedValue(undefined),
+      assertQueue: vi.fn().mockResolvedValue({ queue: "test" }),
+      bindQueue: vi.fn().mockResolvedValue(undefined),
+      ack: vi.fn(),
+      nack: vi.fn(),
+      close: vi.fn().mockResolvedValue(undefined),
+      consume: vi.fn(),
+    };
+
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
+    (bus as any)._channel = mockChannel;
+
+    const order: string[] = [];
+    let overlapping = false;
+    let active = false;
+    bus.on("Moved", async (e: any) => {
+      if (active) overlapping = true;
+      active = true;
+      await new Promise((r) => setTimeout(r, e.payload.slow ? 30 : 5));
+      order.push(e.payload.tag);
+      active = false;
+    });
+
+    let consumeCallback: any = async () => {};
+    mockChannel.consume = vi.fn(async (_q, cb) => {
+      consumeCallback = cb;
+      return { consumerTag: "t" };
+    }) as any;
+
+    await (bus as any)._setupConsumer("Moved");
+
+    const makeMsg = (tag: string, slow: boolean) => ({
+      content: Buffer.from(
+        JSON.stringify({
+          name: "Moved",
+          payload: { tag, slow },
+          metadata: { aggregateId: "acc-1" },
+        }),
+      ),
+      properties: {},
+      fields: { deliveryTag: tag },
+    });
+
+    // Fire both without awaiting the first — simulates concurrent delivery
+    // up to prefetch. The slow first delivery must still finish before the
+    // second one's handler starts.
+    const p1 = consumeCallback(makeMsg("first", true));
+    const p2 = consumeCallback(makeMsg("second", false));
+    await Promise.all([p1, p2]);
+
+    expect(order).toEqual(["first", "second"]);
+    expect(overlapping).toBe(false);
+  });
+
+  it("should not serialize deliveries for different aggregateIds against each other", async () => {
+    const mockChannel = {
+      assertExchange: vi.fn().mockResolvedValue(undefined),
+      assertQueue: vi.fn().mockResolvedValue({ queue: "test" }),
+      bindQueue: vi.fn().mockResolvedValue(undefined),
+      ack: vi.fn(),
+      nack: vi.fn(),
+      close: vi.fn().mockResolvedValue(undefined),
+      consume: vi.fn(),
+    };
+
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
+    (bus as any)._channel = mockChannel;
+
+    let concurrentPeak = 0;
+    let inFlight = 0;
+    bus.on("Moved", async () => {
+      inFlight++;
+      concurrentPeak = Math.max(concurrentPeak, inFlight);
+      await new Promise((r) => setTimeout(r, 20));
+      inFlight--;
+    });
+
+    let consumeCallback: any = async () => {};
+    mockChannel.consume = vi.fn(async (_q, cb) => {
+      consumeCallback = cb;
+      return { consumerTag: "t" };
+    }) as any;
+
+    await (bus as any)._setupConsumer("Moved");
+
+    const makeMsg = (aggregateId: string) => ({
+      content: Buffer.from(
+        JSON.stringify({
+          name: "Moved",
+          payload: {},
+          metadata: { aggregateId },
+        }),
+      ),
+      properties: {},
+      fields: { deliveryTag: aggregateId },
+    });
+
+    await Promise.all([
+      consumeCallback(makeMsg("acc-1")),
+      consumeCallback(makeMsg("acc-2")),
+    ]);
+
+    expect(concurrentPeak).toBe(2);
+  });
+
+  it("should not leak aggregate chain map entries after they drain", async () => {
+    const mockChannel = {
+      assertExchange: vi.fn().mockResolvedValue(undefined),
+      assertQueue: vi.fn().mockResolvedValue({ queue: "test" }),
+      bindQueue: vi.fn().mockResolvedValue(undefined),
+      ack: vi.fn(),
+      nack: vi.fn(),
+      close: vi.fn().mockResolvedValue(undefined),
+      consume: vi.fn(),
+    };
+
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+    });
+    (bus as any)._channel = mockChannel;
+    bus.on("Moved", vi.fn());
+
+    let consumeCallback: any = async () => {};
+    mockChannel.consume = vi.fn(async (_q, cb) => {
+      consumeCallback = cb;
+      return { consumerTag: "t" };
+    }) as any;
+
+    await (bus as any)._setupConsumer("Moved");
+
+    await consumeCallback({
+      content: Buffer.from(
+        JSON.stringify({
+          name: "Moved",
+          payload: {},
+          metadata: { aggregateId: "acc-1" },
+        }),
+      ),
+      properties: {},
+      fields: { deliveryTag: 1 },
+    });
+
+    expect((bus as any)._aggregateChains.size).toBe(0);
+  });
+});
+
+// ### maxRetries without messageId does not misclassify a burst of distinct messages as poison
+describe("RabbitMqEventBus retry key", () => {
+  it("should not discard 10 distinct same-type messages with no messageId", async () => {
+    const mockChannel = {
+      assertExchange: vi.fn().mockResolvedValue(undefined),
+      assertQueue: vi.fn().mockResolvedValue({ queue: "test" }),
+      bindQueue: vi.fn().mockResolvedValue(undefined),
+      ack: vi.fn(),
+      nack: vi.fn(),
+      publish: vi.fn().mockReturnValue(true),
+      close: vi.fn().mockResolvedValue(undefined),
+      consume: vi.fn(),
+    };
+
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+      resilience: { maxRetries: 3 },
+    });
+    (bus as any)._channel = mockChannel;
+
+    const handler = vi.fn();
+    bus.on("Burst", handler);
+
+    let consumeCallback: any = async () => {};
+    mockChannel.consume = vi.fn(async (_q, cb) => {
+      consumeCallback = cb;
+      return { consumerTag: "t" };
+    }) as any;
+
+    await (bus as any)._setupConsumer("Burst");
+
+    for (let i = 0; i < 10; i++) {
+      await consumeCallback({
+        content: Buffer.from(JSON.stringify({ name: "Burst", payload: { i } })),
+        properties: {},
+        fields: { deliveryTag: i, redelivered: false },
+      });
+    }
+
+    expect(handler).toHaveBeenCalledTimes(10);
+    expect(mockChannel.ack).toHaveBeenCalledTimes(10);
+  });
+
+  it("should dead-letter a message redelivered past maxRetries", async () => {
+    const mockChannel = {
+      assertExchange: vi.fn().mockResolvedValue(undefined),
+      assertQueue: vi.fn().mockResolvedValue({ queue: "test" }),
+      bindQueue: vi.fn().mockResolvedValue(undefined),
+      ack: vi.fn(),
+      nack: vi.fn(),
+      publish: vi.fn().mockReturnValue(true),
+      close: vi.fn().mockResolvedValue(undefined),
+      consume: vi.fn(),
+    };
+
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+      resilience: { maxRetries: 2 },
+    });
+    (bus as any)._channel = mockChannel;
+
+    bus.on("Poison", async () => {
+      throw new Error("always fails");
+    });
+
+    let consumeCallback: any = async () => {};
+    mockChannel.consume = vi.fn(async (_q, cb) => {
+      consumeCallback = cb;
+      return { consumerTag: "t" };
+    }) as any;
+
+    await (bus as any)._setupConsumer("Poison");
+
+    const content = Buffer.from(
+      JSON.stringify({ name: "Poison", payload: { fixed: true } }),
+    );
+    const msg = {
+      content,
+      properties: {},
+      fields: { deliveryTag: 1, redelivered: false },
+    };
+
+    await consumeCallback(msg); // attempt 1
+    await consumeCallback(msg); // attempt 2
+    await consumeCallback(msg); // attempt 3 — exceeds maxRetries=2
+
+    expect(mockChannel.publish).toHaveBeenCalledWith(
+      expect.stringContaining("dlx"),
+      "Poison",
+      content,
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "x-original-event-name": "Poison",
+        }),
+      }),
+    );
+  });
+});
+
+// ### consumer setup failure is logged and retried on the next reconnection cycle
+describe("RabbitMqEventBus consumer setup failure", () => {
+  it("should log an error via the framework logger when _setupConsumer fails", async () => {
+    const mockLogger: Logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      child: vi.fn().mockReturnThis(),
+    };
+
+    const bus = new RabbitMqEventBus({
+      url: "amqp://localhost:5672",
+      queuePrefix: "test",
+      logger: mockLogger,
+    });
+    (bus as any)._connected = true;
+    (bus as any)._channel = {
+      assertQueue: vi.fn().mockRejectedValue(new Error("boom")),
+    };
+
+    bus.on("FailsToSetup", vi.fn());
+
+    // on() fires _setupConsumer without awaiting it — flush microtasks.
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.stringContaining("FailsToSetup"),
+      expect.objectContaining({ eventName: "FailsToSetup" }),
+    );
   });
 });
