@@ -2,7 +2,7 @@
 title: "Closeable, Connectable, BackgroundProcess & BrokerResilience"
 module: infrastructure/closeable
 source_file: packages/core/src/infrastructure/closeable.ts, packages/core/src/infrastructure/connectable.ts, packages/core/src/infrastructure/background-process.ts
-status: ready
+status: implemented
 exports:
   - Closeable
   - isCloseable

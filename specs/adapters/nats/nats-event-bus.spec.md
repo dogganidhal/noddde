@@ -2,7 +2,7 @@
 title: "NatsEventBus"
 module: adapters/nats/nats-event-bus
 source_file: packages/adapters/nats/src/nats-event-bus.ts
-status: ready
+status: implemented
 exports: [NatsEventBus, NatsEventBusConfig]
 depends_on:
   - core/edd/event-bus

@@ -2,7 +2,7 @@
 title: "RabbitMqEventBus"
 module: adapters/rabbitmq/rabbitmq-event-bus
 source_file: packages/adapters/rabbitmq/src/rabbitmq-event-bus.ts
-status: ready
+status: implemented
 exports: [RabbitMqEventBus, RabbitMqEventBusConfig]
 depends_on:
   - core/edd/event-bus

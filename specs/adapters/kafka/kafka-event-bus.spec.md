@@ -2,7 +2,7 @@
 title: "KafkaEventBus"
 module: adapters/kafka/kafka-event-bus
 source_file: packages/adapters/kafka/src/kafka-event-bus.ts
-status: ready
+status: implemented
 exports: [KafkaEventBus, KafkaEventBusConfig]
 depends_on:
   - core/edd/event-bus

@@ -5,8 +5,7 @@ source_file: packages/core/src/cqrs/query/query.ts
 status: implemented
 exports: [Query, QueryResult, DefineQueries]
 depends_on: []
-docs:
-  - queries/defining-queries.mdx
+docs: [read-model/queries.mdx]
 ---
 
 # Query, QueryResult & DefineQueries

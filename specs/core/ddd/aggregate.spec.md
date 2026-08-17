@@ -26,11 +26,11 @@ depends_on:
     infrastructure/index,
   ]
 docs:
-  - aggregates/overview.mdx
-  - aggregates/defining-aggregates.mdx
-  - aggregates/state-design.mdx
-  - aggregates/command-routing.mdx
-  - aggregates/type-inference.mdx
+  - core-concepts/decider-pattern.mdx
+  - modeling/defining-aggregates.mdx
+  - modeling/state-and-events.mdx
+  - modeling/routing-and-dispatch.mdx
+  - modeling/type-inference.mdx
 ---
 
 # AggregateTypes, DecideHandler, Aggregate, defineAggregate & Infer Utilities

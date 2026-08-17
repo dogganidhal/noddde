@@ -2,11 +2,10 @@
 title: "EventBus"
 module: edd/event-bus
 source_file: packages/core/src/edd/event-bus.ts
-status: ready
+status: implemented
 exports: [EventBus, AsyncEventHandler]
 depends_on: [edd/event, infrastructure/closeable]
-docs:
-  - events/event-bus.mdx
+docs: [running/event-bus-adapters.mdx]
 ---
 
 # EventBus

@@ -15,8 +15,8 @@ depends_on:
   - core/persistence/event-reader
   - core/infrastructure
 docs:
-  - docs/content/docs/infrastructure/persistence-adapters.mdx
-  - docs/content/docs/read-model/projection-rebuild.mdx
+  - running/persistence-adapters.mdx
+  - read-model/projection-rebuild.mdx
 ---
 
 # Persistence Adapter Interface
