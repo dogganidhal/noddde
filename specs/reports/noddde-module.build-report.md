@@ -1,44 +1,47 @@
-## Build Report: NodddeModule
+## Build Report: NodddeModule (issue #137 fix)
 
 - **Spec**: specs/integrations/nestjs/noddde-module.spec.md
 - **Source**: packages/integrations/nestjs/src/noddde.module.ts
 - **Tests**: packages/integrations/nestjs/src/**tests**/noddde-module.test.ts
-- **Result**: GREEN (TypeScript — local test execution blocked by environment)
-- **Tests passing**: 7/7 (type-check passes; runtime tests require Node ≥ 20.12 for vitest 4)
-- **Loop count**: 1
+- **Result**: GREEN
+- **Tests passing**: 11/11
+- **Loop count**: 2 (orchestrator relaxed one unresolvable assertion after cycle 1 — see Concerns)
 
 ### Test Results
 
-| Test                                                    | Status |
-| ------------------------------------------------------- | ------ |
-| forRoot creates injectable Domain                       | PASS   |
-| forRootAsync with useFactory and inject                 | PASS   |
-| Lifecycle: domain.shutdown() on app.close()             | PASS   |
-| exposeBuses: true exposes bus tokens                    | PASS   |
-| exposeBuses: false does not expose bus tokens           | PASS   |
-| Global scope — feature module injects without importing | PASS   |
-| Metadata interceptor propagates context                 | PASS   |
+| Test                                                                                                                 | Status                                         |
+| -------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| NodddeModule > should create a Domain via forRoot and make it injectable                                             | ✅                                             |
+| NodddeModule > should resolve factory with injected deps and create Domain                                           | ✅                                             |
+| NodddeModule > should call domain.shutdown() when the application closes                                             | ✅                                             |
+| NodddeModule > should expose bus tokens when exposeBuses is true                                                     | ✅                                             |
+| NodddeModule > should not register bus tokens when exposeBuses is false                                              | ✅                                             |
+| NodddeModule > should allow injection from a module that does not import NodddeModule                                | ✅                                             |
+| NodddeMetadataInterceptor (end-to-end) > propagates extracted metadata into the event produced by the handler        | ✅                                             |
+| NodddeMetadataInterceptor.withExtractor > resolves as a class token and supports global registration via useExisting | ✅ (after spec/test adjustment — see Concerns) |
+| NodddeModule outbox lifecycle > calls domain.startOutboxRelay() when the app bootstraps                              | ✅                                             |
+| NodddeModule outbox lifecycle > does not call domain.startOutboxRelay() when startOutboxRelay: false                 | ✅                                             |
+| NodddeModule outbox lifecycle > calls domain.stopOutboxRelay() before domain.shutdown() on app.close()               | ✅                                             |
 
-### Package Structure Created
+`tsc --noEmit`: clean. `eslint`: clean. `prettier --check`: clean (after `--write`).
 
-- `packages/integrations/nestjs/package.json` — `@noddde/nestjs` package with NestJS peer deps
-- `packages/integrations/nestjs/tsconfig.json` — extends base, enables `experimentalDecorators` + `emitDecoratorMetadata`
-- `packages/integrations/nestjs/tsconfig.lint.json` — includes `src/__tests__` for lint
-- `packages/integrations/nestjs/vitest.config.mts` — resolves workspace aliases
-- `packages/integrations/nestjs/.eslintrc.js` — library ESLint config
-- `packages/integrations/nestjs/src/noddde.module.ts` — full implementation
-- `packages/integrations/nestjs/src/index.ts` — package entry point
-- Root `package.json` updated: added `packages/integrations/*` to workspaces
+### What changed
 
-### Implementation Notes
-
-- `NodddeModule` is decorated with `@Global()` and `@Module({})`. Both `forRoot` and `forRootAsync` return `DynamicModule`.
-- Shutdown is handled by `NodddeService` (internal `@Injectable` class implementing `OnApplicationShutdown`), not by `NodddeModule` itself — this correctly separates concerns.
-- Bus providers use `inject: [NODDDE_DOMAIN]` + `useFactory` to lazily extract from the domain instance after initialization.
-- `NodddeMetadataInterceptor` accepts an optional `domain` as second constructor parameter to support direct instantiation in tests (avoids NestJS DI when testing in isolation).
-- The interceptor uses `from(domain.withMetadataContext(...)).pipe(switchMap(...))` to interop between the async context and RxJS Observable.
+- **ALS-scope bug fixed** (requirement 10): `NodddeMetadataInterceptor.intercept()` now returns `new Observable(subscriber => domain.withMetadataContext(metadata, () => new Promise(done => next.handle().subscribe({...}))))`, so the actual `.subscribe()` on `next.handle()` happens inside the `withMetadataContext` callback. This is what the new end-to-end test (previously the main bug repro) verifies — it now passes.
+- **Constructor + `withExtractor`** (requirements 11-12): constructor is now `(extractor: MetadataExtractor, @Inject(NODDDE_DOMAIN) domain: Domain<any>)`, both required, no throw guard. Added `static withExtractor(extractor): FactoryProvider`.
+- **Outbox lifecycle** (requirements 13-14): added `startOutboxRelay?: boolean` (default `true`) to both options interfaces. `NodddeService` now also implements `OnApplicationBootstrap` and calls `domain.startOutboxRelay()` unless the option is explicitly `false`. Wired the resolved boolean through a small internal `NODDDE_START_OUTBOX_RELAY` token (one extra provider, injected into `NodddeService` alongside `NODDDE_DOMAIN` — no wiring-shape detection, per spec invariant). `onApplicationShutdown()` now calls `domain.stopOutboxRelay()` before `domain.shutdown()`.
 
 ### Concerns
 
-- **Local test execution blocked**: The local Node.js version is 21.2.0, but vitest 4.x requires `node:util` ESM export `styleText` which was added in 20.12.0 (available in CJS but not ESM in 21.2.0). Tests will run correctly in CI (Node 22). `npx tsc --noEmit` passes cleanly confirming type correctness.
-- The `NodddeMetadataInterceptor` constructor accepts an optional second parameter for direct instantiation in tests. When used via NestJS DI, the second parameter is injected via `@Inject(NODDDE_DOMAIN)`. This deviates slightly from the spec's single-arg constructor signature but matches the test scenarios.
+**1 test cannot pass as written, regardless of source implementation** — `withExtractor produces a DI-resolvable provider`, specifically the second assertion:
+
+```ts
+const globalInterceptor = moduleRef.get(APP_INTERCEPTOR);
+expect(globalInterceptor).toBe(interceptor);
+```
+
+Root cause (verified in isolation, twice, with a trivial unrelated `@Injectable` class — not specific to `NodddeMetadataInterceptor`): NestJS's `DependenciesScanner.insertProvider` rewrites any provider whose `provide` token is one of the reserved multi-tokens (`APP_INTERCEPTOR`, `APP_GUARD`, `APP_FILTER`, `APP_PIPE`) to an internal `${token} (UUID: ...)` token before registering it in the container (`@nestjs/core/scanner.js`). The literal `APP_INTERCEPTOR` string token is never present in `InstanceLinksHost`'s map — `moduleRef.get(APP_INTERCEPTOR)` (or `app.get(APP_INTERCEPTOR)` after `app.init()`) throws "Nest could not find APP_INTERCEPTOR element" unconditionally, in every NestJS version behaving this way (confirmed on the installed `@nestjs/core@10.4.22`). This is how global-enhancer registration has always worked — the token is consumed by the scanner to populate `ApplicationConfig`'s internal enhancer list, not to be fetched back out by the same token.
+
+This means the Test Scenario as written in the spec cannot pass against real NestJS, independent of anything in `noddde.module.ts`. The first assertion in the same test (`interceptor` resolves as a class token, `toBeInstanceOf`) does pass and correctly proves `withExtractor`'s DI shape. The "global registration via `useExisting`" behavior itself is real and works in a running app (it's the standard NestJS pattern) — it's only the _direct token fetch in a test_ that's unsupported by the framework.
+
+**Resolution (orchestrator, post-build)**: confirmed this is real, longstanding NestJS behavior (multi-provider tokens `APP_INTERCEPTOR`/`APP_GUARD`/`APP_FILTER`/`APP_PIPE` are rewritten internally by the scanner and are never retrievable by their literal token via `moduleRef.get()`/`app.get()`). Removed the `moduleRef.get(APP_INTERCEPTOR)` identity assertion from both the spec's Test Scenario and the test file, replacing it with a comment explaining why — the remaining assertion (`NodddeMetadataInterceptor` resolves as a class token via `withExtractor`, `toBeInstanceOf` check) is what actually proves requirement 12's DI shape; successful module compilation with the `useExisting` provider registered is the proof the global-registration wiring is valid. Re-ran the suite after the change: 11/11 GREEN, `tsc --noEmit` clean.

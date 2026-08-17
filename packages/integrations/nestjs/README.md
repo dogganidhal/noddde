@@ -165,18 +165,14 @@ const extractMetadata: MetadataExtractor = (ctx: ExecutionContext) => {
 @Module({
   imports: [NodddeModule.forRoot({ definition: myDomain })],
   providers: [
-    {
-      provide: APP_INTERCEPTOR,
-      useFactory: (extractor: MetadataExtractor) =>
-        new NodddeMetadataInterceptor(
-          extractor /* domain injected automatically */,
-        ),
-      useValue: extractMetadata,
-    },
+    NodddeMetadataInterceptor.withExtractor(extractMetadata),
+    { provide: APP_INTERCEPTOR, useExisting: NodddeMetadataInterceptor },
   ],
 })
 export class AppModule {}
 ```
+
+`withExtractor` returns a provider bound to `NodddeMetadataInterceptor` that resolves the `Domain` via DI — the interceptor can't be constructed with `new NodddeMetadataInterceptor(fn)` on its own, since it also requires the `Domain`. The `useExisting` line applies the same instance globally; to scope it to one controller instead, register the same `withExtractor(...)` provider in that controller's module and use `@UseInterceptors(NodddeMetadataInterceptor)` on the controller.
 
 Every event emitted as a side-effect of a command dispatched inside an HTTP handler will carry the same `correlationId`, propagating through sagas and projections.
 
@@ -184,7 +180,9 @@ Every event emitted as a side-effect of a command dispatched inside an HTTP hand
 
 ## Lifecycle
 
-The module installs a private `OnApplicationShutdown` listener that calls `domain.shutdown()` for you. That drains in-flight commands, flushes the outbox relay, lets active sagas finish, and closes infrastructure implementing `Closeable` (event buses, persistence adapters, etc.). Just make sure your Nest app calls `app.enableShutdownHooks()`:
+The module installs a private `OnApplicationShutdown` listener that calls `domain.shutdown()` for you. That drains in-flight commands, lets active sagas finish, and closes infrastructure implementing `Closeable` (event buses, persistence adapters, etc.). Just make sure your Nest app calls `app.enableShutdownHooks()`:
+
+If your wiring configures an outbox, the module also starts and stops its relay for you: `domain.startOutboxRelay()` runs on bootstrap and `domain.stopOutboxRelay()` runs before shutdown, unless you pass `startOutboxRelay: false` to `forRoot`/`forRootAsync`. Both calls are safe no-ops when no outbox is configured.
 
 ```ts
 import { NestFactory } from "@nestjs/core";

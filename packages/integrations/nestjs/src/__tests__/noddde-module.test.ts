@@ -1,17 +1,21 @@
 import { describe, it, expect, vi } from "vitest";
 import { Test } from "@nestjs/testing";
-import { Module, Injectable, Inject } from "@nestjs/common";
+import { Module, Injectable, Inject, Controller, Post } from "@nestjs/common";
 import type { ExecutionContext, CallHandler } from "@nestjs/common";
-import { of } from "rxjs";
-import { NodddeModule, NODDDE_DOMAIN } from "../noddde.module";
+import { APP_INTERCEPTOR } from "@nestjs/core";
+import { defer, firstValueFrom } from "rxjs";
 import {
+  NodddeModule,
+  NODDDE_DOMAIN,
   NODDDE_COMMAND_BUS,
   NODDDE_QUERY_BUS,
   NODDDE_EVENT_BUS,
   NodddeMetadataInterceptor,
+  InjectDomain,
 } from "../noddde.module";
 import type { MetadataExtractor } from "../noddde.module";
-import { defineDomain } from "@noddde/core";
+import { defineAggregate, defineDomain } from "@noddde/core";
+import type { Event } from "@noddde/core";
 import type { Domain } from "@noddde/engine";
 
 describe("NodddeModule", () => {
@@ -157,8 +161,111 @@ describe("NodddeModule", () => {
   });
 });
 
-describe("NodddeMetadataInterceptor", () => {
-  it("should call domain.withMetadataContext with extracted metadata", async () => {
+type PingCommand = { name: "Ping"; targetAggregateId: string };
+type PingedEvent = { name: "Pinged"; payload: Record<string, never> };
+
+const Pingable = defineAggregate<{
+  state: Record<string, never>;
+  events: PingedEvent;
+  commands: PingCommand;
+  infrastructure: Record<string, never>;
+}>({
+  initialState: {},
+  decide: {
+    Ping: () => ({ name: "Pinged", payload: {} }),
+  },
+  evolve: {
+    Pinged: (_payload, state) => state,
+  },
+});
+
+@Controller("ping")
+class PingController {
+  // eslint-disable-next-line no-unused-vars
+  constructor(@InjectDomain() private readonly domain: Domain<any>) {}
+
+  @Post()
+  ping() {
+    return this.domain.dispatchCommand({
+      name: "Ping",
+      targetAggregateId: "aggregate-1",
+    });
+  }
+}
+
+describe("NodddeMetadataInterceptor (end-to-end)", () => {
+  it("propagates extracted metadata into the event produced by the handler", async () => {
+    const definition = defineDomain({
+      writeModel: { aggregates: { Pingable } },
+      readModel: { projections: {} },
+    });
+
+    const extractor: MetadataExtractor = () => ({
+      correlationId: "corr-123",
+      userId: "user-456",
+    });
+
+    const moduleRef = await Test.createTestingModule({
+      controllers: [PingController],
+      providers: [NodddeMetadataInterceptor.withExtractor(extractor)],
+      imports: [NodddeModule.forRoot({ definition, exposeBuses: true })],
+    }).compile();
+
+    const eventBus = moduleRef.get(NODDDE_EVENT_BUS);
+    const controller = moduleRef.get(PingController);
+    const interceptor = moduleRef.get(NodddeMetadataInterceptor);
+
+    const captured: Event[] = [];
+    eventBus.on("Pinged", (event: Event) => {
+      captured.push(event);
+    });
+
+    const mockContext = {} as ExecutionContext;
+    const mockNext: CallHandler = {
+      // `defer` mirrors NestJS: the controller method runs only when this
+      // Observable is subscribed, not when `next.handle()` is called.
+      handle: () => defer(() => controller.ping()),
+    };
+
+    await firstValueFrom(interceptor.intercept(mockContext, mockNext));
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.metadata?.correlationId).toBe("corr-123");
+    expect(captured[0]?.metadata?.userId).toBe("user-456");
+
+    await moduleRef.close();
+  });
+});
+
+describe("NodddeMetadataInterceptor.withExtractor", () => {
+  it("resolves as a class token and supports global registration via useExisting", async () => {
+    const definition = defineDomain({
+      writeModel: { aggregates: {} },
+      readModel: { projections: {} },
+    });
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [NodddeModule.forRoot({ definition })],
+      providers: [
+        NodddeMetadataInterceptor.withExtractor(() => ({})),
+        { provide: APP_INTERCEPTOR, useExisting: NodddeMetadataInterceptor },
+      ],
+    }).compile();
+
+    const interceptor = moduleRef.get(NodddeMetadataInterceptor);
+    expect(interceptor).toBeInstanceOf(NodddeMetadataInterceptor);
+
+    // NestJS rewrites APP_INTERCEPTOR to an internal per-provider token
+    // when scanning the module, so the literal token is never resolvable
+    // via moduleRef.get() in a test. Successful compilation with
+    // `useExisting` registered is the proof that the wiring shape is valid.
+
+    await moduleRef.close();
+  });
+});
+
+describe("NodddeModule outbox lifecycle", () => {
+  it("calls domain.startOutboxRelay() when the app bootstraps", async () => {
     const definition = defineDomain({
       writeModel: { aggregates: {} },
       readModel: { projections: {} },
@@ -169,38 +276,59 @@ describe("NodddeMetadataInterceptor", () => {
     }).compile();
 
     const domain = moduleRef.get<Domain<any>>(NODDDE_DOMAIN);
-    const withMetadataSpy = vi
-      .spyOn(domain, "withMetadataContext")
-      .mockImplementation(async (_meta, fn) => fn());
+    const startSpy = vi.spyOn(domain, "startOutboxRelay");
 
-    const extractor: MetadataExtractor = () => ({
-      correlationId: "corr-123",
-      userId: "user-456",
+    const app = moduleRef.createNestApplication();
+    await app.init();
+
+    expect(startSpy).toHaveBeenCalledOnce();
+
+    await app.close();
+  });
+
+  it("does not call domain.startOutboxRelay() when startOutboxRelay: false", async () => {
+    const definition = defineDomain({
+      writeModel: { aggregates: {} },
+      readModel: { projections: {} },
     });
 
-    const interceptor = new NodddeMetadataInterceptor(extractor, domain);
+    const moduleRef = await Test.createTestingModule({
+      imports: [NodddeModule.forRoot({ definition, startOutboxRelay: false })],
+    }).compile();
 
-    const mockContext = {
-      switchToHttp: () => ({
-        getRequest: () => ({}),
-      }),
-    } as unknown as ExecutionContext;
+    const domain = moduleRef.get<Domain<any>>(NODDDE_DOMAIN);
+    const startSpy = vi.spyOn(domain, "startOutboxRelay");
 
-    const mockNext: CallHandler = {
-      handle: () => of("result"),
-    };
+    const app = moduleRef.createNestApplication();
+    await app.init();
 
-    await new Promise<void>((resolve) => {
-      interceptor.intercept(mockContext, mockNext).subscribe({
-        complete: resolve,
-      });
+    expect(startSpy).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
+  it("calls domain.stopOutboxRelay() before domain.shutdown() on app.close()", async () => {
+    const definition = defineDomain({
+      writeModel: { aggregates: {} },
+      readModel: { projections: {} },
     });
 
-    expect(withMetadataSpy).toHaveBeenCalledWith(
-      { correlationId: "corr-123", userId: "user-456" },
-      expect.any(Function),
+    const moduleRef = await Test.createTestingModule({
+      imports: [NodddeModule.forRoot({ definition })],
+    }).compile();
+
+    const domain = moduleRef.get<Domain<any>>(NODDDE_DOMAIN);
+    const stopSpy = vi.spyOn(domain, "stopOutboxRelay");
+    const shutdownSpy = vi.spyOn(domain, "shutdown");
+
+    const app = moduleRef.createNestApplication();
+    await app.init();
+    await app.close();
+
+    expect(stopSpy).toHaveBeenCalledOnce();
+    expect(shutdownSpy).toHaveBeenCalledOnce();
+    expect(stopSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      shutdownSpy.mock.invocationCallOrder[0],
     );
-
-    await moduleRef.close();
   });
 });

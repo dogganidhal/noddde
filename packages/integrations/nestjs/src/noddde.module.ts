@@ -4,15 +4,16 @@ import {
   Global,
   DynamicModule,
   OnApplicationShutdown,
+  OnApplicationBootstrap,
   Inject,
   Injectable,
   NestInterceptor,
   ExecutionContext,
   CallHandler,
 } from "@nestjs/common";
-import type { ModuleMetadata } from "@nestjs/common";
+import type { ModuleMetadata, FactoryProvider } from "@nestjs/common";
 import type { Observable } from "rxjs";
-import { from, switchMap } from "rxjs";
+import { Observable as RxObservable } from "rxjs";
 import type {
   DomainDefinition,
   DomainWiring,
@@ -76,6 +77,15 @@ export interface NodddeModuleOptions {
    * @default false
    */
   exposeBuses?: boolean;
+  /**
+   * When `true`, calls `domain.startOutboxRelay()` from an
+   * `OnApplicationBootstrap` hook, and `domain.stopOutboxRelay()` before
+   * `domain.shutdown()` on application shutdown. Both calls are no-ops when
+   * no outbox is configured, so this is safe to leave at its default
+   * regardless of whether `wiring` configures an outbox.
+   * @default true
+   */
+  startOutboxRelay?: boolean;
 }
 
 /**
@@ -97,6 +107,15 @@ export interface NodddeModuleAsyncOptions
    * @default false
    */
   exposeBuses?: boolean;
+  /**
+   * When `true`, calls `domain.startOutboxRelay()` from an
+   * `OnApplicationBootstrap` hook, and `domain.stopOutboxRelay()` before
+   * `domain.shutdown()` on application shutdown. Both calls are no-ops when
+   * no outbox is configured, so this is safe to leave at its default
+   * regardless of whether the resolved wiring configures an outbox.
+   * @default true
+   */
+  startOutboxRelay?: boolean;
 }
 
 // ── Metadata extractor ────────────────────────────────────────────
@@ -108,18 +127,34 @@ export interface NodddeModuleAsyncOptions
  */
 export type MetadataExtractor = (ctx: ExecutionContext) => MetadataContext;
 
+/** @internal */
+const NODDDE_START_OUTBOX_RELAY: unique symbol = Symbol(
+  "NODDDE_START_OUTBOX_RELAY",
+);
+
 // ── NodddeService (lifecycle) ─────────────────────────────────────
 
 /**
  * Internal service that holds the Domain instance and handles
- * application shutdown lifecycle.
+ * application bootstrap/shutdown lifecycle.
  * @internal
  */
 @Injectable()
-class NodddeService implements OnApplicationShutdown {
-  constructor(@Inject(NODDDE_DOMAIN) private readonly domain: Domain<any>) {}
+class NodddeService implements OnApplicationBootstrap, OnApplicationShutdown {
+  constructor(
+    @Inject(NODDDE_DOMAIN) private readonly domain: Domain<any>,
+    @Inject(NODDDE_START_OUTBOX_RELAY)
+    private readonly startOutboxRelay: boolean,
+  ) {}
+
+  onApplicationBootstrap(): void {
+    if (this.startOutboxRelay) {
+      this.domain.startOutboxRelay();
+    }
+  }
 
   async onApplicationShutdown(): Promise<void> {
+    this.domain.stopOutboxRelay();
     await this.domain.shutdown();
   }
 }
@@ -167,7 +202,17 @@ export class NodddeModule {
         ]
       : [];
 
-    const providers = [domainProvider, NodddeService, ...busProviders];
+    const startOutboxRelayProvider = {
+      provide: NODDDE_START_OUTBOX_RELAY,
+      useValue: options.startOutboxRelay ?? true,
+    };
+
+    const providers = [
+      domainProvider,
+      startOutboxRelayProvider,
+      NodddeService,
+      ...busProviders,
+    ];
     const exports = [
       NODDDE_DOMAIN,
       ...(options.exposeBuses
@@ -217,7 +262,17 @@ export class NodddeModule {
         ]
       : [];
 
-    const providers = [domainProvider, NodddeService, ...busProviders];
+    const startOutboxRelayProvider = {
+      provide: NODDDE_START_OUTBOX_RELAY,
+      useValue: options.startOutboxRelay ?? true,
+    };
+
+    const providers = [
+      domainProvider,
+      startOutboxRelayProvider,
+      NodddeService,
+      ...busProviders,
+    ];
     const exports = [
       NODDDE_DOMAIN,
       ...(options.exposeBuses
@@ -241,33 +296,58 @@ export class NodddeModule {
  * `domain.withMetadataContext()`. Propagates correlation IDs, user IDs,
  * and causation IDs from the request context into every command
  * dispatched within the handler.
+ *
+ * Requires the `Domain` instance to construct — cannot be instantiated
+ * inline as `new NodddeMetadataInterceptor(fn)` without also supplying a
+ * `Domain`. Use {@link NodddeMetadataInterceptor.withExtractor} to obtain
+ * a DI-registerable provider instead.
  */
 @Injectable()
 export class NodddeMetadataInterceptor implements NestInterceptor {
-  private readonly domain: Domain<any>;
-
   constructor(
     private readonly extractor: MetadataExtractor,
-    @Inject(NODDDE_DOMAIN) domainOrToken?: Domain<any>,
-  ) {
-    if (!domainOrToken) {
-      throw new Error(
-        "NodddeMetadataInterceptor requires a Domain instance. Make sure NodddeModule is imported.",
-      );
-    }
-    this.domain = domainOrToken;
+    @Inject(NODDDE_DOMAIN) private readonly domain: Domain<any>,
+  ) {}
+
+  /**
+   * Returns a `FactoryProvider` bound to `NodddeMetadataInterceptor` that
+   * resolves `Domain` via `NODDDE_DOMAIN` and constructs the interceptor
+   * with the given extractor. Register it in a module's `providers`:
+   *
+   * - Per-controller/module: `@UseInterceptors(NodddeMetadataInterceptor)`
+   *   resolves the class token through that module's DI container.
+   * - Global: additionally register
+   *   `{ provide: APP_INTERCEPTOR, useExisting: NodddeMetadataInterceptor }`.
+   */
+  static withExtractor(extractor: MetadataExtractor): FactoryProvider {
+    return {
+      provide: NodddeMetadataInterceptor,
+      inject: [NODDDE_DOMAIN],
+      useFactory: (domain: Domain<any>) =>
+        new NodddeMetadataInterceptor(extractor, domain),
+    };
   }
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const metadata = this.extractor(context);
-    return from(
-      this.domain.withMetadataContext(
+    return new RxObservable((subscriber) => {
+      void this.domain.withMetadataContext(
         metadata,
         () =>
-          new Promise<Observable<any>>((resolve) => {
-            resolve(next.handle());
+          new Promise<void>((done) => {
+            next.handle().subscribe({
+              next: (value) => subscriber.next(value),
+              error: (error) => {
+                subscriber.error(error);
+                done();
+              },
+              complete: () => {
+                subscriber.complete();
+                done();
+              },
+            });
           }),
-      ),
-    ).pipe(switchMap((obs) => obs));
+      );
+    });
   }
 }
