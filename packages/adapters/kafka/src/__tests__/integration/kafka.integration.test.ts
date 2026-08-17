@@ -351,4 +351,150 @@ describe("KafkaEventBus broker-specific behaviour", () => {
 
     await bus.close();
   });
+
+  it("auto-provisions the topic at connect() with the configured partition count, without any manual admin.createTopics call", async () => {
+    const suffix = uniqueSuffix();
+    const topic = `AutoProvisioned_${suffix}`;
+    const groupId = `auto-provision-group-${suffix}`;
+
+    // Deliberately do NOT pre-create the topic — this is the whole point of
+    // the test: connect() itself must provision it via the admin client.
+    const bus = new KafkaEventBus({
+      brokers: kafka_.brokers,
+      clientId: `auto-provision-${suffix}`,
+      groupId,
+      topicPartitions: 3,
+    });
+    const received: { partition: number; aggregateId: string }[] = [];
+    bus.on(topic, async (evt) => {
+      received.push({
+        partition: 0,
+        aggregateId: (evt.payload as { aggregateId: string }).aggregateId,
+      });
+    });
+    await bus.connect();
+
+    // Confirm the broker really does have a 3-partition topic now.
+    const admin = new Kafka({
+      brokers: kafka_.brokers,
+      clientId: `admin-verify-${suffix}`,
+    }).admin();
+    await admin.connect();
+    const metadata = await admin.fetchTopicMetadata({ topics: [topic] });
+    await admin.disconnect();
+    expect(metadata.topics[0]?.partitions).toHaveLength(3);
+
+    // And that dispatch actually works end-to-end against the
+    // bus-provisioned topic (not just that the topic exists).
+    for (let i = 0; i < 3; i++) {
+      await bus.dispatch({
+        name: topic,
+        payload: { aggregateId: `agg-${i}` },
+        metadata: {
+          aggregateId: `agg-${i}`,
+          eventId: String(i),
+          correlationId: "c",
+          causationId: "x",
+          timestamp: "2024-01-01T00:00:00.000Z",
+        },
+      });
+    }
+    await waitFor(() => received.length >= 3, { timeoutMs: 30_000 });
+    expect(received).toHaveLength(3);
+
+    await bus.close();
+  });
+
+  it("parks an exhausted-retry message to its DLQ topic with failure metadata headers", async () => {
+    const suffix = uniqueSuffix();
+    const topic = `DlqSource_${suffix}`;
+    const groupId = `dlq-group-${suffix}`;
+
+    const admin = new Kafka({
+      brokers: kafka_.brokers,
+      clientId: `admin-dlq-${suffix}`,
+    }).admin();
+    await admin.connect();
+    await admin.createTopics({
+      waitForLeaders: true,
+      topics: [{ topic, numPartitions: 1 }],
+    });
+    await admin.disconnect();
+
+    // maxRetries: 0 means the very first delivery attempt already exceeds
+    // the cap, so the message is parked immediately — no kafkajs-level
+    // crash/rejoin cycle needed. That cycle is real and correct (see the
+    // "does not commit offset" test above), but is slower/less
+    // deterministic under broker contention, and isn't what this test is
+    // about (it's proving the DLQ payload/headers, not the retry cap).
+    const bus = new KafkaEventBus({
+      brokers: kafka_.brokers,
+      clientId: `dlq-${suffix}`,
+      groupId,
+      resilience: { maxRetries: 0 },
+    });
+    bus.on(topic, async () => {
+      throw new Error("always fails for DLQ test");
+    });
+    await bus.connect();
+
+    await bus.dispatch({
+      name: topic,
+      payload: { foo: "bar" },
+      metadata: {
+        aggregateId: "agg",
+        eventId: "e1",
+        correlationId: "c",
+        causationId: "x",
+        timestamp: "2024-01-01T00:00:00.000Z",
+      },
+    });
+
+    // Probe the DLQ topic directly with a raw kafkajs consumer. The bus only
+    // creates the DLQ topic once retries are exhausted (asynchronously,
+    // after this dispatch), so wait for it to exist before subscribing —
+    // subscribing to a not-yet-created topic throws.
+    const dlqTopic = `${topic}.dlq`;
+    const dlqMessages: { headers: Record<string, string>; value: string }[] =
+      [];
+    const probeConsumer = new Kafka({
+      brokers: kafka_.brokers,
+      clientId: `dlq-probe-${suffix}`,
+    }).consumer({ groupId: `dlq-probe-${suffix}` });
+    await probeConsumer.connect();
+    await waitFor(
+      async () => {
+        await probeConsumer.subscribe({ topic: dlqTopic, fromBeginning: true });
+        return true;
+      },
+      { timeoutMs: 60_000, intervalMs: 500 },
+    );
+    void probeConsumer.run({
+      eachMessage: async ({ message }) => {
+        const headers: Record<string, string> = {};
+        for (const [key, value] of Object.entries(message.headers ?? {})) {
+          if (value != null) headers[key] = value.toString();
+        }
+        dlqMessages.push({
+          headers,
+          value: message.value?.toString() ?? "",
+        });
+      },
+    });
+
+    await waitFor(() => dlqMessages.length >= 1, { timeoutMs: 60_000 });
+
+    expect(dlqMessages[0]?.value).toContain(topic);
+    expect(dlqMessages[0]?.headers["x-noddde-dlq-error"]).toBe(
+      "always fails for DLQ test",
+    );
+    expect(dlqMessages[0]?.headers["x-noddde-dlq-original-topic"]).toBe(topic);
+    expect(dlqMessages[0]?.headers["content-type"]).toContain(
+      "application/vnd.noddde.event+json",
+    );
+
+    await probeConsumer.stop();
+    await probeConsumer.disconnect();
+    await bus.close();
+  }, 90_000);
 });

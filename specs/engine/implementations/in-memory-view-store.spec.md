@@ -5,8 +5,7 @@ source_file: packages/engine/src/implementations/in-memory-view-store.ts
 status: implemented
 exports: [InMemoryViewStore]
 depends_on: [core/persistence/view-store]
-docs:
-  - infrastructure/in-memory-implementations.mdx
+docs: [read-model/view-persistence.mdx]
 ---
 
 # InMemoryViewStore

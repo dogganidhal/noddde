@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import { describe, expectTypeOf, it } from "vitest";
 import type {
   CommandBus,

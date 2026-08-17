@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import { describe, it, expect, expectTypeOf } from "vitest";
 import type { ViewStore, ViewStoreFactory, ID } from "@noddde/core";
 import { createViewStoreFactory } from "@noddde/core";

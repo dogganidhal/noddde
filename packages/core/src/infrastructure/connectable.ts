@@ -1,5 +1,3 @@
-/* eslint-disable no-unused-vars */
-
 /**
  * Interface for infrastructure components that require an explicit
  * async connection step before use (message brokers, databases, etc.).

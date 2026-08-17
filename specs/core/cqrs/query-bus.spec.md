@@ -5,8 +5,7 @@ source_file: packages/core/src/cqrs/query/query-bus.ts
 status: implemented
 exports: [QueryBus]
 depends_on: [cqrs/query/query]
-docs:
-  - queries/query-bus.mdx
+docs: [read-model/queries.mdx]
 ---
 
 # QueryBus

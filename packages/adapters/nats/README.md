@@ -27,6 +27,7 @@ import { wireDomain } from "@noddde/engine";
 const eventBus = new NatsEventBus({
   servers: "nats://localhost:4222",
   streamName: "my-domain-events",
+  subjectPrefix: "my-domain.", // required when streamName is set
   consumerGroup: "my-service",
 });
 
@@ -47,7 +48,7 @@ const eventBus = new NatsEventBus({
   servers: "nats://localhost:4222",
   streamName: "my-domain-events",
   consumerGroup: "my-service", // Durable consumer group
-  subjectPrefix: "myapp", // Optional subject namespace
+  subjectPrefix: "myapp.", // Required when streamName is set; normalized to end with "."
   resilience: {
     maxAttempts: 5, // -1 for infinite (default)
     initialDelayMs: 2000, // NATS uses fixed intervals — maxDelayMs is ignored

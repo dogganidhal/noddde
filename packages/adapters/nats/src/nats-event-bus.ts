@@ -2,6 +2,7 @@ import {
   connect,
   consumerOpts,
   createInbox,
+  headers,
   type JetStreamClient,
   type JetStreamManager,
   type NatsConnection,
@@ -16,19 +17,34 @@ import type {
 import type { Event } from "@noddde/core";
 import { Instrumentation, NodddeLogger } from "@noddde/engine";
 
+// ponytail: fixed backoff ceiling for nak redelivery; make configurable via
+// resilience if a real workload needs a different curve.
+const NAK_BASE_DELAY_MS = 500;
+const NAK_MAX_DELAY_MS = 30_000;
+
 /** Configuration for the NatsEventBus. */
 export interface NatsEventBusConfig {
   /** NATS server URL(s) (e.g., "localhost:4222" or ["nats://host1:4222", "nats://host2:4222"]). */
   servers: string | string[];
   /**
-   * Consumer group identity. Used as prefix for JetStream durable consumer names.
-   * Two services with different consumerGroup values independently consume the same stream
-   * without stealing each other's messages. Analogous to Kafka's groupId.
+   * Consumer group identity. Used both as the prefix for JetStream durable consumer names
+   * and as the JetStream deliver/queue group. Two services with different consumerGroup
+   * values independently consume the same stream without stealing each other's messages.
+   * Multiple bus instances (replicas) sharing the same consumerGroup for the same event
+   * bind to the same durable as competing consumers (queue group semantics) — the stream's
+   * messages are split across them, not duplicated. Analogous to Kafka's groupId.
    */
   consumerGroup: string;
   /** JetStream stream name for durable subscriptions (e.g., "noddde-events"). */
   streamName?: string;
-  /** Optional prefix prepended to event names to form subject names (e.g., "noddde." → "noddde.AccountCreated"). */
+  /**
+   * Prefix prepended to event names to form subject names (e.g., "noddde." → "noddde.AccountCreated").
+   * Optional for dispatch/subscribe subject naming. **Required** when `streamName` is also
+   * configured and the stream doesn't exist yet — without a prefix, the stream would be
+   * created with the subject ">", claiming every subject on the server. A prefix without a
+   * trailing "." (e.g. "myapp") is normalized to end with "." before being used to compute
+   * stream subjects.
+   */
   subjectPrefix?: string;
   /** Maximum number of unacknowledged messages per consumer (default: 256). Provides backpressure control. */
   prefetchCount?: number;
@@ -71,6 +87,7 @@ export class NatsEventBus implements EventBus, Connectable {
   private _js: JetStreamClient | null = null;
   private _connected: boolean = false;
   private readonly _handlers: Map<string, AsyncEventHandler[]> = new Map();
+  private readonly _subscribedEventNames: Set<string> = new Set();
   private _closed: boolean = false;
 
   constructor(config: NatsEventBusConfig) {
@@ -138,8 +155,16 @@ export class NatsEventBus implements EventBus, Connectable {
     existing.push(handler);
     this._handlers.set(eventName, existing);
 
-    // If already connected, create a subscription immediately (late registration — log errors, don't crash)
-    if (this._connected && this._js) {
+    // If already connected and this event name isn't subscribed yet, create a
+    // subscription immediately (late registration — log errors, don't crash).
+    // Already-subscribed event names just get the new handler added to the
+    // registry above; _handleMessage fans out to it from the existing subscription.
+    if (
+      this._connected &&
+      this._js &&
+      !this._subscribedEventNames.has(eventName)
+    ) {
+      this._subscribedEventNames.add(eventName);
       void this._createSubscriptionForEvent(eventName, false);
     }
   }
@@ -185,6 +210,7 @@ export class NatsEventBus implements EventBus, Connectable {
     }
 
     this._handlers.clear();
+    this._subscribedEventNames.clear();
   }
 
   /**
@@ -252,10 +278,67 @@ export class NatsEventBus implements EventBus, Connectable {
     return `${prefix}${eventName}`;
   }
 
-  private _buildSubjectsForStream(): string[] {
+  private _dlqSubjectFor(eventName: string): string {
     const prefix = this._config.subjectPrefix ?? "";
-    // Use a wildcard subject for the stream to capture all events
-    return [`${prefix}>`];
+    return `${prefix}dlq.${eventName}`;
+  }
+
+  private _computeNakDelayMs(deliveryCount: number): number {
+    const backoffMs = NAK_BASE_DELAY_MS * 2 ** Math.max(0, deliveryCount - 1);
+    return Math.min(backoffMs, NAK_MAX_DELAY_MS);
+  }
+
+  /**
+   * Publishes an exhausted-retry message to its dead-letter subject with
+   * failure metadata, before the message is termed. Best-effort: a DLQ
+   * publish failure is logged, not thrown, so it never blocks message
+   * termination.
+   */
+  private async _publishToDeadLetter(
+    eventName: string,
+    raw: Uint8Array,
+    deliveryCount: number,
+    error: unknown,
+  ): Promise<void> {
+    if (!this._js) {
+      return;
+    }
+    const hdrs = headers();
+    hdrs.set("noddde-original-subject", this._subjectFor(eventName));
+    hdrs.set("noddde-delivery-count", String(deliveryCount));
+    hdrs.set(
+      "noddde-failure-reason",
+      error instanceof Error ? error.message : String(error),
+    );
+    try {
+      await this._js.publish(this._dlqSubjectFor(eventName), raw, {
+        headers: hdrs,
+      });
+    } catch (dlqErr) {
+      this._logger.error("Failed to publish message to dead-letter subject", {
+        eventName,
+        error: String(dlqErr),
+      });
+    }
+  }
+
+  private _buildSubjectsForStream(): string[] {
+    const prefix = this._config.subjectPrefix;
+    if (!prefix) {
+      throw new Error(
+        'NatsEventBus: "subjectPrefix" is required when "streamName" is configured. ' +
+          'An unset subjectPrefix would create a stream claiming ">" — every subject ' +
+          'on the server. Provide a namespaced prefix (e.g. subjectPrefix: "myapp.").',
+      );
+    }
+    const normalized = prefix.endsWith(".") ? prefix : `${prefix}.`;
+    const subject = `${normalized}>`;
+    if (subject === ">" || /[*>]/.test(normalized)) {
+      throw new Error(
+        `NatsEventBus: computed stream subject "${subject}" is invalid or overly broad.`,
+      );
+    }
+    return [subject];
   }
 
   /**
@@ -264,6 +347,7 @@ export class NatsEventBus implements EventBus, Connectable {
    */
   private async _activateSubscriptions(): Promise<void> {
     for (const eventName of this._handlers.keys()) {
+      this._subscribedEventNames.add(eventName);
       await this._createSubscriptionForEvent(eventName, true);
     }
   }
@@ -289,6 +373,10 @@ export class NatsEventBus implements EventBus, Connectable {
 
     const opts = consumerOpts();
     opts.durable(durableName);
+    // Queue group equal to the durable name: replicas sharing the same
+    // consumerGroup bind to the same durable as competing consumers instead
+    // of the second binder being rejected with "duplicate subscription".
+    opts.deliverGroup(durableName);
     opts.manualAck();
     opts.filterSubject(subject);
     opts.maxAckPending(this._config.prefetchCount ?? 256);
@@ -358,13 +446,36 @@ export class NatsEventBus implements EventBus, Connectable {
           });
         }
       } catch (err) {
-        // Handler failure — request immediate redelivery via nak()
         this._logger.error("Handler error for event", {
           eventName,
           error: String(err),
         });
+
+        const deliveryCount = msg.info?.deliveryCount ?? 1;
+        const maxRetries = this._config.resilience?.maxRetries;
+
+        if (maxRetries !== undefined && deliveryCount >= maxRetries) {
+          await this._publishToDeadLetter(
+            eventName,
+            msg.data,
+            deliveryCount,
+            err,
+          );
+          try {
+            msg.term();
+          } catch (termErr) {
+            this._logger.warn(
+              "Failed to term exhausted-retry message (connection dropped?)",
+              { eventName, error: String(termErr) },
+            );
+          }
+          continue;
+        }
+
+        // Handler failure — request redelivery via nak() with a backoff
+        // delay derived from the delivery count, to avoid a hot retry loop.
         try {
-          msg.nak();
+          msg.nak(this._computeNakDelayMs(deliveryCount));
         } catch (nakErr) {
           this._logger.warn("Failed to nak message (connection dropped?)", {
             eventName,

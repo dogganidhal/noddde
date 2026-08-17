@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import "reflect-metadata";
 import {
   Module,
@@ -332,7 +331,7 @@ export class NodddeMetadataInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const metadata = this.extractor(context);
     return new RxObservable((subscriber) => {
-      this.domain.withMetadataContext(
+      void this.domain.withMetadataContext(
         metadata,
         () =>
           new Promise<void>((done) => {
