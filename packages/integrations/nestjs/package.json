@@ -51,22 +51,24 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@noddde/core": "^1.0.0-rc.1",
-    "@noddde/engine": "^1.0.0-rc.1",
-    "reflect-metadata": "^0.2.0",
-    "rxjs": "^7.8.0"
+    "@noddde/engine": "^1.0.0-rc.1"
   },
   "peerDependencies": {
     "@nestjs/common": ">=10.0.0",
-    "@nestjs/core": ">=10.0.0"
+    "@nestjs/core": ">=10.0.0",
+    "reflect-metadata": "^0.2.0",
+    "rxjs": "^7.8.0"
   },
   "devDependencies": {
     "@nestjs/common": "^10.0.0",
     "@nestjs/core": "^10.0.0",
     "@nestjs/platform-express": "^10.0.0",
     "@nestjs/testing": "^10.0.0",
+    "@noddde/core": "1.0.0-rc.1",
     "@noddde/typescript-config": "0.0.0",
     "eslint": "^8.56.0",
+    "reflect-metadata": "^0.2.0",
+    "rxjs": "^7.8.0",
     "typescript": "^5.3.3",
     "vitest": "^4.1.0"
   }

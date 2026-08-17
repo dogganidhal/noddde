@@ -171,20 +171,35 @@ These are the exact same bus instances used by the `Domain` internally.
 
 `NodddeMetadataInterceptor` wraps handler execution inside `domain.withMetadataContext()`, propagating correlation IDs, user IDs, and causation IDs from the request context into every command dispatched within the handler.
 
+The interceptor needs the `Domain` instance, so it is registered through DI rather than constructed inline. `NodddeMetadataInterceptor.withExtractor(extractor)` returns a provider that resolves `Domain` for you — add it to the `providers` of the module that declares the controller, then reference the class in `@UseInterceptors()`:
+
+```ts title="order.module.ts"
+import { Module } from "@nestjs/common";
+import type { ExecutionContext } from "@nestjs/common";
+import { NodddeMetadataInterceptor } from "@noddde/nestjs";
+import { OrderController } from "./order.controller";
+
+const extractMetadata = (ctx: ExecutionContext) => {
+  const req = ctx.switchToHttp().getRequest();
+  return {
+    correlationId: req.headers["x-correlation-id"],
+    userId: req.user?.id,
+  };
+};
+
+@Module({
+  controllers: [OrderController],
+  providers: [NodddeMetadataInterceptor.withExtractor(extractMetadata)],
+})
+export class OrderModule {}
+```
+
 ```ts title="order.controller.ts"
 import { Controller, UseInterceptors } from "@nestjs/common";
 import { NodddeMetadataInterceptor } from "@noddde/nestjs";
 
 @Controller("orders")
-@UseInterceptors(
-  new NodddeMetadataInterceptor((ctx) => {
-    const req = ctx.switchToHttp().getRequest();
-    return {
-      correlationId: req.headers["x-correlation-id"],
-      userId: req.user?.id,
-    };
-  }),
-)
+@UseInterceptors(NodddeMetadataInterceptor)
 export class OrderController {
   // All commands dispatched here inherit the metadata
 }
@@ -192,25 +207,17 @@ export class OrderController {
 
 The interceptor accepts a `MetadataExtractor` function — you control how metadata is extracted from the request. This works with any NestJS transport (HTTP, gRPC, WebSocket).
 
-To apply globally:
+To apply globally, register the same provider and alias `APP_INTERCEPTOR` to it with `useExisting` so both refer to one instance:
 
 ```ts title="app.module.ts"
+import { Module } from "@nestjs/common";
 import { APP_INTERCEPTOR } from "@nestjs/core";
+import { NodddeMetadataInterceptor } from "@noddde/nestjs";
 
 @Module({
   providers: [
-    {
-      provide: APP_INTERCEPTOR,
-      useFactory: (domain) =>
-        new NodddeMetadataInterceptor((ctx) => {
-          const req = ctx.switchToHttp().getRequest();
-          return {
-            correlationId: req.headers["x-correlation-id"],
-            userId: req.user?.id,
-          };
-        }, domain),
-      inject: [NODDDE_DOMAIN],
-    },
+    NodddeMetadataInterceptor.withExtractor(extractMetadata),
+    { provide: APP_INTERCEPTOR, useExisting: NodddeMetadataInterceptor },
   ],
 })
 export class AppModule {}
@@ -220,27 +227,28 @@ export class AppModule {}
 
 - **Initialization**: `wireDomain()` is called inside an async NestJS provider factory. It calls `domain.init()` internally, so the `Domain` is fully initialized before it becomes injectable.
 - **Shutdown**: The module implements `OnApplicationShutdown`. When `app.close()` is called (or on SIGTERM/SIGINT with `app.enableShutdownHooks()`), `domain.shutdown()` drains in-flight operations and closes all infrastructure (buses, persistence, etc.).
-
-No manual lifecycle management is needed.
+- **Outbox relay**: Unless `startOutboxRelay: false` is set, `domain.startOutboxRelay()` runs on application bootstrap and `domain.stopOutboxRelay()` runs before `domain.shutdown()`. Both calls are no-ops when no outbox is configured, so the default is safe regardless of your wiring.
 
 ## API Reference
 
 ### NodddeModuleOptions
 
-| Option        | Type               | Required | Default | Description                                          |
-| ------------- | ------------------ | -------- | ------- | ---------------------------------------------------- |
-| `definition`  | `DomainDefinition` | Yes      | —       | The domain definition from `defineDomain()`          |
-| `wiring`      | `DomainWiring`     | No       | `{}`    | Infrastructure wiring passed to `wireDomain()`       |
-| `exposeBuses` | `boolean`          | No       | `false` | Register CommandBus, QueryBus, EventBus as providers |
+| Option             | Type               | Required | Default | Description                                                     |
+| ------------------ | ------------------ | -------- | ------- | --------------------------------------------------------------- |
+| `definition`       | `DomainDefinition` | Yes      | —       | The domain definition from `defineDomain()`                     |
+| `wiring`           | `DomainWiring`     | No       | `{}`    | Infrastructure wiring passed to `wireDomain()`                  |
+| `exposeBuses`      | `boolean`          | No       | `false` | Register CommandBus, QueryBus, EventBus as providers            |
+| `startOutboxRelay` | `boolean`          | No       | `true`  | Start the outbox relay on bootstrap and stop it before shutdown |
 
 ### NodddeModuleAsyncOptions
 
-| Option        | Type                               | Required | Default | Description                                          |
-| ------------- | ---------------------------------- | -------- | ------- | ---------------------------------------------------- |
-| `imports`     | `ModuleMetadata["imports"]`        | No       | `[]`    | Modules providing tokens for the factory             |
-| `inject`      | `any[]`                            | No       | `[]`    | Tokens to inject into `useFactory`                   |
-| `useFactory`  | `(...args) => NodddeModuleOptions` | Yes      | —       | Factory returning module options (can be async)      |
-| `exposeBuses` | `boolean`                          | No       | `false` | Register CommandBus, QueryBus, EventBus as providers |
+| Option             | Type                               | Required | Default | Description                                                     |
+| ------------------ | ---------------------------------- | -------- | ------- | --------------------------------------------------------------- |
+| `imports`          | `ModuleMetadata["imports"]`        | No       | `[]`    | Modules providing tokens for the factory                        |
+| `inject`           | `any[]`                            | No       | `[]`    | Tokens to inject into `useFactory`                              |
+| `useFactory`       | `(...args) => NodddeModuleOptions` | Yes      | —       | Factory returning module options (can be async)                 |
+| `exposeBuses`      | `boolean`                          | No       | `false` | Register CommandBus, QueryBus, EventBus as providers            |
+| `startOutboxRelay` | `boolean`                          | No       | `true`  | Start the outbox relay on bootstrap and stop it before shutdown |
 
 ### Injection Tokens & Decorators
 
