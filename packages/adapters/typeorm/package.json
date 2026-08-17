@@ -40,6 +40,9 @@
   "files": [
     "dist"
   ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "tsup",
     "build:watch": "tsup --watch",
@@ -51,10 +54,10 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@noddde/core": "1.0.0-rc.1"
+    "@noddde/core": "^1.0.0-rc.1"
   },
   "peerDependencies": {
-    "typeorm": ">=0.3.0"
+    "typeorm": ">=0.3.0 <0.4.0"
   },
   "devDependencies": {
     "@noddde/testing-integration": "0.0.1-rc.1",

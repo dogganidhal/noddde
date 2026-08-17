@@ -24,6 +24,6 @@ import type { ${ctx.projection.name}ProjectionDef } from "../${ctx.projection.ke
 
 /** Handles the ${ctx.query.name} query. */
 export const handle${ctx.query.name}: InferProjectionQueryHandler<${ctx.projection.name}ProjectionDef, "${ctx.query.name}"> = async (query, { views }) =>
-  (await views.load(query.payload.id)) ?? null;
+  (await views.load(query.id)) ?? null;
 `;
 }

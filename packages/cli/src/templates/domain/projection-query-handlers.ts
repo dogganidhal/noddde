@@ -13,6 +13,6 @@ import type { ${ctx.name}ProjectionDef } from "../${ctx.kebabName}.js";
 
 /** Handles the Get${ctx.name} query. */
 export const handleGet${ctx.name}: InferProjectionQueryHandler<${ctx.name}ProjectionDef, "Get${ctx.name}"> = async (query, { views }) =>
-  (await views.load(query.payload.id)) ?? null;
+  (await views.load(query.id)) ?? null;
 `;
 }

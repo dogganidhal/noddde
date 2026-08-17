@@ -235,7 +235,7 @@ And updates:
 - `query-handlers/index.ts` — appends the handler re-export
 - `auction-summary.ts` — adds the handler import and the entry in `queryHandlers`
 
-The generated handler is typed with `InferProjectionQueryHandler<Def, "QueryName">` and defaults to `views.load(query.payload.id)`. Adjust the payload shape and the handler body to fit your query.
+The generated handler is typed with `InferProjectionQueryHandler<Def, "QueryName">` and defaults to `views.load(query.id)` — the handler's first argument is the query payload itself, not a `Query` wrapper. Adjust the payload shape and the handler body to fit your query.
 
 ### `noddde add event-handler <event-name>`
 
