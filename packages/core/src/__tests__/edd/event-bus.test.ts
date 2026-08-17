@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import { describe, it, expectTypeOf } from "vitest";
 import type {
   EventBus,

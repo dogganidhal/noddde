@@ -1,5 +1,4 @@
 /* eslint-disable no-redeclare */
-/* eslint-disable no-unused-vars */
 import type { Aggregate } from "./aggregate-root";
 import type { Projection } from "./projection";
 import type { Saga } from "./saga";

@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 export { DrizzleAdapter, type DrizzleAdapterOptions } from "./drizzle-adapter";
 export { DrizzleAdvisoryLocker } from "./advisory-locker";
 import type { UnitOfWorkFactory } from "@noddde/core";

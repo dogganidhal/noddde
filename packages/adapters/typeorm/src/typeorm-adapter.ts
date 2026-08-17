@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import type { DataSource } from "typeorm";
 import type {
   PersistenceAdapter,

@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import { describe, expect, it, vi } from "vitest";
 import type { DefineCommands, DefineEvents } from "@noddde/core";
 import { defineAggregate, defineDomain, everyNEvents } from "@noddde/core";

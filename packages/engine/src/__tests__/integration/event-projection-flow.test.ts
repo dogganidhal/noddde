@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import { describe, expect, it } from "vitest";
 import type { DefineCommands, DefineEvents, DefineQueries } from "@noddde/core";
 import {

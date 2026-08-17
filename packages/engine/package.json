@@ -49,6 +49,7 @@
     "build:watch": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "typecheck:stress": "tsc --noEmit -p tsconfig.stress.json",
+    "typecheck:tests": "tsc --noEmit -p tsconfig.tests.json",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest"

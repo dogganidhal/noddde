@@ -1,5 +1,3 @@
-/* eslint-disable no-unused-vars */
-
 /**
  * Branded symbol used to carry the phantom `TResult` type on query types.
  * Unlike interface type parameters, branded symbols survive intersections —
