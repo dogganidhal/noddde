@@ -31,7 +31,7 @@ export class PrismaDedicatedStateStoredPersistence
   ) {}
 
   private getDelegate(): any {
-    const executor = this.txStore.current ?? this.prisma;
+    const executor = this.txStore.als.getStore() ?? this.prisma;
     return (executor as any)[this.modelName];
   }
 

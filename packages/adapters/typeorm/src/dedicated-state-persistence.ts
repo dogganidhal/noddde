@@ -6,6 +6,7 @@ import {
 } from "@noddde/core";
 import type { TypeORMTransactionStore } from "./unit-of-work";
 import type { TypeORMStateMapper } from "./builder";
+import { isUniqueViolation } from "./errors";
 
 /**
  * TypeORM-backed state-stored aggregate persistence bound to a
@@ -32,7 +33,7 @@ export class TypeORMDedicatedStateStoredPersistence<TState, TEntity>
   ) {}
 
   private getManager(): EntityManager {
-    return this.txStore.current ?? this.dataSource.manager;
+    return this.txStore.als.getStore() ?? this.dataSource.manager;
   }
 
   async save(
@@ -44,47 +45,48 @@ export class TypeORMDedicatedStateStoredPersistence<TState, TEntity>
     const manager = this.getManager();
     const repo = manager.getRepository(this.entity);
     const { aggregateIdField, versionField } = this.mapper;
+    const stateRow = this.mapper.toRow(state as TState);
 
-    const existing = await repo.findOne({
-      where: { [aggregateIdField]: aggregateId } as any,
-    });
-
-    if (existing) {
-      const storedVersion = (existing as any)[versionField] as number;
-      if (storedVersion !== expectedVersion) {
-        throw new ConcurrencyError(
-          _aggregateName,
-          aggregateId,
-          expectedVersion,
-          storedVersion,
-        );
+    if (expectedVersion === 0) {
+      // Insert path: new aggregate. No prior read — a unique-constraint
+      // violation on the primary key is the concurrency signal.
+      try {
+        await repo.insert({
+          ...stateRow,
+          [aggregateIdField]: aggregateId,
+          [versionField]: 1,
+        } as any);
+      } catch (error: unknown) {
+        if (isUniqueViolation(error)) {
+          throw new ConcurrencyError(
+            _aggregateName,
+            aggregateId,
+            expectedVersion,
+            -1,
+          );
+        }
+        throw error;
       }
-
-      // Merge mapper row into the existing entity, then set id and version.
-      const stateRow = this.mapper.toRow(state as TState);
-      Object.assign(existing as any, stateRow, {
-        [aggregateIdField]: aggregateId,
-        [versionField]: expectedVersion + 1,
-      });
-      await repo.save(existing);
     } else {
-      if (expectedVersion !== 0) {
+      // Update path: the version predicate is enforced by the database
+      // itself, not by a prior read-then-compare — closing the classic
+      // lost-update race where two concurrent saves both read version N,
+      // both pass an in-memory check, and the second silently overwrites.
+      const result = await repo.update(
+        {
+          [aggregateIdField]: aggregateId,
+          [versionField]: expectedVersion,
+        } as any,
+        { ...stateRow, [versionField]: expectedVersion + 1 } as any,
+      );
+      if (result.affected === 0) {
         throw new ConcurrencyError(
           _aggregateName,
           aggregateId,
           expectedVersion,
-          0,
+          -1,
         );
       }
-
-      // Create a new entity instance, spread mapper row, then set id and version.
-      const newEntity = repo.create() as any;
-      const stateRow = this.mapper.toRow(state as TState);
-      Object.assign(newEntity, stateRow, {
-        [aggregateIdField]: aggregateId,
-        [versionField]: 1,
-      });
-      await repo.save(newEntity);
     }
   }
 

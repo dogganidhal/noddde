@@ -111,5 +111,27 @@ export function defineAdvisoryLockerContract(
       await ctx.lockerB.acquire("Order", "o-crash", 5000);
       await ctx.lockerB.release("Order", "o-crash");
     });
+
+    // Regression coverage for the #131 finding 2 residual hole: PG/MySQL
+    // advisory locks are session-scoped, not call-scoped, so a session
+    // pinned for safe release (fromUrl / a dedicated QueryRunner) is still
+    // re-entrant — two concurrent acquire() calls from the SAME locker
+    // instance (one session) would both "succeed" without an in-process
+    // mutex layered in front of the DB lock. This never crosses sessions
+    // (lockerA only), so it exercises the composed local mutex specifically.
+    it("serializes concurrent acquires from the same locker instance for the same key", async () => {
+      let holders = 0;
+      let maxConcurrentHolders = 0;
+      const contend = async () => {
+        await ctx.lockerA.acquire("Order", "o-reentrant", 2000);
+        holders++;
+        maxConcurrentHolders = Math.max(maxConcurrentHolders, holders);
+        await sleep(40);
+        holders--;
+        await ctx.lockerA.release("Order", "o-reentrant");
+      };
+      await Promise.all([contend(), contend(), contend()]);
+      expect(maxConcurrentHolders).toBe(1);
+    });
   });
 }

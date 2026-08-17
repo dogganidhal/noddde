@@ -547,6 +547,44 @@ model NodddeOutboxEntry {
 }
 ```
 
+## GA Hardening (Phase 1 — issues #129, #130, #131)
+
+> Prisma already has correct optimistic-concurrency (`updateMany` + `count` check), correct
+> unique-violation detection (`P2002`), and session-affine advisory locking (`fromUrl`) — it
+> was the reference implementation the audit asked Drizzle/TypeORM to match. Prisma's own gaps
+> are: transaction propagation (shared bug, #129 finding 1), the MySQL `VARCHAR(191)` schema
+> gap (#130 finding 3), and the missing `EventReader` / unbounded outbox scan (#131).
+
+### Transaction propagation (fixes #129 finding 1 — cross-transaction contamination)
+
+61. `PrismaTransactionStore` is no longer a plain mutable `{ current: any | null }` object. It wraps a Node `AsyncLocalStorage`: `interface PrismaTransactionStore { readonly als: AsyncLocalStorage<any> }`. Each `PrismaAdapter` (and `createPrismaAdapter`) constructs exactly one `{ als: new AsyncLocalStorage() }` and shares it across every persistence instance it creates.
+62. Every persistence class's `getExecutor()` becomes `this.txStore.als.getStore() ?? this.prisma`.
+63. `PrismaUnitOfWork.commit()` runs its enlisted-operations loop inside `await this.txStore.als.run(tx, async () => { for (const op of ops) await op(); })` instead of assigning `txStore.current = tx`. Two `PrismaUnitOfWork` instances committing concurrently no longer cross-contaminate.
+64. This is a breaking change to `PrismaTransactionStore`'s shape; direct construction (bypassing `PrismaAdapter`) must switch to `{ als: new AsyncLocalStorage() }`.
+
+### MySQL column sizing (fixes #130 finding 3 — VARCHAR(191) truncation)
+
+65. The shipped `prisma/schema.prisma` (SQLite dev schema) carries a prominent comment above every unbounded-length `String` field (`payload`, `metadata`, `state`, `event`) pointing to `prisma/integration/mysql.prisma`, which already annotates the same fields `@db.LongText` for MySQL deployments. There is no single `schema.prisma` that is simultaneously valid for SQLite and MySQL native-type attributes (`@db.LongText` is not a valid SQLite native type), so the fix is documentation-at-the-source plus the already-correct dialect-specific integration schema — not a change to the base schema's provider.
+66. Any MySQL deployment guide/example must reference `prisma/integration/mysql.prisma` (or an equivalent schema carrying `@db.LongText`/`@db.Text` on these fields), not the base `schema.prisma`, as the copy-from-here source.
+
+### EventReader (fixes #131 finding 1 — rebuildProjection unavailable)
+
+67. `PrismaAdapter` (and `createPrismaAdapter`'s result) exposes an `eventReader: EventReader` backed by `NodddeEvent.id` (`@id @default(autoincrement())`): `read(options?)` yields events in batches via keyset pagination (`id: { gt: cursor } [, aggregateName]`, `orderBy: { id: "asc" }`, `take: batchSize`), looping until a batch is smaller than the batch size. Never materializes the full log in memory.
+68. Same quiescence-assumption JSDoc caveat as the Drizzle/TypeORM readers.
+
+### Outbox indexed lookup (fixes #131 finding 3 — unbounded backlog scan)
+
+69. The `NodddeOutboxEntry` model gains a nullable, indexed `eventId` field (`@@index([eventId])`), populated at `save()` time from `entry.event?.metadata?.eventId ?? null`.
+70. `PrismaOutboxStore.markPublishedByEventIds()` issues `updateMany({ where: { eventId: { in: eventIds }, publishedAt: null }, data: { publishedAt: new Date() } })` directly against the indexed column — no more `loadUnpublished(10000)` + in-memory filter.
+71. Existing rows written before this migration have `eventId: null` — see `MIGRATIONS.md` for the backfill. Until backfilled, old rows are simply not matched (same limitation the in-memory filter had beyond its old 10k cap — not a regression).
+
+## Migration
+
+**Breaking, pre-GA:**
+
+- `PrismaTransactionStore` changed shape from `{ current: any | null }` to `{ als: AsyncLocalStorage<any> }`. Direct construction must update accordingly.
+- `schema.prisma` and `prisma/integration/{postgres,mysql}.prisma` gain a nullable `eventId` column/index on `NodddeOutboxEntry` — run `prisma migrate`/`db push` after upgrading. Existing rows need the backfill in `MIGRATIONS.md` for `markPublishedByEventIds` to match them by column.
+
 ## Test Scenarios
 
 ### Event-sourced: save and load roundtrip

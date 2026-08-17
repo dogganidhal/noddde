@@ -28,7 +28,7 @@ export class PrismaEventIdempotencyStore implements EventIdempotencyStore {
   ) {}
 
   private getExecutor(): PrismaExecutor {
-    return (this.txStore.current ?? this.prisma) as PrismaExecutor;
+    return (this.txStore.als.getStore() ?? this.prisma) as PrismaExecutor;
   }
 
   async hasProcessed(key: string): Promise<boolean> {

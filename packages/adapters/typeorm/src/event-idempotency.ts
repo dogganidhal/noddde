@@ -3,6 +3,7 @@ import { Entity, PrimaryColumn, Column, LessThanOrEqual } from "typeorm";
 import type { DataSource, EntityManager } from "typeorm";
 import type { EventIdempotencyStore } from "@noddde/core";
 import type { TypeORMTransactionStore } from "./unit-of-work";
+import { isUniqueViolation } from "./errors";
 
 /**
  * TypeORM entity for the event idempotency dedup table
@@ -26,7 +27,7 @@ export class NodddeEventIdempotencyEntity {
  *
  * Follows the same constructor/Unit-of-Work-enlistment pattern as
  * `TypeORMOutboxStore` and `TypeORMSnapshotStore`: operations resolve the
- * active `EntityManager` via `txStore.current ?? dataSource.manager`, so
+ * active `EntityManager` via `txStore.als.getStore() ?? dataSource.manager`, so
  * they enlist in the current transaction when one is active.
  */
 export class TypeORMEventIdempotencyStore implements EventIdempotencyStore {
@@ -37,7 +38,7 @@ export class TypeORMEventIdempotencyStore implements EventIdempotencyStore {
   ) {}
 
   private getManager(): EntityManager {
-    return this.txStore.current ?? this.dataSource.manager;
+    return this.txStore.als.getStore() ?? this.dataSource.manager;
   }
 
   /**
@@ -59,8 +60,7 @@ export class TypeORMEventIdempotencyStore implements EventIdempotencyStore {
     try {
       await repo.insert(entity);
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (/UNIQUE|duplicate|unique/i.test(message)) {
+      if (isUniqueViolation(error)) {
         return;
       }
       throw error;

@@ -1,4 +1,5 @@
 /* eslint-disable no-unused-vars */
+import { AsyncLocalStorage } from "node:async_hooks";
 import type {
   PersistenceAdapter,
   EventSourcedAggregatePersistence,
@@ -8,6 +9,7 @@ import type {
   SnapshotStore,
   OutboxStore,
   AggregateLocker,
+  EventReader,
 } from "@noddde/core";
 import type { Table } from "drizzle-orm";
 import type { DrizzleTransactionStore } from "./index";
@@ -21,8 +23,8 @@ import {
 } from "./persistence";
 import { DrizzleDedicatedStateStoredPersistence } from "./dedicated-state-persistence";
 import { createDrizzleUnitOfWorkFactory } from "./unit-of-work";
-import { DrizzleAdvisoryLocker } from "./advisory-locker";
 import type { DrizzleDialect } from "./advisory-locker";
+import { DrizzleEventReader } from "./event-reader";
 
 // Static imports of pre-built schemas for all dialects
 import * as pgSchema from "./pg/schema";
@@ -49,7 +51,7 @@ export interface DrizzleAdapterOptions {
  * Uses the internal `_.dialect` property that Drizzle sets.
  * @internal
  */
-function inferDialect(db: any): DrizzleDialect {
+export function inferDialect(db: any): DrizzleDialect {
   const dialectName =
     db?._?.dialect?.constructor?.name ??
     db?.dialect?.constructor?.name ??
@@ -116,6 +118,12 @@ export class DrizzleAdapter implements PersistenceAdapter {
   readonly sagaPersistence: SagaPersistence;
   readonly snapshotStore: SnapshotStore;
   readonly outboxStore: OutboxStore;
+  readonly eventReader: EventReader;
+  /**
+   * Not auto-wired. A pooled `db` cannot safely host session-scoped advisory
+   * locks — construct {@link DrizzleAdvisoryLocker.fromUrl} explicitly and
+   * pass it via `wireDomain`'s `aggregates.concurrency.locker` option.
+   */
   readonly aggregateLocker?: AggregateLocker;
 
   private readonly txStore: DrizzleTransactionStore;
@@ -125,7 +133,7 @@ export class DrizzleAdapter implements PersistenceAdapter {
   constructor(db: any, options?: DrizzleAdapterOptions) {
     this.db = db;
     this.dialect = inferDialect(db);
-    this.txStore = { current: null };
+    this.txStore = { als: new AsyncLocalStorage() };
 
     const defaultSchema = getSchemaForDialect(this.dialect);
     const tables = options?.tables ?? {};
@@ -138,25 +146,46 @@ export class DrizzleAdapter implements PersistenceAdapter {
       outbox: tables.outboxStore ?? defaultSchema.outbox,
     };
 
+    // pg/mysql `payload`/`metadata`/`event` columns are native jsonb/json —
+    // pass raw objects. mysql's aggregate-state/saga/snapshot `state` column
+    // is plain `text`, so only pg gets nativeJson for those. sqlite is text
+    // everywhere.
+    const eventsAndOutboxNativeJson =
+      this.dialect === "pg" || this.dialect === "mysql";
+    const stateNativeJson = this.dialect === "pg";
+
     this.eventSourcedPersistence = new DrizzleEventSourcedAggregatePersistence(
       db,
       this.txStore,
       schema,
+      eventsAndOutboxNativeJson,
     );
     this.stateStoredPersistence = new DrizzleStateStoredAggregatePersistence(
       db,
       this.txStore,
       schema,
+      stateNativeJson,
     );
-    this.sagaPersistence = new DrizzleSagaPersistence(db, this.txStore, schema);
-    this.snapshotStore = new DrizzleSnapshotStore(db, this.txStore, schema);
-    this.outboxStore = new DrizzleOutboxStore(db, this.txStore, schema);
+    this.sagaPersistence = new DrizzleSagaPersistence(
+      db,
+      this.txStore,
+      schema,
+      stateNativeJson,
+    );
+    this.snapshotStore = new DrizzleSnapshotStore(
+      db,
+      this.txStore,
+      schema,
+      stateNativeJson,
+    );
+    this.outboxStore = new DrizzleOutboxStore(
+      db,
+      this.txStore,
+      schema,
+      eventsAndOutboxNativeJson,
+    );
+    this.eventReader = new DrizzleEventReader(db, schema);
     this.unitOfWorkFactory = createDrizzleUnitOfWorkFactory(db, this.txStore);
-
-    // Advisory locker only for PG and MySQL
-    if (this.dialect === "pg" || this.dialect === "mysql") {
-      this.aggregateLocker = new DrizzleAdvisoryLocker(db, this.dialect);
-    }
   }
 
   /**

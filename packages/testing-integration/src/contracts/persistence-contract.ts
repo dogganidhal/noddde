@@ -264,6 +264,54 @@ export function definePersistenceContract(
           expect(loaded?.version).toBe(1);
         }
       });
+
+      // The two races above are 2-way. The DoD for #129 asks for "N
+      // concurrent commands against one aggregate id: exactly one winner" —
+      // widen to 5 concurrent writers to rule out a fix that only
+      // serializes pairs (e.g. a lock that itself has a re-entrancy hole
+      // under >2 waiters).
+      it("rejects all but one winner when N=5 commands race on the same event-sourced stream", async () => {
+        const id = "o-race-n5";
+        const results = await Promise.allSettled(
+          Array.from({ length: 5 }, (_, i) =>
+            ctx.eventSourced.save(
+              "Order",
+              id,
+              [{ name: "OrderPlaced", payload: { by: i } }],
+              0,
+            ),
+          ),
+        );
+        const fulfilled = results.filter((r) => r.status === "fulfilled");
+        const rejected = results.filter(
+          (r): r is PromiseRejectedResult => r.status === "rejected",
+        );
+        expect(fulfilled).toHaveLength(1);
+        expect(rejected).toHaveLength(4);
+        for (const r of rejected) {
+          expect(r.reason).toBeInstanceOf(ConcurrencyError);
+        }
+        expect(await ctx.eventSourced.load("Order", id)).toHaveLength(1);
+      });
+
+      it("rejects all but one winner when N=5 commands race on the same state-stored aggregate", async () => {
+        const id = "a-race-n5";
+        const results = await Promise.allSettled(
+          Array.from({ length: 5 }, (_, i) =>
+            ctx.stateStored.save("Account", id, { balance: i }, 0),
+          ),
+        );
+        const fulfilled = results.filter((r) => r.status === "fulfilled");
+        const rejected = results.filter(
+          (r): r is PromiseRejectedResult => r.status === "rejected",
+        );
+        expect(fulfilled).toHaveLength(1);
+        expect(rejected).toHaveLength(4);
+        for (const r of rejected) {
+          expect(r.reason).toBeInstanceOf(ConcurrencyError);
+        }
+        expect((await ctx.stateStored.load("Account", id))?.version).toBe(1);
+      });
     });
 
     // The framework's payload contract is "any JSON-serializable value".

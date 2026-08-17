@@ -86,13 +86,14 @@ export class DrizzleUnitOfWork implements UnitOfWork {
    */
   private async commitWithSqlStatements(): Promise<Event[]> {
     this.db.run(sql`BEGIN`);
-    this.txStore.current = this.db;
     this._context = this.db;
 
     try {
-      for (const op of this.operations) {
-        await op();
-      }
+      await this.txStore.als.run(this.db, async () => {
+        for (const op of this.operations) {
+          await op();
+        }
+      });
       this.db.run(sql`COMMIT`);
     } catch (error) {
       try {
@@ -102,7 +103,6 @@ export class DrizzleUnitOfWork implements UnitOfWork {
       }
       throw error;
     } finally {
-      this.txStore.current = null;
       this._context = undefined;
     }
 
@@ -115,21 +115,20 @@ export class DrizzleUnitOfWork implements UnitOfWork {
    */
   private async commitWithCallback(): Promise<Event[]> {
     await this.db.transaction(async (tx: any) => {
-      this.txStore.current = tx;
       this._context = tx;
 
       try {
-        for (const op of this.operations) {
-          await op();
-        }
+        await this.txStore.als.run(tx, async () => {
+          for (const op of this.operations) {
+            await op();
+          }
+        });
       } catch (error) {
-        this.txStore.current = null;
         this._context = undefined;
         throw error;
       }
     });
 
-    this.txStore.current = null;
     this._context = undefined;
     return [...this.pendingEvents];
   }

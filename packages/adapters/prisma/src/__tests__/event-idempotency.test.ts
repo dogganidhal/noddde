@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { PrismaClient } from "@prisma/client";
 import { execSync } from "child_process";
 import fs from "fs";
@@ -38,7 +39,9 @@ describe("PrismaEventIdempotencyStore", () => {
   });
 
   it("should return true for hasProcessed after markProcessed", async () => {
-    const store = new PrismaEventIdempotencyStore(prisma, { current: null });
+    const store = new PrismaEventIdempotencyStore(prisma, {
+      als: new AsyncLocalStorage(),
+    });
 
     await store.markProcessed("evt-1");
 
@@ -46,13 +49,17 @@ describe("PrismaEventIdempotencyStore", () => {
   });
 
   it("should return false for a key that was never marked processed", async () => {
-    const store = new PrismaEventIdempotencyStore(prisma, { current: null });
+    const store = new PrismaEventIdempotencyStore(prisma, {
+      als: new AsyncLocalStorage(),
+    });
 
     expect(await store.hasProcessed("never-seen")).toBe(false);
   });
 
   it("should not throw when markProcessed is called twice for the same key", async () => {
-    const store = new PrismaEventIdempotencyStore(prisma, { current: null });
+    const store = new PrismaEventIdempotencyStore(prisma, {
+      als: new AsyncLocalStorage(),
+    });
 
     await store.markProcessed("evt-dup");
     await expect(store.markProcessed("evt-dup")).resolves.toBeUndefined();
@@ -60,7 +67,9 @@ describe("PrismaEventIdempotencyStore", () => {
   });
 
   it("should remove expired records via removeExpired while keeping recent ones", async () => {
-    const store = new PrismaEventIdempotencyStore(prisma, { current: null });
+    const store = new PrismaEventIdempotencyStore(prisma, {
+      als: new AsyncLocalStorage(),
+    });
 
     await store.markProcessed("evt-old");
     await (prisma as any).nodddeEventIdempotencyRecord.update({
@@ -78,7 +87,7 @@ describe("PrismaEventIdempotencyStore", () => {
   it("should apply lazy TTL cleanup on hasProcessed when constructed with ttlMs", async () => {
     const store = new PrismaEventIdempotencyStore(
       prisma,
-      { current: null },
+      { als: new AsyncLocalStorage() },
       100,
     );
 

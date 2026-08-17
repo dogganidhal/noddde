@@ -6,6 +6,8 @@ import {
 } from "@noddde/core";
 import type { DrizzleTransactionStore } from "./index";
 import type { DrizzleStateMapper } from "./builder";
+import { isUniqueViolation } from "./errors";
+import { getRowsAffected } from "./rows-affected";
 
 /**
  * Drizzle-backed state-stored aggregate persistence bound to a
@@ -37,7 +39,7 @@ export class DrizzleDedicatedStateStoredPersistence
   }
 
   private getExecutor() {
-    return this.txStore.current ?? this.db;
+    return this.txStore.als.getStore() ?? this.db;
   }
 
   async save(
@@ -59,14 +61,8 @@ export class DrizzleDedicatedStateStoredPersistence
           [this.idKey]: aggregateId,
           [this.versionKey]: 1,
         });
-      } catch (error: any) {
-        const message = error?.message ?? "";
-        if (
-          message.includes("UNIQUE constraint failed") || // SQLite
-          message.includes("unique constraint") || // PostgreSQL
-          message.includes("Duplicate entry") || // MySQL
-          message.includes("duplicate key") // PostgreSQL variant
-        ) {
+      } catch (error: unknown) {
+        if (isUniqueViolation(error)) {
           throw new ConcurrencyError(
             _aggregateName,
             aggregateId,
@@ -91,9 +87,7 @@ export class DrizzleDedicatedStateStoredPersistence
           ),
         );
 
-      const rowsAffected =
-        result?.rowsAffected ?? result?.changes ?? result?.rowCount ?? 0;
-      if (rowsAffected === 0) {
+      if (getRowsAffected(result) === 0) {
         throw new ConcurrencyError(
           _aggregateName,
           aggregateId,

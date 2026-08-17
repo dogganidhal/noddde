@@ -14,6 +14,7 @@
     "./contracts/snapshot": "./src/contracts/snapshot-contract.ts",
     "./contracts/unit-of-work": "./src/contracts/unit-of-work-contract.ts",
     "./contracts/advisory-locker": "./src/contracts/advisory-locker-contract.ts",
+    "./contracts/event-reader": "./src/contracts/event-reader-contract.ts",
     "./contracts/event-bus": "./src/contracts/event-bus-contract.ts",
     "./containers": "./src/containers/index.ts"
   },
