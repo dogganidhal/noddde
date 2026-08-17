@@ -1,5 +1,6 @@
-import { describe, it, expectTypeOf } from "vitest";
+import { describe, it, expect, expectTypeOf } from "vitest";
 import type { IdempotencyRecord, IdempotencyStore, ID } from "@noddde/core";
+import { IdempotencyConflictError } from "@noddde/core";
 
 describe("IdempotencyRecord & IdempotencyStore", () => {
   // ### IdempotencyRecord and IdempotencyStore type shapes
@@ -48,6 +49,20 @@ describe("IdempotencyRecord & IdempotencyStore", () => {
       expectTypeOf<
         ReturnType<IdempotencyStore["removeExpired"]>
       >().toEqualTypeOf<Promise<void>>();
+    });
+  });
+
+  describe("IdempotencyConflictError", () => {
+    it("should have correct name, message, and commandId property", () => {
+      const error = new IdempotencyConflictError("cmd-1");
+      expect(error.name).toBe("IdempotencyConflictError");
+      expect(error.commandId).toBe("cmd-1");
+      expect(error.message).toContain("cmd-1");
+    });
+
+    it("should be an instance of Error", () => {
+      const error = new IdempotencyConflictError("cmd-1");
+      expect(error).toBeInstanceOf(Error);
     });
   });
 });

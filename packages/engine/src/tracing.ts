@@ -1,3 +1,5 @@
+import type { Instrumentation } from "@noddde/core";
+
 /**
  * Native OpenTelemetry instrumentation for the noddde engine.
  *
@@ -6,7 +8,12 @@
  * W3C Trace Context through event metadata. When absent, all
  * methods are zero-cost no-ops.
  *
- * @internal Not exported from `@noddde/engine` public API.
+ * The abstraction this class implements lives in `@noddde/core` as the
+ * `Instrumentation` interface — public config surfaces (e.g. messaging
+ * adapters) should depend on that interface, not this concrete class, so
+ * they don't take a runtime dependency on `@noddde/engine` just to type a
+ * tracing option. Use `NoopInstrumentation` from `@noddde/core` as the
+ * dependency-free default.
  */
 
 /**
@@ -42,8 +49,10 @@ export async function detectOTel(): Promise<OTelApi | null> {
 /**
  * Thin, safe wrapper around OTel APIs. All methods are no-ops when
  * constructed with `null` (i.e. `@opentelemetry/api` is not installed).
+ *
+ * Implements the `Instrumentation` interface from `@noddde/core`.
  */
-export class Instrumentation {
+export class OTelInstrumentation implements Instrumentation {
   private readonly otel: OTelApi | null;
   private readonly tracer: any; // OTel Tracer or null
 

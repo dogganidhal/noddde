@@ -18,7 +18,7 @@ docs:
 - **`Command`** is an interface with:
   - `name: string` -- discriminant for type narrowing.
   - `payload?: any` -- optional data carried by the command.
-  - `commandId?: ID` -- optional unique identifier for idempotent command processing. When present and an `IdempotencyStore` is configured, the domain engine checks this value to skip duplicate commands.
+  - `commandId?: ID` -- optional unique identifier for idempotent command processing. When present and an `IdempotencyStore` is configured, the domain engine checks this value to skip duplicate commands. Also used as the `causationId` of every event this command produces; when omitted, the engine auto-generates one per dispatch (not per command type) so causation chains remain per-dispatch identifiers rather than collapsing to the command name (see `specs/api-freeze.spec.md` decision 4).
 - **`AggregateCommand<TID extends ID = string>`** extends `Command` with:
   - `targetAggregateId: TID` -- identifies which aggregate instance handles this command.
   - `TID` is bounded by `ID` and defaults to `string`.

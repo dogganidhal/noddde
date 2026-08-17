@@ -9,7 +9,7 @@ import {
 } from "vitest";
 import {
   EventEmitterEventBus,
-  Instrumentation,
+  OTelInstrumentation,
   detectOTel,
 } from "@noddde/engine";
 import type { Logger } from "@noddde/core";
@@ -422,7 +422,7 @@ describe("EventEmitterEventBus error isolation", () => {
       };
       const bus = new EventEmitterEventBus({
         logger,
-        instrumentation: new Instrumentation(null),
+        instrumentation: new OTelInstrumentation(null),
       });
       bus.on("E", () => {
         throw new Error("boom");
@@ -442,7 +442,7 @@ describe("EventEmitterEventBus error isolation", () => {
       error: vi.fn(),
       child: vi.fn().mockReturnThis(),
     };
-    const instrumentation = new Instrumentation(otel);
+    const instrumentation = new OTelInstrumentation(otel);
     const bus = new EventEmitterEventBus({ logger, instrumentation });
 
     bus.on("E", () => {

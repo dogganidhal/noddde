@@ -1,7 +1,13 @@
-import type { AsyncEventHandler, Event, EventBus, Logger } from "@noddde/core";
+import type {
+  AsyncEventHandler,
+  Event,
+  EventBus,
+  Instrumentation,
+  Logger,
+} from "@noddde/core";
+import { NoopInstrumentation } from "@noddde/core";
 import { EventEmitter } from "node:events";
 import { NodddeLogger } from "../logger";
-import { Instrumentation } from "../tracing";
 
 /**
  * Configuration for the {@link EventEmitterEventBus}.
@@ -13,8 +19,10 @@ export interface EventEmitterEventBusConfig {
    */
   logger?: Logger;
   /**
-   * OpenTelemetry instrumentation used to enrich error logs with trace correlation IDs.
-   * Defaults to a no-op `Instrumentation(null)` instance.
+   * Tracing instrumentation used to enrich error logs with trace correlation IDs.
+   * Accepts the `Instrumentation` interface from `@noddde/core` (e.g.
+   * `OTelInstrumentation` from `@noddde/engine`). Defaults to a no-op
+   * `NoopInstrumentation` instance.
    */
   instrumentation?: Instrumentation;
 }
@@ -58,7 +66,7 @@ export class EventEmitterEventBus implements EventBus {
     this._logger =
       config?.logger ?? new NodddeLogger("warn", "noddde:ee-event-bus");
     this._instrumentation =
-      config?.instrumentation ?? new Instrumentation(null);
+      config?.instrumentation ?? new NoopInstrumentation();
   }
 
   /**

@@ -15,6 +15,14 @@ export interface Snapshot {
   state: any;
   /** The event stream version (number of events) at which this snapshot was taken. */
   version: number;
+  /**
+   * Optional schema-version tag for the `state` payload shape, distinct
+   * from `version` (which is the event-stream position). Absent means
+   * "implicitly version 1" (pre-envelope data). Reserved for future
+   * state-upcasting support — no upcasting is performed by the framework
+   * as of 1.0.
+   */
+  stateVersion?: number;
 }
 
 /**

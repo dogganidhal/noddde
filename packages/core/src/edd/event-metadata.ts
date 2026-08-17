@@ -19,7 +19,16 @@ export interface EventMetadata {
    * All events in a causal chain share the same correlationId.
    */
   correlationId: string;
-  /** ID of the command or event that directly caused this event. */
+  /**
+   * ID of the command or event that directly caused this event.
+   *
+   * Must be a per-dispatch identifier — the causing command's `commandId`
+   * or the causing event's `eventId` — never a static command/event name.
+   * A causation chain built from names instead of ids collapses every
+   * dispatch of the same command into one indistinguishable value, which
+   * defeats the field's purpose (audit/debugging tooling built on
+   * causation graphs) and cannot be repaired retroactively once persisted.
+   */
   causationId: string;
   /** Who initiated the action (set via metadata context or provider). */
   userId?: ID;

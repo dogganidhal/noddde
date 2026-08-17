@@ -41,7 +41,7 @@ class InMemoryIdempotencyStore implements IdempotencyStore {
 3. `exists(commandId)` returns `true` if a record exists for the normalized key and has not expired (per constructor `ttlMs`).
 4. When constructed with `ttlMs`, `exists()` performs lazy cleanup: checks the record's `processedAt` timestamp against `Date.now() - ttlMs`. If expired, deletes the record and returns `false`.
 5. When constructed without `ttlMs`, records never auto-expire from `exists()` — they persist until explicitly removed.
-6. `save(record)` stores the record under `String(record.commandId)`. Overwrites any existing record with the same key.
+6. `save(record)` atomically claims `String(record.commandId)`. Throws `IdempotencyConflictError` (imported from `@noddde/core`) if a live (non-expired) record already exists under that key, instead of overwriting it. If the existing record has expired (per constructor `ttlMs`), `save` treats the key as free and succeeds.
 7. `remove(commandId)` deletes the record under `String(commandId)`. No-op if the key does not exist.
 8. `removeExpired(ttlMs)` iterates all records and removes those whose `processedAt` is older than `Date.now() - ttlMs`. The `ttlMs` parameter is independent of the constructor `ttlMs`.
 
@@ -57,6 +57,8 @@ class InMemoryIdempotencyStore implements IdempotencyStore {
 - `String(commandId)` normalization: `commandId = 42` (number) and `commandId = "42"` (string) map to the same key. This is acceptable — `commandId` values should be globally unique in practice.
 - `removeExpired(0)` removes all records.
 - Empty store: all methods are safe on an empty `Map`.
+- `save()` called twice with the same live `commandId` throws `IdempotencyConflictError` on the second call (see `specs/api-freeze.spec.md` decision 5).
+- `save()` called with a `commandId` whose only prior record has expired (per `ttlMs`) succeeds and replaces the expired record.
 
 ## Integration Points
 
@@ -240,6 +242,50 @@ describe("InMemoryIdempotencyStore", () => {
     });
 
     expect(await store.exists(9007199254740993n)).toBe(true);
+  });
+});
+```
+
+### save throws IdempotencyConflictError on duplicate commandId
+
+```ts
+import { describe, it, expect } from "vitest";
+import { IdempotencyConflictError } from "@noddde/core";
+import { InMemoryIdempotencyStore } from "@noddde/engine";
+
+describe("InMemoryIdempotencyStore conflict detection", () => {
+  it("should throw IdempotencyConflictError when saving a commandId that already exists", async () => {
+    const store = new InMemoryIdempotencyStore();
+    const record = {
+      commandId: "cmd-1",
+      aggregateName: "Order",
+      aggregateId: "order-1",
+      processedAt: new Date().toISOString(),
+    };
+
+    await store.save(record);
+
+    await expect(store.save(record)).rejects.toThrow(IdempotencyConflictError);
+  });
+
+  it("should allow re-saving a commandId after its record expired", async () => {
+    const store = new InMemoryIdempotencyStore(100); // 100ms TTL
+
+    await store.save({
+      commandId: "cmd-1",
+      aggregateName: "Order",
+      aggregateId: "order-1",
+      processedAt: new Date(Date.now() - 200).toISOString(), // already expired
+    });
+
+    await expect(
+      store.save({
+        commandId: "cmd-1",
+        aggregateName: "Order",
+        aggregateId: "order-1",
+        processedAt: new Date().toISOString(),
+      }),
+    ).resolves.toBeUndefined();
   });
 });
 ```

@@ -17,6 +17,11 @@ export interface Command {
    * Optional unique identifier for idempotent command processing.
    * When present and an {@link IdempotencyStore} is configured on the domain,
    * the engine checks this value to skip duplicate commands.
+   *
+   * Also used as the `causationId` of every event this command produces.
+   * When omitted, the engine auto-generates one per dispatch (not per
+   * command type) so causation chains remain per-dispatch identifiers
+   * rather than collapsing to the command name.
    */
   commandId?: ID;
 }

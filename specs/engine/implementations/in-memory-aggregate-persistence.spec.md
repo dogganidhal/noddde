@@ -45,18 +45,20 @@ class InMemoryStateStoredAggregatePersistence
   load(
     aggregateName: string,
     aggregateId: string,
-  ): Promise<{ state: any; version: number } | null>;
+  ): Promise<{ state: any; version: number; stateVersion?: number } | null>;
   save(
     aggregateName: string,
     aggregateId: string,
     state: any,
     expectedVersion: number,
+    stateVersion?: number,
   ): Promise<void>;
 }
 ```
 
 - Both implement their respective interfaces from `engine/domain`.
 - Both use `Promise`-based APIs for consistency with durable persistence implementations, even though the in-memory operations are synchronous.
+- `InMemoryStateStoredAggregatePersistence`'s optional `stateVersion` parameter (API Freeze decision 8, see `specs/api-freeze.spec.md`) is stored and returned as-is alongside `state`/`version`; the implementation performs no upcasting on it.
 - `InMemoryEventSourcedAggregatePersistence` additionally implements `EventReader` so the in-memory development/test path supports `Domain.rebuildProjection` without requiring a separate adapter.
 
 ## Behavioral Requirements
@@ -78,8 +80,8 @@ class InMemoryStateStoredAggregatePersistence
 
 ### InMemoryStateStoredAggregatePersistence
 
-1. **Save overwrites state with version check** -- `save(name, id, state, expectedVersion)` stores the state snapshot, replacing any previously stored state. Before writing, checks that `expectedVersion` matches the current stored version (0 for new aggregates). If not, throws `ConcurrencyError`. On success, the stored version becomes `expectedVersion + 1`.
-2. **Load returns latest state and version** -- `load(name, id)` returns `{ state, version }` for the most recently saved state, or `null` if no state exists. Version starts at 0 for new aggregates and increments by 1 on each successful save.
+1. **Save overwrites state with version check** -- `save(name, id, state, expectedVersion, stateVersion?)` stores the state snapshot, replacing any previously stored state. Before writing, checks that `expectedVersion` matches the current stored version (0 for new aggregates). If not, throws `ConcurrencyError`. On success, the stored version becomes `expectedVersion + 1`. The optional `stateVersion` is stored as-is.
+2. **Load returns latest state and version** -- `load(name, id)` returns `{ state, version, stateVersion? }` for the most recently saved state, or `null` if no state exists. Version starts at 0 for new aggregates and increments by 1 on each successful save. `stateVersion` is `undefined` unless it was provided on the corresponding `save`.
 3. **Load returns null for unknown aggregate** -- If no state has been saved for `(name, id)`, `load` returns `null`.
 4. **Namespace isolation** -- State for `("Order", "1")` and `("Account", "1")` are stored independently.
 5. **State is stored by reference** -- The in-memory implementation may store the state object by reference. Callers should treat loaded state as immutable to avoid aliasing bugs.
@@ -594,6 +596,37 @@ describe("InMemoryEventSourcedAggregatePersistence EventReader shape", () => {
   it("should expose a callable read() method (duck-typed EventReader)", () => {
     const persistence = new InMemoryEventSourcedAggregatePersistence();
     expect(typeof (persistence as { read?: unknown }).read).toBe("function");
+  });
+});
+```
+
+### State-stored: optional stateVersion envelope field
+
+```ts
+import { describe, it, expect } from "vitest";
+import { InMemoryStateStoredAggregatePersistence } from "@noddde/engine";
+
+describe("InMemoryStateStoredAggregatePersistence stateVersion", () => {
+  it("should store and return the given stateVersion", async () => {
+    const persistence = new InMemoryStateStoredAggregatePersistence();
+
+    await persistence.save("Account", "acc-1", { balance: 100 }, 0, 2);
+    const loaded = await persistence.load("Account", "acc-1");
+
+    expect(loaded).toEqual({
+      state: { balance: 100 },
+      version: 1,
+      stateVersion: 2,
+    });
+  });
+
+  it("should omit stateVersion when not provided", async () => {
+    const persistence = new InMemoryStateStoredAggregatePersistence();
+
+    await persistence.save("Account", "acc-1", { balance: 100 }, 0);
+    const loaded = await persistence.load("Account", "acc-1");
+
+    expect(loaded?.stateVersion).toBeUndefined();
   });
 });
 ```

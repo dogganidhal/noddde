@@ -1,5 +1,10 @@
 /* eslint-disable no-unused-vars */
-import type { Query, QueryBus, QueryResult } from "@noddde/core";
+import type {
+  Query,
+  QueryBus,
+  QueryHandlerRegistry,
+  QueryResult,
+} from "@noddde/core";
 
 /** Handler function type for query bus registration. */
 type QueryHandlerFn = (payload: any) => any | Promise<any>;
@@ -14,7 +19,7 @@ type QueryHandlerFn = (payload: any) => any | Promise<any>;
  *
  * Suitable for development, testing, and single-process applications.
  */
-export class InMemoryQueryBus implements QueryBus {
+export class InMemoryQueryBus implements QueryBus, QueryHandlerRegistry {
   private readonly handlers = new Map<string, QueryHandlerFn>();
 
   /**

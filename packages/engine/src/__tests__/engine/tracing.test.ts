@@ -23,7 +23,8 @@ import type {
   CQRSInfrastructure,
 } from "@noddde/core";
 import { wireDomain, InMemoryViewStoreFactory } from "@noddde/engine";
-import { detectOTel, Instrumentation } from "../../tracing";
+import { detectOTel, OTelInstrumentation } from "../../tracing";
+import type { Instrumentation } from "@noddde/core";
 import { MetadataEnricher } from "../../executors/metadata-enricher";
 import type { MetadataContext } from "../../domain";
 
@@ -63,7 +64,7 @@ describe("Instrumentation.withSpan", () => {
 
   beforeAll(async () => {
     const otel = await detectOTel();
-    instrumentation = new Instrumentation(otel);
+    instrumentation = new OTelInstrumentation(otel);
   });
 
   it("should create a span with the given name and attributes", async () => {
@@ -88,7 +89,7 @@ describe("Instrumentation.withSpan error recording", () => {
 
   beforeAll(async () => {
     const otel = await detectOTel();
-    instrumentation = new Instrumentation(otel);
+    instrumentation = new OTelInstrumentation(otel);
   });
 
   it("should record exception and set ERROR status when fn throws", async () => {
@@ -113,7 +114,7 @@ describe("Instrumentation.injectTraceContext", () => {
 
   beforeAll(async () => {
     const otel = await detectOTel();
-    instrumentation = new Instrumentation(otel);
+    instrumentation = new OTelInstrumentation(otel);
   });
 
   it("should return a valid W3C traceparent string within an active span", async () => {
@@ -137,7 +138,7 @@ describe("Instrumentation.withExtractedContext", () => {
 
   beforeAll(async () => {
     const otel = await detectOTel();
-    instrumentation = new Instrumentation(otel);
+    instrumentation = new OTelInstrumentation(otel);
   });
 
   it("should restore trace context from traceparent and link child span to same trace", async () => {
@@ -168,7 +169,7 @@ describe("Instrumentation.withExtractedContext", () => {
 
 describe("Instrumentation no-op", () => {
   it("should pass through withSpan without creating spans", async () => {
-    const instrumentation = new Instrumentation(null);
+    const instrumentation = new OTelInstrumentation(null);
 
     let called = false;
     await instrumentation.withSpan("noop", {}, async () => {
@@ -178,13 +179,13 @@ describe("Instrumentation no-op", () => {
   });
 
   it("should return empty object from injectTraceContext", () => {
-    const instrumentation = new Instrumentation(null);
+    const instrumentation = new OTelInstrumentation(null);
     const ctx = instrumentation.injectTraceContext();
     expect(ctx).toEqual({});
   });
 
   it("should pass through withExtractedContext", async () => {
-    const instrumentation = new Instrumentation(null);
+    const instrumentation = new OTelInstrumentation(null);
 
     let called = false;
     await instrumentation.withExtractedContext(
@@ -206,7 +207,7 @@ describe("MetadataEnricher with tracing", () => {
 
   beforeAll(async () => {
     const otel = await detectOTel();
-    instrumentation = new Instrumentation(otel);
+    instrumentation = new OTelInstrumentation(otel);
   });
 
   it("should add traceparent to event metadata when enriching within an active span", async () => {

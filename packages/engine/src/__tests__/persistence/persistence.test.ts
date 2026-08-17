@@ -253,53 +253,123 @@ describe("StateStoredAggregatePersistence concurrency", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// StateStoredAggregatePersistence: optional stateVersion envelope field
+// ═══════════════════════════════════════════════════════════════════
+
+describe("StateStoredAggregatePersistence stateVersion", () => {
+  it("should store and return the given stateVersion", async () => {
+    const persistence = new InMemoryStateStoredAggregatePersistence();
+
+    await persistence.save("Account", "acc-1", { balance: 100 }, 0, 2);
+    const loaded = await persistence.load("Account", "acc-1");
+
+    expect(loaded).toEqual({
+      state: { balance: 100 },
+      version: 1,
+      stateVersion: 2,
+    });
+  });
+
+  it("should omit stateVersion when not provided", async () => {
+    const persistence = new InMemoryStateStoredAggregatePersistence();
+
+    await persistence.save("Account", "acc-1", { balance: 100 }, 0);
+    const loaded = await persistence.load("Account", "acc-1");
+
+    expect(loaded).toEqual({ state: { balance: 100 }, version: 1 });
+    expect(loaded?.stateVersion).toBeUndefined();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
 // SagaPersistence contract: save, load, and not-found semantics
 // ═══════════════════════════════════════════════════════════════════
 
 describe("SagaPersistence contract", () => {
   function runContractTests(createPersistence: () => SagaPersistence) {
-    it("should return the saved state on load", async () => {
+    it("should return the saved state and version on load", async () => {
       const persistence = createPersistence();
       const state = { status: "awaiting_payment" };
 
-      await persistence.save("OrderFulfillment", "order-1", state);
+      await persistence.save("OrderFulfillment", "order-1", state, 0);
       const loaded = await persistence.load("OrderFulfillment", "order-1");
 
-      expect(loaded).toEqual(state);
+      expect(loaded).toEqual({ state, version: 1 });
     });
 
-    it("should return null or undefined for unknown saga instance", async () => {
+    it("should return null for unknown saga instance", async () => {
       const persistence = createPersistence();
       const loaded = await persistence.load("OrderFulfillment", "nonexistent");
 
-      expect(loaded == null).toBe(true);
+      expect(loaded).toBeNull();
     });
 
-    it("should overwrite state on repeated saves", async () => {
+    it("should overwrite state on repeated saves with correct versions", async () => {
       const persistence = createPersistence();
 
-      await persistence.save("OrderFulfillment", "o-1", { step: 1 });
-      await persistence.save("OrderFulfillment", "o-1", { step: 2 });
+      await persistence.save("OrderFulfillment", "o-1", { step: 1 }, 0);
+      await persistence.save("OrderFulfillment", "o-1", { step: 2 }, 1);
 
       const loaded = await persistence.load("OrderFulfillment", "o-1");
-      expect(loaded).toEqual({ step: 2 });
+      expect(loaded).toEqual({ state: { step: 2 }, version: 2 });
     });
 
     it("should isolate by saga name", async () => {
       const persistence = createPersistence();
 
-      await persistence.save("OrderFulfillment", "1", { a: true });
-      await persistence.save("PaymentFlow", "1", { b: true });
+      await persistence.save("OrderFulfillment", "1", { a: true }, 0);
+      await persistence.save("PaymentFlow", "1", { b: true }, 0);
 
       expect(await persistence.load("OrderFulfillment", "1")).toEqual({
-        a: true,
+        state: { a: true },
+        version: 1,
       });
-      expect(await persistence.load("PaymentFlow", "1")).toEqual({ b: true });
+      expect(await persistence.load("PaymentFlow", "1")).toEqual({
+        state: { b: true },
+        version: 1,
+      });
     });
   }
 
   describe("InMemorySagaPersistence", () => {
     runContractTests(() => new InMemorySagaPersistence());
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// ConcurrencyError: saga save throws on version mismatch
+// ═══════════════════════════════════════════════════════════════════
+
+describe("SagaPersistence concurrency", () => {
+  it("should throw ConcurrencyError when expectedVersion does not match stored version", async () => {
+    const persistence = new InMemorySagaPersistence();
+
+    await persistence.save("OrderFulfillment", "order-1", { step: 1 }, 0);
+
+    await expect(
+      persistence.save("OrderFulfillment", "order-1", { step: 2 }, 0),
+    ).rejects.toThrow(ConcurrencyError);
+
+    try {
+      await persistence.save("OrderFulfillment", "order-1", { step: 2 }, 0);
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConcurrencyError);
+      const concurrencyError = error as ConcurrencyError;
+      expect(concurrencyError.aggregateName).toBe("OrderFulfillment");
+      expect(concurrencyError.aggregateId).toBe("order-1");
+      expect(concurrencyError.expectedVersion).toBe(0);
+      expect(concurrencyError.actualVersion).toBe(1);
+    }
+  });
+
+  it("should succeed when expectedVersion matches stored version", async () => {
+    const persistence = new InMemorySagaPersistence();
+
+    await persistence.save("OrderFulfillment", "order-1", { step: 1 }, 0);
+    await persistence.save("OrderFulfillment", "order-1", { step: 2 }, 1);
+
+    const loaded = await persistence.load("OrderFulfillment", "order-1");
+    expect(loaded).toEqual({ state: { step: 2 }, version: 2 });
   });
 });
 

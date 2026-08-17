@@ -36,11 +36,12 @@ interface StateStoredAggregatePersistence {
     aggregateId: ID,
     state: any,
     expectedVersion: number,
+    stateVersion?: number,
   ): Promise<void>;
   load(
     aggregateName: string,
     aggregateId: ID,
-  ): Promise<{ state: any; version: number } | null>;
+  ): Promise<{ state: any; version: number; stateVersion?: number } | null>;
 }
 
 interface EventSourcedAggregatePersistence {
@@ -58,8 +59,16 @@ type PersistenceConfiguration =
   | EventSourcedAggregatePersistence;
 
 interface SagaPersistence {
-  save(sagaName: string, sagaId: ID, state: any): Promise<void>;
-  load(sagaName: string, sagaId: ID): Promise<any | undefined | null>;
+  save(
+    sagaName: string,
+    sagaId: ID,
+    state: any,
+    expectedVersion: number,
+  ): Promise<void>;
+  load(
+    sagaName: string,
+    sagaId: ID,
+  ): Promise<{ state: any; version: number } | null>;
 }
 
 class ConcurrencyError extends Error {
@@ -103,6 +112,8 @@ function fnv1a64(key: string): bigint;
 - The `any` state type is intentional: persistence is generic across all aggregate/saga types. Type safety is enforced at the aggregate/saga definition layer, not the persistence layer.
 - `ConcurrencyError` is thrown by `save()` when the actual version in the store does not match `expectedVersion`. For event-sourced persistence, the version is the event count (`events.length`). For state-stored persistence, the version is an integer stored alongside the state.
 - `StateStoredAggregatePersistence.load()` returns `{ state, version }` or `null` for new aggregates (version 0). This differs from event-sourced where version is derived from `events.length`.
+- `StateStoredAggregatePersistence`'s optional `stateVersion` is a schema-version tag for the `state` payload shape, orthogonal to `version` (the OCC/stream-position counter). Absent means "implicitly version 1" (pre-envelope data). Reserved for future state-upcasting support (API Freeze decision 8, see `specs/api-freeze.spec.md`) — no upcasting is performed by the framework as of 1.0.
+- `SagaPersistence` uses the same optimistic-concurrency shape as `StateStoredAggregatePersistence`: `load` returns `{ state, version } | null`, `save` requires `expectedVersion` and throws `ConcurrencyError` on mismatch (API Freeze decision 2).
 - `AggregateLocker` is the interface for pessimistic concurrency control. Implementations acquire/release exclusive locks per aggregate instance. Used by `PessimisticConcurrencyStrategy` in the domain engine.
 - `LockTimeoutError` is thrown when lock acquisition times out. It is distinct from `ConcurrencyError` (different failure mode: lock timeout vs. version mismatch).
 - `fnv1a64` is an FNV-1a 64-bit hash function that converts a string key to a signed `bigint`, suitable for PostgreSQL `pg_advisory_lock` keys.
@@ -111,8 +122,8 @@ function fnv1a64(key: string): bigint;
 
 ### StateStoredAggregatePersistence
 
-1. **save(aggregateName, aggregateId, state, expectedVersion)** -- Persists the full state snapshot. Implementations must overwrite any previously stored state for the same `(aggregateName, aggregateId)` pair. Before writing, implementations must verify that the current version in the store matches `expectedVersion`. If the versions differ, implementations must throw `ConcurrencyError`. On success, the stored version is incremented (to `expectedVersion + 1`).
-2. **load(aggregateName, aggregateId)** -- Returns the latest state snapshot and version as `{ state, version }`. If no state exists, returns `null`. The domain engine interprets `null` as a "new aggregate" (version 0) and uses `Aggregate.initialState`.
+1. **save(aggregateName, aggregateId, state, expectedVersion, stateVersion?)** -- Persists the full state snapshot. Implementations must overwrite any previously stored state for the same `(aggregateName, aggregateId)` pair. Before writing, implementations must verify that the current version in the store matches `expectedVersion`. If the versions differ, implementations must throw `ConcurrencyError`. On success, the stored version is incremented (to `expectedVersion + 1`). The optional `stateVersion` is stored and returned as-is; implementations perform no upcasting on it.
+2. **load(aggregateName, aggregateId)** -- Returns the latest state snapshot and version as `{ state, version, stateVersion? }`. If no state exists, returns `null`. The domain engine interprets `null` as a "new aggregate" (version 0) and uses `Aggregate.initialState`.
 3. **Namespace semantics** -- `aggregateName` serves as a namespace. Two aggregates with the same ID but different names are entirely separate.
 4. **Optimistic concurrency** -- The version is a monotonically increasing integer starting at 0 (new aggregate). Each successful `save()` increments the version by 1. Concurrent saves with the same `expectedVersion` result in one succeeding and the other throwing `ConcurrencyError`.
 
@@ -154,9 +165,10 @@ function fnv1a64(key: string): bigint;
 
 ### SagaPersistence
 
-1. **save(sagaName, sagaId, state)** -- Persists the saga instance state, overwriting any previously stored state.
-2. **load(sagaName, sagaId)** -- Returns the saga instance state, or `undefined`/`null` if no instance exists. The domain engine uses this sentinel to decide whether to create a new saga (via `initialState`) or update an existing one.
+1. **save(sagaName, sagaId, state, expectedVersion)** -- Persists the saga instance state, overwriting any previously stored state. Before writing, implementations must verify that the current stored version matches `expectedVersion`. If the versions differ, implementations must throw `ConcurrencyError`. On success, the stored version is incremented (to `expectedVersion + 1`).
+2. **load(sagaName, sagaId)** -- Returns `{ state, version }`, or `null` if no instance exists (version implicitly 0). The domain engine uses `null` to decide whether to create a new saga (via `initialState`, version 0) or update an existing one.
 3. **Namespace semantics** -- `sagaName` is a namespace. Different saga types with the same instance ID are independent.
+4. **Optimistic concurrency** -- Same shape as `StateStoredAggregatePersistence`: the version is a monotonically increasing integer starting at 0. Concurrent saves with the same `expectedVersion` result in one succeeding and the other throwing `ConcurrencyError`. This closes the lost-update race where two events for the same saga instance, processed concurrently, would otherwise silently overwrite each other (GA audit issue #132). The engine's retry/serialize logic on `ConcurrencyError` is out of scope for this interface — see `packages/engine/src/executors/saga-executor.ts`.
 
 ### PersistenceConfiguration (union discrimination)
 
@@ -184,7 +196,7 @@ The framework should define a clear discrimination mechanism so that custom pers
 - **Save with expectedVersion 0 on new aggregate** -- For event-sourced: appends events to a new stream (stream was empty, so `length === 0 === expectedVersion`). For state-stored: inserts new state at version 1.
 - **Save with expectedVersion 0 on existing aggregate** -- Must throw `ConcurrencyError` (the aggregate already has events/state at a higher version).
 - **Very large event streams** -- `EventSourcedAggregatePersistence.load` returns the full stream. For aggregates with thousands of events, implementations should adopt the `SnapshotStore` and `PartialEventLoad` interfaces (defined in `persistence/snapshot`) to optimize load times. See `specs/core/persistence/snapshot.spec.md`.
-- **Null vs undefined** -- `SagaPersistence.load` returns `any | undefined | null`. The domain engine should check `state == null` (loose equality) to handle both.
+- **SagaPersistence.load for a new instance** -- Returns `null` (version implicitly 0), same convention as `StateStoredAggregatePersistence.load`.
 - **Empty string as name or ID** -- Valid per the interface but likely a bug. Implementations should not reject them; validation belongs at a higher layer.
 
 ## Integration Points
@@ -468,49 +480,113 @@ import type { SagaPersistence } from "@noddde/core";
 
 describe("SagaPersistence contract", () => {
   function runContractTests(createPersistence: () => SagaPersistence) {
-    it("should return the saved state on load", async () => {
+    it("should return the saved state and version on load", async () => {
       const persistence = createPersistence();
       const state = { status: "awaiting_payment" };
 
-      await persistence.save("OrderFulfillment", "order-1", state);
+      await persistence.save("OrderFulfillment", "order-1", state, 0);
       const loaded = await persistence.load("OrderFulfillment", "order-1");
 
-      expect(loaded).toEqual(state);
+      expect(loaded).toEqual({ state, version: 1 });
     });
 
-    it("should return null or undefined for unknown saga instance", async () => {
+    it("should return null for unknown saga instance", async () => {
       const persistence = createPersistence();
       const loaded = await persistence.load("OrderFulfillment", "nonexistent");
 
-      expect(loaded == null).toBe(true);
+      expect(loaded).toBeNull();
     });
 
-    it("should overwrite state on repeated saves", async () => {
+    it("should overwrite state on repeated saves with correct versions", async () => {
       const persistence = createPersistence();
 
-      await persistence.save("OrderFulfillment", "o-1", { step: 1 });
-      await persistence.save("OrderFulfillment", "o-1", { step: 2 });
+      await persistence.save("OrderFulfillment", "o-1", { step: 1 }, 0);
+      await persistence.save("OrderFulfillment", "o-1", { step: 2 }, 1);
 
       const loaded = await persistence.load("OrderFulfillment", "o-1");
-      expect(loaded).toEqual({ step: 2 });
+      expect(loaded).toEqual({ state: { step: 2 }, version: 2 });
     });
 
     it("should isolate by saga name", async () => {
       const persistence = createPersistence();
 
-      await persistence.save("OrderFulfillment", "1", { a: true });
-      await persistence.save("PaymentFlow", "1", { b: true });
+      await persistence.save("OrderFulfillment", "1", { a: true }, 0);
+      await persistence.save("PaymentFlow", "1", { b: true }, 0);
 
       expect(await persistence.load("OrderFulfillment", "1")).toEqual({
-        a: true,
+        state: { a: true },
+        version: 1,
       });
-      expect(await persistence.load("PaymentFlow", "1")).toEqual({ b: true });
+      expect(await persistence.load("PaymentFlow", "1")).toEqual({
+        state: { b: true },
+        version: 1,
+      });
     });
   }
 
   describe("InMemorySagaPersistence", () => {
     const { InMemorySagaPersistence } = require("@noddde/core");
     runContractTests(() => new InMemorySagaPersistence());
+  });
+});
+```
+
+### ConcurrencyError: saga save throws on version mismatch
+
+```ts
+import { describe, it, expect } from "vitest";
+import { InMemorySagaPersistence, ConcurrencyError } from "@noddde/core";
+
+describe("SagaPersistence concurrency", () => {
+  it("should throw ConcurrencyError when expectedVersion does not match stored version", async () => {
+    const persistence = new InMemorySagaPersistence();
+
+    await persistence.save("OrderFulfillment", "order-1", { step: 1 }, 0);
+
+    await expect(
+      persistence.save("OrderFulfillment", "order-1", { step: 2 }, 0),
+    ).rejects.toThrow(ConcurrencyError);
+  });
+
+  it("should succeed when expectedVersion matches stored version", async () => {
+    const persistence = new InMemorySagaPersistence();
+
+    await persistence.save("OrderFulfillment", "order-1", { step: 1 }, 0);
+    await persistence.save("OrderFulfillment", "order-1", { step: 2 }, 1);
+
+    const loaded = await persistence.load("OrderFulfillment", "order-1");
+    expect(loaded).toEqual({ state: { step: 2 }, version: 2 });
+  });
+});
+```
+
+### StateStoredAggregatePersistence: optional stateVersion envelope field
+
+```ts
+import { describe, it, expect } from "vitest";
+import { InMemoryStateStoredAggregatePersistence } from "@noddde/core";
+
+describe("StateStoredAggregatePersistence stateVersion", () => {
+  it("should store and return the given stateVersion", async () => {
+    const persistence = new InMemoryStateStoredAggregatePersistence();
+
+    await persistence.save("Account", "acc-1", { balance: 100 }, 0, 2);
+    const loaded = await persistence.load("Account", "acc-1");
+
+    expect(loaded).toEqual({
+      state: { balance: 100 },
+      version: 1,
+      stateVersion: 2,
+    });
+  });
+
+  it("should omit stateVersion when not provided", async () => {
+    const persistence = new InMemoryStateStoredAggregatePersistence();
+
+    await persistence.save("Account", "acc-1", { balance: 100 }, 0);
+    const loaded = await persistence.load("Account", "acc-1");
+
+    expect(loaded?.stateVersion).toBeUndefined();
   });
 });
 ```
