@@ -151,10 +151,10 @@ describe("Persistence Interface Contracts", () => {
         const persistence = createPersistence();
         const state = { status: "awaiting_payment" };
 
-        await persistence.save("OrderFulfillment", "order-1", state);
+        await persistence.save("OrderFulfillment", "order-1", state, 0);
         const loaded = await persistence.load("OrderFulfillment", "order-1");
 
-        expect(loaded).toEqual(state);
+        expect(loaded).toEqual({ state, version: 1 });
       });
 
       it("should return null or undefined for unknown saga instance", async () => {
@@ -170,24 +170,26 @@ describe("Persistence Interface Contracts", () => {
       it("should overwrite state on repeated saves", async () => {
         const persistence = createPersistence();
 
-        await persistence.save("OrderFulfillment", "o-1", { step: 1 });
-        await persistence.save("OrderFulfillment", "o-1", { step: 2 });
+        await persistence.save("OrderFulfillment", "o-1", { step: 1 }, 0);
+        await persistence.save("OrderFulfillment", "o-1", { step: 2 }, 1);
 
         const loaded = await persistence.load("OrderFulfillment", "o-1");
-        expect(loaded).toEqual({ step: 2 });
+        expect(loaded).toEqual({ state: { step: 2 }, version: 2 });
       });
 
       it("should isolate by saga name", async () => {
         const persistence = createPersistence();
 
-        await persistence.save("OrderFulfillment", "1", { a: true });
-        await persistence.save("PaymentFlow", "1", { b: true });
+        await persistence.save("OrderFulfillment", "1", { a: true }, 0);
+        await persistence.save("PaymentFlow", "1", { b: true }, 0);
 
         expect(await persistence.load("OrderFulfillment", "1")).toEqual({
-          a: true,
+          state: { a: true },
+          version: 1,
         });
         expect(await persistence.load("PaymentFlow", "1")).toEqual({
-          b: true,
+          state: { b: true },
+          version: 1,
         });
       });
     }

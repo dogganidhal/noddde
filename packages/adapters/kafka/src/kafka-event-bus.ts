@@ -6,8 +6,9 @@ import type {
   EventBus,
   Logger,
 } from "@noddde/core";
-import type { Event } from "@noddde/core";
-import { Instrumentation, NodddeLogger } from "@noddde/engine";
+import type { Event, Instrumentation } from "@noddde/core";
+import { NoopInstrumentation } from "@noddde/core";
+import { NodddeLogger } from "@noddde/engine";
 
 /**
  * Configuration for the KafkaEventBus.
@@ -118,7 +119,7 @@ export class KafkaEventBus implements EventBus, Connectable {
   constructor(config: KafkaEventBusConfig) {
     this._config = config;
     this._logger = config.logger ?? new NodddeLogger("warn", "noddde:kafka");
-    this._instrumentation = config.instrumentation ?? new Instrumentation(null);
+    this._instrumentation = config.instrumentation ?? new NoopInstrumentation();
     this._warmupEventName = `__noddde_warmup_${config.clientId}`;
     this._kafka = new Kafka({
       brokers: config.brokers,

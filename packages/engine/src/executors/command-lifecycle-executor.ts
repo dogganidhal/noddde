@@ -9,6 +9,7 @@ import type {
   IdempotencyStore,
   Infrastructure,
   CQRSInfrastructure,
+  Instrumentation,
   Logger,
   PartialEventLoad,
   PersistenceConfiguration,
@@ -23,7 +24,6 @@ import { upcastEvents, currentEventVersion } from "@noddde/core";
 import type { AggregatePersistenceResolver } from "../aggregate-persistence-resolver";
 import type { ConcurrencyStrategy } from "../concurrency-strategy";
 import type { MetadataEnricher } from "./metadata-enricher";
-import type { Instrumentation } from "../tracing";
 
 /**
  * Executes the full aggregate command lifecycle: load state, execute

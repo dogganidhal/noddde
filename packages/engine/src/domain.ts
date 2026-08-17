@@ -37,7 +37,7 @@ import type {
   OutboxStore,
   OutboxEntry,
 } from "@noddde/core";
-import type { AggregateLocker, Closeable } from "@noddde/core";
+import type { AggregateLocker, Closeable, Instrumentation } from "@noddde/core";
 import {
   isCloseable,
   isConnectable,
@@ -50,7 +50,7 @@ export type { DomainDefinition } from "@noddde/core";
 import { OutboxRelay } from "./outbox-relay";
 import type { OutboxRelayOptions } from "./outbox-relay";
 import { uuidv7 } from "./uuid";
-import { detectOTel, Instrumentation } from "./tracing";
+import { detectOTel, OTelInstrumentation } from "./tracing";
 
 /**
  * Error thrown when a command or query is dispatched after
@@ -448,7 +448,7 @@ export class Domain<
 
     // Step 0.5: Detect OpenTelemetry at runtime
     const otelApi = await detectOTel();
-    this._instrumentation = new Instrumentation(otelApi);
+    this._instrumentation = new OTelInstrumentation(otelApi);
     if (otelApi) {
       domainLog.info("OpenTelemetry detected. Tracing enabled.");
     } else {

@@ -5,6 +5,7 @@ import type {
   CQRSInfrastructure,
   Event,
   Infrastructure,
+  Instrumentation,
   Logger,
   Saga,
   SagaPersistence,
@@ -13,7 +14,6 @@ import type {
 } from "@noddde/core";
 import { uuidv7 } from "../uuid";
 import type { MetadataContext } from "../domain";
-import type { Instrumentation } from "../tracing";
 
 /**
  * Executes the full saga event handling lifecycle: derive instance ID,
@@ -73,12 +73,15 @@ export class SagaExecutor {
     });
 
     // Step 3: Load saga state
-    let currentState = await this.sagaPersistence.load(sagaName, sagaId);
+    const loaded = await this.sagaPersistence.load(sagaName, sagaId);
 
     // Step 4: Bootstrap or resume
-    if (currentState == null) {
+    let currentState: any;
+    let expectedVersion: number;
+    if (loaded == null) {
       if ((saga.startedBy as string[]).includes(event.name)) {
         currentState = saga.initialState;
+        expectedVersion = 0;
         this.logger?.info("Saga instance started.", {
           sagaName,
           sagaId: String(sagaId),
@@ -93,6 +96,9 @@ export class SagaExecutor {
         });
         return;
       }
+    } else {
+      currentState = loaded.state;
+      expectedVersion = loaded.version;
     }
 
     // Wrap saga lifecycle in restored trace context from the triggering event
@@ -144,6 +150,10 @@ export class SagaExecutor {
             : [reaction.commands]
           : [];
 
+        // ponytail: a ConcurrencyError (version conflict) propagates like any
+        // other commit failure below, no retry/serialize-per-saga-id yet.
+        // Add if concurrent handlers for the same saga instance prove common.
+        //
         // Log, attempt a best-effort rollback, and re-throw. Used for the
         // saga-state commit phase in both modes.
         const failCommitPhase = async (error: unknown): Promise<never> => {
@@ -207,7 +217,12 @@ export class SagaExecutor {
             await this.metadataStorage.run(sagaCtx, async () => {
               try {
                 uow.enlist(() =>
-                  sagaPersistence.save(sagaName, sagaId, reaction.state),
+                  sagaPersistence.save(
+                    sagaName,
+                    sagaId,
+                    reaction.state,
+                    expectedVersion,
+                  ),
                 );
                 await commitAndPublish();
               } catch (error) {
@@ -228,7 +243,12 @@ export class SagaExecutor {
             await this.metadataStorage.run(sagaCtx, async () => {
               try {
                 uow.enlist(() =>
-                  sagaPersistence.save(sagaName, sagaId, reaction.state),
+                  sagaPersistence.save(
+                    sagaName,
+                    sagaId,
+                    reaction.state,
+                    expectedVersion,
+                  ),
                 );
                 await dispatchCommands();
                 await commitAndPublish();
