@@ -200,6 +200,13 @@ export class KafkaEventBus implements EventBus, Connectable {
           groupId: this._config.groupId,
           sessionTimeout: this._config.sessionTimeout ?? 30000,
           heartbeatInterval: this._config.heartbeatInterval ?? 3000,
+          // kafkajs only auto-restarts a crashed consumer.run() loop when the
+          // thrown error is marked `retriable`. Handler failures rethrown by
+          // _handleMessage are plain Errors, so without this override the
+          // consumer would crash permanently instead of redelivering the
+          // uncommitted offset — breaking the redelivery contract this
+          // adapter's DLQ/maxRetries mechanism depends on.
+          retry: { restartOnFailure: () => Promise.resolve(true) },
         });
 
         await this._producer.connect();
