@@ -10,12 +10,15 @@ depends_on:
   - persistence/outbox
   - edd/event-bus
   - infrastructure/closeable
-docs: [running/outbox-pattern.mdx]
+docs:
+  - running/outbox-pattern.mdx
 ---
 
 # OutboxRelay
 
 > Background process that polls the `OutboxStore` for unpublished entries and dispatches them via the `EventBus`. Provides at-least-once delivery guarantees for domain events. Designed for crash recovery: if the node crashes after database commit but before event publishing, the relay picks up unpublished entries on restart.
+>
+> **Scope of the at-least-once guarantee.** The relay marks an entry published only when `eventBus.dispatch()` resolves without throwing, and never marks it published when `dispatch()` rejects — that half of the contract is fully enforced regardless of which `EventBus` is wired. The guarantee's _practical_ strength depends on whether the wired bus surfaces handler failures as a rejection: a broker-backed bus that fails to deliver typically rejects, so the relay retries as intended. An in-process bus that catches every handler error and always resolves (e.g. `EventEmitterEventBus`, see `specs/engine/implementations/ee-event-bus.spec.md`) never reports a handler failure to the relay, so a transiently-failing in-process handler is marked published anyway — for that bus, "at-least-once" holds at the transport level but not against in-process handler failures. This is a known, documented limitation of pairing the outbox with an in-process bus, not a defect in the relay itself; closing it fully requires the bus to report per-handler success (tracked separately, out of scope for this spec).
 
 ## Type Contract
 
@@ -81,6 +84,7 @@ class OutboxRelay implements BackgroundProcess {
 5. **concurrent processOnce calls are serialized** -- If `processOnce()` is already running (e.g., a poll fires while a previous batch is still processing), the new call returns immediately with 0.
 6. **processOnce returns 0 for empty batches** -- If `loadUnpublished` returns an empty array, returns 0 without further work.
 7. **drain stops polling and processes until empty** -- `drain()` calls `stop()` to clear the polling timer, then loops `processOnce()` until it returns 0. Implements `BackgroundProcess.drain`. Idempotent: subsequent calls resolve immediately.
+8. **processOnce survives a rejecting `loadUnpublished`** -- If `outboxStore.loadUnpublished()` rejects (e.g., a transient DB connection error), `processOnce()` catches the error, logs it via the injected `Logger` at `error` level (`"Outbox poll failed."`, with the error), and resolves with `0` instead of rejecting. The `processing` flag is still reset in a `finally` so the next scheduled poll can run normally. Combined with requirement 3 (`start()`'s `setInterval` callback), a transient failure therefore degrades to "this poll did nothing," not an unhandled promise rejection that could crash the process under Node's default `--unhandled-rejections=throw`.
 
 ## Invariants
 
@@ -89,6 +93,7 @@ class OutboxRelay implements BackgroundProcess {
 - A dispatch failure for one entry does not prevent processing of subsequent entries in the batch.
 - The relay never creates, modifies, or deletes outbox entries except via `markPublished`.
 - The timer is always cleaned up by `stop()`. No timer leaks.
+- `processOnce()` never rejects. Every failure mode it can encounter (a rejecting `loadUnpublished`, or a rejecting `dispatch`/`markPublished` for an individual entry) is caught internally and surfaces only via the return value and the injected `Logger` — the poll loop started by `start()` can therefore never produce an unhandled promise rejection.
 - A handler failure is invisible to the relay by design: the relay only observes whether `eventBus.dispatch()` rejects, not what registered handlers did. Bus implementations that isolate handler errors (e.g. `EventEmitterEventBus`, whose per-handler isolation is documented in BR 7 of `core/edd/event-bus`) resolve `dispatch()` regardless of handler outcome, so the relay marks the entry published even if every handler for that event threw.
 
 ## Edge Cases
@@ -101,6 +106,8 @@ class OutboxRelay implements BackgroundProcess {
 - **stop() called without start()** -- No-op.
 - **stop() then start()** -- Restarts polling with a fresh timer.
 - **processOnce() called concurrently** -- Second call returns 0 immediately.
+- **`loadUnpublished()` rejects** -- `processOnce()` logs the error and returns 0. `processing` is reset. The next poll (on the next `pollIntervalMs` tick, or the next `drain()` loop iteration) retries `loadUnpublished()` from scratch. `drain()`'s `do { processed = await this.processOnce(); } while (processed > 0);` loop treats this identically to an empty batch (`processed === 0`) and stops looping — a caller draining during a persistent outage will NOT loop forever, but will also not have drained the backlog; this matches `processOnce()`'s existing "0 means nothing more to do right now" contract and is a pre-existing `drain()` characteristic, not new.
+- **A handler fails inside an in-process `EventBus.dispatch()` that swallows handler errors** -- `dispatch()` resolves normally (per that bus's contract), so the relay marks the entry published even though the handler never durably processed it. See the scope note above the Type Contract — this is a bounded, documented limitation of in-process buses, not a `processOnce()` bug.
 
 ## Integration Points
 
@@ -167,7 +174,7 @@ describe("OutboxRelay", () => {
 });
 ```
 
-### processOnce skips failed dispatches and continues
+### processOnce is bounded by what the bus reports (in-process bus swallows handler errors)
 
 `EventEmitterEventBus.dispatch()` isolates handler errors internally (see BR 7 of `core/edd/event-bus`) and never rejects because of a throwing handler, so this scenario exercises BR #2 with a broker-style fake bus whose `dispatch()` itself rejects — the failure mode the relay actually guards against (e.g. a Kafka/RabbitMQ/NATS adapter that fails to publish because the connection dropped).
 
@@ -342,6 +349,80 @@ describe("OutboxRelay", () => {
     expect(processOnceSpy.mock.calls.length).toBeLessThanOrEqual(4);
 
     relay.stop();
+  });
+});
+```
+
+### processOnce survives a rejecting loadUnpublished instead of throwing
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { OutboxRelay } from "../../outbox-relay";
+import { EventEmitterEventBus } from "@noddde/engine";
+import type { OutboxStore, OutboxEntry, Logger } from "@noddde/core";
+
+describe("OutboxRelay", () => {
+  it("should catch a rejecting loadUnpublished, log it, and return 0", async () => {
+    const failingStore: OutboxStore = {
+      save: vi.fn(async () => {}),
+      loadUnpublished: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("connection reset"))
+        .mockResolvedValue([] as OutboxEntry[]),
+      markPublished: vi.fn(async () => {}),
+      markPublishedByEventIds: vi.fn(async () => {}),
+    };
+    const eventBus = new EventEmitterEventBus();
+    const errors: unknown[] = [];
+    const logger: Logger = {
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: (...args: unknown[]) => errors.push(args),
+      child: () => logger,
+    };
+    const relay = new OutboxRelay(failingStore, eventBus, {}, logger);
+
+    // Must not throw / reject despite loadUnpublished rejecting.
+    await expect(relay.processOnce()).resolves.toBe(0);
+    expect(errors.length).toBeGreaterThan(0);
+
+    // The relay recovers on the next call once the store is healthy again.
+    await expect(relay.processOnce()).resolves.toBe(0);
+    expect(failingStore.loadUnpublished).toHaveBeenCalledTimes(2);
+  });
+
+  it("should not leave an unhandled rejection when the interval callback fires", async () => {
+    vi.useFakeTimers();
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+
+    try {
+      const failingStore: OutboxStore = {
+        save: vi.fn(async () => {}),
+        loadUnpublished: vi.fn().mockRejectedValue(new Error("db down")),
+        markPublished: vi.fn(async () => {}),
+        markPublishedByEventIds: vi.fn(async () => {}),
+      };
+      const eventBus = new EventEmitterEventBus();
+      const relay = new OutboxRelay(failingStore, eventBus, {
+        pollIntervalMs: 10,
+      });
+
+      relay.start();
+      await vi.advanceTimersByTimeAsync(35);
+      relay.stop();
+
+      // Flush the microtask queue so any unhandled rejection would surface.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(unhandled).toHaveLength(0);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+      vi.useRealTimers();
+    }
   });
 });
 ```

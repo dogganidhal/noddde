@@ -6,6 +6,7 @@ import type {
   DefineQueries,
   EventSourcedAggregatePersistence,
   Infrastructure,
+  Logger,
   ProjectionTypes,
   SagaTypes,
 } from "@noddde/core";
@@ -2436,5 +2437,282 @@ describe("standalone event handlers", () => {
     });
 
     expect(domain).toBeInstanceOf(Domain);
+  });
+});
+
+// ============================================================
+// Fail loud on unwired projection view stores
+// ============================================================
+
+describe("Domain.init: fail loud on unwired strong-consistency projection", () => {
+  it("should throw during wireDomain when no viewStore is wired for a strong projection", async () => {
+    type ItemEvent = DefineEvents<{ ItemCreated: { id: string } }>;
+    type ItemCommand = DefineCommands<{ CreateItem: { id: string } }>;
+    type ItemQuery = DefineQueries<{
+      GetItem: { payload: { id: string }; result: { id: string } | null };
+    }>;
+    type ItemTypes = AggregateTypes & {
+      state: { id: string } | null;
+      commands: ItemCommand;
+      events: ItemEvent;
+      infrastructure: Infrastructure;
+    };
+
+    const Item = defineAggregate<ItemTypes>({
+      initialState: null,
+      decide: {
+        CreateItem: (cmd) => ({
+          name: "ItemCreated",
+          payload: { id: cmd.payload.id },
+        }),
+      },
+      evolve: { ItemCreated: (p) => ({ id: p.id }) },
+    });
+
+    const StrongSummary = defineProjection<{
+      events: ItemEvent;
+      queries: ItemQuery;
+      view: { id: string };
+      infrastructure: Infrastructure;
+    }>({
+      consistency: "strong",
+      on: {
+        ItemCreated: {
+          id: (e) => e.payload.id,
+          reduce: (e) => ({ id: e.payload.id }),
+        },
+      },
+      queryHandlers: {},
+    });
+
+    const def = defineDomain({
+      writeModel: { aggregates: { Item } },
+      readModel: { projections: { StrongSummary } },
+    });
+
+    // No `projections: { StrongSummary: { viewStore: ... } }` wiring at all.
+    await expect(wireDomain(def)).rejects.toThrow(/StrongSummary/);
+  });
+});
+
+describe("Domain.init: warn on unwired eventual-consistency projection", () => {
+  it("should not throw, and should log a warning naming the projection", async () => {
+    type ItemEvent = DefineEvents<{ ItemCreated: { id: string } }>;
+    type ItemCommand = DefineCommands<{ CreateItem: { id: string } }>;
+    type ItemQuery = DefineQueries<{
+      GetItem: { payload: { id: string }; result: { id: string } | null };
+    }>;
+    type ItemTypes = AggregateTypes & {
+      state: { id: string } | null;
+      commands: ItemCommand;
+      events: ItemEvent;
+      infrastructure: Infrastructure;
+    };
+
+    const Item = defineAggregate<ItemTypes>({
+      initialState: null,
+      decide: {
+        CreateItem: (cmd) => ({
+          name: "ItemCreated",
+          payload: { id: cmd.payload.id },
+        }),
+      },
+      evolve: { ItemCreated: (p) => ({ id: p.id }) },
+    });
+
+    const EventualSummary = defineProjection<{
+      events: ItemEvent;
+      queries: ItemQuery;
+      view: { id: string };
+      infrastructure: Infrastructure;
+    }>({
+      on: {
+        ItemCreated: {
+          id: (e) => e.payload.id,
+          reduce: (e) => ({ id: e.payload.id }),
+        },
+      },
+      queryHandlers: {},
+    });
+
+    const warnings: string[] = [];
+    const logger: Logger = {
+      debug: () => {},
+      info: () => {},
+      warn: (message: string) => warnings.push(message),
+      error: () => {},
+      child: () => logger,
+    };
+
+    const def = defineDomain({
+      writeModel: { aggregates: { Item } },
+      readModel: { projections: { EventualSummary } },
+    });
+
+    // No `projections: { EventualSummary: { viewStore: ... } }` wiring.
+    const domain = await wireDomain(def, { logger });
+
+    expect(domain).toBeDefined();
+    expect(warnings.some((w) => w.includes("EventualSummary"))).toBe(true);
+  });
+});
+
+// ============================================================
+// withUnitOfWork: publish runs outside the UoW's AsyncLocalStorage scope
+// ============================================================
+
+describe("Domain.withUnitOfWork: pessimistic lock released before publish", () => {
+  it("should let a same-aggregate re-entrant dispatch proceed instead of deadlocking on the still-held lock", async () => {
+    type CounterEvent = DefineEvents<{ Bumped: { by: number } }>;
+    type CounterCommand = DefineCommands<{ Bump: { by: number } }>;
+    type CounterTypes = AggregateTypes & {
+      state: { total: number };
+      commands: CounterCommand;
+      events: CounterEvent;
+      infrastructure: Infrastructure;
+    };
+
+    const Counter = defineAggregate<CounterTypes>({
+      initialState: { total: 0 },
+      decide: {
+        Bump: (cmd) => ({ name: "Bumped", payload: { by: cmd.payload.by } }),
+      },
+      evolve: {
+        Bumped: (p, s) => ({ total: s.total + p.by }),
+      },
+    });
+
+    const sharedPersistence = new InMemoryEventSourcedAggregatePersistence();
+
+    const definition = defineDomain({
+      writeModel: { aggregates: { Counter } },
+      readModel: { projections: {} },
+      processModel: {
+        standaloneEventHandlers: {
+          Bumped: async (event, infrastructure) => {
+            // Re-entrant dispatch against the SAME aggregate the just-committed
+            // withUnitOfWork call targeted.
+            if (event.payload.by === 1) {
+              await infrastructure.commandBus.dispatch({
+                name: "Bump",
+                targetAggregateId: "c-1",
+                payload: { by: 100 },
+              });
+            }
+          },
+        },
+      },
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: {
+        persistence: () => sharedPersistence,
+        concurrency: {
+          strategy: "pessimistic",
+          locker: new InMemoryAggregateLocker(),
+          lockTimeoutMs: 500,
+        },
+      },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    await domain.withUnitOfWork(async () => {
+      await domain.dispatchCommand({
+        name: "Bump",
+        targetAggregateId: "c-1",
+        payload: { by: 1 },
+      });
+    });
+
+    const events = await sharedPersistence.load("Counter", "c-1");
+    expect(events).toHaveLength(2);
+    expect(events[1]!.payload).toEqual({ by: 100 });
+  });
+});
+
+describe("Domain.withUnitOfWork: re-entrant dispatch from a standalone event handler", () => {
+  it("should let a standalone handler dispatch a command against a second aggregate without throwing", async () => {
+    type SourceEvent = DefineEvents<{ SourceDone: { id: string } }>;
+    type SourceCommand = DefineCommands<{ FinishSource: { id: string } }>;
+    type SourceTypes = AggregateTypes & {
+      state: { done: boolean } | null;
+      commands: SourceCommand;
+      events: SourceEvent;
+      infrastructure: Infrastructure;
+    };
+
+    const Source = defineAggregate<SourceTypes>({
+      initialState: null,
+      decide: {
+        FinishSource: (cmd) => ({
+          name: "SourceDone",
+          payload: { id: cmd.targetAggregateId as string },
+        }),
+      },
+      evolve: { SourceDone: () => ({ done: true }) },
+    });
+
+    type TargetEvent = DefineEvents<{ TargetUpdated: { id: string } }>;
+    type TargetCommand = DefineCommands<{ UpdateTarget: { id: string } }>;
+    type TargetTypes = AggregateTypes & {
+      state: { updated: boolean } | null;
+      commands: TargetCommand;
+      events: TargetEvent;
+      infrastructure: Infrastructure;
+    };
+
+    const Target = defineAggregate<TargetTypes>({
+      initialState: null,
+      decide: {
+        UpdateTarget: (cmd) => ({
+          name: "TargetUpdated",
+          payload: { id: cmd.targetAggregateId as string },
+        }),
+      },
+      evolve: { TargetUpdated: () => ({ updated: true }) },
+    });
+
+    const sharedPersistence = new InMemoryEventSourcedAggregatePersistence();
+
+    const definition = defineDomain({
+      writeModel: { aggregates: { Source, Target } },
+      readModel: { projections: {} },
+      processModel: {
+        standaloneEventHandlers: {
+          SourceDone: async (event, infrastructure) => {
+            await infrastructure.commandBus.dispatch({
+              name: "UpdateTarget",
+              targetAggregateId: event.payload.id,
+              payload: { id: event.payload.id },
+            });
+          },
+        },
+      },
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: { persistence: () => sharedPersistence },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    await domain.withUnitOfWork(async () => {
+      await domain.dispatchCommand({
+        name: "FinishSource",
+        targetAggregateId: "s-1",
+        payload: { id: "s-1" },
+      });
+    });
+
+    const targetEvents = await sharedPersistence.load("Target", "s-1");
+    expect(targetEvents).toHaveLength(1);
+    expect(targetEvents[0]!.name).toBe("TargetUpdated");
   });
 });

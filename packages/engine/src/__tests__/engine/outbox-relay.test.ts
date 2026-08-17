@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { OutboxRelay } from "../../outbox-relay";
 import { InMemoryOutboxStore, EventEmitterEventBus } from "@noddde/engine";
-import type { Event } from "@noddde/core";
+import type { Event, OutboxStore, OutboxEntry, Logger } from "@noddde/core";
 
 describe("OutboxRelay", () => {
   it("should dispatch each unpublished entry and mark it published", async () => {
@@ -122,6 +122,69 @@ describe("OutboxRelay", () => {
     expect(processOnceSpy.mock.calls.length).toBeLessThanOrEqual(4);
 
     relay.stop();
+  });
+
+  it("should catch a rejecting loadUnpublished, log it, and return 0", async () => {
+    const failingStore: OutboxStore = {
+      save: vi.fn(async () => {}),
+      loadUnpublished: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("connection reset"))
+        .mockResolvedValue([] as OutboxEntry[]),
+      markPublished: vi.fn(async () => {}),
+      markPublishedByEventIds: vi.fn(async () => {}),
+    };
+    const eventBus = new EventEmitterEventBus();
+    const errors: unknown[] = [];
+    const logger: Logger = {
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: (...args: unknown[]) => errors.push(args),
+      child: () => logger,
+    };
+    const relay = new OutboxRelay(failingStore, eventBus, {}, logger);
+
+    // Must not throw / reject despite loadUnpublished rejecting.
+    await expect(relay.processOnce()).resolves.toBe(0);
+    expect(errors.length).toBeGreaterThan(0);
+
+    // The relay recovers on the next call once the store is healthy again.
+    await expect(relay.processOnce()).resolves.toBe(0);
+    expect(failingStore.loadUnpublished).toHaveBeenCalledTimes(2);
+  });
+
+  it("should not leave an unhandled rejection when the interval callback fires", async () => {
+    vi.useFakeTimers();
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+
+    try {
+      const failingStore: OutboxStore = {
+        save: vi.fn(async () => {}),
+        loadUnpublished: vi.fn().mockRejectedValue(new Error("db down")),
+        markPublished: vi.fn(async () => {}),
+        markPublishedByEventIds: vi.fn(async () => {}),
+      };
+      const eventBus = new EventEmitterEventBus();
+      const relay = new OutboxRelay(failingStore, eventBus, {
+        pollIntervalMs: 10,
+      });
+
+      relay.start();
+      await vi.advanceTimersByTimeAsync(35);
+      relay.stop();
+
+      // Flush the microtask queue so any unhandled rejection would surface.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(unhandled).toHaveLength(0);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+      vi.useRealTimers();
+    }
   });
 
   it("should process at most batchSize entries per call", async () => {

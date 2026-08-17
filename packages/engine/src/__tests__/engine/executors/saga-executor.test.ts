@@ -1,8 +1,9 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { describe, it, expect, vi } from "vitest";
-import { defineSaga } from "@noddde/core";
+import { defineSaga, defineDomain, defineAggregate } from "@noddde/core";
 import type {
   SagaTypes,
+  DefineCommands,
   DefineEvents,
   Event,
   Infrastructure,
@@ -15,7 +16,9 @@ import {
   EventEmitterEventBus,
   InMemoryQueryBus,
   InMemorySagaPersistence,
+  InMemoryEventSourcedAggregatePersistence,
   createInMemoryUnitOfWork,
+  wireDomain,
 } from "@noddde/engine";
 import { SagaExecutor } from "../../../executors/saga-executor";
 import type { MetadataContext } from "../../../domain";
@@ -758,5 +761,107 @@ describe("SagaExecutor atomic (issue #119 limitation)", () => {
     // The re-entrant ProcessCompleted arrived before commit → dropped.
     const state = await sagaPersistence.load("AtomicTaskSaga", "t-2");
     expect(state).toEqual({ step: "processing" });
+  });
+});
+
+describe("SagaExecutor: re-entrant dispatch from a standalone event handler", () => {
+  it("should let a standalone handler dispatch a command against a second aggregate", async () => {
+    type SourceEvent = DefineEvents<{ SourceDone: { id: string } }>;
+    type SourceCommand = DefineCommands<{ FinishSource: { id: string } }>;
+    type SourceTypes = {
+      state: { done: boolean } | null;
+      events: SourceEvent;
+      commands: SourceCommand;
+      infrastructure: Infrastructure;
+    };
+
+    type TargetEvent = DefineEvents<{ TargetUpdated: { id: string } }>;
+    type TargetCommand = DefineCommands<{ UpdateTarget: { id: string } }>;
+    type TargetTypes = {
+      state: { updated: boolean } | null;
+      events: TargetEvent;
+      commands: TargetCommand;
+      infrastructure: Infrastructure;
+    };
+
+    type TriggerSagaTypes = {
+      state: { started: boolean };
+      events: SourceEvent;
+      commands: never;
+      infrastructure: Infrastructure;
+    };
+
+    const Source = defineAggregate<SourceTypes>({
+      initialState: null,
+      decide: {
+        FinishSource: (cmd) => ({
+          name: "SourceDone",
+          payload: { id: cmd.targetAggregateId as string },
+        }),
+      },
+      evolve: { SourceDone: () => ({ done: true }) },
+    });
+
+    const Target = defineAggregate<TargetTypes>({
+      initialState: null,
+      decide: {
+        UpdateTarget: (cmd) => ({
+          name: "TargetUpdated",
+          payload: { id: cmd.targetAggregateId as string },
+        }),
+      },
+      evolve: { TargetUpdated: () => ({ updated: true }) },
+    });
+
+    const TriggerSaga = defineSaga<TriggerSagaTypes>({
+      atomicity: "atomic",
+      initialState: { started: false },
+      startedBy: ["SourceDone"],
+      on: {
+        SourceDone: {
+          id: (event) => event.payload.id,
+          handle: () => ({ state: { started: true } }),
+        },
+      },
+    });
+
+    const sharedPersistence = new InMemoryEventSourcedAggregatePersistence();
+
+    const definition = defineDomain({
+      writeModel: { aggregates: { Source, Target } },
+      readModel: { projections: {} },
+      processModel: {
+        sagas: { TriggerSaga },
+        standaloneEventHandlers: {
+          SourceDone: async (event, infrastructure) => {
+            await infrastructure.commandBus.dispatch({
+              name: "UpdateTarget",
+              targetAggregateId: event.payload.id,
+              payload: { id: event.payload.id },
+            });
+          },
+        },
+      },
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: { persistence: () => sharedPersistence },
+      sagas: { persistence: () => new InMemorySagaPersistence() },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    await domain.dispatchCommand({
+      name: "FinishSource",
+      targetAggregateId: "s-1",
+      payload: { id: "s-1" },
+    });
+
+    const targetEvents = await sharedPersistence.load("Target", "s-1");
+    expect(targetEvents).toHaveLength(1);
+    expect(targetEvents[0]!.name).toBe("TargetUpdated");
   });
 });
