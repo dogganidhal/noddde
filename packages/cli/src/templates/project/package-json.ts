@@ -1,6 +1,7 @@
 import type { TemplateContext } from "../../utils/context.js";
 import type { EventBusAdapter } from "../../utils/event-bus.js";
 import type { PersistenceAdapter } from "../../utils/persistence.js";
+import { getCliMajorVersion } from "../../utils/cli-version.js";
 
 /** Generates package.json content with correct deps for the chosen adapters. */
 export function packageJsonTemplate(
@@ -8,14 +9,18 @@ export function packageJsonTemplate(
   adapter: PersistenceAdapter,
   eventBus: EventBusAdapter = "event-emitter",
 ): string {
+  // @noddde/* packages are versioned independently but cut a GA release
+  // together, so anchoring every generated range to the CLI's own major
+  // version is the range that's actually installable at scaffold time.
+  const nodddeRange = `^${getCliMajorVersion()}.0.0`;
+
   const deps: Record<string, string> = {
-    "@noddde/core": "^0.0.0",
-    "@noddde/engine": "^0.0.0",
+    "@noddde/core": nodddeRange,
+    "@noddde/engine": nodddeRange,
   };
 
   const devDeps: Record<string, string> = {
-    "@noddde/testing": "^0.0.0",
-    "@noddde/typescript-config": "^0.0.0",
+    "@noddde/testing": nodddeRange,
     "@types/node": "^20.11.17",
     eslint: "^8.56.0",
     tsx: "^4.21.0",
@@ -24,26 +29,26 @@ export function packageJsonTemplate(
   };
 
   if (adapter === "prisma") {
-    deps["@noddde/prisma"] = "^0.0.0";
+    deps["@noddde/prisma"] = nodddeRange;
     deps["@prisma/client"] = "^6.5.0";
     devDeps["prisma"] = "^6.5.0";
   } else if (adapter === "drizzle") {
-    deps["@noddde/drizzle"] = "^0.0.0";
+    deps["@noddde/drizzle"] = nodddeRange;
     deps["drizzle-orm"] = "^0.40.0";
     deps["better-sqlite3"] = "^11.0.0";
     devDeps["@types/better-sqlite3"] = "^7.6.13";
   } else if (adapter === "typeorm") {
-    deps["@noddde/typeorm"] = "^0.0.0";
+    deps["@noddde/typeorm"] = nodddeRange;
   }
 
   if (eventBus === "kafka") {
-    deps["@noddde/kafka"] = "^0.0.0";
+    deps["@noddde/kafka"] = nodddeRange;
     deps["kafkajs"] = "^2.0.0";
   } else if (eventBus === "nats") {
-    deps["@noddde/nats"] = "^0.0.0";
+    deps["@noddde/nats"] = nodddeRange;
     deps["nats"] = "^2.0.0";
   } else if (eventBus === "rabbitmq") {
-    deps["@noddde/rabbitmq"] = "^0.0.0";
+    deps["@noddde/rabbitmq"] = nodddeRange;
     deps["amqplib"] = "^0.10.0";
     devDeps["@types/amqplib"] = "^0.10.0";
   }

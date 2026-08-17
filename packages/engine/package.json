@@ -40,6 +40,9 @@
   "files": [
     "dist"
   ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "lint": "eslint . --max-warnings 0",
     "build": "tsup",
@@ -51,7 +54,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@noddde/core": "1.0.0-rc.1"
+    "@noddde/core": "^1.0.0-rc.1"
   },
   "peerDependencies": {
     "@opentelemetry/api": "^1.0.0"

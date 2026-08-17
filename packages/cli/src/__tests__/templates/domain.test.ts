@@ -180,9 +180,10 @@ describe("domain templates", () => {
   describe("domain wiring", () => {
     it("generates domain.ts with defineDomain", () => {
       const result = domainDefinitionTemplate(ctx);
-      expect(result).toContain("defineDomain");
-      expect(result).toContain("BankAccountInfrastructure");
-      expect(result).toContain("bankAccountDomain");
+      expect(result).toContain("defineDomain({");
+      expect(result).toContain("export const definition");
+      expect(result).toContain("InferDomain");
+      expect(result).toContain("BankAccountDomain");
       expect(result).toContain("BankAccount");
       expect(result).toContain("BankAccountProjection");
     });
@@ -199,7 +200,7 @@ describe("domain templates", () => {
       expect(result).toContain("InMemoryCommandBus");
       expect(result).toContain("EventEmitterEventBus");
       expect(result).toContain("InMemoryQueryBus");
-      expect(result).toContain("bankAccountDomain");
+      expect(result).toContain("definition");
     });
   });
 
