@@ -285,22 +285,16 @@ Absent `stateVersion` means "implicitly schema version 1" (i.e. pre-envelope dat
 - `packages/core/src/persistence/index.ts` — `StateStoredAggregatePersistence.load`/`save` updated.
 - `packages/engine/src/implementations/in-memory-snapshot-store.ts`, `in-memory-aggregate-persistence.ts` (the `InMemoryStateStoredAggregatePersistence` class) — pass `stateVersion` through unchanged (store/return it if provided; `undefined` otherwise). No upcasting logic added.
 - `specs/core/persistence/snapshot.spec.md`, `specs/core/persistence/persistence.spec.md`, `specs/engine/implementations/in-memory-snapshot-store.spec.md`, `specs/engine/implementations/in-memory-aggregate-persistence.spec.md` updated.
-- **GitHub issue drafted, NOT filed** — see "Issue draft" below. Filing requires repo-owner confirmation per this lane's brief; ask before posting.
+- **Filed as issue #152** — https://github.com/dogganidhal/noddde/issues/152 (repo-owner confirmed before posting, per this lane's brief).
 
 **Downstream (not implemented by this lane):**
 
 - **Lane A** — add a `state_version` (or `stateVersion`) integer column, default `1`, to every dedicated state-stored table and every snapshot table across Drizzle/Prisma/TypeORM schemas; thread it through each adapter's `save`/`load`.
 - **Lane B** (post-GA, v1.1 candidate — do not block GA on this) — design and wire an `Aggregate.stateUpcasters`-style registration point, and call it in `command-lifecycle-executor.ts` wherever `StateStoredAggregatePersistence.load()` / `SnapshotStore.load()` results are consumed, mirroring how `upcastEvents` is already called for event-sourced replay.
 
-#### Issue draft (do not file without repo-owner sign-off)
+#### Tracking issue
 
-> **Title:** State-stored / snapshot payloads have no schema-version envelope — silent corruption on aggregate-state schema evolution
->
-> **Body:** > `Snapshot { state: any; version: number }` and `StateStoredAggregatePersistence`'s `{state, version}` both use `version` for the event-stream position / OCC counter — there is no field for the _payload schema_ version. `upcastEvents` exists and is called for event-sourced replay (`command-lifecycle-executor.ts:243,262`) but there is no equivalent for state-stored/snapshot payloads. A row or snapshot written by v1 aggregate-state code silently rehydrates into v2 handlers with no upcasting and no way to detect the mismatch — this is on-disk format, so it freezes at GA; fixing it later is a data migration for every user running state-stored or snapshotted aggregates.
->
-> Lane 0c (core API freeze) reserved a `stateVersion?: number` field on both `Snapshot` and `StateStoredAggregatePersistence` (defaulting to "implicitly 1" when absent) so this can be closed without another on-disk break, but did **not** implement upcasting. Follow-up: design an `Aggregate.stateUpcasters` registration point and wire it into the engine's state-load path, plus add the corresponding column to all three SQL adapters.
->
-> Filed from the GA-readiness audit of `1.0.0-rc.1` (commit `dec6f7d`).
+Filed as [issue #152](https://github.com/dogganidhal/noddde/issues/152): "State-stored / snapshot payloads have no schema-version envelope — silent corruption on aggregate-state schema evolution."
 
 ---
 
