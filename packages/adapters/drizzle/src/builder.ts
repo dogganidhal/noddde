@@ -1,3 +1,5 @@
+/* eslint-disable no-unused-vars */
+import { AsyncLocalStorage } from "node:async_hooks";
 import type {
   EventSourcedAggregatePersistence,
   StateStoredAggregatePersistence,
@@ -6,6 +8,7 @@ import type {
   OutboxStore,
   UnitOfWorkFactory,
   AggregateStateMapper,
+  EventReader,
 } from "@noddde/core";
 import type { AnyColumn, Table } from "drizzle-orm";
 import type { DrizzleTransactionStore } from "./index";
@@ -18,6 +21,8 @@ import {
 } from "./persistence";
 import { DrizzleDedicatedStateStoredPersistence } from "./dedicated-state-persistence";
 import { createDrizzleUnitOfWorkFactory } from "./unit-of-work";
+import { inferDialect } from "./drizzle-adapter";
+import { DrizzleEventReader } from "./event-reader";
 
 /**
  * Drizzle-specific bi-directional mapper between an aggregate's state and
@@ -102,6 +107,8 @@ export type DrizzleAdapterResult<C extends DrizzleAdapterConfig> = {
   sagaPersistence: SagaPersistence;
   /** Factory for creating Drizzle-backed UnitOfWork instances. Always present. */
   unitOfWorkFactory: UnitOfWorkFactory;
+  /** Reads the global event log in append order. Enables `Domain.rebuildProjection`. Always present. */
+  eventReader: EventReader;
 } & (C extends { stateStore: any }
   ? {
       /** Shared state-stored persistence. */ stateStoredPersistence: StateStoredAggregatePersistence;
@@ -162,7 +169,7 @@ export function createDrizzleAdapter<const C extends DrizzleAdapterConfig>(
   db: any,
   config: C,
 ): DrizzleAdapterResult<C> {
-  const txStore: DrizzleTransactionStore = { current: null };
+  const txStore: DrizzleTransactionStore = { als: new AsyncLocalStorage() };
 
   // Build the schema object for shared persistence classes
   const schema: any = {
@@ -173,14 +180,37 @@ export function createDrizzleAdapter<const C extends DrizzleAdapterConfig>(
     outbox: config.outboxStore,
   };
 
+  // pg/mysql `payload`/`metadata`/`event` columns are native jsonb/json —
+  // pass raw objects. mysql's aggregate-state/saga/snapshot `state` column
+  // is plain `text`, so only pg gets nativeJson for those. sqlite is text
+  // everywhere. Falls back to `false` (stringify) if the dialect can't be
+  // inferred (e.g. a custom `db`-like test double) rather than throwing,
+  // since this factory (unlike DrizzleAdapter) is also used with hand-rolled
+  // table definitions that may not carry native JSON columns at all.
+  let dialect: "pg" | "mysql" | "sqlite" | undefined;
+  try {
+    dialect = inferDialect(db);
+  } catch {
+    dialect = undefined;
+  }
+  const eventsAndOutboxNativeJson = dialect === "pg" || dialect === "mysql";
+  const stateNativeJson = dialect === "pg";
+
   const result: Record<string, any> = {
     eventSourcedPersistence: new DrizzleEventSourcedAggregatePersistence(
       db,
       txStore,
       schema,
+      eventsAndOutboxNativeJson,
     ),
-    sagaPersistence: new DrizzleSagaPersistence(db, txStore, schema),
+    sagaPersistence: new DrizzleSagaPersistence(
+      db,
+      txStore,
+      schema,
+      stateNativeJson,
+    ),
     unitOfWorkFactory: createDrizzleUnitOfWorkFactory(db, txStore),
+    eventReader: new DrizzleEventReader(db, schema),
   };
 
   if (config.stateStore) {
@@ -188,15 +218,26 @@ export function createDrizzleAdapter<const C extends DrizzleAdapterConfig>(
       db,
       txStore,
       schema,
+      stateNativeJson,
     );
   }
 
   if (config.snapshotStore) {
-    result.snapshotStore = new DrizzleSnapshotStore(db, txStore, schema);
+    result.snapshotStore = new DrizzleSnapshotStore(
+      db,
+      txStore,
+      schema,
+      stateNativeJson,
+    );
   }
 
   if (config.outboxStore) {
-    result.outboxStore = new DrizzleOutboxStore(db, txStore, schema);
+    result.outboxStore = new DrizzleOutboxStore(
+      db,
+      txStore,
+      schema,
+      eventsAndOutboxNativeJson,
+    );
   }
 
   if (config.aggregateStates) {

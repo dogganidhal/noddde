@@ -200,6 +200,10 @@ export class KafkaEventBus implements EventBus, Connectable {
           groupId: this._config.groupId,
           sessionTimeout: this._config.sessionTimeout ?? 30000,
           heartbeatInterval: this._config.heartbeatInterval ?? 3000,
+          // kafkajs only auto-restarts a crashed consumer.run() loop when the
+          // crash error is `retriable` (see `_markRetriable`); this override
+          // makes sure restart actually happens once it is.
+          retry: { restartOnFailure: () => Promise.resolve(true) },
         });
 
         await this._producer.connect();
@@ -768,7 +772,7 @@ export class KafkaEventBus implements EventBus, Connectable {
     this._deliveryCounts.set(offsetKey, attempt);
 
     if (attempt <= maxRetries) {
-      throw firstRejection;
+      throw this._markRetriable(firstRejection);
     }
 
     try {
@@ -784,9 +788,24 @@ export class KafkaEventBus implements EventBus, Connectable {
         `Failed to park exhausted-retry message to DLQ topic; leaving offset uncommitted for redelivery.`,
         { eventName, error: String(dlqErr) },
       );
-      throw firstRejection;
+      throw this._markRetriable(firstRejection);
     }
     this._deliveryCounts.delete(offsetKey);
+  }
+
+  /**
+   * kafkajs's `consumer.run()` only invokes `retry.restartOnFailure` (and
+   * thus restarts the crashed fetch loop) when the crash error itself is
+   * marked `retriable` — a plain `Error` short-circuits that check and the
+   * consumer stays down permanently, never redelivering the uncommitted
+   * offset. Handler rejections are ordinary application errors, so this
+   * flags them retriable before they're rethrown to crash the consumer.
+   */
+  private _markRetriable(err: unknown): unknown {
+    if (err instanceof Error) {
+      (err as Error & { retriable?: boolean }).retriable = true;
+    }
+    return err;
   }
 
   /**

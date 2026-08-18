@@ -1,6 +1,7 @@
 import { eq, lte } from "drizzle-orm";
 import type { EventIdempotencyStore } from "@noddde/core";
 import type { DrizzleTransactionStore } from "./index";
+import { isUniqueViolation } from "./errors";
 
 /**
  * Serializes a `Date` to a string accepted by every dialect we target.
@@ -41,7 +42,7 @@ function toDbTimestamp(d: Date): string {
  * import { withIdempotency } from "@noddde/core";
  *
  * const db = drizzle(new Database("app.db"));
- * const store = new DrizzleEventIdempotencyStore(db, { current: null }, eventIdempotency);
+ * const store = new DrizzleEventIdempotencyStore(db, { als: new AsyncLocalStorage() }, eventIdempotency);
  * const handler = withIdempotency(myHandler, store);
  * ```
  */
@@ -54,7 +55,7 @@ export class DrizzleEventIdempotencyStore implements EventIdempotencyStore {
   ) {}
 
   private getExecutor() {
-    return this.txStore.current ?? this.db;
+    return this.txStore.als.getStore() ?? this.db;
   }
 
   /**
@@ -98,14 +99,8 @@ export class DrizzleEventIdempotencyStore implements EventIdempotencyStore {
         key,
         processedAt: toDbTimestamp(new Date()),
       });
-    } catch (error: any) {
-      const message = error?.message ?? "";
-      if (
-        message.includes("UNIQUE constraint failed") || // SQLite
-        message.includes("unique constraint") || // PostgreSQL
-        message.includes("Duplicate entry") || // MySQL
-        message.includes("duplicate key") // PostgreSQL variant
-      ) {
+    } catch (error: unknown) {
+      if (isUniqueViolation(error)) {
         return;
       }
       throw error;

@@ -1,3 +1,5 @@
+/* eslint-disable no-unused-vars */
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { PrismaClient } from "@prisma/client";
 import type {
   EventSourcedAggregatePersistence,
@@ -7,7 +9,9 @@ import type {
   OutboxStore,
   UnitOfWorkFactory,
   AggregateStateMapper,
+  EventReader,
 } from "@noddde/core";
+import { PrismaEventReader } from "./event-reader";
 import type { PrismaTransactionStore } from "./unit-of-work";
 import {
   PrismaEventSourcedAggregatePersistence,
@@ -89,6 +93,8 @@ export type PrismaAdapterResult<C extends PrismaAdapterConfig> = {
   sagaPersistence: SagaPersistence;
   /** Factory for creating Prisma-backed UnitOfWork instances. Always present. */
   unitOfWorkFactory: UnitOfWorkFactory;
+  /** Global event-log reader, enabling `Domain.rebuildProjection`. Always present. */
+  eventReader: EventReader;
 } & (C extends { snapshotStore: true }
   ? { /** Snapshot store. */ snapshotStore: SnapshotStore }
   : {}) &
@@ -154,7 +160,7 @@ export function createPrismaAdapter(
   prisma: PrismaClient,
   config?: PrismaAdapterConfig,
 ): any {
-  const txStore: PrismaTransactionStore = { current: null };
+  const txStore: PrismaTransactionStore = { als: new AsyncLocalStorage() };
 
   const result: Record<string, any> = {
     eventSourcedPersistence: new PrismaEventSourcedAggregatePersistence(
@@ -167,6 +173,7 @@ export function createPrismaAdapter(
     ),
     sagaPersistence: new PrismaSagaPersistence(prisma, txStore),
     unitOfWorkFactory: createPrismaUnitOfWorkFactory(prisma, txStore),
+    eventReader: new PrismaEventReader(prisma) as EventReader,
   };
 
   if (config?.snapshotStore) {

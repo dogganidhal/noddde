@@ -28,6 +28,49 @@ export interface PersistenceContractContext {
    * flag exists because some legacy column types do.
    */
   unicodeSafe?: boolean;
+  /**
+   * Set to `"lossy"` for adapter-dialect combinations whose payload column
+   * is a database-native JSON type that re-serializes numbers through its
+   * own storage engine rather than passing the original text through
+   * untouched (e.g. MySQL's `JSON` column, which stores DOUBLE values with
+   * fewer significant digits than IEEE-754 needs for guaranteed round-trip
+   * of an arbitrary double). Adapters that store payloads as an opaque
+   * string/text column (Prisma, TypeORM, Drizzle/sqlite, Drizzle/pg's
+   * `jsonb` in practice) are unaffected and should leave this `"exact"`
+   * (the default) — this is specifically about a JSON engine re-parsing
+   * and re-emitting numeric literals. Only affects the property-based
+   * sweep's floating-point leaves; structural corruption (wrong keys,
+   * wrong types, dropped values) still fails either way.
+   */
+  jsonNumberPrecision?: "exact" | "lossy";
+}
+
+/**
+ * Recursively rounds every finite number in `value` to `precision`
+ * significant digits, leaving strings/booleans/null/structure untouched.
+ * Used to compare a JSON payload against its round-tripped copy when the
+ * storage engine doesn't guarantee bit-exact double fidelity (see
+ * {@link PersistenceContractContext.jsonNumberPrecision}) — comparing two
+ * values put through the same rounding still catches any real corruption
+ * (dropped keys, wrong types, wrong array length) while tolerating the
+ * storage engine's own numeric re-serialization.
+ */
+function roundForLossyCompare(value: unknown, precision = 12): unknown {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Number(value.toPrecision(precision));
+  }
+  if (Array.isArray(value)) {
+    return value.map((v) => roundForLossyCompare(v, precision));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [
+        k,
+        roundForLossyCompare(v, precision),
+      ]),
+    );
+  }
+  return value;
 }
 
 export type PersistenceContractFactory = () =>
@@ -264,6 +307,54 @@ export function definePersistenceContract(
           expect(loaded?.version).toBe(1);
         }
       });
+
+      // The two races above are 2-way. The DoD for #129 asks for "N
+      // concurrent commands against one aggregate id: exactly one winner" —
+      // widen to 5 concurrent writers to rule out a fix that only
+      // serializes pairs (e.g. a lock that itself has a re-entrancy hole
+      // under >2 waiters).
+      it("rejects all but one winner when N=5 commands race on the same event-sourced stream", async () => {
+        const id = "o-race-n5";
+        const results = await Promise.allSettled(
+          Array.from({ length: 5 }, (_, i) =>
+            ctx.eventSourced.save(
+              "Order",
+              id,
+              [{ name: "OrderPlaced", payload: { by: i } }],
+              0,
+            ),
+          ),
+        );
+        const fulfilled = results.filter((r) => r.status === "fulfilled");
+        const rejected = results.filter(
+          (r): r is PromiseRejectedResult => r.status === "rejected",
+        );
+        expect(fulfilled).toHaveLength(1);
+        expect(rejected).toHaveLength(4);
+        for (const r of rejected) {
+          expect(r.reason).toBeInstanceOf(ConcurrencyError);
+        }
+        expect(await ctx.eventSourced.load("Order", id)).toHaveLength(1);
+      });
+
+      it("rejects all but one winner when N=5 commands race on the same state-stored aggregate", async () => {
+        const id = "a-race-n5";
+        const results = await Promise.allSettled(
+          Array.from({ length: 5 }, (_, i) =>
+            ctx.stateStored.save("Account", id, { balance: i }, 0),
+          ),
+        );
+        const fulfilled = results.filter((r) => r.status === "fulfilled");
+        const rejected = results.filter(
+          (r): r is PromiseRejectedResult => r.status === "rejected",
+        );
+        expect(fulfilled).toHaveLength(1);
+        expect(rejected).toHaveLength(4);
+        for (const r of rejected) {
+          expect(r.reason).toBeInstanceOf(ConcurrencyError);
+        }
+        expect((await ctx.stateStored.load("Account", id))?.version).toBe(1);
+      });
     });
 
     // The framework's payload contract is "any JSON-serializable value".
@@ -307,6 +398,7 @@ export function definePersistenceContract(
 
       it("roundtrips arbitrary JSON-serializable payloads (property-based)", async () => {
         let n = 0;
+        const lossy = ctx.jsonNumberPrecision === "lossy";
         await fc.assert(
           fc.asyncProperty(jsonSafeValue, async (value) => {
             const id = `o-fc-${n++}`;
@@ -322,9 +414,14 @@ export function definePersistenceContract(
             // it comes back as +0 — normalize the expectation through the
             // same JSON round-trip rather than comparing against the raw
             // generated payload.
-            expect(loaded?.payload).toEqual(
-              JSON.parse(JSON.stringify(payload)),
-            );
+            const normalizedPayload = JSON.parse(JSON.stringify(payload));
+            if (lossy) {
+              expect(roundForLossyCompare(loaded?.payload)).toEqual(
+                roundForLossyCompare(normalizedPayload),
+              );
+            } else {
+              expect(loaded?.payload).toEqual(normalizedPayload);
+            }
           }),
           { numRuns: 40 },
         );

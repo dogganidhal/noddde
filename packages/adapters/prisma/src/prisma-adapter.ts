@@ -1,3 +1,5 @@
+/* eslint-disable no-unused-vars */
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { PrismaClient } from "@prisma/client";
 import type {
   PersistenceAdapter,
@@ -8,6 +10,7 @@ import type {
   SnapshotStore,
   OutboxStore,
   AggregateLocker,
+  EventReader,
 } from "@noddde/core";
 import type { PrismaTransactionStore } from "./unit-of-work";
 import type { PrismaStateMapper } from "./builder";
@@ -22,6 +25,7 @@ import { PrismaDedicatedStateStoredPersistence } from "./dedicated-state-persist
 import { createPrismaUnitOfWorkFactory } from "./unit-of-work";
 import { PrismaAdvisoryLocker } from "./advisory-locker";
 import type { PrismaDialect } from "./advisory-locker";
+import { PrismaEventReader } from "./event-reader";
 
 /**
  * Prisma-backed persistence adapter implementing {@link PersistenceAdapter}.
@@ -49,13 +53,14 @@ export class PrismaAdapter implements PersistenceAdapter {
   readonly snapshotStore: SnapshotStore;
   readonly outboxStore: OutboxStore;
   readonly aggregateLocker?: AggregateLocker;
+  readonly eventReader: EventReader;
 
   private readonly prisma: PrismaClient;
   private readonly txStore: PrismaTransactionStore;
 
   constructor(prisma: PrismaClient, options?: { dialect?: PrismaDialect }) {
     this.prisma = prisma;
-    this.txStore = { current: null };
+    this.txStore = { als: new AsyncLocalStorage() };
 
     this.eventSourcedPersistence = new PrismaEventSourcedAggregatePersistence(
       prisma,
@@ -72,6 +77,7 @@ export class PrismaAdapter implements PersistenceAdapter {
       prisma,
       this.txStore,
     );
+    this.eventReader = new PrismaEventReader(prisma);
 
     // Advisory locker requires explicit dialect
     if (options?.dialect) {

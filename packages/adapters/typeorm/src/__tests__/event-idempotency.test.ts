@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import "reflect-metadata";
-import { DataSource } from "typeorm";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { DataSource, type EntityManager } from "typeorm";
 import {
   TypeORMEventIdempotencyStore,
   NodddeEventIdempotencyEntity,
@@ -25,7 +26,7 @@ describe("TypeORMEventIdempotencyStore", () => {
 
   it("should return true for hasProcessed after markProcessed", async () => {
     const store = new TypeORMEventIdempotencyStore(dataSource, {
-      current: null,
+      als: new AsyncLocalStorage<EntityManager>(),
     });
 
     await store.markProcessed("evt-1");
@@ -35,7 +36,7 @@ describe("TypeORMEventIdempotencyStore", () => {
 
   it("should return false for a key that was never marked processed", async () => {
     const store = new TypeORMEventIdempotencyStore(dataSource, {
-      current: null,
+      als: new AsyncLocalStorage<EntityManager>(),
     });
 
     expect(await store.hasProcessed("never-seen")).toBe(false);
@@ -43,7 +44,7 @@ describe("TypeORMEventIdempotencyStore", () => {
 
   it("should not throw when markProcessed is called twice for the same key", async () => {
     const store = new TypeORMEventIdempotencyStore(dataSource, {
-      current: null,
+      als: new AsyncLocalStorage<EntityManager>(),
     });
 
     await store.markProcessed("evt-dup");
@@ -53,7 +54,7 @@ describe("TypeORMEventIdempotencyStore", () => {
 
   it("should remove expired records via removeExpired while keeping recent ones", async () => {
     const store = new TypeORMEventIdempotencyStore(dataSource, {
-      current: null,
+      als: new AsyncLocalStorage<EntityManager>(),
     });
 
     await store.markProcessed("evt-old");
@@ -74,7 +75,7 @@ describe("TypeORMEventIdempotencyStore", () => {
   it("should apply lazy TTL cleanup on hasProcessed when constructed with ttlMs", async () => {
     const store = new TypeORMEventIdempotencyStore(
       dataSource,
-      { current: null },
+      { als: new AsyncLocalStorage<EntityManager>() },
       100,
     );
 

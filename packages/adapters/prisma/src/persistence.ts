@@ -29,7 +29,7 @@ export class PrismaEventSourcedAggregatePersistence
   ) {}
 
   private getExecutor(): PrismaExecutor {
-    return (this.txStore.current ?? this.prisma) as PrismaExecutor;
+    return (this.txStore.als.getStore() ?? this.prisma) as PrismaExecutor;
   }
 
   async save(
@@ -124,7 +124,7 @@ export class PrismaStateStoredAggregatePersistence
   ) {}
 
   private getExecutor(): PrismaExecutor {
-    return (this.txStore.current ?? this.prisma) as PrismaExecutor;
+    return (this.txStore.als.getStore() ?? this.prisma) as PrismaExecutor;
   }
 
   async save(
@@ -202,7 +202,7 @@ export class PrismaSagaPersistence implements SagaPersistence {
   ) {}
 
   private getExecutor(): PrismaExecutor {
-    return (this.txStore.current ?? this.prisma) as PrismaExecutor;
+    return (this.txStore.als.getStore() ?? this.prisma) as PrismaExecutor;
   }
 
   async save(sagaName: string, sagaId: string, state: any): Promise<void> {
@@ -250,7 +250,7 @@ export class PrismaSnapshotStore implements SnapshotStore {
   ) {}
 
   private getExecutor(): PrismaExecutor {
-    return (this.txStore.current ?? this.prisma) as PrismaExecutor;
+    return (this.txStore.als.getStore() ?? this.prisma) as PrismaExecutor;
   }
 
   async load(
@@ -313,7 +313,7 @@ export class PrismaOutboxStore implements OutboxStore {
   ) {}
 
   private getExecutor(): PrismaExecutor {
-    return (this.txStore.current ?? this.prisma) as PrismaExecutor;
+    return (this.txStore.als.getStore() ?? this.prisma) as PrismaExecutor;
   }
 
   async save(entries: OutboxEntry[]): Promise<void> {
@@ -323,6 +323,7 @@ export class PrismaOutboxStore implements OutboxStore {
       data: entries.map((e) => ({
         id: e.id,
         event: JSON.stringify(e.event),
+        eventId: (e.event as any)?.metadata?.eventId ?? null,
         aggregateName: e.aggregateName ?? null,
         aggregateId: e.aggregateId ?? null,
         createdAt: e.createdAt,
@@ -359,18 +360,11 @@ export class PrismaOutboxStore implements OutboxStore {
 
   async markPublishedByEventIds(eventIds: string[]): Promise<void> {
     if (eventIds.length === 0) return;
-    const unpublished = await this.loadUnpublished(10000);
-    const eventIdSet = new Set(eventIds);
-    const matchingIds = unpublished
-      .filter(
-        (e) =>
-          e.event?.metadata?.eventId &&
-          eventIdSet.has(e.event.metadata.eventId),
-      )
-      .map((e) => e.id);
-    if (matchingIds.length > 0) {
-      await this.markPublished(matchingIds);
-    }
+    const executor = this.getExecutor();
+    await (executor as any).nodddeOutboxEntry.updateMany({
+      where: { eventId: { in: eventIds }, publishedAt: null },
+      data: { publishedAt: new Date() },
+    });
   }
 
   async deletePublished(olderThan?: Date): Promise<void> {

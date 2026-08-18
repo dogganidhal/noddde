@@ -4,6 +4,7 @@ import type {
   UnitOfWorkFactory,
 } from "@noddde/core";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { sleep } from "../utils.js";
 
 export interface UnitOfWorkContractContext {
   eventSourced: EventSourcedAggregatePersistence;
@@ -125,6 +126,103 @@ export function defineUnitOfWorkContract(
       expect(observed).toBeDefined();
       expect(observed).not.toBeNull();
       expect(uow.context).toBeUndefined();
+    });
+
+    // Regression coverage for the #129 finding 1 BLOCKER: the active
+    // transaction used to live in a single mutable field shared by every
+    // persistence instance (`txStore.current = tx`), so a second UoW
+    // committing while a first UoW's enlisted operations were still
+    // in-flight would silently redirect the first UoW's later writes onto
+    // the second UoW's transaction — including its rollback. These two
+    // tests reproduce that exact interleaving and must pass on an
+    // AsyncLocalStorage-backed (or equivalent per-call-context) executor.
+    describe("concurrent unit-of-work isolation", () => {
+      it("two unit-of-work commits interleaved in time do not cross-contaminate each other's writes", async () => {
+        const uowA = ctx.uowFactory();
+        const uowB = ctx.uowFactory();
+
+        // uowA's second op is delayed so uowB's commit interleaves in the
+        // gap — the exact window where a shared mutable txStore would let
+        // uowB's transaction overwrite uowA's for the remainder of uowA's op
+        // loop.
+        uowA.enlist(() =>
+          ctx.eventSourced.save(
+            "Order",
+            "uow-a",
+            [{ name: "First", payload: {} }],
+            0,
+          ),
+        );
+        uowA.enlist(async () => {
+          await sleep(30);
+          await ctx.eventSourced.save(
+            "Order",
+            "uow-a",
+            [{ name: "Second", payload: {} }],
+            1,
+          );
+        });
+
+        uowB.enlist(() =>
+          ctx.eventSourced.save(
+            "Order",
+            "uow-b",
+            [{ name: "OnlyB", payload: {} }],
+            0,
+          ),
+        );
+
+        const commitA = uowA.commit();
+        await sleep(5); // let uowA enter its transaction and start its op loop
+        const commitB = uowB.commit();
+        await Promise.all([commitA, commitB]);
+
+        const aEvents = await ctx.eventSourced.load("Order", "uow-a");
+        expect(aEvents.map((e) => e.name)).toEqual(["First", "Second"]);
+
+        const bEvents = await ctx.eventSourced.load("Order", "uow-b");
+        expect(bEvents.map((e) => e.name)).toEqual(["OnlyB"]);
+      });
+
+      it("a rollback in one unit-of-work does not roll back another unit-of-work's concurrently-committing writes", async () => {
+        const uowKeep = ctx.uowFactory();
+        const uowFail = ctx.uowFactory();
+
+        uowKeep.enlist(() =>
+          ctx.eventSourced.save(
+            "Order",
+            "uow-keep",
+            [{ name: "First", payload: {} }],
+            0,
+          ),
+        );
+        uowKeep.enlist(async () => {
+          await sleep(30);
+          await ctx.eventSourced.save(
+            "Order",
+            "uow-keep",
+            [{ name: "Second", payload: {} }],
+            1,
+          );
+        });
+
+        uowFail.enlist(async () => {
+          throw new Error("boom");
+        });
+
+        const commitKeep = uowKeep.commit();
+        await sleep(5); // interleave uowFail's rollback inside uowKeep's gap
+        const commitFail = uowFail.commit();
+
+        await expect(commitFail).rejects.toThrow(/boom/);
+        await commitKeep;
+
+        // The whole point: uowKeep's commit resolved successfully and BOTH
+        // of its writes must be visible — a shared mutable txStore would let
+        // uowFail's rollback silently discard uowKeep's in-flight write.
+        const keepEvents = await ctx.eventSourced.load("Order", "uow-keep");
+        expect(keepEvents.map((e) => e.name)).toEqual(["First", "Second"]);
+      });
     });
   });
 }

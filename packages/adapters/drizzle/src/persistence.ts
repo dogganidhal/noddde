@@ -26,6 +26,8 @@ import {
   type OutboxEntry,
 } from "@noddde/core";
 import type { DrizzleTransactionStore, DrizzleNodddeSchema } from "./index";
+import { isUniqueViolation } from "./errors";
+import { getRowsAffected } from "./rows-affected";
 
 /**
  * Drizzle-backed event-sourced aggregate persistence.
@@ -40,10 +42,11 @@ export class DrizzleEventSourcedAggregatePersistence
     private readonly db: any,
     private readonly txStore: DrizzleTransactionStore,
     private readonly schema: DrizzleNodddeSchema,
+    private readonly nativeJson: boolean = false,
   ) {}
 
   private getExecutor() {
-    return this.txStore.current ?? this.db;
+    return this.txStore.als.getStore() ?? this.db;
   }
 
   async save(
@@ -64,8 +67,12 @@ export class DrizzleEventSourcedAggregatePersistence
           aggregateId,
           sequenceNumber: expectedVersion + index + 1,
           eventName: event.name,
-          payload: JSON.stringify(event.payload),
-          metadata: JSON.stringify(event.metadata ?? null),
+          payload: this.nativeJson
+            ? event.payload
+            : JSON.stringify(event.payload),
+          metadata: this.nativeJson
+            ? event.metadata ?? null
+            : JSON.stringify(event.metadata ?? null),
           createdAt: toDbTimestamp(
             event.metadata?.timestamp
               ? new Date(event.metadata.timestamp)
@@ -73,15 +80,8 @@ export class DrizzleEventSourcedAggregatePersistence
           ),
         })),
       );
-    } catch (error: any) {
-      // Detect unique constraint violation across dialects
-      const message = error?.message ?? "";
-      if (
-        message.includes("UNIQUE constraint failed") || // SQLite
-        message.includes("unique constraint") || // PostgreSQL
-        message.includes("Duplicate entry") || // MySQL
-        message.includes("duplicate key") // PostgreSQL variant
-      ) {
+    } catch (error: unknown) {
+      if (isUniqueViolation(error)) {
         throw new ConcurrencyError(
           aggregateName,
           aggregateId,
@@ -136,7 +136,7 @@ export class DrizzleEventSourcedAggregatePersistence
 }
 
 /** Deserializes a raw DB row into an Event, parsing JSON payload and metadata. */
-function deserializeEvent(row: any): Event {
+export function deserializeEvent(row: any): Event {
   const event: Event = {
     name: row.eventName,
     payload:
@@ -165,10 +165,11 @@ export class DrizzleStateStoredAggregatePersistence
     private readonly db: any,
     private readonly txStore: DrizzleTransactionStore,
     private readonly schema: DrizzleNodddeSchema,
+    private readonly nativeJson: boolean = false,
   ) {}
 
   private getExecutor() {
-    return this.txStore.current ?? this.db;
+    return this.txStore.als.getStore() ?? this.db;
   }
 
   async save(
@@ -179,7 +180,7 @@ export class DrizzleStateStoredAggregatePersistence
   ): Promise<void> {
     const executor = this.getExecutor();
     const table = this.schema.aggregateStates;
-    const serialized = JSON.stringify(state);
+    const serialized = this.nativeJson ? state : JSON.stringify(state);
 
     if (expectedVersion === 0) {
       // Insert path: new aggregate
@@ -190,14 +191,8 @@ export class DrizzleStateStoredAggregatePersistence
           state: serialized,
           version: 1,
         });
-      } catch (error: any) {
-        const message = error?.message ?? "";
-        if (
-          message.includes("UNIQUE constraint failed") || // SQLite
-          message.includes("unique constraint") || // PostgreSQL
-          message.includes("Duplicate entry") || // MySQL
-          message.includes("duplicate key") // PostgreSQL variant
-        ) {
+      } catch (error: unknown) {
+        if (isUniqueViolation(error)) {
           throw new ConcurrencyError(
             aggregateName,
             aggregateId,
@@ -220,20 +215,7 @@ export class DrizzleStateStoredAggregatePersistence
           ),
         );
 
-      // Check if no rows were updated (concurrency conflict). Each
-      // drizzle driver surfaces this on a different property — better-
-      // sqlite3 uses `changes`, node-postgres uses `rowCount`, mysql2
-      // returns a `ResultSetHeader` with `affectedRows`. mysql2 in
-      // particular is wrapped in an array `[ResultSetHeader, ...]` by
-      // drizzle's mysql2 session, so probe both shapes.
-      const rowsAffected =
-        result?.rowsAffected ??
-        result?.changes ??
-        result?.rowCount ??
-        result?.affectedRows ??
-        result?.[0]?.affectedRows ??
-        0;
-      if (rowsAffected === 0) {
+      if (getRowsAffected(result) === 0) {
         throw new ConcurrencyError(
           aggregateName,
           aggregateId,
@@ -278,16 +260,17 @@ export class DrizzleSagaPersistence implements SagaPersistence {
     private readonly db: any,
     private readonly txStore: DrizzleTransactionStore,
     private readonly schema: DrizzleNodddeSchema,
+    private readonly nativeJson: boolean = false,
   ) {}
 
   private getExecutor() {
-    return this.txStore.current ?? this.db;
+    return this.txStore.als.getStore() ?? this.db;
   }
 
   async save(sagaName: string, sagaId: string, state: any): Promise<void> {
     const executor = this.getExecutor();
     const table = this.schema.sagaStates;
-    const serialized = JSON.stringify(state);
+    const serialized = this.nativeJson ? state : JSON.stringify(state);
 
     const existing = await executor
       .select()
@@ -336,10 +319,11 @@ export class DrizzleSnapshotStore implements SnapshotStore {
     private readonly db: any,
     private readonly txStore: DrizzleTransactionStore,
     private readonly schema: DrizzleNodddeSchema,
+    private readonly nativeJson: boolean = false,
   ) {}
 
   private getExecutor() {
-    return this.txStore.current ?? this.db;
+    return this.txStore.als.getStore() ?? this.db;
   }
 
   async load(
@@ -376,8 +360,9 @@ export class DrizzleSnapshotStore implements SnapshotStore {
     const table = this.schema.snapshots;
     if (!table) return;
 
-    const serialized =
-      typeof snapshot.state === "string"
+    const serialized = this.nativeJson
+      ? snapshot.state
+      : typeof snapshot.state === "string"
         ? snapshot.state
         : JSON.stringify(snapshot.state);
 
@@ -422,10 +407,11 @@ export class DrizzleOutboxStore implements OutboxStore {
     private readonly db: any,
     private readonly txStore: DrizzleTransactionStore,
     private readonly schema: DrizzleNodddeSchema,
+    private readonly nativeJson: boolean = false,
   ) {}
 
   private getExecutor() {
-    return this.txStore.current ?? this.db;
+    return this.txStore.als.getStore() ?? this.db;
   }
 
   async save(entries: OutboxEntry[]): Promise<void> {
@@ -434,7 +420,8 @@ export class DrizzleOutboxStore implements OutboxStore {
     await executor.insert(this.schema.outbox).values(
       entries.map((e) => ({
         id: e.id,
-        event: JSON.stringify(e.event),
+        event: this.nativeJson ? e.event : JSON.stringify(e.event),
+        eventId: (e.event as any)?.metadata?.eventId ?? null,
         aggregateName: e.aggregateName ?? null,
         aggregateId: e.aggregateId ?? null,
         createdAt: toDbTimestamp(e.createdAt),
@@ -472,19 +459,16 @@ export class DrizzleOutboxStore implements OutboxStore {
 
   async markPublishedByEventIds(eventIds: string[]): Promise<void> {
     if (eventIds.length === 0) return;
-    // Load all unpublished, filter by eventId in deserialized event metadata
-    const unpublished = await this.loadUnpublished(10000);
-    const eventIdSet = new Set(eventIds);
-    const matchingIds = unpublished
-      .filter(
-        (e) =>
-          e.event?.metadata?.eventId &&
-          eventIdSet.has(e.event.metadata.eventId),
-      )
-      .map((e) => e.id);
-    if (matchingIds.length > 0) {
-      await this.markPublished(matchingIds);
-    }
+    const executor = this.getExecutor();
+    await executor
+      .update(this.schema.outbox)
+      .set({ publishedAt: toDbTimestamp(new Date()) })
+      .where(
+        and(
+          inArray(this.schema.outbox.eventId, eventIds),
+          isNull(this.schema.outbox.publishedAt),
+        ),
+      );
   }
 
   async deletePublished(olderThan?: Date): Promise<void> {

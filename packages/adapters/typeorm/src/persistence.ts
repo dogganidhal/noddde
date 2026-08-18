@@ -26,6 +26,7 @@ import type {
   NodddeOutboxEntryEntity,
 } from "./entities";
 import type { TypeORMTransactionStore } from "./unit-of-work";
+import { isUniqueViolation } from "./errors";
 
 /** Table names of the built-in noddde stores. */
 const TABLE = {
@@ -72,7 +73,7 @@ export class TypeORMEventSourcedAggregatePersistence
   ) {}
 
   private getManager(): EntityManager {
-    return this.txStore.current ?? this.dataSource.manager;
+    return this.txStore.als.getStore() ?? this.dataSource.manager;
   }
 
   async save(
@@ -101,8 +102,7 @@ export class TypeORMEventSourcedAggregatePersistence
     try {
       await repo.save(entities);
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (/UNIQUE|duplicate|unique/i.test(message)) {
+      if (isUniqueViolation(error)) {
         throw new ConcurrencyError(
           aggregateName,
           aggregateId,
@@ -171,7 +171,7 @@ export class TypeORMStateStoredAggregatePersistence
   ) {}
 
   private getManager(): EntityManager {
-    return this.txStore.current ?? this.dataSource.manager;
+    return this.txStore.als.getStore() ?? this.dataSource.manager;
   }
 
   async save(
@@ -187,47 +187,37 @@ export class TypeORMStateStoredAggregatePersistence
     );
     const serialized = JSON.stringify(state);
 
-    const existing = await repo.findOne({
-      where: { aggregateName, aggregateId },
-    });
-
-    try {
-      if (existing) {
-        if (existing.version !== expectedVersion) {
-          throw new ConcurrencyError(
-            aggregateName,
-            aggregateId,
-            expectedVersion,
-            existing.version,
-          );
-        }
-        existing.state = serialized;
-        existing.version = expectedVersion + 1;
-        await repo.save(existing);
-      } else {
-        if (expectedVersion !== 0) {
-          throw new ConcurrencyError(
-            aggregateName,
-            aggregateId,
-            expectedVersion,
-            0,
-          );
-        }
-        await repo.save({
+    if (expectedVersion === 0) {
+      // Insert path: new aggregate. No prior read — a unique-constraint
+      // violation on the primary key is the concurrency signal.
+      try {
+        await repo.insert({
           aggregateName,
           aggregateId,
           state: serialized,
           version: 1,
         });
+      } catch (error: unknown) {
+        if (isUniqueViolation(error)) {
+          throw new ConcurrencyError(
+            aggregateName,
+            aggregateId,
+            expectedVersion,
+            -1,
+          );
+        }
+        throw error;
       }
-    } catch (error: unknown) {
-      if (error instanceof ConcurrencyError) throw error;
-      // The `findOne`-then-insert path has a TOCTOU window: two racing
-      // saves for a brand-new aggregate both see no existing row and both
-      // INSERT, violating the primary key. Map that to a ConcurrencyError
-      // so concurrent creators get the same contract as a stale version.
-      const message = error instanceof Error ? error.message : String(error);
-      if (/UNIQUE|duplicate|unique/i.test(message)) {
+    } else {
+      // Update path: the version predicate is enforced by the database
+      // itself, not by a prior read-then-compare — closing the classic
+      // lost-update race where two concurrent saves both read version N,
+      // both pass an in-memory check, and the second silently overwrites.
+      const result = await repo.update(
+        { aggregateName, aggregateId, version: expectedVersion } as any,
+        { state: serialized, version: expectedVersion + 1 } as any,
+      );
+      if (result.affected === 0) {
         throw new ConcurrencyError(
           aggregateName,
           aggregateId,
@@ -235,7 +225,6 @@ export class TypeORMStateStoredAggregatePersistence
           -1,
         );
       }
-      throw error;
     }
   }
 
@@ -268,7 +257,7 @@ export class TypeORMSagaPersistence implements SagaPersistence {
   ) {}
 
   private getManager(): EntityManager {
-    return this.txStore.current ?? this.dataSource.manager;
+    return this.txStore.als.getStore() ?? this.dataSource.manager;
   }
 
   async save(sagaName: string, sagaId: string, state: any): Promise<void> {
@@ -314,7 +303,7 @@ export class TypeORMSnapshotStore implements SnapshotStore {
   ) {}
 
   private getManager(): EntityManager {
-    return this.txStore.current ?? this.dataSource.manager;
+    return this.txStore.als.getStore() ?? this.dataSource.manager;
   }
 
   async load(
@@ -370,7 +359,7 @@ export class TypeORMOutboxStore implements OutboxStore {
   ) {}
 
   private getManager(): EntityManager {
-    return this.txStore.current ?? this.dataSource.manager;
+    return this.txStore.als.getStore() ?? this.dataSource.manager;
   }
 
   async save(entries: OutboxEntry[]): Promise<void> {

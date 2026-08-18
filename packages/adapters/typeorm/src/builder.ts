@@ -1,4 +1,6 @@
-import type { DataSource } from "typeorm";
+/* eslint-disable no-unused-vars */
+import { AsyncLocalStorage } from "node:async_hooks";
+import type { DataSource, EntityManager } from "typeorm";
 import type {
   EventSourcedAggregatePersistence,
   StateStoredAggregatePersistence,
@@ -7,6 +9,7 @@ import type {
   OutboxStore,
   UnitOfWorkFactory,
   AggregateStateMapper,
+  EventReader,
 } from "@noddde/core";
 import type { TypeORMTransactionStore } from "./unit-of-work";
 import {
@@ -18,6 +21,7 @@ import {
 } from "./persistence";
 import { TypeORMDedicatedStateStoredPersistence } from "./dedicated-state-persistence";
 import { createTypeORMUnitOfWorkFactory } from "./unit-of-work";
+import { TypeORMEventReader } from "./event-reader";
 
 /**
  * TypeORM-specific bi-directional mapper between an aggregate's state and
@@ -89,6 +93,8 @@ export type TypeORMAdapterResult<C extends TypeORMAdapterConfig> = {
   sagaPersistence: SagaPersistence;
   /** Factory for creating TypeORM-backed UnitOfWork instances. Always present. */
   unitOfWorkFactory: UnitOfWorkFactory;
+  /** Global event-log reader enabling `Domain.rebuildProjection`. Always present. */
+  eventReader: EventReader;
 } & (C extends { snapshotStore: true }
   ? { /** Snapshot store. */ snapshotStore: SnapshotStore }
   : {}) &
@@ -156,7 +162,9 @@ export function createTypeORMAdapter(
   dataSource: DataSource,
   config?: TypeORMAdapterConfig,
 ): any {
-  const txStore: TypeORMTransactionStore = { current: null };
+  const txStore: TypeORMTransactionStore = {
+    als: new AsyncLocalStorage<EntityManager>(),
+  };
 
   const result: Record<string, any> = {
     eventSourcedPersistence: new TypeORMEventSourcedAggregatePersistence(
@@ -169,6 +177,7 @@ export function createTypeORMAdapter(
     ),
     sagaPersistence: new TypeORMSagaPersistence(dataSource, txStore),
     unitOfWorkFactory: createTypeORMUnitOfWorkFactory(dataSource, txStore),
+    eventReader: new TypeORMEventReader(dataSource),
   };
 
   if (config?.snapshotStore) {

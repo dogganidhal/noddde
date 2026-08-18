@@ -4,6 +4,11 @@
  * schema *definitions* (drizzle table objects), not migrations — apps
  * are expected to manage their own migrations. For tests we issue the
  * equivalent CREATE TABLE statements explicitly.
+ *
+ * MUST mirror ../../pg/schema.ts, ../../mysql/schema.ts, ../../sqlite/schema.ts
+ * column-for-column and constraint-for-constraint — this DDL diverging from the
+ * shipped schema objects is exactly the bug fixed by issue #130 (the shipped
+ * Drizzle schemas had no PK/unique constraint that this test DDL already had).
  */
 export const SQLITE_DDL = `
   CREATE TABLE IF NOT EXISTS noddde_events (
@@ -41,11 +46,13 @@ export const SQLITE_DDL = `
   CREATE TABLE IF NOT EXISTS noddde_outbox (
     id TEXT PRIMARY KEY,
     event TEXT NOT NULL,
+    event_id TEXT,
     aggregate_name TEXT,
     aggregate_id TEXT,
     created_at TEXT NOT NULL,
     published_at TEXT
   );
+  CREATE INDEX IF NOT EXISTS noddde_outbox_event_id_idx ON noddde_outbox (event_id);
 `;
 
 export const POSTGRES_DDL = `
@@ -84,11 +91,13 @@ export const POSTGRES_DDL = `
   CREATE TABLE IF NOT EXISTS noddde_outbox (
     id TEXT PRIMARY KEY,
     event JSONB NOT NULL,
+    event_id TEXT,
     aggregate_name TEXT,
     aggregate_id TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     published_at TIMESTAMPTZ
   );
+  CREATE INDEX IF NOT EXISTS noddde_outbox_event_id_idx ON noddde_outbox (event_id);
 `;
 
 export const MYSQL_DDL = `
@@ -126,10 +135,12 @@ export const MYSQL_DDL = `
   CREATE TABLE IF NOT EXISTS noddde_outbox (
     id VARCHAR(255) PRIMARY KEY,
     event JSON NOT NULL,
+    event_id VARCHAR(255),
     aggregate_name VARCHAR(255),
     aggregate_id VARCHAR(255),
     created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    published_at TIMESTAMP(3) NULL
+    published_at TIMESTAMP(3) NULL,
+    INDEX noddde_outbox_event_id_idx (event_id)
   );
 `;
 
