@@ -63,6 +63,7 @@ function createTestDb() {
     CREATE TABLE noddde_outbox (
       id TEXT PRIMARY KEY,
       event TEXT NOT NULL,
+      event_id TEXT,
       aggregate_name TEXT,
       aggregate_id TEXT,
       created_at TEXT NOT NULL,

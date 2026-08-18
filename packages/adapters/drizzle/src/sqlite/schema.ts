@@ -3,6 +3,8 @@ import {
   text,
   integer,
   uniqueIndex,
+  index,
+  primaryKey,
 } from "drizzle-orm/sqlite-core";
 
 /**
@@ -34,48 +36,77 @@ export const events = sqliteTable(
  * SQLite table definition for state-stored aggregate persistence.
  * Stores the latest state snapshot per aggregate instance.
  */
-export const aggregateStates = sqliteTable("noddde_aggregate_states", {
-  aggregateName: text("aggregate_name").notNull(),
-  aggregateId: text("aggregate_id").notNull(),
-  state: text("state").notNull(),
-  version: integer("version").notNull().default(0),
-});
+export const aggregateStates = sqliteTable(
+  "noddde_aggregate_states",
+  {
+    aggregateName: text("aggregate_name").notNull(),
+    aggregateId: text("aggregate_id").notNull(),
+    state: text("state").notNull(),
+    version: integer("version").notNull().default(0),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.aggregateName, table.aggregateId] }),
+  }),
+);
 
 /**
  * SQLite table definition for saga persistence.
  * Stores the current workflow state per saga instance.
  */
-export const sagaStates = sqliteTable("noddde_saga_states", {
-  sagaName: text("saga_name").notNull(),
-  sagaId: text("saga_id").notNull(),
-  state: text("state").notNull(),
-  version: integer("version").notNull().default(0),
-});
+export const sagaStates = sqliteTable(
+  "noddde_saga_states",
+  {
+    sagaName: text("saga_name").notNull(),
+    sagaId: text("saga_id").notNull(),
+    state: text("state").notNull(),
+    version: integer("version").notNull().default(0),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.sagaName, table.sagaId] }),
+  }),
+);
 
 /**
  * SQLite table definition for aggregate state snapshots.
  * Stores the latest snapshot per aggregate instance for
  * optimized event-sourced aggregate loading.
  */
-export const snapshots = sqliteTable("noddde_snapshots", {
-  aggregateName: text("aggregate_name").notNull(),
-  aggregateId: text("aggregate_id").notNull(),
-  state: text("state").notNull(),
-  version: integer("version").notNull(),
-});
+export const snapshots = sqliteTable(
+  "noddde_snapshots",
+  {
+    aggregateName: text("aggregate_name").notNull(),
+    aggregateId: text("aggregate_id").notNull(),
+    state: text("state").notNull(),
+    version: integer("version").notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.aggregateName, table.aggregateId] }),
+  }),
+);
 
 /**
  * SQLite table definition for the transactional outbox.
  * Stores domain events pending publication.
  */
-export const outbox = sqliteTable("noddde_outbox", {
-  id: text("id").primaryKey(),
-  event: text("event").notNull(),
-  aggregateName: text("aggregate_name"),
-  aggregateId: text("aggregate_id"),
-  createdAt: text("created_at").notNull(),
-  publishedAt: text("published_at"),
-});
+export const outbox = sqliteTable(
+  "noddde_outbox",
+  {
+    id: text("id").primaryKey(),
+    event: text("event").notNull(),
+    /** Extracted from `event.metadata.eventId` at write time; indexed so
+     * `markPublishedByEventIds` can look up rows directly instead of
+     * scanning the unpublished backlog. Nullable — rows written before
+     * this column existed have it `NULL` until backfilled. */
+    eventId: text("event_id"),
+    aggregateName: text("aggregate_name"),
+    aggregateId: text("aggregate_id"),
+    createdAt: text("created_at").notNull(),
+    publishedAt: text("published_at"),
+  },
+  (table) => ({
+    eventIdIdx: index("noddde_outbox_event_id_idx").on(table.eventId),
+  }),
+);
 
 /**
  * SQLite table definition for event handler idempotency tracking.

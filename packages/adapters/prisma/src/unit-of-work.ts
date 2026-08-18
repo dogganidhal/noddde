@@ -1,12 +1,18 @@
+/* eslint-disable no-unused-vars */
+import type { AsyncLocalStorage } from "node:async_hooks";
 import type { PrismaClient } from "@prisma/client";
 import type { Event, UnitOfWork, UnitOfWorkFactory } from "@noddde/core";
 
 /**
  * Shared store for propagating the active Prisma transaction client
- * to persistence implementations.
+ * to persistence implementations. Backed by `AsyncLocalStorage` so
+ * concurrent `UnitOfWork.commit()` calls never see each other's
+ * transaction handle — the previous `{ current: any | null }` shared
+ * mutable field let a second commit's transaction leak into the first
+ * commit's still-running enlisted operations.
  */
 export interface PrismaTransactionStore {
-  current: any | null;
+  readonly als: AsyncLocalStorage<any>;
 }
 
 /**
@@ -56,14 +62,14 @@ export class PrismaUnitOfWork implements UnitOfWork {
     const txStore = this.txStore;
 
     await this.prisma.$transaction(async (tx) => {
-      txStore.current = tx;
       this._context = tx;
       try {
-        for (const op of ops) {
-          await op();
-        }
+        await txStore.als.run(tx, async () => {
+          for (const op of ops) {
+            await op();
+          }
+        });
       } finally {
-        txStore.current = null;
         this._context = undefined;
       }
     });

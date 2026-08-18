@@ -21,8 +21,16 @@ export type ScaleContractFactory = () =>
   | Promise<ScaleContractContext>;
 
 // Volume knobs. Kept as named constants so the budgets below read clearly.
-const OUTBOX_ENTRIES = 10_000;
-const MARK_SAMPLE = 1_000;
+// OUTBOX_ENTRIES deliberately EXCEEDS the adapters' old hardcoded
+// `loadUnpublished(10000)` scan cap (see markPublishedByEventIds in each
+// adapter's persistence.ts) — at exactly 10,000 this suite would not have
+// caught the "entries past the 10k cap are never matched" bug (#131 finding
+// 3), since every seeded id would fall within the old window. Some of the
+// evenly-spread `targetEventIds` below now land past index 10,000, so this
+// only passes when markPublishedByEventIds matches by an indexed column
+// rather than loading and filtering a capped batch.
+const OUTBOX_ENTRIES = 12_000;
+const MARK_SAMPLE = 1_200;
 const AGGREGATE_EVENTS = 100_000;
 const SAVE_BATCH = 5_000;
 

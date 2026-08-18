@@ -487,6 +487,76 @@ noddde_outbox
 └── published_at     (timestamp, nullable)
 ```
 
+## GA Hardening (Phase 1 — issues #129, #130, #131)
+
+> Fixes for concurrency, on-disk-format, and capability-gap findings from the GA-readiness
+> audit. All changes below are pre-GA (on-disk format is not yet frozen) — see Migration
+> notes at the end of this section for the one-time data migration required by existing
+> deployments once these ship.
+
+### Transaction propagation (fixes #129 finding 1 — cross-transaction contamination)
+
+61. `DrizzleTransactionStore` is no longer a plain mutable `{ current: any | null }` object. It wraps a Node `AsyncLocalStorage`: `interface DrizzleTransactionStore { readonly als: AsyncLocalStorage<any> }`. Each `DrizzleAdapter` (and `createDrizzleAdapter`) constructs exactly one `{ als: new AsyncLocalStorage() }` and shares it across every persistence instance it creates, same as before.
+62. Every persistence class's `getExecutor()` becomes `this.txStore.als.getStore() ?? this.db` — no other change to the resolution contract (still falls back to the base `db` outside a transaction).
+63. `DrizzleUnitOfWork.commit()` (both the SQL-statement/SQLite path and the callback/PG-MySQL path) runs its enlisted-operations loop inside `await this.txStore.als.run(tx, async () => { for (const op of this.operations) await op(); })` instead of assigning `this.txStore.current = tx`. This guarantees each UoW's operations see only their own transaction handle even when two UoWs' `commit()` calls interleave on the event loop — `AsyncLocalStorage` propagates through the `async`/`await` chain per call, not through a shared field.
+64. Two `DrizzleUnitOfWork` instances committing concurrently (`Promise.all([uowA.commit(), uowB.commit()])`) each see only their own transaction inside their enlisted operations — no cross-contamination, verified by a new concurrent-commit contract test (see `packages/testing-integration`).
+65. This is a breaking change to `DrizzleTransactionStore`'s shape. Any code constructing persistence classes directly with a raw `{ current: null }` object (e.g. the pre-existing `DrizzleEventIdempotencyStore` JSDoc example) must switch to `{ als: new AsyncLocalStorage() }`.
+    65a. **Sync-SQLite commit serialization.** AsyncLocalStorage alone does not make two overlapping `commitWithSqlStatements()` calls safe on a synchronous, single-connection driver like better-sqlite3: issuing a second `BEGIN` while the first is still open throws `SqliteError: cannot start a transaction within a transaction`, and its `ROLLBACK` aborts the _other_ UoW's open transaction. `createDrizzleUnitOfWorkFactory` therefore constructs one `SyncCommitMutex` shared by every `DrizzleUnitOfWork` it creates; `commitWithSqlStatements()` queues behind it, so concurrent commits on a sync-SQLite `db` run one at a time (the only physically sound behavior for a single connection) instead of racing. The async PG/MySQL path (`commitWithCallback`) is unaffected — pooled connections genuinely support concurrent transactions and never touch this mutex.
+
+### Unique-violation detection (fixes #129 finding 4)
+
+66. A new `isUniqueViolation(error: unknown): boolean` helper (in `packages/adapters/drizzle/src/errors.ts`) replaces every message-string-match block. It checks, in order: Postgres SQLSTATE `23505` (`error.code`), MySQL `ER_DUP_ENTRY` / `errno 1062`, SQLite `SQLITE_CONSTRAINT*` codes, and — only as a last resort when no driver code is present — the legacy message regex (for wrapped/older driver errors that don't expose a code).
+67. Every one of the ~12 duplicated message-match blocks across `persistence.ts`, `dedicated-state-persistence.ts`, and `event-idempotency.ts` is replaced with a call to `isUniqueViolation(error)`.
+
+### Rows-affected detection (fixes #129 finding 3)
+
+68. A new `getRowsAffected(result: any): number` helper (in `packages/adapters/drizzle/src/rows-affected.ts`) unifies the three divergent probe implementations and adds `result?.count` (the `drizzle-orm/postgres-js` shape) to the probe list: `rowsAffected ?? changes ?? rowCount ?? count ?? affectedRows ?? [0]?.affectedRows ?? 0`.
+69. `DrizzleStateStoredAggregatePersistence.save()` (update path) and `DrizzleDedicatedStateStoredPersistence.save()` (update path) both use `getRowsAffected()` instead of their own inline probes.
+
+### Native JSON storage (fixes #130 finding 2 — double JSON encoding)
+
+70. Persistence classes that write to `jsonb`/`json` columns (PostgreSQL, MySQL) now pass the raw object to Drizzle instead of pre-stringifying — Drizzle's own `jsonb`/`json` column mapping performs the single JSON encode. SQLite `text` columns still receive `JSON.stringify(...)` since the column is untyped text.
+71. Every persistence class that serializes payload/metadata/state/event (`DrizzleEventSourcedAggregatePersistence`, `DrizzleStateStoredAggregatePersistence`, `DrizzleSagaPersistence`, `DrizzleSnapshotStore`, `DrizzleOutboxStore`, `DrizzleDedicatedStateStoredPersistence`) accepts the dialect (or an equivalent `nativeJson: boolean` flag derived from it) as a constructor parameter, supplied by `DrizzleAdapter`/`createDrizzleAdapter` from the already-inferred dialect.
+72. Deserialization is unchanged (`typeof row.x === "string" ? JSON.parse(row.x) : row.x`) — it already handles both a native object (pg/mysql) and a string (sqlite) transparently.
+73. A new integration assertion queries `payload->>'field'` directly against Postgres and asserts the expected scalar, pinning the on-disk format (see `packages/testing-integration`).
+    73a. **Known limitation, MySQL only.** Storing payloads as native `json` (rather than a double-encoded string) means MySQL's own JSON engine now parses and re-emits numeric literals, which does not guarantee full IEEE-754 double round-trip fidelity for every value (fewer significant digits than a bit-exact round-trip needs). The shared property-based payload contract (`packages/testing-integration`) exposes an opt-out (`jsonNumberPrecision: "lossy"`) for exactly this case — wired for `drizzle/mysql` only — that compares floating-point leaves after rounding both sides to the same precision, so structural corruption (wrong keys/types/nesting) still fails the test while this specific, engine-level precision limitation does not. PostgreSQL's `jsonb` and SQLite's `text` storage are unaffected and remain `"exact"`.
+
+### Schema constraints (fixes #130 finding 1 — missing PK/unique on Drizzle schemas)
+
+74. The `pg`, `mysql`, and `sqlite` schema modules add a composite primary key / unique constraint on `aggregateStates` (`aggregateName`, `aggregateId`), `snapshots` (`aggregateName`, `aggregateId`), and a composite primary key on `sagaStates` (`sagaName`, `sagaId`) — matching what the hand-written integration-test DDL already enforces and what Prisma/TypeORM already declare.
+75. The integration-test DDL (`src/__tests__/integration/schema-sql.ts`) is kept in lockstep with the schema module definitions — column-for-column and constraint-for-constraint — so the two can never re-diverge silently. A comment at the top of `schema-sql.ts` cross-references the schema module it must mirror.
+
+### Outbox indexed lookup (fixes #131 finding 3 — unbounded backlog scan)
+
+76. The outbox schema (`pg`, `mysql`, `sqlite`) adds a nullable, indexed `event_id` column, populated at `save()` time from `entry.event?.metadata?.eventId ?? null`.
+77. `DrizzleOutboxStore.markPublishedByEventIds()` issues `UPDATE outbox SET published_at = now() WHERE event_id IN (...) AND published_at IS NULL` directly against the indexed column — no more `loadUnpublished(10000)` + in-memory filter. Cost no longer scales with backlog size.
+78. Existing rows written before this migration have `event_id IS NULL` — a one-time backfill migration (documented in the package `MIGRATIONS.md`) populates it from the existing JSON blob. Until backfilled, old rows are simply not matched by `markPublishedByEventIds` (same limitation the in-memory filter had for anything past its old 10k cap, so this is not a regression).
+
+### EventReader (fixes #131 finding 1 — rebuildProjection unavailable)
+
+79. `DrizzleAdapter` (and `createDrizzleAdapter`'s result) exposes an `eventReader: EventReader` backed by the events table's existing global auto-increment `id` column: `read(options?)` yields events in batches via keyset pagination (`WHERE id > $cursor [AND aggregate_name = $name] ORDER BY id ASC LIMIT $batchSize`), looping until a batch returns fewer rows than the batch size.
+80. `read()` never materializes the full event log in memory — each batch is fetched, yielded, and discarded before the next batch query runs.
+81. JSDoc on the reader documents the quiescence assumption: auto-increment `id` values can commit out of order under concurrent writers, so `read()` is only guaranteed complete/gap-free when called against a quiescent log (no concurrent writers) — e.g. during an offline projection rebuild.
+
+### Advisory locker session affinity (fixes #131 finding 2 — pooled-connection lock leak)
+
+82. `DrizzleAdapter` no longer auto-constructs `DrizzleAdvisoryLocker` from the shared (pooled) `db` instance in its constructor — `aggregateLocker` is `undefined` unless the caller explicitly wires one, since a pooled `db` cannot safely host session-scoped advisory locks.
+83. `DrizzleAdvisoryLocker.fromUrl(url, dialect, options?)` (new static factory, mirroring `PrismaAdvisoryLocker.fromUrl`) lazily opens and owns a single dedicated driver connection (`pg.Client` for `"pg"`, `mysql2/promise` `Connection` for `"mysql"` — never a pool), wraps it with the matching Drizzle driver (`drizzle-orm/node-postgres` / `drizzle-orm/mysql2`), and constructs the locker against that connection. This is the recommended, safe construction path. `close()` disconnects the owned connection; the class implements `Closeable`.
+84. The existing `new DrizzleAdvisoryLocker(db, dialect)` constructor remains available for advanced callers who guarantee `db` is already backed by a single dedicated connection (documented prominently as a footgun otherwise, matching the Prisma package's constructor JSDoc).
+85. `PostgresLocker`/`MySQLLocker` (Drizzle) gain the same `_held`-set multiplexing detection as their Prisma counterparts: `release()` throws loudly if the unlock call reports "not held" while the locker believes it acquired the lock on this connection — signaling a session mismatch instead of silently leaking.
+86. Both `PostgresLocker` and `MySQLLocker` (Drizzle) additionally compose a per-process keyed mutex in front of the DB-level lock: `acquire()` first waits on (and then holds) a local `Map<string, Promise<void>>` entry for `${aggregateName}:${aggregateId}` before issuing the DB lock call, and `release()` releases the local entry after the DB unlock. This closes the residual re-entrancy hole (PG/MySQL advisory locks are session-scoped, not call-scoped, so two concurrent commands sharing one pinned connection would otherwise both "acquire").
+
+## Migration
+
+**Breaking, pre-GA (on-disk format not yet frozen):**
+
+- `DrizzleTransactionStore` changed shape from `{ current: any | null }` to `{ als: AsyncLocalStorage<any> }`. Direct construction (rare — only advanced users bypassing `DrizzleAdapter`) must update to `{ als: new AsyncLocalStorage() }`.
+- Persistence class constructors gained a dialect/`nativeJson` parameter. Callers using `DrizzleAdapter` / `createDrizzleAdapter` are unaffected — only direct persistence-class construction needs the new argument.
+- PostgreSQL/MySQL payload/metadata/state/event columns switch from double-encoded JSON strings to native JSON. See `packages/adapters/drizzle/MIGRATIONS.md` for the one-time backfill SQL (`(col #>> '{}')::jsonb` on Postgres, `CAST(JSON_UNQUOTE(col) AS JSON)` on MySQL) required before upgrading a database with existing double-encoded rows.
+- Drizzle schema objects gained composite PK/unique constraints on `aggregate_states`, `saga_states`, `snapshots`. Existing tables provisioned from the old (constraint-less) schema need an `ALTER TABLE ... ADD PRIMARY KEY (...)` migration — deduplicate any pre-existing duplicate rows first.
+- Outbox tables gain a nullable `event_id` column. New rows populate it automatically; existing rows need the backfill migration in `MIGRATIONS.md` for `markPublishedByEventIds` to match them.
+- `DrizzleAdapter` no longer auto-wires `aggregateLocker` from a pooled `db`. Callers using `concurrency: "pessimistic"` must construct `DrizzleAdvisoryLocker.fromUrl(url, dialect)` explicitly and pass it via `wireDomain`'s `aggregates.concurrency.locker` option.
+
 ## Test Scenarios
 
 ### Factory creates all infrastructure components

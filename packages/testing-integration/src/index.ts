@@ -16,5 +16,6 @@ export * from "./contracts/saga-contract.js";
 export * from "./contracts/snapshot-contract.js";
 export * from "./contracts/unit-of-work-contract.js";
 export * from "./contracts/advisory-locker-contract.js";
+export * from "./contracts/event-reader-contract.js";
 export * from "./contracts/event-bus-contract.js";
 export * from "./utils.js";

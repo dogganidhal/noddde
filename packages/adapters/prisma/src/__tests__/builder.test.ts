@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { PrismaClient } from "@prisma/client";
 import { execSync } from "child_process";
 import fs from "fs";
@@ -163,7 +164,7 @@ describe("PrismaDedicatedStateStoredPersistence (unit)", () => {
     delegate: ReturnType<typeof createMockDelegate>,
   ) {
     const mockPrismaInst = { order: delegate } as any;
-    const txStore = { current: null };
+    const txStore = { als: new AsyncLocalStorage() };
     const mapper = jsonStateMapper();
     return new PrismaDedicatedStateStoredPersistence(
       mockPrismaInst,
@@ -201,11 +202,11 @@ describe("PrismaDedicatedStateStoredPersistence (unit)", () => {
     ).rejects.toThrow(ConcurrencyError);
   });
 
-  it("should use txStore.current when inside a transaction", async () => {
+  it("should use the ALS-bound transaction executor when inside a transaction", async () => {
     const delegate = createMockDelegate();
     const txDelegate = createMockDelegate();
     const mockPrismaInst = { order: delegate } as any;
-    const txStore: { current: any } = { current: null };
+    const txStore = { als: new AsyncLocalStorage<any>() };
     const mapper = jsonStateMapper();
     const persistence = new PrismaDedicatedStateStoredPersistence(
       mockPrismaInst,
@@ -214,19 +215,18 @@ describe("PrismaDedicatedStateStoredPersistence (unit)", () => {
       mapper,
     );
 
-    txStore.current = { order: txDelegate };
-    await persistence.save("Order", "order-1", { total: 100 }, 0);
+    await txStore.als.run({ order: txDelegate }, async () => {
+      await persistence.save("Order", "order-1", { total: 100 }, 0);
+    });
 
     expect(txDelegate.create).toHaveBeenCalled();
     expect(delegate.create).not.toHaveBeenCalled();
-
-    txStore.current = null;
   });
 
   it("mapper.toRow is called once per save", async () => {
     const delegate = createMockDelegate();
     const mockPrismaInst = { order: delegate } as any;
-    const txStore = { current: null };
+    const txStore = { als: new AsyncLocalStorage() };
     const mapper = jsonStateMapper();
     const toRowSpy = vi.spyOn(mapper, "toRow");
 
@@ -247,7 +247,7 @@ describe("PrismaDedicatedStateStoredPersistence (unit)", () => {
   it("mapper.fromRow is called once per loaded row", async () => {
     const delegate = createMockDelegate();
     const mockPrismaInst = { order: delegate } as any;
-    const txStore = { current: null };
+    const txStore = { als: new AsyncLocalStorage() };
     const mapper = jsonStateMapper();
     const fromRowSpy = vi.spyOn(mapper, "fromRow");
 

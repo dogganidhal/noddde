@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
 import { sql } from "drizzle-orm";
@@ -22,7 +23,7 @@ describe("DrizzleEventIdempotencyStore (sqlite)", () => {
   it("should return true for hasProcessed after markProcessed", async () => {
     const store = new DrizzleEventIdempotencyStore(
       db,
-      { current: null },
+      { als: new AsyncLocalStorage() },
       eventIdempotency,
     );
 
@@ -34,7 +35,7 @@ describe("DrizzleEventIdempotencyStore (sqlite)", () => {
   it("should return false for a key that was never marked processed", async () => {
     const store = new DrizzleEventIdempotencyStore(
       db,
-      { current: null },
+      { als: new AsyncLocalStorage() },
       eventIdempotency,
     );
 
@@ -44,7 +45,7 @@ describe("DrizzleEventIdempotencyStore (sqlite)", () => {
   it("should not throw when markProcessed is called twice for the same key", async () => {
     const store = new DrizzleEventIdempotencyStore(
       db,
-      { current: null },
+      { als: new AsyncLocalStorage() },
       eventIdempotency,
     );
 
@@ -56,7 +57,7 @@ describe("DrizzleEventIdempotencyStore (sqlite)", () => {
   it("should remove expired records via removeExpired while keeping recent ones", async () => {
     const store = new DrizzleEventIdempotencyStore(
       db,
-      { current: null },
+      { als: new AsyncLocalStorage() },
       eventIdempotency,
     );
 
@@ -75,7 +76,7 @@ describe("DrizzleEventIdempotencyStore (sqlite)", () => {
   it("should apply lazy TTL cleanup on hasProcessed when constructed with ttlMs", async () => {
     const store = new DrizzleEventIdempotencyStore(
       db,
-      { current: null },
+      { als: new AsyncLocalStorage() },
       eventIdempotency,
       100,
     );

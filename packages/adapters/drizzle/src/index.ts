@@ -1,3 +1,5 @@
+/* eslint-disable no-unused-vars */
+import type { AsyncLocalStorage } from "node:async_hooks";
 export { DrizzleAdapter, type DrizzleAdapterOptions } from "./drizzle-adapter";
 export { DrizzleAdvisoryLocker } from "./advisory-locker";
 import type { UnitOfWorkFactory } from "@noddde/core";
@@ -47,12 +49,18 @@ export interface DrizzleNodddeSchema {
 
 /**
  * Shared transaction store used to propagate the active Drizzle
- * transaction context to persistence implementations. The UoW sets
- * `current` before executing enlisted operations; persistence
- * classes read it to run queries inside the transaction.
+ * transaction context to persistence implementations. Backed by
+ * `AsyncLocalStorage` so that concurrent `UnitOfWork.commit()` calls each
+ * see only their own transaction handle inside their enlisted operations —
+ * a plain mutable field would leak one commit's transaction into another
+ * concurrently-running commit's operations.
+ *
+ * The UoW runs its enlisted-operations loop inside `als.run(tx, ...)`;
+ * persistence classes read `als.getStore()` to run queries inside the
+ * active transaction, falling back to the base `db` outside one.
  */
 export interface DrizzleTransactionStore {
-  current: any | null;
+  readonly als: AsyncLocalStorage<any>;
 }
 
 /**

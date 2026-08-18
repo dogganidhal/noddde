@@ -7,6 +7,7 @@ export {
   PrismaOutboxStore,
 } from "./persistence";
 export { PrismaEventIdempotencyStore } from "./event-idempotency";
+export { PrismaEventReader } from "./event-reader";
 export {
   PrismaAdvisoryLocker,
   withConnectionLimitOne,

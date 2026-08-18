@@ -164,6 +164,54 @@ defineScaleContract("drizzle/postgres", async () => {
   };
 });
 
+// Pins the on-disk format fixed by issue #130 finding 2: payload/state must
+// be stored as a native jsonb object, not a double-encoded JSON string
+// scalar, or `->>` and other jsonb operators silently return nothing.
+describe("native jsonb storage (issue #130 finding 2)", () => {
+  it("payload->>'total' is queryable directly in SQL", async () => {
+    await truncate();
+    const adapter = makeAdapter();
+    await adapter.eventSourcedPersistence.save(
+      "Order",
+      "order-jsonb-1",
+      [{ name: "OrderPlaced", payload: { total: 4200 } }],
+      0,
+    );
+
+    const { rows } = await pool.query(
+      `SELECT payload->>'total' AS total FROM noddde_events WHERE aggregate_id = $1`,
+      ["order-jsonb-1"],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].total).toBe("4200");
+
+    const typeCheck = await pool.query(
+      `SELECT jsonb_typeof(payload) AS t FROM noddde_events WHERE aggregate_id = $1`,
+      ["order-jsonb-1"],
+    );
+    expect(typeCheck.rows[0].t).toBe("object");
+  });
+
+  it("aggregate_states.state is stored as a jsonb object, not a string scalar", async () => {
+    await truncate();
+    const adapter = makeAdapter();
+    await adapter.stateStoredPersistence.save(
+      "Account",
+      "acc-jsonb-1",
+      { balance: 500 },
+      0,
+    );
+
+    const { rows } = await pool.query(
+      `SELECT state->>'balance' AS balance, jsonb_typeof(state) AS t
+       FROM noddde_aggregate_states WHERE aggregate_id = $1`,
+      ["acc-jsonb-1"],
+    );
+    expect(rows[0].balance).toBe("500");
+    expect(rows[0].t).toBe("object");
+  });
+});
+
 defineAdvisoryLockerContract("drizzle/postgres", async () => {
   // Each AdvisoryLocker contract test needs two *independent* sessions
   // because postgres advisory locks are session-scoped. We allocate one

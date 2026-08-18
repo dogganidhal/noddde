@@ -55,10 +55,12 @@ model NodddeSnapshot {
 model NodddeOutboxEntry {
   id            String    @id
   event         String    @db.LongText
+  eventId       String?   @map("event_id")
   aggregateName String?   @map("aggregate_name")
   aggregateId   String?   @map("aggregate_id")
   createdAt     DateTime  @map("created_at")
   publishedAt   DateTime? @map("published_at")
 
+  @@index([eventId])
   @@map("noddde_outbox")
 }

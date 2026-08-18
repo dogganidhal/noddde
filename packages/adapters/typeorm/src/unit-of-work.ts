@@ -1,12 +1,19 @@
+/* eslint-disable no-unused-vars */
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { DataSource, EntityManager } from "typeorm";
 import type { Event, UnitOfWork, UnitOfWorkFactory } from "@noddde/core";
 
 /**
  * Shared store for propagating the active TypeORM EntityManager
  * (transaction-scoped) to persistence implementations.
+ *
+ * Backed by `AsyncLocalStorage` rather than a plain mutable field so that
+ * two `TypeORMUnitOfWork` instances committing concurrently each see only
+ * their own transactional `EntityManager` inside their enlisted operations,
+ * even when their `commit()` calls interleave on the event loop.
  */
 export interface TypeORMTransactionStore {
-  current: EntityManager | null;
+  readonly als: AsyncLocalStorage<EntityManager>;
 }
 
 /**
@@ -57,14 +64,14 @@ export class TypeORMUnitOfWork implements UnitOfWork {
 
     await this.dataSource.manager.transaction(
       async (transactionalEntityManager) => {
-        txStore.current = transactionalEntityManager;
         this._context = transactionalEntityManager;
         try {
-          for (const op of ops) {
-            await op();
-          }
+          await txStore.als.run(transactionalEntityManager, async () => {
+            for (const op of ops) {
+              await op();
+            }
+          });
         } finally {
-          txStore.current = null;
           this._context = undefined;
         }
       },

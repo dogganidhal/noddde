@@ -12,6 +12,41 @@ function isSyncSQLite(db: any): boolean {
 }
 
 /**
+ * Serializes explicit `BEGIN`/`COMMIT`/`ROLLBACK` sequences on a single
+ * synchronous (single-connection) driver like better-sqlite3.
+ *
+ * Unlike the pooled PG/MySQL path, a sync SQLite driver has exactly one
+ * physical connection — two overlapping transactions on it are not just
+ * unsafe, they're impossible: issuing a second `BEGIN` while the first is
+ * still open throws `SqliteError: cannot start a transaction within a
+ * transaction`, and the resulting `ROLLBACK` aborts the *other* UoW's still
+ * -open transaction (issue #129 finding 1's sync-SQLite-specific failure
+ * mode). AsyncLocalStorage fixes which transaction each operation resolves
+ * to, but does nothing to stop two commits from physically overlapping.
+ * This mutex queues concurrent `commitWithSqlStatements()` calls so they run
+ * one at a time instead of racing — the only physically sound behavior for
+ * a single synchronous connection, and each queued commit still gets full
+ * atomicity.
+ */
+class SyncCommitMutex {
+  private queue: Promise<void> = Promise.resolve();
+
+  async run<T>(fn: () => Promise<T>): Promise<T> {
+    const previous = this.queue;
+    let release!: () => void;
+    this.queue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  }
+}
+
+/**
  * Drizzle-backed {@link UnitOfWork} implementation.
  *
  * Detects the dialect at construction time:
@@ -33,6 +68,7 @@ export class DrizzleUnitOfWork implements UnitOfWork {
   constructor(
     private readonly db: any,
     private readonly txStore: DrizzleTransactionStore,
+    private readonly syncMutex: SyncCommitMutex = new SyncCommitMutex(),
   ) {
     this.useSqlStatements = isSyncSQLite(db);
   }
@@ -84,28 +120,30 @@ export class DrizzleUnitOfWork implements UnitOfWork {
    * Works with synchronous drivers like better-sqlite3.
    */
   private async commitWithSqlStatements(): Promise<Event[]> {
-    this.db.run(sql`BEGIN`);
-    this.txStore.current = this.db;
-    this._context = this.db;
+    return this.syncMutex.run(async () => {
+      this.db.run(sql`BEGIN`);
+      this._context = this.db;
 
-    try {
-      for (const op of this.operations) {
-        await op();
-      }
-      this.db.run(sql`COMMIT`);
-    } catch (error) {
       try {
-        this.db.run(sql`ROLLBACK`);
-      } catch {
-        // ROLLBACK may fail if transaction was already aborted
+        await this.txStore.als.run(this.db, async () => {
+          for (const op of this.operations) {
+            await op();
+          }
+        });
+        this.db.run(sql`COMMIT`);
+      } catch (error) {
+        try {
+          this.db.run(sql`ROLLBACK`);
+        } catch {
+          // ROLLBACK may fail if transaction was already aborted
+        }
+        throw error;
+      } finally {
+        this._context = undefined;
       }
-      throw error;
-    } finally {
-      this.txStore.current = null;
-      this._context = undefined;
-    }
 
-    return [...this.pendingEvents];
+      return [...this.pendingEvents];
+    });
   }
 
   /**
@@ -114,21 +152,20 @@ export class DrizzleUnitOfWork implements UnitOfWork {
    */
   private async commitWithCallback(): Promise<Event[]> {
     await this.db.transaction(async (tx: any) => {
-      this.txStore.current = tx;
       this._context = tx;
 
       try {
-        for (const op of this.operations) {
-          await op();
-        }
+        await this.txStore.als.run(tx, async () => {
+          for (const op of this.operations) {
+            await op();
+          }
+        });
       } catch (error) {
-        this.txStore.current = null;
         this._context = undefined;
         throw error;
       }
     });
 
-    this.txStore.current = null;
     this._context = undefined;
     return [...this.pendingEvents];
   }
@@ -151,5 +188,11 @@ export function createDrizzleUnitOfWorkFactory(
   db: any,
   txStore: DrizzleTransactionStore,
 ): UnitOfWorkFactory {
-  return () => new DrizzleUnitOfWork(db, txStore);
+  // Shared across every UoW this factory creates, so concurrent
+  // commitWithSqlStatements() calls on a sync-SQLite `db` queue behind one
+  // another instead of racing (see SyncCommitMutex). Irrelevant for the
+  // async PG/MySQL path — real pooled connections genuinely run concurrent
+  // transactions and never touch this mutex.
+  const syncMutex = new SyncCommitMutex();
+  return () => new DrizzleUnitOfWork(db, txStore, syncMutex);
 }

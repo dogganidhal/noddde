@@ -8,6 +8,15 @@ datasource db {
 }
 
 /// Events table for event-sourced aggregate persistence.
+///
+/// NOTE ON COLUMN SIZING: `payload`/`metadata` are plain `String` here because
+/// this file targets SQLite (unbounded TEXT). Prisma maps an unannotated
+/// `String` to `VARCHAR(191)` on MySQL, which truncates realistic serialized
+/// event payloads. MySQL deployments MUST copy from `prisma/integration/mysql.prisma`
+/// (which annotates every such field `@db.LongText`), not this file — copying
+/// this schema verbatim onto a MySQL datasource silently reproduces the
+/// truncation bug. PostgreSQL's default (unannotated `String` -> `TEXT`) has
+/// no such limit, so `prisma/integration/postgres.prisma` needs no annotation.
 model NodddeEvent {
   id             Int      @id @default(autoincrement())
   aggregateName  String   @map("aggregate_name")
@@ -23,6 +32,8 @@ model NodddeEvent {
 }
 
 /// Aggregate states table for state-stored aggregate persistence.
+/// See the MySQL column-sizing note on `NodddeEvent` above — `state` needs
+/// `@db.LongText` on MySQL (already applied in `prisma/integration/mysql.prisma`).
 model NodddeAggregateState {
   aggregateName String @map("aggregate_name")
   aggregateId   String @map("aggregate_id")
@@ -34,6 +45,7 @@ model NodddeAggregateState {
 }
 
 /// Saga states table for saga persistence.
+/// See the MySQL column-sizing note on `NodddeEvent` above.
 model NodddeSagaState {
   sagaName String @map("saga_name")
   sagaId   String @map("saga_id")
@@ -45,6 +57,7 @@ model NodddeSagaState {
 }
 
 /// Snapshots table for event-sourced aggregate state snapshotting.
+/// See the MySQL column-sizing note on `NodddeEvent` above.
 model NodddeSnapshot {
   aggregateName String @map("aggregate_name")
   aggregateId   String @map("aggregate_id")
@@ -56,14 +69,25 @@ model NodddeSnapshot {
 }
 
 /// Outbox table for the transactional outbox pattern.
+/// See the MySQL column-sizing note on `NodddeEvent` above — `event` needs
+/// `@db.LongText` on MySQL.
+///
+/// `eventId` is a nullable, indexed copy of `event.metadata.eventId` (already
+/// present inside the serialized `event` JSON blob), written at save time so
+/// `markPublishedByEventIds` can `UPDATE ... WHERE event_id IN (...)` directly
+/// instead of scanning and JSON-parsing the unpublished backlog. Existing rows
+/// predating this column have `eventId: null` until backfilled — see
+/// `MIGRATIONS.md`.
 model NodddeOutboxEntry {
-  id            String  @id
+  id            String    @id
   event         String
-  aggregateName String? @map("aggregate_name")
-  aggregateId   String? @map("aggregate_id")
+  eventId       String?   @map("event_id")
+  aggregateName String?   @map("aggregate_name")
+  aggregateId   String?   @map("aggregate_id")
   createdAt     DateTime  @map("created_at")
   publishedAt   DateTime? @map("published_at")
 
+  @@index([eventId])
   @@map("noddde_outbox")
 }
 

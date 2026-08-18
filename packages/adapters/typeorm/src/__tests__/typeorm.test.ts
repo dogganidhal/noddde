@@ -1,6 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import "reflect-metadata";
-import { DataSource, Entity, PrimaryColumn, Column } from "typeorm";
+import { AsyncLocalStorage } from "node:async_hooks";
+import {
+  DataSource,
+  Entity,
+  PrimaryColumn,
+  Column,
+  type EntityManager,
+} from "typeorm";
 import {
   ConcurrencyError,
   LockTimeoutError,
@@ -225,14 +232,14 @@ describe("TypeORMStateStoredAggregatePersistence", () => {
   });
 
   it("maps a concurrent-create duplicate-key insert to ConcurrencyError", async () => {
-    // Two racing creators both see no existing row (findOne → null) and both
-    // INSERT; the loser gets a raw unique-violation from the driver. That
-    // race can't be reproduced with the synchronous in-memory driver, so we
-    // stub the repository: no existing row, INSERT throws a duplicate-key
-    // error. The persistence must surface ConcurrencyError, not the raw one.
+    // Two racing creators both INSERT for a brand-new aggregate; the loser
+    // gets a raw unique-violation from the driver. That race can't be
+    // reproduced with the synchronous in-memory driver, so we stub the
+    // repository's INSERT to throw a duplicate-key error directly (there is
+    // no findOne in the insert path any more — see the lost-update fix).
+    // The persistence must surface ConcurrencyError, not the raw one.
     const repo = {
-      findOne: vi.fn().mockResolvedValue(null),
-      save: vi
+      insert: vi
         .fn()
         .mockRejectedValue(
           new Error("UNIQUE constraint failed: noddde_aggregate_states.id"),
@@ -253,7 +260,9 @@ describe("TypeORMStateStoredAggregatePersistence", () => {
     } as unknown as DataSource;
     const persistence = new TypeORMStateStoredAggregatePersistence(
       fakeDataSource,
-      { current: undefined } as unknown as ConstructorParameters<
+      {
+        als: new AsyncLocalStorage<EntityManager>(),
+      } as unknown as ConstructorParameters<
         typeof TypeORMStateStoredAggregatePersistence
       >[1],
     );
@@ -261,7 +270,7 @@ describe("TypeORMStateStoredAggregatePersistence", () => {
     await expect(
       persistence.save("Account", "acc-race", { balance: 1 }, 0),
     ).rejects.toBeInstanceOf(ConcurrencyError);
-    expect(repo.save).toHaveBeenCalled();
+    expect(repo.insert).toHaveBeenCalled();
   });
 });
 
@@ -511,7 +520,17 @@ describe("TypeORMEventSourcedAggregatePersistence (loadAfterVersion)", () => {
 // ═══════════════════════════════════════════════════════════════════
 
 function mockDataSource(type: string) {
-  return { options: { type }, query: vi.fn() } as unknown as DataSource;
+  const query = vi.fn();
+  const queryRunner = {
+    connect: vi.fn().mockResolvedValue(undefined),
+    query,
+    release: vi.fn().mockResolvedValue(undefined),
+  };
+  return {
+    options: { type },
+    query,
+    createQueryRunner: vi.fn(() => queryRunner),
+  } as unknown as DataSource;
 }
 
 describe("TypeORMAdvisoryLocker", () => {

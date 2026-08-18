@@ -625,6 +625,51 @@ noddde_outbox
 └── published_at     (datetime, nullable)
 ```
 
+## GA Hardening (Phase 1 — issues #129, #130, #131)
+
+> Fixes for concurrency and capability-gap findings from the GA-readiness audit. TypeORM
+> owns no on-disk-format findings in #130 (Prisma/TypeORM already had correct composite PKs),
+> so this section covers #129 and #131 only.
+
+### Transaction propagation (fixes #129 finding 1 — cross-transaction contamination)
+
+37. `TypeORMTransactionStore` is no longer a plain mutable `{ current: EntityManager | null }` object. It wraps a Node `AsyncLocalStorage`: `interface TypeORMTransactionStore { readonly als: AsyncLocalStorage<EntityManager> }`. Each `TypeORMAdapter` (and `createTypeORMAdapter`) constructs exactly one `{ als: new AsyncLocalStorage() }` and shares it across every persistence instance it creates.
+38. Every persistence class's `getManager()` becomes `this.txStore.als.getStore() ?? this.dataSource.manager`.
+39. `TypeORMUnitOfWork.commit()` runs its enlisted-operations loop inside `await this.txStore.als.run(transactionalEntityManager, async () => { for (const op of ops) await op(); })` instead of assigning `txStore.current = transactionalEntityManager`. Two `TypeORMUnitOfWork` instances committing concurrently no longer cross-contaminate.
+40. This is a breaking change to `TypeORMTransactionStore`'s shape; direct construction (bypassing `TypeORMAdapter`) must switch to `{ als: new AsyncLocalStorage() }`.
+
+### Lost-update fix (fixes #129 finding 2 — TypeORM-only classic lost update)
+
+41. `TypeORMStateStoredAggregatePersistence.save()` and `TypeORMDedicatedStateStoredPersistence.save()` no longer `findOne()` the row, compare `version` in application code, and `repo.save(existing)` unconditionally. Instead:
+    - **Update path (`expectedVersion > 0`)**: `repo.update({ aggregateName, aggregateId, version: expectedVersion }, { state: serialized, version: expectedVersion + 1 })`. If `result.affected === 0`, throws `ConcurrencyError(aggregateName, aggregateId, expectedVersion, -1)` — no prior read, matching the Drizzle/Prisma sibling adapters' `-1` sentinel for "actual version unknown, only that the predicate didn't match."
+    - **Insert path (`expectedVersion === 0`)**: `repo.insert({ aggregateName, aggregateId, state: serialized, version: 1 })`, catching a unique violation (via `isUniqueViolation`, see below) and throwing `ConcurrencyError(..., -1)`.
+42. This removes the TOCTOU window entirely (no `findOne` step to race against) rather than narrowing it, and is a deliberate parity change with Drizzle/Prisma's `-1` `actualVersion` reporting (previously TypeORM reported the real stored version read via `findOne`; that read no longer happens).
+
+### Unique-violation detection (fixes #129 finding 4)
+
+43. A new `isUniqueViolation(error: unknown): boolean` helper (in `packages/adapters/typeorm/src/errors.ts`) replaces the `/UNIQUE|duplicate|unique/i` regex everywhere. It checks TypeORM's `QueryFailedError.driverError` for driver-specific codes first (Postgres `23505`, MySQL `ER_DUP_ENTRY`/`1062`, SQLite `SQLITE_CONSTRAINT*`, MSSQL `2627`/`2601`), falling back to the message regex only when no driver error/code is present.
+44. Every site using the old regex (`persistence.ts`, `dedicated-state-persistence.ts`, `event-idempotency.ts`) calls `isUniqueViolation(error)` instead.
+
+### EventReader (fixes #131 finding 1 — rebuildProjection unavailable)
+
+45. `TypeORMAdapter` (and `createTypeORMAdapter`'s result) exposes an `eventReader: EventReader` backed by `noddde_events.id` (the existing `@PrimaryGeneratedColumn()`): `read(options?)` yields events in batches via keyset pagination (`id > cursor [AND aggregateName = ?] ORDER BY id ASC LIMIT batchSize`), looping until a batch is smaller than the batch size. Never materializes the full log in memory.
+46. Same quiescence-assumption JSDoc caveat as the Drizzle/Prisma readers: auto-increment ids can commit out of order under concurrent writers.
+
+### Advisory locker session affinity (fixes #131 finding 2 — pooled-connection lock leak)
+
+47. `TypeORMAdvisoryLocker` no longer issues `acquire`/`release` via `dataSource.query()` (which multiplexes across the pool). Instead it lazily obtains a single dedicated `QueryRunner` from `dataSource.createQueryRunner()` on first `acquire()` (connecting it once and holding it for the locker's lifetime) and issues every subsequent `acquire`/`release` through that same `QueryRunner`'s connection — TypeORM's built-in mechanism for pinning a session out of a pool. This is safe even though `dataSource` itself remains pooled, so `TypeORMAdapter` **continues** to auto-wire the locker in its constructor (unlike Drizzle, which has no equivalent pinning primitive on a raw `db` handle).
+48. `TypeORMAdvisoryLocker` implements `Closeable`: `close()` releases the owned `QueryRunner` back to the pool. Idempotent.
+49. Each dialect locker (`PostgresLocker`, `MySQLLocker`, `MSSQLLocker`) gains `_held`-set multiplexing detection mirroring Prisma's: `release()` throws loudly if the DB reports "not held" while the locker believes it holds the lock (except MSSQL, whose `sp_releaseapplock` idempotent-release behavior is preserved for the legitimate double-release case; the multiplexing check does not change that).
+50. Each dialect locker composes a per-process keyed mutex (`Map<string, Promise<void>>` keyed by `${aggregateName}:${aggregateId}`) in front of the DB-level lock, closing the intra-process re-entrancy hole noted in the issue (a pinned session's advisory lock is re-entrant, so two concurrent commands in the same process would otherwise both "acquire").
+
+## Migration
+
+**Breaking, pre-GA:**
+
+- `TypeORMTransactionStore` changed shape from `{ current: EntityManager | null }` to `{ als: AsyncLocalStorage<EntityManager> }`. Direct construction must update accordingly.
+- `ConcurrencyError` thrown from `TypeORMStateStoredAggregatePersistence`/`TypeORMDedicatedStateStoredPersistence` on a version mismatch now always reports `actualVersion: -1` instead of the previously-read stored version, for parity with Drizzle/Prisma. Callers inspecting `actualVersion` for diagnostics should not rely on it being the real stored version.
+- `TypeORMAdvisoryLocker` now owns a `QueryRunner`; callers that previously relied on `TypeORMAdvisoryLocker` never holding a dedicated connection open should call `close()` on shutdown (the engine's `Closeable` auto-discovery already does this for adapter-provided lockers).
+
 ## Test Scenarios
 
 ### Event-sourced: save and load roundtrip

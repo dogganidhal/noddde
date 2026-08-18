@@ -1,4 +1,6 @@
-import type { DataSource } from "typeorm";
+/* eslint-disable no-unused-vars */
+import { AsyncLocalStorage } from "node:async_hooks";
+import type { DataSource, EntityManager } from "typeorm";
 import type {
   PersistenceAdapter,
   EventSourcedAggregatePersistence,
@@ -8,6 +10,7 @@ import type {
   SnapshotStore,
   OutboxStore,
   AggregateLocker,
+  EventReader,
 } from "@noddde/core";
 import type { TypeORMTransactionStore } from "./unit-of-work";
 import type { TypeORMStateMapper } from "./builder";
@@ -21,6 +24,7 @@ import {
 import { TypeORMDedicatedStateStoredPersistence } from "./dedicated-state-persistence";
 import { createTypeORMUnitOfWorkFactory } from "./unit-of-work";
 import { TypeORMAdvisoryLocker } from "./advisory-locker";
+import { TypeORMEventReader } from "./event-reader";
 
 /** Database types that support advisory locking. */
 const ADVISORY_LOCK_TYPES = new Set(["postgres", "mysql", "mariadb", "mssql"]);
@@ -49,13 +53,14 @@ export class TypeORMAdapter implements PersistenceAdapter {
   readonly snapshotStore: SnapshotStore;
   readonly outboxStore: OutboxStore;
   readonly aggregateLocker?: AggregateLocker;
+  readonly eventReader: EventReader;
 
   private readonly dataSource: DataSource;
   private readonly txStore: TypeORMTransactionStore;
 
   constructor(dataSource: DataSource) {
     this.dataSource = dataSource;
-    this.txStore = { current: null };
+    this.txStore = { als: new AsyncLocalStorage<EntityManager>() };
 
     this.eventSourcedPersistence = new TypeORMEventSourcedAggregatePersistence(
       dataSource,
@@ -72,6 +77,7 @@ export class TypeORMAdapter implements PersistenceAdapter {
       dataSource,
       this.txStore,
     );
+    this.eventReader = new TypeORMEventReader(dataSource);
 
     // Advisory locker auto-detected from dataSource.options.type
     const dbType = dataSource.options.type;
