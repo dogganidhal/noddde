@@ -67,6 +67,7 @@ export const sagaStates = pgTable(
     sagaName: text("saga_name").notNull(),
     sagaId: text("saga_id").notNull(),
     state: jsonb("state").notNull(),
+    version: integer("version").notNull().default(0),
   },
   (table) => ({
     pk: primaryKey({ columns: [table.sagaName, table.sagaId] }),

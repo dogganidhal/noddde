@@ -15,17 +15,16 @@ docs: [running/infrastructure.mdx]
 ## Type Contract
 
 ```ts
-class InMemoryQueryBus implements QueryBus {
+class InMemoryQueryBus implements QueryBus, QueryHandlerRegistry {
   dispatch<TQuery extends Query<any>>(
     query: TQuery,
   ): Promise<QueryResult<TQuery>>;
 }
 ```
 
-- Implements the `QueryBus` interface from `cqrs/query/query-bus`.
-- The current source is a stub (`throw new Error("Method not implemented.")`). This spec defines the expected behavior once implemented.
+- Implements both `QueryBus` and `QueryHandlerRegistry` from `@noddde/core` (the latter added in the 1.0 API freeze, decision 3 — see `specs/api-freeze.spec.md`; behavior is unchanged, `register()` already existed, only the explicit `implements` clause is new).
 - `dispatch` returns `Promise<QueryResult<TQuery>>` which extracts the phantom result type from the query, giving callers compile-time type safety on the return value.
-- The bus must support handler registration so the Domain can wire projection query handlers and standalone query handlers at init time.
+- The bus must support handler registration via `register(name, handler)` so the Domain can wire projection query handlers and standalone query handlers at init time.
 
 ## Behavioral Requirements
 

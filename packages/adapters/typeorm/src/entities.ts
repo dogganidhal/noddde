@@ -109,6 +109,9 @@ export class NodddeSagaStateEntity {
 
   @Column({ type: "text" })
   state!: string;
+
+  @Column({ type: "int", default: 0 })
+  version!: number;
 }
 
 /**
@@ -260,10 +263,15 @@ function buildEntities(types: EntityColumnTypes): NodddeEntities {
     sagaName!: string;
     sagaId!: string;
     state!: string;
+    version!: number;
   }
   PrimaryColumn(pk("saga_name"))(NodddeSagaStateEntity.prototype, "sagaName");
   PrimaryColumn(pk("saga_id"))(NodddeSagaStateEntity.prototype, "sagaId");
   Column({ ...types.json })(NodddeSagaStateEntity.prototype, "state");
+  Column({ type: "int", default: 0 })(
+    NodddeSagaStateEntity.prototype,
+    "version",
+  );
   Entity("noddde_saga_states")(NodddeSagaStateEntity);
 
   class NodddeSnapshotEntity {

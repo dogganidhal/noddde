@@ -1,8 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { Event, ID } from "@noddde/core";
+import type { Event, ID, Instrumentation } from "@noddde/core";
 import { uuidv7 } from "../uuid";
 import type { MetadataContext, MetadataProvider } from "../domain";
-import type { Instrumentation } from "../tracing";
 
 /**
  * Enriches raw events produced by command handlers with metadata

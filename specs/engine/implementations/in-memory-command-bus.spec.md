@@ -15,14 +15,13 @@ docs: [running/infrastructure.mdx]
 ## Type Contract
 
 ```ts
-class InMemoryCommandBus implements CommandBus {
+class InMemoryCommandBus implements CommandBus, CommandHandlerRegistry {
   dispatch(command: Command): Promise<void>;
 }
 ```
 
-- Implements the `CommandBus` interface from `cqrs/command/command-bus`.
-- The current source is a stub (`throw new Error("Method not implemented.")`). This spec defines the expected behavior once implemented.
-- The bus must support handler registration (e.g., via a `register(name, handler)` method or constructor injection of a handler map) so the Domain can wire aggregate command handlers and standalone command handlers at init time.
+- Implements both `CommandBus` and `CommandHandlerRegistry` from `@noddde/core` (the latter added in the 1.0 API freeze, decision 3 — see `specs/api-freeze.spec.md`; behavior is unchanged, `register()` already existed, only the explicit `implements` clause is new).
+- The bus must support handler registration via `register(name, handler)` so the Domain can wire aggregate command handlers and standalone command handlers at init time.
 
 ## Behavioral Requirements
 

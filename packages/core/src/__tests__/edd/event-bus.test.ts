@@ -1,4 +1,5 @@
-import { describe, it, expectTypeOf } from "vitest";
+/* eslint-disable no-unused-vars */
+import { describe, it, expect, expectTypeOf } from "vitest";
 import type {
   EventBus,
   Event,
@@ -6,6 +7,7 @@ import type {
   AsyncEventHandler,
   Closeable,
 } from "@noddde/core";
+import { LateSubscriptionError } from "@noddde/core";
 
 // ### EventBus dispatch accepts any Event subtype
 describe("EventBus", () => {
@@ -69,5 +71,20 @@ describe("EventBus structural implementation", () => {
       close: async () => {},
     };
     expectTypeOf(myBus).toMatchTypeOf<EventBus>();
+  });
+});
+
+// ### LateSubscriptionError: the shared late-on() contract error type
+describe("LateSubscriptionError", () => {
+  it("should have correct name, message, and eventName property", () => {
+    const error = new LateSubscriptionError("NewEvent");
+    expect(error.name).toBe("LateSubscriptionError");
+    expect(error.eventName).toBe("NewEvent");
+    expect(error.message).toContain("NewEvent");
+  });
+
+  it("should be an instance of Error", () => {
+    const error = new LateSubscriptionError("NewEvent");
+    expect(error).toBeInstanceOf(Error);
   });
 });

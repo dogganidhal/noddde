@@ -95,6 +95,7 @@ function createTestDb() {
       saga_name TEXT NOT NULL,
       saga_id TEXT NOT NULL,
       state TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (saga_name, saga_id)
     );
     CREATE TABLE noddde_snapshots (
@@ -136,6 +137,7 @@ function createTestDbWithCustomTables() {
       saga_name TEXT NOT NULL,
       saga_id TEXT NOT NULL,
       state TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (saga_name, saga_id)
     );
     CREATE TABLE orders (
@@ -298,6 +300,7 @@ describe("Per-Aggregate State Table", () => {
         saga_name TEXT NOT NULL,
         saga_id TEXT NOT NULL,
         state TEXT NOT NULL,
+        version INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (saga_name, saga_id)
       );
       CREATE TABLE custom_orders (
@@ -349,6 +352,7 @@ describe("Per-Aggregate State Table", () => {
         saga_name TEXT NOT NULL,
         saga_id TEXT NOT NULL,
         state TEXT NOT NULL,
+        version INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (saga_name, saga_id)
       );
       CREATE TABLE typed_orders (
@@ -413,6 +417,7 @@ describe("Per-Aggregate State Table", () => {
         saga_name TEXT NOT NULL,
         saga_id TEXT NOT NULL,
         state TEXT NOT NULL,
+        version INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (saga_name, saga_id)
       );
       CREATE TABLE typed_orders (

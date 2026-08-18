@@ -254,8 +254,16 @@ export class TypeORMStateStoredAggregatePersistence
  */
 export class TypeORMSagaPersistence implements SagaPersistence {
   constructor(dataSource: DataSource, txStore: TypeORMTransactionStore);
-  save(sagaName: string, sagaId: string, state: any): Promise<void>;
-  load(sagaName: string, sagaId: string): Promise<any | undefined | null>;
+  save(
+    sagaName: string,
+    sagaId: string,
+    state: any,
+    expectedVersion: number,
+  ): Promise<void>;
+  load(
+    sagaName: string,
+    sagaId: string,
+  ): Promise<{ state: any; version: number } | null>;
 }
 
 /**
@@ -360,6 +368,9 @@ export class NodddeSagaStateEntity {
 
   @Column({ type: "text" })
   state!: string;
+
+  @Column({ type: "int", default: 0 })
+  version!: number;
 }
 
 /**
@@ -431,9 +442,9 @@ export class NodddeOutboxEntryEntity {
 
 ### Saga Persistence
 
-14. `save()` performs a `findOne` followed by a conditional `create` (if not found) or update (if found), using `JSON.stringify(state)`.
-15. `load()` uses `repo.findOne()` and returns `JSON.parse(row.state)`, or `undefined` if not found.
-16. Saga persistence has no concurrency control — no version checking on save.
+14. `save(sagaName, sagaId, state, expectedVersion)` uses the same check-then-act + version pattern as `TypeORMStateStoredAggregatePersistence.save()`: `findOne` for the existing row; if found, validates `existing.version === expectedVersion` (throws `ConcurrencyError` on mismatch), else updates state and sets `version = expectedVersion + 1`; if not found, validates `expectedVersion === 0` (throws `ConcurrencyError` otherwise), else creates a new row at `version: 1`. A duplicate-key error from the `findOne`-then-insert TOCTOU race is also mapped to `ConcurrencyError`.
+15. `load()` uses `repo.findOne()` and returns `{ state: JSON.parse(row.state), version: row.version }`, or `null` if not found.
+16. Saga persistence has the same optimistic-concurrency guarantees as state-stored aggregate persistence — see `specs/api-freeze.spec.md` decision 2.
 
 ### Advisory Locker
 
@@ -543,7 +554,7 @@ export class NodddeOutboxEntryEntity {
 
 ## Edge Cases
 
-- **First save for a new aggregate**: Event-sourced creates new entity rows with `sequenceNumber` starting at 1. State-stored inserts a new entity with `version: 1`. No prior data exists. `load()` before any save returns `[]` (event-sourced) or `null` (state-stored) or `undefined` (saga).
+- **First save for a new aggregate**: Event-sourced creates new entity rows with `sequenceNumber` starting at 1. State-stored inserts a new entity with `version: 1`. No prior data exists. `load()` before any save returns `[]` (event-sourced) or `null` (state-stored, saga).
 - **Multiple saves to same aggregate (event-sourced)**: Events append with incrementing sequence numbers. Each save must use the correct `expectedVersion`.
 - **Multiple saves to same aggregate (state-stored)**: State is overwritten via entity update; version increments from `expectedVersion` to `expectedVersion + 1`.
 - **Empty event array on save**: No-op, no database call.
@@ -596,7 +607,8 @@ noddde_aggregate_states
 noddde_saga_states
 ├── saga_name        (string, PK part 1, @PrimaryColumn)
 ├── saga_id          (string, PK part 2, @PrimaryColumn)
-└── state            (text, NOT NULL)
+├── state            (text, NOT NULL)
+└── version          (int, default 0)
 
 noddde_snapshots
 ├── aggregate_name   (string, PK part 1, @PrimaryColumn)
@@ -903,33 +915,47 @@ describe("TypeORMSagaPersistence", () => {
   beforeEach(setupDb);
   afterEach(teardownDb);
 
-  it("should save and load saga state", async () => {
-    await infra.sagaPersistence.save("Fulfillment", "o-1", {
-      status: "pending",
-    });
+  it("should save and load saga state and version", async () => {
+    await infra.sagaPersistence.save(
+      "Fulfillment",
+      "o-1",
+      { status: "pending" },
+      0,
+    );
     const state = await infra.sagaPersistence.load("Fulfillment", "o-1");
-    expect(state).toEqual({ status: "pending" });
+    expect(state).toEqual({ state: { status: "pending" }, version: 1 });
   });
 });
 ```
 
-### Saga: returns undefined for unknown saga
+### Saga: returns null for unknown saga
 
 ```ts
-it("should return undefined for unknown saga", async () => {
+it("should return null for unknown saga", async () => {
   const state = await infra.sagaPersistence.load("Fulfillment", "nonexistent");
-  expect(state == null).toBe(true);
+  expect(state).toBeNull();
 });
 ```
 
-### Saga: overwrites state on repeated saves
+### Saga: overwrites state on repeated saves with correct versions
 
 ```ts
-it("should overwrite state on repeated saves", async () => {
-  await infra.sagaPersistence.save("Fulfillment", "o-1", { step: 1 });
-  await infra.sagaPersistence.save("Fulfillment", "o-1", { step: 2 });
+it("should overwrite state on repeated saves with correct versions", async () => {
+  await infra.sagaPersistence.save("Fulfillment", "o-1", { step: 1 }, 0);
+  await infra.sagaPersistence.save("Fulfillment", "o-1", { step: 2 }, 1);
   const state = await infra.sagaPersistence.load("Fulfillment", "o-1");
-  expect(state).toEqual({ step: 2 });
+  expect(state).toEqual({ state: { step: 2 }, version: 2 });
+});
+```
+
+### Saga: throws ConcurrencyError on a stale expectedVersion
+
+```ts
+it("should throw ConcurrencyError on a stale expectedVersion", async () => {
+  await infra.sagaPersistence.save("Fulfillment", "o-2", { step: 1 }, 0);
+  await expect(
+    infra.sagaPersistence.save("Fulfillment", "o-2", { step: 2 }, 0),
+  ).rejects.toBeInstanceOf(ConcurrencyError);
 });
 ```
 
@@ -951,7 +977,7 @@ describe("TypeORMUnitOfWork", () => {
       ),
     );
     uow.enlist(() =>
-      infra.sagaPersistence.save("Fulfillment", "o-1", { step: 1 }),
+      infra.sagaPersistence.save("Fulfillment", "o-1", { step: 1 }, 0),
     );
     uow.deferPublish({ name: "AccountCreated", payload: { owner: "Alice" } });
 
@@ -961,7 +987,7 @@ describe("TypeORMUnitOfWork", () => {
     const loaded = await infra.eventSourcedPersistence.load("Account", "acc-1");
     expect(loaded).toHaveLength(1);
     const sagaState = await infra.sagaPersistence.load("Fulfillment", "o-1");
-    expect(sagaState).toEqual({ step: 1 });
+    expect(sagaState).toEqual({ state: { step: 1 }, version: 1 });
   });
 });
 ```

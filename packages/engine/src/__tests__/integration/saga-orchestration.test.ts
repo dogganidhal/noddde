@@ -122,8 +122,8 @@ describe("Saga orchestration - two-step fulfillment", () => {
       "order-1",
     );
     expect(sagaState).toEqual({
-      status: "awaiting_payment",
-      orderId: "order-1",
+      state: { status: "awaiting_payment", orderId: "order-1" },
+      version: 1,
     });
 
     // Verify the command was dispatched
@@ -174,8 +174,8 @@ describe("Saga orchestration - two-step fulfillment", () => {
       "order-2",
     );
     expect(sagaState).toEqual({
-      status: "fulfilled",
-      orderId: "order-2",
+      state: { status: "fulfilled", orderId: "order-2" },
+      version: 2,
     });
 
     // Second call should be FulfillOrder
@@ -219,7 +219,7 @@ describe("Non-starter event without existing saga instance", () => {
       "OrderFulfillmentSaga",
       "nonexistent-order",
     );
-    expect(state).toBeUndefined();
+    expect(state).toBeNull();
 
     // No commands should have been dispatched
     expect(commandDispatchSpy).not.toHaveBeenCalled();
@@ -287,7 +287,7 @@ describe("Handler returning no commands", () => {
     });
 
     const state = await sagaPersistence.load("AckSaga", "task-1");
-    expect(state).toEqual({ acknowledged: false });
+    expect(state).toEqual({ state: { acknowledged: false }, version: 1 });
     expect(commandDispatchSpy).not.toHaveBeenCalled();
 
     await eventBus.dispatch({
@@ -296,7 +296,10 @@ describe("Handler returning no commands", () => {
     });
 
     const updatedState = await sagaPersistence.load("AckSaga", "task-1");
-    expect(updatedState).toEqual({ acknowledged: true });
+    expect(updatedState).toEqual({
+      state: { acknowledged: true },
+      version: 2,
+    });
     expect(commandDispatchSpy).not.toHaveBeenCalled();
   });
 });
@@ -351,7 +354,7 @@ describe("startedBy event with existing instance", () => {
     });
 
     let state = await sagaPersistence.load("RetrySaga", "job-1");
-    expect(state).toEqual({ attempts: 1 });
+    expect(state).toEqual({ state: { attempts: 1 }, version: 1 });
 
     // Dispatch the same startedBy event again for the same ID
     await eventBus.dispatch({
@@ -361,6 +364,6 @@ describe("startedBy event with existing instance", () => {
 
     state = await sagaPersistence.load("RetrySaga", "job-1");
     // Should be 2, not re-initialized to 1
-    expect(state).toEqual({ attempts: 2 });
+    expect(state).toEqual({ state: { attempts: 2 }, version: 2 });
   });
 });

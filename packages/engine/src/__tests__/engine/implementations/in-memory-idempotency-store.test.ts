@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { IdempotencyConflictError } from "@noddde/core";
 import { InMemoryIdempotencyStore } from "@noddde/engine";
 
 describe("InMemoryIdempotencyStore", () => {
@@ -122,5 +123,60 @@ describe("InMemoryIdempotencyStore", () => {
     });
 
     expect(await store.exists(9007199254740993n)).toBe(true);
+  });
+
+  // ### save throws IdempotencyConflictError on duplicate commandId
+  it("should throw IdempotencyConflictError when saving a commandId that already exists", async () => {
+    const store = new InMemoryIdempotencyStore();
+    const record = {
+      commandId: "cmd-1",
+      aggregateName: "Order",
+      aggregateId: "order-1",
+      processedAt: new Date().toISOString(),
+    };
+
+    await store.save(record);
+
+    await expect(store.save(record)).rejects.toThrow(IdempotencyConflictError);
+  });
+
+  it("should include the commandId on the thrown IdempotencyConflictError", async () => {
+    const store = new InMemoryIdempotencyStore();
+    const record = {
+      commandId: "cmd-1",
+      aggregateName: "Order",
+      aggregateId: "order-1",
+      processedAt: new Date().toISOString(),
+    };
+
+    await store.save(record);
+
+    try {
+      await store.save(record);
+      expect.unreachable("save should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(IdempotencyConflictError);
+      expect((error as IdempotencyConflictError).commandId).toBe("cmd-1");
+    }
+  });
+
+  it("should allow re-saving a commandId after its record expired", async () => {
+    const store = new InMemoryIdempotencyStore(100); // 100ms TTL
+
+    await store.save({
+      commandId: "cmd-1",
+      aggregateName: "Order",
+      aggregateId: "order-1",
+      processedAt: new Date(Date.now() - 200).toISOString(), // already expired
+    });
+
+    await expect(
+      store.save({
+        commandId: "cmd-1",
+        aggregateName: "Order",
+        aggregateId: "order-1",
+        processedAt: new Date().toISOString(),
+      }),
+    ).resolves.toBeUndefined();
   });
 });

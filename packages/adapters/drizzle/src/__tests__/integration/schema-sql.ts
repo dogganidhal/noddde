@@ -34,6 +34,7 @@ export const SQLITE_DDL = `
     saga_name TEXT NOT NULL,
     saga_id TEXT NOT NULL,
     state TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (saga_name, saga_id)
   );
   CREATE TABLE IF NOT EXISTS noddde_snapshots (
@@ -79,6 +80,7 @@ export const POSTGRES_DDL = `
     saga_name TEXT NOT NULL,
     saga_id TEXT NOT NULL,
     state JSONB NOT NULL,
+    version INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (saga_name, saga_id)
   );
   CREATE TABLE IF NOT EXISTS noddde_snapshots (
@@ -123,6 +125,7 @@ export const MYSQL_DDL = `
     saga_name VARCHAR(255) NOT NULL,
     saga_id VARCHAR(255) NOT NULL,
     state TEXT NOT NULL,
+    version INT NOT NULL DEFAULT 0,
     PRIMARY KEY (saga_name, saga_id)
   );
   CREATE TABLE IF NOT EXISTS noddde_snapshots (

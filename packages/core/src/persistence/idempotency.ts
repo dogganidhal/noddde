@@ -31,14 +31,21 @@ export interface IdempotencyStore {
    * Checks whether a command with the given ID has already been processed.
    * Returns `true` if a record exists (and has not expired), `false` otherwise.
    *
+   * This is a fast-path check only, subject to a check-then-act race under
+   * concurrency. The authoritative duplicate signal is an
+   * {@link IdempotencyConflictError} thrown from {@link save}.
+   *
    * @param commandId - The unique command identifier to check.
    */
   exists(commandId: ID): Promise<boolean>;
 
   /**
-   * Records that a command has been processed. Called within the UoW
+   * Atomically claims a command as processed. Called within the UoW
    * to ensure atomicity with event persistence.
-   * If a record with the same `commandId` already exists, it is overwritten.
+   *
+   * Throws {@link IdempotencyConflictError} if a (non-expired) record with
+   * the same `commandId` already exists — this is the authoritative
+   * duplicate signal, unlike the best-effort {@link exists} fast-path.
    *
    * @param record - The idempotency record to persist.
    */

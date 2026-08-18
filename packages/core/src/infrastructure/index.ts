@@ -8,6 +8,8 @@ export type { Connectable, BrokerResilience } from "./connectable";
 export { isConnectable } from "./connectable";
 export type { BackgroundProcess } from "./background-process";
 export type { Logger, LogLevel } from "./logger";
+export type { Instrumentation } from "./instrumentation";
+export { NoopInstrumentation } from "./instrumentation";
 
 /**
  * Base infrastructure type. Extend this interface to declare the external

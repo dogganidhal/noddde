@@ -1,4 +1,5 @@
-import type { Command, CommandBus } from "@noddde/core";
+/* eslint-disable no-unused-vars */
+import type { Command, CommandBus, CommandHandlerRegistry } from "@noddde/core";
 
 /** Handler function type for command bus registration. */
 type CommandHandler = (command: Command) => void | Promise<void>;
@@ -13,7 +14,7 @@ type CommandHandler = (command: Command) => void | Promise<void>;
  *
  * Suitable for development, testing, and single-process applications.
  */
-export class InMemoryCommandBus implements CommandBus {
+export class InMemoryCommandBus implements CommandBus, CommandHandlerRegistry {
   private readonly handlers = new Map<string, CommandHandler>();
 
   /**

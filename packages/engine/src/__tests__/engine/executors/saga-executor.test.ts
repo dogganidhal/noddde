@@ -110,7 +110,7 @@ describe("SagaExecutor", () => {
     });
 
     const state = await sagaPersistence.load("OrderSaga", "order-1");
-    expect(state).toEqual({ status: "placed" });
+    expect(state).toEqual({ state: { status: "placed" }, version: 1 });
   });
 
   // ============================================================
@@ -154,7 +154,7 @@ describe("SagaExecutor", () => {
     });
 
     const state = await sagaPersistence.load("MySaga", "s1");
-    expect(state).toBeUndefined();
+    expect(state).toBeNull();
   });
 
   // ============================================================
@@ -248,7 +248,7 @@ describe("SagaExecutor", () => {
 
     // Saga state should also be persisted
     const state = await sagaPersistence.load("DispatchSaga", "d1");
-    expect(state).toEqual({ dispatched: true });
+    expect(state).toEqual({ state: { dispatched: true }, version: 1 });
   });
 
   // ============================================================
@@ -373,7 +373,7 @@ describe("SagaExecutor", () => {
 
     // Saga state should NOT be persisted due to rollback
     const state = await sagaPersistence.load("RbSaga", "rb1");
-    expect(state).toBeUndefined();
+    expect(state).toBeNull();
   });
 
   // ============================================================
@@ -414,7 +414,7 @@ describe("SagaExecutor", () => {
     });
 
     const state = await sagaPersistence.load("NoCmdSaga", "nc1");
-    expect(state).toEqual({ step: 1 });
+    expect(state).toEqual({ state: { step: 1 }, version: 1 });
     expect(dispatchSpy).not.toHaveBeenCalled();
   });
 
@@ -469,7 +469,10 @@ describe("SagaExecutor", () => {
     });
 
     const state = await sagaPersistence.load("FlowSaga", "flow-1");
-    expect(state).toEqual({ steps: ["started", "continued"] });
+    expect(state).toEqual({
+      state: { steps: ["started", "continued"] },
+      version: 2,
+    });
   });
 });
 
@@ -533,7 +536,7 @@ describe("SagaExecutor best-effort", () => {
 
     // Saga state IS persisted — committed before the command ran.
     const state = await sagaPersistence.load("BeRbSaga", "be1");
-    expect(state).toEqual({ ran: true });
+    expect(state).toEqual({ state: { ran: true }, version: 1 });
   });
 });
 
@@ -593,7 +596,10 @@ describe("SagaExecutor best-effort (commit ordering)", () => {
     });
 
     // The command handler observed the already-committed saga state.
-    expect(stateSeenByCommand).toEqual({ phase: "committed" });
+    expect(stateSeenByCommand).toEqual({
+      state: { phase: "committed" },
+      version: 1,
+    });
   });
 });
 
@@ -677,7 +683,7 @@ describe("SagaExecutor best-effort (issue #119)", () => {
     });
 
     const state = await sagaPersistence.load("TaskSaga", "t-1");
-    expect(state).toEqual({ step: "done" });
+    expect(state).toEqual({ state: { step: "done" }, version: 2 });
   });
 });
 
@@ -760,7 +766,7 @@ describe("SagaExecutor atomic (issue #119 limitation)", () => {
 
     // The re-entrant ProcessCompleted arrived before commit → dropped.
     const state = await sagaPersistence.load("AtomicTaskSaga", "t-2");
-    expect(state).toEqual({ step: "processing" });
+    expect(state).toEqual({ state: { step: "processing" }, version: 1 });
   });
 });
 

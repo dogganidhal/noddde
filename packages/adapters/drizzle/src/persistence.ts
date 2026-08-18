@@ -267,34 +267,69 @@ export class DrizzleSagaPersistence implements SagaPersistence {
     return this.txStore.als.getStore() ?? this.db;
   }
 
-  async save(sagaName: string, sagaId: string, state: any): Promise<void> {
+  async save(
+    sagaName: string,
+    sagaId: string,
+    state: any,
+    expectedVersion: number,
+  ): Promise<void> {
     const executor = this.getExecutor();
     const table = this.schema.sagaStates;
     const serialized = this.nativeJson ? state : JSON.stringify(state);
 
-    const existing = await executor
-      .select()
-      .from(table)
-      .where(and(eq(table.sagaName, sagaName), eq(table.sagaId, sagaId)));
-
-    if (existing.length > 0) {
-      await executor
-        .update(table)
-        .set({ state: serialized })
-        .where(and(eq(table.sagaName, sagaName), eq(table.sagaId, sagaId)));
+    if (expectedVersion === 0) {
+      // Insert path: new saga instance
+      try {
+        await executor.insert(table).values({
+          sagaName,
+          sagaId,
+          state: serialized,
+          version: 1,
+        });
+      } catch (error: any) {
+        const message = error?.message ?? "";
+        if (
+          message.includes("UNIQUE constraint failed") || // SQLite
+          message.includes("unique constraint") || // PostgreSQL
+          message.includes("Duplicate entry") || // MySQL
+          message.includes("duplicate key") // PostgreSQL variant
+        ) {
+          throw new ConcurrencyError(sagaName, sagaId, expectedVersion, -1);
+        }
+        throw error;
+      }
     } else {
-      await executor.insert(table).values({
-        sagaName,
-        sagaId,
-        state: serialized,
-      });
+      // Update path: optimistic concurrency check via version match
+      const result = await executor
+        .update(table)
+        .set({ state: serialized, version: expectedVersion + 1 })
+        .where(
+          and(
+            eq(table.sagaName, sagaName),
+            eq(table.sagaId, sagaId),
+            eq(table.version, expectedVersion),
+          ),
+        );
+
+      // See DrizzleStateStoredAggregatePersistence.save for why we probe
+      // all these shapes — each driver surfaces affected-row count differently.
+      const rowsAffected =
+        result?.rowsAffected ??
+        result?.changes ??
+        result?.rowCount ??
+        result?.affectedRows ??
+        result?.[0]?.affectedRows ??
+        0;
+      if (rowsAffected === 0) {
+        throw new ConcurrencyError(sagaName, sagaId, expectedVersion, -1);
+      }
     }
   }
 
   async load(
     sagaName: string,
     sagaId: string,
-  ): Promise<any | undefined | null> {
+  ): Promise<{ state: any; version: number } | null> {
     const executor = this.getExecutor();
     const table = this.schema.sagaStates;
 
@@ -303,9 +338,11 @@ export class DrizzleSagaPersistence implements SagaPersistence {
       .from(table)
       .where(and(eq(table.sagaName, sagaName), eq(table.sagaId, sagaId)));
 
-    if (rows.length === 0) return undefined;
-    const raw = rows[0]!.state;
-    return typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (rows.length === 0) return null;
+    const row = rows[0]!;
+    const state =
+      typeof row.state === "string" ? JSON.parse(row.state) : row.state;
+    return { state, version: row.version };
   }
 }
 

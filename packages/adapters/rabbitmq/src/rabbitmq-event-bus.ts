@@ -5,8 +5,9 @@ import type {
   EventBus,
   Logger,
 } from "@noddde/core";
-import type { Event } from "@noddde/core";
-import { Instrumentation, NodddeLogger } from "@noddde/engine";
+import type { Event, Instrumentation } from "@noddde/core";
+import { NoopInstrumentation } from "@noddde/core";
+import { NodddeLogger } from "@noddde/engine";
 import type { ChannelModel, ConfirmChannel, ConsumeMessage } from "amqplib";
 import amqplib from "amqplib";
 import { createHash } from "node:crypto";
@@ -190,7 +191,7 @@ export class RabbitMqEventBus implements EventBus, Connectable {
     this._queuePrefix = config.queuePrefix;
     this._prefetchCount = config.prefetchCount ?? 10;
     this._logger = config.logger ?? new NodddeLogger("warn", "noddde:rabbitmq");
-    this._instrumentation = config.instrumentation ?? new Instrumentation(null);
+    this._instrumentation = config.instrumentation ?? new NoopInstrumentation();
     this._dlxName = `${this._exchangeName}.dlx`;
     this._dlqName = `${this._queuePrefix}.dlq`;
   }

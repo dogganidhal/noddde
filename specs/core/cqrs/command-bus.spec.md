@@ -3,14 +3,14 @@ title: "CommandBus"
 module: cqrs/command/command-bus
 source_file: packages/core/src/cqrs/command/command-bus.ts
 status: implemented
-exports: [CommandBus]
+exports: [CommandBus, CommandHandlerRegistry]
 depends_on: [cqrs/command/command]
 docs: [modeling/routing-and-dispatch.mdx]
 ---
 
 # CommandBus
 
-> The `CommandBus` interface defines the contract for dispatching commands to their registered handlers. It routes aggregate commands to the appropriate aggregate and standalone commands to standalone command handlers.
+> The `CommandBus` interface defines the contract for dispatching commands to their registered handlers. It routes aggregate commands to the appropriate aggregate and standalone commands to standalone command handlers. `CommandHandlerRegistry` is a separate, optional sub-interface for buses that support local handler registration.
 
 ## Type Contract
 
@@ -18,6 +18,9 @@ docs: [modeling/routing-and-dispatch.mdx]
   - `dispatch(command: Command): Promise<void>` -- dispatches a command for processing.
 - Unlike `EventBus` and `QueryBus`, the `dispatch` method is NOT generic -- it accepts the base `Command` type.
 - The return type is `Promise<void>`.
+- **`CommandHandlerRegistry`** is an interface with a single method:
+  - `register(commandName: string, handler: (command: Command) => void | Promise<void>): void`
+  - Not part of `CommandBus` itself: a remote/RPC command bus is a valid `CommandBus` that structurally cannot support local registration.
 
 ## Behavioral Requirements
 
@@ -25,6 +28,7 @@ docs: [modeling/routing-and-dispatch.mdx]
 - The method is not generic, meaning the concrete command type is erased at the interface level. Implementations must use runtime dispatch (e.g., matching on `command.name`).
 - Returns `Promise<void>` -- callers await completion but receive no return value.
 - The bus is responsible for routing: aggregate commands go to aggregates, standalone commands go to their handlers.
+- `CommandHandlerRegistry.register` is not required by `CommandBus`. A bus that only implements `CommandBus` (no registration) is valid. The domain engine checks for `CommandHandlerRegistry` structurally on the bus supplied via `DomainWiring.buses`, and fails loudly at init (rather than a runtime `TypeError`) if registration is required but the bus doesn't implement it. See `specs/api-freeze.spec.md` decision 3.
 
 ## Invariants
 
@@ -87,6 +91,40 @@ describe("CommandBus non-generic dispatch", () => {
     expectTypeOf<CommandBus["dispatch"]>()
       .parameter(0)
       .toEqualTypeOf<Command>();
+  });
+});
+```
+
+### CommandHandlerRegistry is a separate, optional sub-interface
+
+```ts
+import { describe, it, expect, expectTypeOf } from "vitest";
+import type { CommandBus, CommandHandlerRegistry, Command } from "@noddde/core";
+
+describe("CommandHandlerRegistry", () => {
+  it("should not be required by CommandBus", () => {
+    const bus: CommandBus = { dispatch: async () => {} };
+    expectTypeOf(bus).toMatchTypeOf<CommandBus>();
+  });
+
+  it("should allow a bus to implement both CommandBus and CommandHandlerRegistry", async () => {
+    const handlers = new Map<string, (command: Command) => void>();
+    const bus: CommandBus & CommandHandlerRegistry = {
+      dispatch: async (command) => {
+        handlers.get(command.name)?.(command);
+      },
+      register: (commandName, handler) => {
+        handlers.set(commandName, handler as (command: Command) => void);
+      },
+    };
+
+    let received: Command | undefined;
+    bus.register("DoSomething", (command) => {
+      received = command;
+    });
+    await bus.dispatch({ name: "DoSomething" });
+
+    expect(received).toEqual({ name: "DoSomething" });
   });
 });
 ```

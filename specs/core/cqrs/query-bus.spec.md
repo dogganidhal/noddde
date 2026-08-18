@@ -3,14 +3,14 @@ title: "QueryBus"
 module: cqrs/query/query-bus
 source_file: packages/core/src/cqrs/query/query-bus.ts
 status: implemented
-exports: [QueryBus]
+exports: [QueryBus, QueryHandlerRegistry]
 depends_on: [cqrs/query/query]
 docs: [read-model/queries.mdx]
 ---
 
 # QueryBus
 
-> The `QueryBus` interface defines the contract for dispatching queries to their registered handlers and returning typed results. It is the primary interface for reading data from projections and read models, preserving the phantom `TResult` type through the dispatch call.
+> The `QueryBus` interface defines the contract for dispatching queries to their registered handlers and returning typed results. It is the primary interface for reading data from projections and read models, preserving the phantom `TResult` type through the dispatch call. `QueryHandlerRegistry` is a separate, optional sub-interface for buses that support local handler registration.
 
 ## Type Contract
 
@@ -18,6 +18,9 @@ docs: [read-model/queries.mdx]
   - `dispatch<TQuery extends Query<any>>(query: TQuery): Promise<QueryResult<TQuery>>` -- dispatches a query and returns its typed result.
 - The method is generic over `TQuery`, preserving the concrete query type to extract the result.
 - The return type uses `QueryResult<TQuery>` to resolve the phantom result type from the query.
+- **`QueryHandlerRegistry`** is an interface with a single method:
+  - `register(queryName: string, handler: (payload: any) => any | Promise<any>): void`
+  - Not part of `QueryBus` itself, for the same reason as `CommandHandlerRegistry`/`CommandBus`: a remote/RPC query bus is a valid `QueryBus` that structurally cannot support local registration.
 
 ## Behavioral Requirements
 
@@ -25,6 +28,7 @@ docs: [read-model/queries.mdx]
 - The generic parameter enables type inference: when you pass a `Query<UserView>`, the return type is `Promise<UserView>`.
 - `dispatch` returns a `Promise`, meaning all query resolution is treated as asynchronous.
 - The bus routes queries to the appropriate handler based on the query's `name`.
+- `QueryHandlerRegistry.register` is not required by `QueryBus`. The domain engine checks for `QueryHandlerRegistry` structurally on the bus supplied via `DomainWiring.buses`, and fails loudly at init if registration is required but the bus doesn't implement it. See `specs/api-freeze.spec.md` decision 3.
 
 ## Invariants
 
@@ -97,6 +101,36 @@ describe("QueryBus phantom type preservation", () => {
     const query: Query<number> = { name: "GetCount" };
     const result = bus.dispatch(query);
     expectTypeOf(result).toEqualTypeOf<Promise<number>>();
+  });
+});
+```
+
+### QueryHandlerRegistry is a separate, optional sub-interface
+
+```ts
+import { describe, it, expect, expectTypeOf } from "vitest";
+import type { QueryBus, QueryHandlerRegistry, Query } from "@noddde/core";
+
+describe("QueryHandlerRegistry", () => {
+  it("should not be required by QueryBus", () => {
+    const bus: QueryBus = { dispatch: async () => ({}) as any };
+    expectTypeOf(bus).toMatchTypeOf<QueryBus>();
+  });
+
+  it("should allow a bus to implement both QueryBus and QueryHandlerRegistry", async () => {
+    const handlers = new Map<string, (payload: any) => any>();
+    const bus: QueryBus & QueryHandlerRegistry = {
+      dispatch: async (query) =>
+        handlers.get(query.name as string)?.(query.payload),
+      register: (queryName, handler) => {
+        handlers.set(queryName, handler);
+      },
+    };
+
+    bus.register("GetCount", () => 42);
+    const result = await bus.dispatch({ name: "GetCount" } as Query<number>);
+
+    expect(result).toBe(42);
   });
 });
 ```

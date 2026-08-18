@@ -322,8 +322,8 @@ All three dialects define the same logical schema with the same table names (`no
 9. `EventSourcedAggregatePersistence.save()` with an empty events array is a no-op.
 10. `StateStoredAggregatePersistence.save()` upserts the state (insert if new, update if exists).
 11. `StateStoredAggregatePersistence.load()` returns the JSON-parsed state, or `undefined` for a nonexistent aggregate.
-12. `SagaPersistence.save()` upserts the saga state.
-13. `SagaPersistence.load()` returns the JSON-parsed state, or `undefined` for a nonexistent saga.
+12. `SagaPersistence.save()` upserts the saga state with the same optimistic-concurrency semantics as `StateStoredAggregatePersistence.save()` (insert when `expectedVersion === 0`, versioned `UPDATE ... WHERE version = expectedVersion` otherwise, `ConcurrencyError` on conflict).
+13. `SagaPersistence.load()` returns `{ state, version }` (state JSON-parsed), or `null` for a nonexistent saga.
 14. All persistence operations route through `txStore.current` when inside a transaction, falling back to the base `db` otherwise.
 
 ### Unit of Work (dialect-aware)
@@ -469,7 +469,8 @@ noddde_aggregate_states
 noddde_saga_states
 ├── saga_name        (string, PK part 1)
 ├── saga_id          (string, PK part 2)
-└── state            (JSON string, NOT NULL)
+├── state            (JSON string, NOT NULL)
+└── version          (integer, NOT NULL, default 0)
 
 noddde_snapshots
 ├── aggregate_name   (string, PK part 1)
@@ -826,9 +827,15 @@ it("saves and loads saga state", async () => {
   });
   const persistence = adapter.sagaPersistence;
 
-  await persistence.save("OrderSaga", "saga-1", { status: "active", step: 2 });
-  const state = await persistence.load("OrderSaga", "saga-1");
-  expect(state).toEqual({ status: "active", step: 2 });
+  await persistence.save(
+    "OrderSaga",
+    "saga-1",
+    { status: "active", step: 2 },
+    0,
+  );
+  const loaded = await persistence.load("OrderSaga", "saga-1");
+  expect(loaded?.state).toEqual({ status: "active", step: 2 });
+  expect(loaded?.version).toBe(1);
 });
 ```
 

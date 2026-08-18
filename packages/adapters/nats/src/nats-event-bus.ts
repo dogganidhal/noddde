@@ -14,8 +14,9 @@ import type {
   EventBus,
   Logger,
 } from "@noddde/core";
-import type { Event } from "@noddde/core";
-import { Instrumentation, NodddeLogger } from "@noddde/engine";
+import type { Event, Instrumentation } from "@noddde/core";
+import { NoopInstrumentation } from "@noddde/core";
+import { NodddeLogger } from "@noddde/engine";
 
 // ponytail: fixed backoff ceiling for nak redelivery; make configurable via
 // resilience if a real workload needs a different curve.
@@ -93,7 +94,7 @@ export class NatsEventBus implements EventBus, Connectable {
   constructor(config: NatsEventBusConfig) {
     this._config = config;
     this._logger = config.logger ?? new NodddeLogger("warn", "noddde:nats");
-    this._instrumentation = config.instrumentation ?? new Instrumentation(null);
+    this._instrumentation = config.instrumentation ?? new NoopInstrumentation();
   }
 
   /**

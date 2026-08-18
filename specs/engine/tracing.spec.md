@@ -45,7 +45,7 @@ function detectOTel(): Promise<OTelApi | null>;
  * Thin, safe wrapper around OTel APIs. All methods are no-ops when
  * constructed with null (i.e. @opentelemetry/api is not installed).
  */
-class Instrumentation {
+class OTelInstrumentation implements Instrumentation {
   constructor(otel: OTelApi | null);
 
   /**
@@ -179,7 +179,8 @@ import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
-import { detectOTel, Instrumentation } from "../tracing";
+import { detectOTel, OTelInstrumentation } from "../tracing";
+import type { Instrumentation } from "@noddde/core";
 
 describe("Instrumentation.withSpan", () => {
   let provider: NodeTracerProvider;
@@ -193,7 +194,7 @@ describe("Instrumentation.withSpan", () => {
     });
     provider.register();
     const otel = await detectOTel();
-    instrumentation = new Instrumentation(otel);
+    instrumentation = new OTelInstrumentation(otel);
   });
 
   afterEach(() => exporter.reset());
@@ -225,7 +226,8 @@ import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
-import { detectOTel, Instrumentation } from "../tracing";
+import { detectOTel, OTelInstrumentation } from "../tracing";
+import type { Instrumentation } from "@noddde/core";
 
 describe("Instrumentation.withSpan error recording", () => {
   let provider: NodeTracerProvider;
@@ -239,7 +241,7 @@ describe("Instrumentation.withSpan error recording", () => {
     });
     provider.register();
     const otel = await detectOTel();
-    instrumentation = new Instrumentation(otel);
+    instrumentation = new OTelInstrumentation(otel);
   });
 
   afterEach(() => exporter.reset());
@@ -270,7 +272,8 @@ import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
-import { detectOTel, Instrumentation } from "../tracing";
+import { detectOTel, OTelInstrumentation } from "../tracing";
+import type { Instrumentation } from "@noddde/core";
 
 describe("Instrumentation.injectTraceContext", () => {
   let provider: NodeTracerProvider;
@@ -284,7 +287,7 @@ describe("Instrumentation.injectTraceContext", () => {
     });
     provider.register();
     const otel = await detectOTel();
-    instrumentation = new Instrumentation(otel);
+    instrumentation = new OTelInstrumentation(otel);
   });
 
   afterEach(() => exporter.reset());
@@ -314,7 +317,8 @@ import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
-import { detectOTel, Instrumentation } from "../tracing";
+import { detectOTel, OTelInstrumentation } from "../tracing";
+import type { Instrumentation } from "@noddde/core";
 
 describe("Instrumentation.withExtractedContext", () => {
   let provider: NodeTracerProvider;
@@ -328,7 +332,7 @@ describe("Instrumentation.withExtractedContext", () => {
     });
     provider.register();
     const otel = await detectOTel();
-    instrumentation = new Instrumentation(otel);
+    instrumentation = new OTelInstrumentation(otel);
   });
 
   afterEach(() => exporter.reset());
@@ -363,11 +367,11 @@ describe("Instrumentation.withExtractedContext", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
-import { Instrumentation } from "../tracing";
+import { OTelInstrumentation } from "../tracing";
 
 describe("Instrumentation no-op", () => {
   it("should pass through withSpan without creating spans", async () => {
-    const instrumentation = new Instrumentation(null);
+    const instrumentation = new OTelInstrumentation(null);
 
     let called = false;
     await instrumentation.withSpan("noop", {}, async () => {
@@ -377,13 +381,13 @@ describe("Instrumentation no-op", () => {
   });
 
   it("should return empty object from injectTraceContext", () => {
-    const instrumentation = new Instrumentation(null);
+    const instrumentation = new OTelInstrumentation(null);
     const ctx = instrumentation.injectTraceContext();
     expect(ctx).toEqual({});
   });
 
   it("should pass through withExtractedContext", async () => {
-    const instrumentation = new Instrumentation(null);
+    const instrumentation = new OTelInstrumentation(null);
 
     let called = false;
     await instrumentation.withExtractedContext(
@@ -409,7 +413,8 @@ import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
-import { detectOTel, Instrumentation } from "../tracing";
+import { detectOTel, OTelInstrumentation } from "../tracing";
+import type { Instrumentation } from "@noddde/core";
 import { MetadataEnricher } from "../executors/metadata-enricher";
 import type { MetadataContext } from "../domain";
 
@@ -425,7 +430,7 @@ describe("MetadataEnricher with tracing", () => {
     });
     provider.register();
     const otel = await detectOTel();
-    instrumentation = new Instrumentation(otel);
+    instrumentation = new OTelInstrumentation(otel);
   });
 
   afterEach(() => exporter.reset());

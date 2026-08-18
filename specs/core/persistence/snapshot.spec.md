@@ -26,6 +26,12 @@ interface Snapshot {
   state: any;
   /** The event stream version (number of events) at which this snapshot was taken. */
   version: number;
+  /**
+   * Optional schema-version tag for the `state` payload shape, distinct
+   * from `version` (event-stream position). Absent means "implicitly
+   * version 1" (pre-envelope data).
+   */
+  stateVersion?: number;
 }
 
 /**
@@ -103,6 +109,7 @@ function everyNEvents(n: number): SnapshotStrategy;
 
 - `Snapshot.state` is `any` for the same reason as persistence: type safety is enforced at the aggregate definition layer, not the snapshot layer.
 - `Snapshot.version` corresponds to `events.length` at the time of the snapshot. It is always a non-negative integer.
+- `Snapshot.stateVersion` is orthogonal to `version`: it tags the _shape_ of `state`, not the stream position. Reserved for future state-upcasting support (API Freeze decision 8, see `specs/api-freeze.spec.md`) — the framework performs no upcasting on it as of 1.0; `SnapshotStore` implementations must store and return it unchanged.
 - `SnapshotStore` is configured separately from `EventSourcedAggregatePersistence`. They may use different backends.
 - `SnapshotStrategy` is a pure function — no side effects, no I/O. It receives computed context and returns a boolean.
 - `PartialEventLoad` is checked via duck typing (`'loadAfterVersion' in persistence`), not via `instanceof`. Any persistence implementation can adopt it by adding the method.
@@ -380,6 +387,32 @@ describe("PartialEventLoad contract", () => {
     const events = await partial.loadAfterVersion("Account", "acc-1", 5);
 
     expect(events).toEqual([]);
+  });
+});
+```
+
+### SnapshotStore: passes through the optional stateVersion field unchanged
+
+```ts
+import { describe, it, expect } from "vitest";
+import { InMemorySnapshotStore } from "@noddde/core";
+
+describe("SnapshotStore stateVersion", () => {
+  it("should store and return stateVersion when provided", async () => {
+    const store = new InMemorySnapshotStore();
+
+    await store.save("BankAccount", "acc-1", {
+      state: { balance: 100 },
+      version: 5,
+      stateVersion: 2,
+    });
+    const loaded = await store.load("BankAccount", "acc-1");
+
+    expect(loaded).toEqual({
+      state: { balance: 100 },
+      version: 5,
+      stateVersion: 2,
+    });
   });
 });
 ```

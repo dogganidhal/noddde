@@ -144,7 +144,10 @@ export class InMemoryEventSourcedAggregatePersistence
 export class InMemoryStateStoredAggregatePersistence
   implements StateStoredAggregatePersistence
 {
-  private readonly store = new Map<string, { state: any; version: number }>();
+  private readonly store = new Map<
+    string,
+    { state: any; version: number; stateVersion?: number }
+  >();
 
   /**
    * Loads the latest state snapshot and version for an aggregate instance.
@@ -152,12 +155,12 @@ export class InMemoryStateStoredAggregatePersistence
    *
    * @param aggregateName - The aggregate type name (used as a namespace).
    * @param aggregateId - The unique identifier of the aggregate instance.
-   * @returns The stored `{ state, version }`, or `null` if not found.
+   * @returns The stored `{ state, version, stateVersion }`, or `null` if not found.
    */
   public async load(
     aggregateName: string,
     aggregateId: ID,
-  ): Promise<{ state: any; version: number } | null> {
+  ): Promise<{ state: any; version: number; stateVersion?: number } | null> {
     const key = `${aggregateName}:${aggregateId}`;
     return this.store.get(key) ?? null;
   }
@@ -171,12 +174,15 @@ export class InMemoryStateStoredAggregatePersistence
    * @param aggregateId - The unique identifier of the aggregate instance.
    * @param state - The full aggregate state to persist.
    * @param expectedVersion - The version observed at load time (0 for new aggregates).
+   * @param stateVersion - Optional schema-version tag for `state`, stored and
+   *   returned as-is (no upcasting is performed).
    */
   public async save(
     aggregateName: string,
     aggregateId: ID,
     state: any,
     expectedVersion: number,
+    stateVersion?: number,
   ): Promise<void> {
     const key = `${aggregateName}:${aggregateId}`;
     const existing = this.store.get(key);
@@ -189,6 +195,6 @@ export class InMemoryStateStoredAggregatePersistence
         actualVersion,
       );
     }
-    this.store.set(key, { state, version: expectedVersion + 1 });
+    this.store.set(key, { state, version: expectedVersion + 1, stateVersion });
   }
 }

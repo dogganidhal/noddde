@@ -3,7 +3,7 @@ title: "EventBus"
 module: edd/event-bus
 source_file: packages/core/src/edd/event-bus.ts
 status: implemented
-exports: [EventBus, AsyncEventHandler]
+exports: [EventBus, AsyncEventHandler, LateSubscriptionError]
 depends_on: [edd/event, infrastructure/closeable]
 docs: [running/event-bus-adapters.mdx]
 ---
@@ -28,8 +28,21 @@ export type AsyncEventHandler = (event: Event) => void | Promise<void>;
 export interface EventBus extends Closeable {
   /** Publishes a single domain event to all subscribers. */
   dispatch<TEvent extends Event>(event: TEvent): Promise<void>;
-  /** Registers an async-capable handler for a given event name. Multiple handlers per name (fan-out). */
+  /**
+   * Registers an async-capable handler for a given event name. Multiple
+   * handlers per name (fan-out). See late-registration contract below.
+   */
   on(eventName: string, handler: AsyncEventHandler): void;
+}
+
+/**
+ * Thrown by `on()` implementations when a handler is registered for an
+ * event name that was not already registered before the bus connected.
+ */
+export class LateSubscriptionError extends Error {
+  readonly name: "LateSubscriptionError";
+  readonly eventName: string;
+  constructor(eventName: string);
 }
 ```
 
@@ -49,6 +62,7 @@ export interface EventBus extends Closeable {
 6. **close is idempotent** -- Calling `close()` multiple times has no additional effect after the first call (inherited from `Closeable`).
 7. **Per-handler error isolation is mandatory** -- Implementations MUST run all registered handlers for a single event delivery to completion, regardless of individual handler failures. A handler that throws or returns a rejected promise MUST NOT short-circuit invocation of its siblings. This requirement is non-negotiable for every `EventBus` implementation (in-memory, broker-backed, future transports).
 8. **Each handler failure MUST be individually observable** -- Implementations MUST log every individual handler failure at `error` level via the framework `Logger`, with at least the fields `eventName`, `handlerName` (best-effort from `handler.name`), and the error itself. When an active OpenTelemetry span is available, log entries SHOULD include `traceId` and `spanId` for log↔trace correlation.
+9. **Late-registration contract** -- For a `Connectable` (broker-backed) implementation, registering the _first_ handler for an event name that was not already registered before `connect()` was called MUST throw `LateSubscriptionError`. This is the one contract every broker implementation can honor (a broker consumer subscribes to a fixed topic/subject/queue set at connect time). Registering an _additional_ handler for an event name that was already registered pre-connect is ordinary fan-out and MUST NOT throw. In-memory / non-`Connectable` implementations have no connect phase, so this contract does not restrict them — every `on()` call is trivially "pre-connect."
 
 ## Invariants
 
@@ -57,6 +71,7 @@ export interface EventBus extends Closeable {
 - `on` supports multiple handlers per event name (fan-out).
 - Per-handler isolation is mandatory; implementations may choose how aggregate handler failure interacts with their transport-level ack/retry/DLQ (e.g. message redelivery, offset commits, nack policies) — but in-process fan-out of siblings is non-negotiable.
 - After `close()`, the bus should not deliver events to handlers.
+- Every broker-backed implementation of `EventBus` shares one late-`on()` contract (throw `LateSubscriptionError` for a genuinely new event name after connect); no adapter may substitute a different behavior (silent accept, fire-and-forget) for that case. See `specs/api-freeze.spec.md` decision 6.
 
 ## Edge Cases
 
@@ -187,6 +202,27 @@ describe("EventBus structural implementation", () => {
       close: async () => {},
     };
     expectTypeOf(myBus).toMatchTypeOf<EventBus>();
+  });
+});
+```
+
+### LateSubscriptionError: the shared late-on() contract error type
+
+```ts
+import { describe, it, expect } from "vitest";
+import { LateSubscriptionError } from "@noddde/core";
+
+describe("LateSubscriptionError", () => {
+  it("should have correct name, message, and eventName property", () => {
+    const error = new LateSubscriptionError("NewEvent");
+    expect(error.name).toBe("LateSubscriptionError");
+    expect(error.eventName).toBe("NewEvent");
+    expect(error.message).toContain("NewEvent");
+  });
+
+  it("should be an instance of Error", () => {
+    const error = new LateSubscriptionError("NewEvent");
+    expect(error).toBeInstanceOf(Error);
   });
 });
 ```

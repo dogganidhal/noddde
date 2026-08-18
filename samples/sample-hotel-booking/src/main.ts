@@ -95,6 +95,7 @@ async function main() {
       saga_name TEXT NOT NULL,
       saga_id TEXT NOT NULL,
       state JSONB NOT NULL,
+      version INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (saga_name, saga_id)
     );
     CREATE TABLE IF NOT EXISTS noddde_snapshots (

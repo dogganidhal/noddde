@@ -16,14 +16,18 @@ docs: [event-bus/in-memory.mdx]
 ## Type Contract
 
 ```ts
-import type { EventBus, AsyncEventHandler, Logger } from "@noddde/core";
-import type { Instrumentation } from "../tracing";
+import type {
+  EventBus,
+  AsyncEventHandler,
+  Instrumentation,
+  Logger,
+} from "@noddde/core";
 
 /** Configuration for the EventEmitterEventBus. */
 export interface EventEmitterEventBusConfig {
   /** Framework logger instance. Defaults to `NodddeLogger("warn", "noddde:ee-event-bus")`. */
   logger?: Logger;
-  /** OpenTelemetry instrumentation used to enrich error logs with trace correlation IDs. Defaults to a no-op instance. */
+  /** Tracing instrumentation used to enrich error logs with trace correlation IDs. Accepts the `Instrumentation` interface from `@noddde/core`. Defaults to a no-op instance. */
   instrumentation?: Instrumentation;
 }
 
@@ -40,7 +44,7 @@ class EventEmitterEventBus implements EventBus {
 ```
 
 - Implements the `EventBus` interface from `edd/event-bus` (which extends `Closeable`).
-- The constructor accepts an optional configuration object. When `config.logger` is omitted, a default `NodddeLogger("warn", "noddde:ee-event-bus")` from `@noddde/engine` is used. When `config.instrumentation` is omitted, a no-op `Instrumentation(null)` is used (no OTel correlation enrichment).
+- The constructor accepts an optional configuration object. When `config.logger` is omitted, a default `NodddeLogger("warn", "noddde:ee-event-bus")` from `@noddde/engine` is used. When `config.instrumentation` is omitted, a `NoopInstrumentation` (from `@noddde/core`) is used (no OTel correlation enrichment). `instrumentation` accepts any `Instrumentation` implementation, e.g. `@noddde/engine`'s OTel-backed `OTelInstrumentation` (formerly named `Instrumentation`, renamed in the 1.0 API freeze — see `specs/api-freeze.spec.md` decision 7 — to free up the name for this core interface).
 - `dispatch` is async (returns `Promise<void>`) and invokes each registered handler sequentially in registration order. **Each handler invocation is wrapped in its own try/catch**: a failure (synchronous throw or rejected promise) is caught, logged, and dispatch continues to the next handler. `dispatch` never rejects from a handler failure — it always resolves with `undefined`.
 - The `on` method registers handlers in an internal `Map<string, AsyncEventHandler[]>` keyed by event name.
 - `close()` clears all registered handlers (equivalent to the previous `removeAllListeners()`). Since this is an in-memory implementation, there are no connections to release. Idempotent: subsequent calls are no-ops.
@@ -570,7 +574,7 @@ describe("EventEmitterEventBus error isolation", () => {
 ```ts
 import { describe, it, expect, vi } from "vitest";
 import { EventEmitterEventBus } from "@noddde/engine";
-import { Instrumentation, detectOTel } from "@noddde/engine/tracing";
+import { OTelInstrumentation, detectOTel } from "@noddde/engine/tracing";
 import type { Logger } from "@noddde/core";
 
 describe("EventEmitterEventBus error isolation", () => {
@@ -587,7 +591,7 @@ describe("EventEmitterEventBus error isolation", () => {
       };
       const bus = new EventEmitterEventBus({
         logger,
-        instrumentation: new Instrumentation(null),
+        instrumentation: new OTelInstrumentation(null),
       });
       bus.on("E", () => {
         throw new Error("boom");
@@ -607,7 +611,7 @@ describe("EventEmitterEventBus error isolation", () => {
       error: vi.fn(),
       child: vi.fn().mockReturnThis(),
     };
-    const instrumentation = new Instrumentation(otel);
+    const instrumentation = new OTelInstrumentation(otel);
     const bus = new EventEmitterEventBus({ logger, instrumentation });
 
     bus.on("E", () => {

@@ -30,6 +30,7 @@ class InMemorySnapshotStore implements SnapshotStore {
 
 - Implements the `SnapshotStore` interface from `@noddde/core`.
 - Uses `Promise`-based APIs for consistency with durable snapshot store implementations, even though the in-memory operations are synchronous.
+- `Snapshot`'s optional `stateVersion` field (API Freeze decision 8, see `specs/api-freeze.spec.md`) passes through unchanged — the store treats the whole `Snapshot` object opaquely, so no code change was needed to support it.
 
 ## Behavioral Requirements
 
@@ -164,6 +165,32 @@ describe("InMemorySnapshotStore", () => {
 
     expect(acc1).toEqual({ state: { balance: 100 }, version: 3 });
     expect(acc2).toEqual({ state: { balance: 500 }, version: 8 });
+  });
+});
+```
+
+### passes through the optional stateVersion field unchanged
+
+```ts
+import { describe, it, expect } from "vitest";
+import { InMemorySnapshotStore } from "@noddde/engine";
+
+describe("InMemorySnapshotStore stateVersion", () => {
+  it("should store and return stateVersion when provided", async () => {
+    const store = new InMemorySnapshotStore();
+
+    await store.save("BankAccount", "acc-1", {
+      state: { balance: 100 },
+      version: 5,
+      stateVersion: 2,
+    });
+    const loaded = await store.load("BankAccount", "acc-1");
+
+    expect(loaded).toEqual({
+      state: { balance: 100 },
+      version: 5,
+      stateVersion: 2,
+    });
   });
 });
 ```
