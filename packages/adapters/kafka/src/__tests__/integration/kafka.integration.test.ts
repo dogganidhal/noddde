@@ -350,7 +350,12 @@ describe("KafkaEventBus broker-specific behaviour", () => {
     expect(attempts).toBeGreaterThanOrEqual(2);
 
     await bus.close();
-  });
+    // The 60s waitFor above leaves no headroom against the global 60s
+    // testTimeout once topic/consumer-group setup and the crash/rejoin
+    // cycle (kafkajs re-joining the group after the thrown handler error)
+    // are accounted for — give this test the same explicit margin as the
+    // other slow, real-broker tests in this file (e.g. the DLQ test below).
+  }, 90_000);
 
   it("auto-provisions the topic at connect() with the configured partition count, without any manual admin.createTopics call", async () => {
     const suffix = uniqueSuffix();
@@ -496,5 +501,7 @@ describe("KafkaEventBus broker-specific behaviour", () => {
     await probeConsumer.stop();
     await probeConsumer.disconnect();
     await bus.close();
-  }, 90_000);
+    // Two sequential 60s waitFor calls above can sum to 120s worst case;
+    // 90s left no headroom against that and could cut the second wait short.
+  }, 150_000);
 });

@@ -57,6 +57,7 @@ export const sagaStates = pgTable("noddde_saga_states", {
   sagaName: text("saga_name").notNull(),
   sagaId: text("saga_id").notNull(),
   state: jsonb("state").notNull(),
+  version: integer("version").notNull().default(0),
 });
 
 /**

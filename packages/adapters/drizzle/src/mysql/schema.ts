@@ -56,6 +56,7 @@ export const sagaStates = mysqlTable("noddde_saga_states", {
   sagaName: varchar("saga_name", { length: 255 }).notNull(),
   sagaId: varchar("saga_id", { length: 255 }).notNull(),
   state: text("state").notNull(),
+  version: int("version").notNull().default(0),
 });
 
 /**

@@ -49,6 +49,7 @@ export const sagaStates = sqliteTable("noddde_saga_states", {
   sagaName: text("saga_name").notNull(),
   sagaId: text("saga_id").notNull(),
   state: text("state").notNull(),
+  version: integer("version").notNull().default(0),
 });
 
 /**
