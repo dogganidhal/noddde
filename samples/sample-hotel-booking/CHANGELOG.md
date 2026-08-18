@@ -1,5 +1,22 @@
 # @noddde/sample-hotel-booking
 
+## 0.0.2-rc.2
+
+### Patch Changes
+
+- Updated dependencies [ec58bd0]
+- Updated dependencies [525513c]
+- Updated dependencies [f0438a4]
+- Updated dependencies [aed710c]
+- Updated dependencies [e0368ab]
+- Updated dependencies [ef341bb]
+- Updated dependencies [dc769be]
+  - @noddde/core@1.0.0-rc.2
+  - @noddde/engine@1.0.0-rc.2
+  - @noddde/testing@1.0.0-rc.2
+  - @noddde/drizzle@1.0.0-rc.2
+  - @noddde/rabbitmq@1.0.0-rc.2
+
 ## 0.0.2-rc.1
 
 ### Patch Changes

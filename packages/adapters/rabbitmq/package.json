@@ -1,6 +1,6 @@
 {
   "name": "@noddde/rabbitmq",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0-rc.2",
   "description": "RabbitMQ EventBus adapter for noddde",
   "license": "MIT",
   "author": "Nidhal Dogga",
@@ -55,8 +55,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@noddde/core": "^1.0.0-rc.1",
-    "@noddde/engine": "^1.0.0-rc.1"
+    "@noddde/core": "^1.0.0-rc.2",
+    "@noddde/engine": "^1.0.0-rc.2"
   },
   "peerDependencies": {
     "amqplib": ">=0.10.0 <0.11.0"

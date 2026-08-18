@@ -1,6 +1,6 @@
 {
   "name": "@noddde/cli",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0-rc.2",
   "description": "CLI tool for scaffolding noddde DDD aggregates, projections, and sagas",
   "license": "MIT",
   "author": "Nidhal Dogga",
@@ -62,8 +62,8 @@
     "typescript": "^5.3.3"
   },
   "devDependencies": {
-    "@noddde/core": "^1.0.0-rc.1",
-    "@noddde/engine": "^1.0.0-rc.1",
+    "@noddde/core": "^1.0.0-rc.2",
+    "@noddde/engine": "^1.0.0-rc.2",
     "@noddde/typescript-config": "0.0.0",
     "eslint": "^8.56.0",
     "vitest": "^4.1.0"

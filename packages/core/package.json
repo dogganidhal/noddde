@@ -1,6 +1,6 @@
 {
   "name": "@noddde/core",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0-rc.2",
   "description": "TypeScript types and definitions for DDD, CQRS, and Event Sourcing using the functional Decider pattern",
   "license": "MIT",
   "author": "Nidhal Dogga",

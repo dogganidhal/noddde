@@ -1,6 +1,6 @@
 {
   "name": "@noddde/nats",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0-rc.2",
   "description": "NATS EventBus adapter for noddde",
   "license": "MIT",
   "author": "Nidhal Dogga",
@@ -54,8 +54,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@noddde/core": "^1.0.0-rc.1",
-    "@noddde/engine": "^1.0.0-rc.1"
+    "@noddde/core": "^1.0.0-rc.2",
+    "@noddde/engine": "^1.0.0-rc.2"
   },
   "peerDependencies": {
     "nats": ">=2.0.0"

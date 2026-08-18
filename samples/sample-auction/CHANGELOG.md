@@ -1,5 +1,20 @@
 # @noddde/sample-auction
 
+## 0.0.2-rc.2
+
+### Patch Changes
+
+- Updated dependencies [ec58bd0]
+- Updated dependencies [525513c]
+- Updated dependencies [aed710c]
+- Updated dependencies [d837aea]
+- Updated dependencies [ef341bb]
+- Updated dependencies [dc769be]
+  - @noddde/core@1.0.0-rc.2
+  - @noddde/engine@1.0.0-rc.2
+  - @noddde/testing@1.0.0-rc.2
+  - @noddde/prisma@1.0.0-rc.2
+
 ## 0.0.2-rc.1
 
 ### Patch Changes
