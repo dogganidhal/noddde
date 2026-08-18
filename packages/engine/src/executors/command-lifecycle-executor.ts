@@ -23,6 +23,7 @@ import { upcastEvents, currentEventVersion } from "@noddde/core";
 import type { AggregatePersistenceResolver } from "../aggregate-persistence-resolver";
 import type { ConcurrencyStrategy } from "../concurrency-strategy";
 import type { MetadataEnricher } from "./metadata-enricher";
+import { onUowCommitted } from "../uow-completion-hooks";
 
 /**
  * Executes the full aggregate command lifecycle: load state, execute
@@ -175,15 +176,47 @@ export class CommandLifecycleExecutor {
         }
       }
     } else {
-      // Explicit UoW — strategy wraps just the lifecycle (for pessimistic locking)
-      await this.concurrencyStrategy.execute(
-        aggregateName,
-        command.targetAggregateId,
-        async () => {
-          await runLifecycle(existingUow!);
-          return [];
-        },
-      );
+      // Explicit UoW — persistence and event publishing are owned by
+      // whatever code holds `existingUow` (Domain.withUnitOfWork or
+      // SagaExecutor). Locking (if any) must be held until that owning
+      // UoW settles, not just until this method returns.
+      if (this.concurrencyStrategy.acquireForUow) {
+        await this.concurrencyStrategy.acquireForUow(
+          aggregateName,
+          command.targetAggregateId,
+          existingUow!,
+        );
+        await runLifecycle(existingUow!);
+      } else {
+        // No acquireForUow (e.g. OptimisticConcurrencyStrategy) — nothing
+        // to hold across commit, fall back to the pre-existing behavior.
+        await this.concurrencyStrategy.execute(
+          aggregateName,
+          command.targetAggregateId,
+          async () => {
+            await runLifecycle(existingUow!);
+            return [];
+          },
+        );
+      }
+
+      // Snapshot save is deferred to the owning UoW's commit, not dropped.
+      const snapshotConfig = this.snapshotResolver?.(aggregateName);
+      if (snapshotResult.value && snapshotConfig?.store) {
+        const pending = snapshotResult.value;
+        const store = snapshotConfig.store;
+        onUowCommitted(existingUow!, async () => {
+          try {
+            await store.save(
+              pending.aggregateName,
+              pending.aggregateId,
+              pending.snapshot,
+            );
+          } catch {
+            // Best-effort: snapshot save failure does not affect the command result
+          }
+        });
+      }
     }
   }
 

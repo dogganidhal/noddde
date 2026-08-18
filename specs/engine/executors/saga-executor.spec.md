@@ -100,15 +100,15 @@ class SagaExecutor {
 
 12. **Commit atomically** -- Call `uow.commit()`, which executes all enlisted operations (saga-state save + aggregate persistence saves) and returns the deferred events.
 
-13. **Publish deferred events, then callback** -- After a successful commit, dispatch every returned event sequentially via `for (const e of events) { await infrastructure.eventBus.dispatch(e); }` (sequential dispatch preserves causal ordering — events from a single saga reaction arrive at consumers in the order they were produced). Then, if `onEventsDispatched` is provided and `events.length > 0`, call `onEventsDispatched(events)`; errors from this callback are silently swallowed (a non-fatal outbox-marking hook).
+13. **Publish deferred events, then callback — OUTSIDE the saga's UoW `AsyncLocalStorage` scope** -- After a successful commit, dispatch every returned event sequentially via `for (const e of events) { await infrastructure.eventBus.dispatch(e); }` (sequential dispatch preserves causal ordering — events from a single saga reaction arrive at consumers in the order they were produced). Then, if `onEventsDispatched` is provided and `events.length > 0`, call `onEventsDispatched(events)`; errors from this callback are silently swallowed (a non-fatal outbox-marking hook). **This publish step runs after `uowStorage.run(uow, ...)` has returned**, not nested inside it — `commit()` happens inside the ALS scope (so `dispatchCommands`, requirement 11, can still enlist on `uow`), but the resulting events are dispatched once that scope has exited. This closes a re-entrancy defect: previously, publishing happened while the saga's now-completed `uow` was still the active `AsyncLocalStorage` value, so a standalone event handler reacting to one of these events — which is handed `infrastructure.commandBus` by design — that dispatched a command would have that command's `CommandLifecycleExecutor` observe the saga's `uow` via `uowStorage.getStore()`, take the explicit-UoW path, and throw `"UnitOfWork already completed"` when it tried to enlist (silently swallowed into a log by the event bus, but the command never ran). With publish outside the ALS scope, `uowStorage.getStore()` returns `undefined` for such a re-entrant dispatch, so it takes the implicit-UoW path and creates its own fresh UoW, exactly as if the triggering event had come from a plain `dispatchCommand()`. `runUowCompletionHooks(uow, true)` (see `specs/engine/executors/command-lifecycle-executor.spec.md` requirement 14a) is invoked once, after commit, to release any deferred locks or save any deferred snapshots registered by aggregate commands dispatched during requirement 11 — also outside the publish loop, so a hook failure cannot block publishing and a slow publish cannot delay lock release.
 
-14. **Rollback on failure (atomic)** -- If any step within the UoW scope (state enlist, command dispatch, or commit) throws, call `uow.rollback()` (best-effort; rollback errors are swallowed) and re-throw the original error. The saga state is **not** persisted, and any aggregate changes enlisted on the same UoW are rolled back with it.
+14. **Rollback on failure (atomic)** -- If any step within the UoW scope (state enlist, command dispatch, or commit) throws, call `uow.rollback()` (best-effort; rollback errors are swallowed) and re-throw the original error. The saga state is **not** persisted, and any aggregate changes enlisted on the same UoW are rolled back with it. `runUowCompletionHooks(uow, false)` is invoked exactly once (outside the ALS scope, alongside the rethrow) to release any deferred locks acquired by aggregate commands enlisted before the failure — a lock is never left held because the owning saga UoW rolled back instead of committing.
 
 ### Best-Effort Mode
 
 > The saga state is committed **first** in its own UoW; **then** reaction commands are dispatched **outside** that UoW (each command obtains its own UoW via `CommandLifecycleExecutor`), still inside the metadata context. Because the saga state is already durable before any command runs, events that command handlers dispatch **directly** through the event bus — and any re-entrant saga executions they trigger — observe the committed saga state. This is the escape hatch for off-path dispatch (issue #119), notably **standalone command handlers**, which have no "return events" channel and can only publish via `eventBus.dispatch()`.
 
-15. **Create and commit a saga-state UoW first** -- Create a UoW, run within `uowStorage.run(uow, ...)` and `metadataStorage.run(sagaCtx, ...)`, enlist the saga-state save, and call `uow.commit()` **before** dispatching any reaction command. For a state-only UoW the returned deferred-events array is typically empty; publish any returned events sequentially and invoke `onEventsDispatched` (when `events.length > 0`) exactly as in atomic mode (BR 13). If this commit phase throws, call `uow.rollback()` (best-effort) and re-throw — the saga state is not persisted.
+15. **Create and commit a saga-state UoW first** -- Create a UoW, run within `uowStorage.run(uow, ...)` and `metadataStorage.run(sagaCtx, ...)`, enlist the saga-state save, and call `uow.commit()` **before** dispatching any reaction command. For a state-only UoW the returned deferred-events array is typically empty; publish any returned events sequentially and invoke `onEventsDispatched` (when `events.length > 0`) exactly as in atomic mode (BR 13) — **also after `uowStorage.run(uow, ...)` has returned**, for the same re-entrancy reason. If this commit phase throws, call `uow.rollback()` (best-effort) and re-throw — the saga state is not persisted. Whether commit succeeds or throws, `runUowCompletionHooks(uow, committed)` is invoked exactly once (`committed` reflects whether `uow.commit()` actually returned) to release deferred locks / run deferred snapshot saves registered by any aggregate command enlisted on this UoW before the throw.
 
 16. **Dispatch reaction commands after commit, outside the saga UoW** -- After the saga-state UoW has committed, if `reaction.commands` is defined, normalize to an array and dispatch each via `infrastructure.commandBus.dispatch(command)`, wrapped in `metadataStorage.run(sagaCtx, ...)` but **not** in `uowStorage.run`. With no ambient UoW, each command creates its own implicit UoW via `CommandLifecycleExecutor`, commits independently, and publishes its own produced events after its own commit.
 
@@ -122,6 +122,8 @@ class SagaExecutor {
 - In **atomic** mode, the saga's UoW spans saga-state persistence and all reaction commands; they commit or roll back together. A reaction-command failure rolls back the saga-state transition.
 - In **best-effort** mode, the saga state is committed in its own UoW **before** any reaction command is dispatched; reaction commands run outside that UoW, each in its own UoW. A reaction-command failure does **not** roll back the (already committed) saga state.
 - Events produced by aggregate deciders are published only after the UoW that persists them commits (never before) — in **atomic** mode the saga's UoW, in **best-effort** mode each command's own UoW.
+- Publishing always happens outside the `uowStorage` `AsyncLocalStorage` scope of the UoW that was just committed — in both modes. A standalone event handler that dispatches a command in reaction to a saga-produced event never observes an already-completed `uow` via `uowStorage.getStore()`; it always gets `undefined` (implicit-UoW path) unless it is itself nested inside a still-open, unrelated UoW scope.
+- `runUowCompletionHooks(uow, committed)` runs exactly once per saga-owned UoW, after that UoW settles (commit or rollback) and outside the ALS scope — never zero times, never twice.
 - The metadata context is set before any commands are dispatched, in **both** modes, ensuring enriched events carry the saga's correlation chain.
 - The `causationId` for events produced by saga-dispatched commands is the `eventId` of the triggering event (linking cause to effect).
 - If `saga.on[event.name]` is `undefined`, the event is silently ignored (no error).
@@ -150,6 +152,7 @@ class SagaExecutor {
 - **Triggering event has no metadata** -- `correlationId` defaults to a new UUID v7. `causationId` defaults to `event.name`. `userId` is `undefined`.
 - **Triggering event has metadata** -- `correlationId`, `causationId` (from `eventId`), and `userId` are propagated.
 - **Saga handler returns empty commands array** -- No commands dispatched (same as `undefined`).
+- **A standalone event handler dispatches a command in reaction to a saga-produced event** -- The handler's `commandBus.dispatch()` call finds no ambient UoW (publishing happens outside `uowStorage.run`), takes the implicit-UoW path, and succeeds with its own independent UoW — it does NOT throw `"UnitOfWork already completed"`. This holds in both atomic and best-effort mode.
 
 ## Integration Points
 
@@ -160,6 +163,7 @@ class SagaExecutor {
 - **SagaPersistence** -- Saga state is loaded and saved via the persistence interface.
 - **MetadataEnricher** -- Indirectly used: the metadata context set by the saga flows through `AsyncLocalStorage` to the `MetadataEnricher` in `CommandLifecycleExecutor`, ensuring correlation propagation.
 - **EventBus** -- Events deferred by aggregate commands within the saga are published after UoW commit.
+- **`uow-completion-hooks.ts`** -- `runUowCompletionHooks(uow, committed)` is called once per saga-owned UoW after it settles (see `specs/engine/executors/command-lifecycle-executor.spec.md` requirement 14a); this releases any pessimistic locks or saves any pending snapshots that aggregate commands dispatched during the reaction (requirement 11) registered via `onUowSettled`/`onUowCommitted` on that same UoW.
 - **EventBus error isolation (layering)** -- `SagaExecutor.execute()` continues to perform its own internal `log + rollback UoW + rethrow` on failure (BR #13). The rollback contract is unchanged. However, when the executor's rethrow surfaces back to the bus, the bus's per-handler isolation layer (see `core/edd/event-bus`) catches the rethrow so it no longer poisons sibling subscribers (other sagas, projections, standalone handlers) on the same event. In other words: a saga still fails atomically (its UoW rolls back), but its failure no longer cascades to unrelated read-side consumers of the triggering event.
 
 ## Test Scenarios
@@ -899,6 +903,130 @@ describe("Saga-failure isolation from sibling subscribers", () => {
       id: "u-1",
       name: "Alice",
     });
+  });
+});
+```
+
+### a standalone handler can dispatch a command in reaction to a saga-published event (atomic mode)
+
+> Integration reproduction of the "UnitOfWork already completed" re-entrancy defect: a saga (atomic mode) reacts to `SourceDone` and just records its own state (no reaction commands, so the fix is exercised purely by the publish step). A standalone event handler also reacts to `SourceDone` by dispatching `UpdateTarget` against a second aggregate. Before the fix, the saga's publish loop ran while the saga's now-completed `uow` was still the ambient `AsyncLocalStorage` value, so the standalone handler's re-entrant dispatch hit the explicit-UoW path, threw `"UnitOfWork already completed"` when it tried to enlist, and that throw was swallowed into a log by the event bus — `Target` was silently never updated. After the fix, publishing happens outside that scope, so the re-entrant dispatch takes the implicit-UoW path and succeeds.
+
+```ts
+import { describe, it, expect } from "vitest";
+import type {
+  DefineCommands,
+  DefineEvents,
+  Infrastructure,
+} from "@noddde/core";
+import { defineAggregate, defineDomain, defineSaga } from "@noddde/core";
+import {
+  EventEmitterEventBus,
+  InMemoryCommandBus,
+  InMemoryEventSourcedAggregatePersistence,
+  InMemoryQueryBus,
+  InMemorySagaPersistence,
+  wireDomain,
+} from "@noddde/engine";
+
+describe("SagaExecutor: re-entrant dispatch from a standalone event handler", () => {
+  type SourceEvent = DefineEvents<{ SourceDone: { id: string } }>;
+  type SourceCommand = DefineCommands<{ FinishSource: { id: string } }>;
+  type SourceTypes = {
+    state: { done: boolean } | null;
+    events: SourceEvent;
+    commands: SourceCommand;
+    infrastructure: Infrastructure;
+  };
+
+  type TargetEvent = DefineEvents<{ TargetUpdated: { id: string } }>;
+  type TargetCommand = DefineCommands<{ UpdateTarget: { id: string } }>;
+  type TargetTypes = {
+    state: { updated: boolean } | null;
+    events: TargetEvent;
+    commands: TargetCommand;
+    infrastructure: Infrastructure;
+  };
+
+  type TriggerSagaTypes = {
+    state: { started: boolean };
+    events: SourceEvent;
+    commands: never;
+    infrastructure: Infrastructure;
+  };
+
+  const Source = defineAggregate<SourceTypes>({
+    initialState: null,
+    decide: {
+      FinishSource: (cmd) => ({
+        name: "SourceDone",
+        payload: { id: cmd.targetAggregateId as string },
+      }),
+    },
+    evolve: { SourceDone: () => ({ done: true }) },
+  });
+
+  const Target = defineAggregate<TargetTypes>({
+    initialState: null,
+    decide: {
+      UpdateTarget: (cmd) => ({
+        name: "TargetUpdated",
+        payload: { id: cmd.targetAggregateId as string },
+      }),
+    },
+    evolve: { TargetUpdated: () => ({ updated: true }) },
+  });
+
+  const TriggerSaga = defineSaga<TriggerSagaTypes>({
+    atomicity: "atomic",
+    initialState: { started: false },
+    startedBy: ["SourceDone"],
+    on: {
+      SourceDone: {
+        id: (event) => event.payload.id,
+        handle: () => ({ state: { started: true } }),
+      },
+    },
+  });
+
+  it("should let a standalone handler dispatch a command against a second aggregate", async () => {
+    const sharedPersistence = new InMemoryEventSourcedAggregatePersistence();
+
+    const definition = defineDomain({
+      writeModel: { aggregates: { Source, Target } },
+      readModel: { projections: {} },
+      processModel: {
+        sagas: { TriggerSaga },
+        standaloneEventHandlers: {
+          SourceDone: async (event, infrastructure) => {
+            await infrastructure.commandBus.dispatch({
+              name: "UpdateTarget",
+              targetAggregateId: event.payload.id,
+              payload: { id: event.payload.id },
+            });
+          },
+        },
+      },
+    });
+
+    const domain = await wireDomain(definition, {
+      aggregates: { persistence: () => sharedPersistence },
+      sagas: { persistence: () => new InMemorySagaPersistence() },
+      buses: () => ({
+        commandBus: new InMemoryCommandBus(),
+        eventBus: new EventEmitterEventBus(),
+        queryBus: new InMemoryQueryBus(),
+      }),
+    });
+
+    await domain.dispatchCommand({
+      name: "FinishSource",
+      targetAggregateId: "s-1",
+      payload: { id: "s-1" },
+    });
+
+    const targetEvents = await sharedPersistence.load("Target", "s-1");
+    expect(targetEvents).toHaveLength(1);
+    expect(targetEvents[0]!.name).toBe("TargetUpdated");
   });
 });
 ```

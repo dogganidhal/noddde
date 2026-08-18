@@ -4,10 +4,11 @@ import type {
   EventReader,
   Logger,
   Projection,
+  UpcasterMap,
   ViewStore,
   ViewStoreFactory,
 } from "@noddde/core";
-import { DeleteView } from "@noddde/core";
+import { DeleteView, upcastEvents } from "@noddde/core";
 
 /**
  * Options accepted by {@link Domain.rebuildProjection}.
@@ -160,6 +161,8 @@ export interface RebuildContext {
   eventBus: EventBus;
   /** projectionName → eventName → handler reference */
   subscriptionRegistry: Map<string, Map<string, AsyncEventHandler>>;
+  /** aggregateName → that aggregate's `upcasters` map (built once per rebuild call). */
+  aggregateUpcasters: Map<string, UpcasterMap>;
   logger: Logger;
 }
 
@@ -184,6 +187,7 @@ export async function rebuildProjectionImpl(
     eventReader,
     eventBus,
     subscriptionRegistry,
+    aggregateUpcasters,
     logger,
   } = ctx;
 
@@ -218,8 +222,16 @@ export async function rebuildProjectionImpl(
     let eventsApplied = 0;
     let viewsDeleted = 0;
 
-    for await (const event of eventReader.read()) {
+    for await (let event of eventReader.read()) {
       eventsRead++;
+
+      const aggregateName = event.metadata?.aggregateName;
+      const upcasters = aggregateName
+        ? aggregateUpcasters.get(aggregateName)
+        : undefined;
+      if (upcasters) {
+        event = upcastEvents([event], upcasters)[0]!;
+      }
 
       const handler = (projection.on as Record<string, any>)[event.name];
       if (!handler) continue;

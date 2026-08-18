@@ -13,6 +13,7 @@ import type {
 } from "@noddde/core";
 import { uuidv7 } from "../uuid";
 import type { MetadataContext } from "../domain";
+import { runUowCompletionHooks } from "../uow-completion-hooks";
 
 /**
  * Executes the full saga event handling lifecycle: derive instance ID,
@@ -170,19 +171,25 @@ export class SagaExecutor {
           throw error;
         };
 
-        // Commit the saga's UoW and publish its deferred events sequentially
-        // (sequential dispatch preserves causal ordering), then run the
-        // best-effort post-dispatch callback. The caller enlists beforehand.
-        const commitAndPublish = async (): Promise<void> => {
+        // Commits the saga's UoW, returning the deferred events. Publishing
+        // and the post-dispatch callback are performed by the caller AFTER
+        // the uowStorage/metadataStorage ALS scope has exited -- not nested
+        // inside it -- so a standalone handler reacting to one of these
+        // events and dispatching a command never observes the just-completed
+        // `uow` via uowStorage.getStore(). It takes the implicit-UoW path
+        // instead of throwing "UnitOfWork already completed".
+        const commitOnly = async (): Promise<Event[]> => {
           const commitFn = () => uow.commit();
-          const events = this.instrumentation
+          return this.instrumentation
             ? await this.instrumentation.withSpan(
                 "noddde.uow.commit",
                 { "noddde.saga.name": sagaName },
                 commitFn,
               )
             : await commitFn();
+        };
 
+        const publish = async (events: Event[]): Promise<void> => {
           for (const e of events) {
             await this.infrastructure.eventBus.dispatch(e);
           }
@@ -203,59 +210,96 @@ export class SagaExecutor {
           }
         };
 
-        if (mode === "best-effort") {
-          // Best-effort: commit the saga state FIRST, then dispatch reaction
-          // commands OUTSIDE the saga's UoW (each obtains its own UoW via the
-          // CommandLifecycleExecutor) but still inside the metadata context.
-          // Because the saga state is already durable, command handlers that
-          // publish events directly via the event bus — and any re-entrant
-          // saga executions they trigger — observe the committed state
-          // (issue #119). A command failure after commit does NOT roll back
-          // the saga state; it propagates.
-          await this.uowStorage.run(uow, async () => {
-            await this.metadataStorage.run(sagaCtx, async () => {
-              try {
-                uow.enlist(() =>
-                  sagaPersistence.save(
-                    sagaName,
-                    sagaId,
-                    reaction.state,
-                    expectedVersion,
-                  ),
-                );
-                await commitAndPublish();
-              } catch (error) {
-                await failCommitPhase(error);
-              }
-            });
-          });
+        let committed = false;
+        let deferredEvents: Event[] = [];
+        let hooksRan = false;
 
-          if (commands.length > 0) {
-            await this.metadataStorage.run(sagaCtx, dispatchCommands);
-          }
-        } else {
-          // Atomic (default): the saga's UoW spans the saga-state save and all
-          // reaction commands, so they commit or roll back together. Aggregate
-          // command handlers enlist on this same UoW (explicit-UoW path) and
-          // their events are deferred until commit.
-          await this.uowStorage.run(uow, async () => {
-            await this.metadataStorage.run(sagaCtx, async () => {
-              try {
-                uow.enlist(() =>
-                  sagaPersistence.save(
-                    sagaName,
-                    sagaId,
-                    reaction.state,
-                    expectedVersion,
-                  ),
-                );
-                await dispatchCommands();
-                await commitAndPublish();
-              } catch (error) {
-                await failCommitPhase(error);
-              }
+        // Runs the UoW completion hooks exactly once, outside the ALS scope
+        // and BEFORE publishing -- so a slow publish loop never delays a
+        // deferred lock release -- while a hook failure is swallowed (logged)
+        // so it can never block publishing from proceeding.
+        const runHooksOnce = async (): Promise<void> => {
+          if (hooksRan) return;
+          hooksRan = true;
+          try {
+            await runUowCompletionHooks(uow, committed);
+          } catch (error) {
+            this.logger?.error("UoW completion hooks failed.", {
+              sagaName,
+              sagaId: String(sagaId),
+              error: String(error),
             });
-          });
+          }
+        };
+
+        try {
+          if (mode === "best-effort") {
+            // Best-effort: commit the saga state FIRST, then dispatch reaction
+            // commands OUTSIDE the saga's UoW (each obtains its own UoW via the
+            // CommandLifecycleExecutor) but still inside the metadata context.
+            // Because the saga state is already durable, command handlers that
+            // publish events directly via the event bus — and any re-entrant
+            // saga executions they trigger — observe the committed state
+            // (issue #119). A command failure after commit does NOT roll back
+            // the saga state; it propagates.
+            await this.uowStorage.run(uow, async () => {
+              await this.metadataStorage.run(sagaCtx, async () => {
+                try {
+                  uow.enlist(() =>
+                    sagaPersistence.save(
+                      sagaName,
+                      sagaId,
+                      reaction.state,
+                      expectedVersion,
+                    ),
+                  );
+                  deferredEvents = await commitOnly();
+                  committed = true;
+                } catch (error) {
+                  await failCommitPhase(error);
+                }
+              });
+            });
+
+            await runHooksOnce();
+            await publish(deferredEvents);
+
+            if (commands.length > 0) {
+              await this.metadataStorage.run(sagaCtx, dispatchCommands);
+            }
+          } else {
+            // Atomic (default): the saga's UoW spans the saga-state save and all
+            // reaction commands, so they commit or roll back together. Aggregate
+            // command handlers enlist on this same UoW (explicit-UoW path) and
+            // their events are deferred until commit.
+            await this.uowStorage.run(uow, async () => {
+              await this.metadataStorage.run(sagaCtx, async () => {
+                try {
+                  uow.enlist(() =>
+                    sagaPersistence.save(
+                      sagaName,
+                      sagaId,
+                      reaction.state,
+                      expectedVersion,
+                    ),
+                  );
+                  await dispatchCommands();
+                  deferredEvents = await commitOnly();
+                  committed = true;
+                } catch (error) {
+                  await failCommitPhase(error);
+                }
+              });
+            });
+
+            await runHooksOnce();
+            await publish(deferredEvents);
+          }
+        } finally {
+          // Safety net for the failure path (failCommitPhase re-throws before
+          // runHooksOnce is reached above) -- ensures the hooks still run
+          // exactly once even when the saga's UoW rolled back.
+          await runHooksOnce();
         }
       };
 

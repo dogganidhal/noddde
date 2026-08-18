@@ -86,6 +86,7 @@ class Domain<TInfrastructure, TStandaloneCommand, TStandaloneQuery> {
 10. **shutdown closes infrastructure even on timeout** -- Even if the drain phases time out, resource cleanup (removeAllListeners + close) still executes.
 11. **in-flight commands complete normally** -- Commands that were dispatched before `shutdown()` complete their full lifecycle (persist, publish events, trigger projections/sagas) without interruption.
 12. **close errors are swallowed** -- If a `Closeable.close()` throws during shutdown, the error is caught and shutdown continues with the remaining closeables.
+13. **Deadline timers are always cleared, never left dangling** -- Both drain phases (in-flight operations, requirement 4; outbox relay, requirement 5) race the relevant work against a deadline built with `setTimeout`. Each `setTimeout` handle is captured and `clearTimeout`'d as soon as `Promise.race(...)` settles, regardless of which side won the race. Previously, the timer handle was discarded, so on the (normal, expected) fast path where the drain wins the race well before the deadline, the still-pending `setTimeout` callback kept the Node.js event loop alive for up to the remainder of `timeoutMs` (default 30s) after `shutdown()` had already resolved -- exactly the delay graceful shutdown exists to avoid, and something that eats directly into a container's `SIGTERM` grace period. Clearing the timer as soon as the race resolves means a fast shutdown lets the process exit immediately once `shutdown()`'s promise resolves and there is no other reason (e.g. an unrelated open handle) to stay alive.
 
 ## Invariants
 
@@ -93,6 +94,7 @@ class Domain<TInfrastructure, TStandaloneCommand, TStandaloneQuery> {
 - After `shutdown()` resolves, no event listeners remain on the event bus.
 - After `shutdown()` resolves, all `Closeable` infrastructure has had `close()` called (best-effort).
 - The outbox relay timer is always cleared during shutdown.
+- Neither of `_performShutdown`'s own deadline `setTimeout`s is ever left pending once `shutdown()` resolves. A process whose only remaining work was a `Domain` awaiting `shutdown()` can exit immediately afterward -- it never has to wait out the rest of `timeoutMs` for an orphaned timer.
 - Shutdown never interrupts or cancels in-flight operations — it only waits for them.
 
 ## Edge Cases
@@ -106,6 +108,8 @@ class Domain<TInfrastructure, TStandaloneCommand, TStandaloneQuery> {
 - **timeout of 0** -- Drain phases are skipped immediately; cleanup still runs.
 - **All infrastructure is Closeable** -- All components are closed in reverse order.
 - **Mixed Closeable and non-Closeable** -- Only Closeable components are closed.
+- **Drain completes well before `timeoutMs`** -- The most common real-world case. The deadline timer is cleared immediately once the drain wins the race; the process is not kept alive waiting for a timer that would otherwise have fired tens of seconds later.
+- **Drain does NOT complete before `timeoutMs` (timeout wins the race)** -- The deadline `setTimeout` fires normally (nothing to clear early); the drain continues running in the background even after `shutdown()` proceeds to resource cleanup, exactly as before this fix -- this requirement changes only what happens to the timer handle, never the race's own semantics or outcome.
 
 ## Integration Points
 
@@ -594,6 +598,41 @@ describe("DomainShutdownError", () => {
     expect(error).toBeInstanceOf(Error);
     expect(error.name).toBe("DomainShutdownError");
     expect(error.message).toContain("shutting down");
+  });
+});
+```
+
+### shutdown clears its deadline timers when the drain wins the race (no dangling timer)
+
+```ts
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { defineDomain } from "@noddde/core";
+import { wireDomain } from "@noddde/engine";
+
+describe("Domain.shutdown", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("should not leave a pending timer after a fast shutdown resolves", async () => {
+    const domain = await wireDomain(
+      defineDomain({
+        writeModel: { aggregates: {} },
+        readModel: { projections: {} },
+      }),
+    );
+
+    vi.useFakeTimers();
+
+    const shutdownPromise = domain.shutdown({ timeoutMs: 30_000 });
+    // Nothing is in-flight and no outbox is configured, so both drain
+    // phases resolve on their own during the same microtask flush --
+    // let fake timers process any microtasks/timers created so far.
+    await vi.advanceTimersByTimeAsync(0);
+    await shutdownPromise;
+
+    // The 30s deadline timer(s) must already be cleared -- none pending.
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 ```
