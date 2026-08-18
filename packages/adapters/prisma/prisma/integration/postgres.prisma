@@ -36,6 +36,7 @@ model NodddeSagaState {
   sagaName String @map("saga_name")
   sagaId   String @map("saga_id")
   state    String
+  version  Int    @default(0)
 
   @@id([sagaName, sagaId])
   @@map("noddde_saga_states")

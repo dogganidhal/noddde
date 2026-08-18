@@ -215,26 +215,36 @@ describe("PrismaSagaPersistence", () => {
   afterEach(teardownDb);
 
   it("should save and load saga state", async () => {
-    await infra.sagaPersistence.save("Fulfillment", "o-1", {
-      status: "pending",
-    });
+    await infra.sagaPersistence.save(
+      "Fulfillment",
+      "o-1",
+      { status: "pending" },
+      0,
+    );
     const state = await infra.sagaPersistence.load("Fulfillment", "o-1");
-    expect(state).toEqual({ status: "pending" });
+    expect(state).toEqual({ state: { status: "pending" }, version: 1 });
   });
 
-  it("should return undefined for unknown saga", async () => {
+  it("should return null for unknown saga", async () => {
     const state = await infra.sagaPersistence.load(
       "Fulfillment",
       "nonexistent",
     );
-    expect(state == null).toBe(true);
+    expect(state).toBeNull();
   });
 
-  it("should overwrite state on repeated saves", async () => {
-    await infra.sagaPersistence.save("Fulfillment", "o-1", { step: 1 });
-    await infra.sagaPersistence.save("Fulfillment", "o-1", { step: 2 });
+  it("should overwrite state on repeated saves with correct versions", async () => {
+    await infra.sagaPersistence.save("Fulfillment", "o-1", { step: 1 }, 0);
+    await infra.sagaPersistence.save("Fulfillment", "o-1", { step: 2 }, 1);
     const state = await infra.sagaPersistence.load("Fulfillment", "o-1");
-    expect(state).toEqual({ step: 2 });
+    expect(state).toEqual({ state: { step: 2 }, version: 2 });
+  });
+
+  it("should throw ConcurrencyError on a stale expectedVersion", async () => {
+    await infra.sagaPersistence.save("Fulfillment", "o-2", { step: 1 }, 0);
+    await expect(
+      infra.sagaPersistence.save("Fulfillment", "o-2", { step: 2 }, 0),
+    ).rejects.toThrow(ConcurrencyError);
   });
 });
 
@@ -258,7 +268,7 @@ describe("PrismaUnitOfWork", () => {
       ),
     );
     uow.enlist(() =>
-      infra.sagaPersistence.save("Fulfillment", "o-1", { step: 1 }),
+      infra.sagaPersistence.save("Fulfillment", "o-1", { step: 1 }, 0),
     );
     uow.deferPublish({ name: "AccountCreated", payload: { owner: "Alice" } });
 
@@ -268,7 +278,7 @@ describe("PrismaUnitOfWork", () => {
     const loaded = await infra.eventSourcedPersistence.load("Account", "acc-1");
     expect(loaded).toHaveLength(1);
     const sagaState = await infra.sagaPersistence.load("Fulfillment", "o-1");
-    expect(sagaState).toEqual({ step: 1 });
+    expect(sagaState).toEqual({ state: { step: 1 }, version: 1 });
   });
 
   it("should rollback without persisting anything", async () => {

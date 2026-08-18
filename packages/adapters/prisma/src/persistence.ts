@@ -205,38 +205,54 @@ export class PrismaSagaPersistence implements SagaPersistence {
     return (this.txStore.current ?? this.prisma) as PrismaExecutor;
   }
 
-  async save(sagaName: string, sagaId: string, state: any): Promise<void> {
+  async save(
+    sagaName: string,
+    sagaId: string,
+    state: any,
+    expectedVersion: number,
+  ): Promise<void> {
     const executor = this.getExecutor() as any;
     const serialized = JSON.stringify(state);
 
-    const existing = await executor.nodddeSagaState.findUnique({
-      where: { sagaName_sagaId: { sagaName, sagaId } },
-    });
-
-    if (existing) {
-      await executor.nodddeSagaState.update({
-        where: { sagaName_sagaId: { sagaName, sagaId } },
-        data: { state: serialized },
-      });
+    if (expectedVersion === 0) {
+      try {
+        await executor.nodddeSagaState.create({
+          data: { sagaName, sagaId, state: serialized, version: 1 },
+        });
+      } catch (error: unknown) {
+        if (
+          error instanceof Error &&
+          "code" in error &&
+          (error as any).code === "P2002"
+        ) {
+          throw new ConcurrencyError(sagaName, sagaId, 0, -1);
+        }
+        throw error;
+      }
     } else {
-      await executor.nodddeSagaState.create({
-        data: { sagaName, sagaId, state: serialized },
+      const result = await executor.nodddeSagaState.updateMany({
+        where: { sagaName, sagaId, version: expectedVersion },
+        data: { state: serialized, version: expectedVersion + 1 },
       });
+
+      if (result.count === 0) {
+        throw new ConcurrencyError(sagaName, sagaId, expectedVersion, -1);
+      }
     }
   }
 
   async load(
     sagaName: string,
     sagaId: string,
-  ): Promise<any | undefined | null> {
+  ): Promise<{ state: any; version: number } | null> {
     const executor = this.getExecutor() as any;
 
     const row = await executor.nodddeSagaState.findUnique({
       where: { sagaName_sagaId: { sagaName, sagaId } },
     });
 
-    if (!row) return undefined;
-    return JSON.parse(row.state);
+    if (!row) return null;
+    return { state: JSON.parse(row.state), version: row.version };
   }
 }
 

@@ -271,7 +271,12 @@ export class TypeORMSagaPersistence implements SagaPersistence {
     return this.txStore.current ?? this.dataSource.manager;
   }
 
-  async save(sagaName: string, sagaId: string, state: any): Promise<void> {
+  async save(
+    sagaName: string,
+    sagaId: string,
+    state: any,
+    expectedVersion: number,
+  ): Promise<void> {
     const manager = this.getManager();
     const repo = getRepo<NodddeSagaStateEntity>(manager, TABLE.sagaStates);
     const serialized = JSON.stringify(state);
@@ -280,18 +285,47 @@ export class TypeORMSagaPersistence implements SagaPersistence {
       where: { sagaName, sagaId },
     });
 
-    if (existing) {
-      existing.state = serialized;
-      await repo.save(existing);
-    } else {
-      await repo.save({ sagaName, sagaId, state: serialized });
+    try {
+      if (existing) {
+        if (existing.version !== expectedVersion) {
+          throw new ConcurrencyError(
+            sagaName,
+            sagaId,
+            expectedVersion,
+            existing.version,
+          );
+        }
+        existing.state = serialized;
+        existing.version = expectedVersion + 1;
+        await repo.save(existing);
+      } else {
+        if (expectedVersion !== 0) {
+          throw new ConcurrencyError(sagaName, sagaId, expectedVersion, 0);
+        }
+        await repo.save({
+          sagaName,
+          sagaId,
+          state: serialized,
+          version: 1,
+        });
+      }
+    } catch (error: unknown) {
+      if (error instanceof ConcurrencyError) throw error;
+      // Same TOCTOU race as TypeORMStateStoredAggregatePersistence.save:
+      // two racing saves for a brand-new saga instance both see no existing
+      // row and both INSERT, violating the primary key.
+      const message = error instanceof Error ? error.message : String(error);
+      if (/UNIQUE|duplicate|unique/i.test(message)) {
+        throw new ConcurrencyError(sagaName, sagaId, expectedVersion, -1);
+      }
+      throw error;
     }
   }
 
   async load(
     sagaName: string,
     sagaId: string,
-  ): Promise<any | undefined | null> {
+  ): Promise<{ state: any; version: number } | null> {
     const manager = this.getManager();
     const repo = getRepo<NodddeSagaStateEntity>(manager, TABLE.sagaStates);
 
@@ -299,8 +333,8 @@ export class TypeORMSagaPersistence implements SagaPersistence {
       where: { sagaName, sagaId },
     });
 
-    if (!row) return undefined;
-    return JSON.parse(row.state);
+    if (!row) return null;
+    return { state: JSON.parse(row.state), version: row.version };
   }
 }
 
