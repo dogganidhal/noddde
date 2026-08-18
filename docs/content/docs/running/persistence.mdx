@@ -319,7 +319,7 @@ SQLite does not support advisory locks -- use `InMemoryAggregateLocker` for sing
 | Complexity               | Lowest                     | Low                  | Higher (lock management)     |
 | Latency under contention | Fails fast                 | Variable (retries)   | Predictable (queueing)       |
 
-Inside an explicit `withUnitOfWork()`, optimistic `ConcurrencyError` is never retried -- it propagates immediately. Pessimistic locking still acquires/releases per command within the UoW.
+Inside an explicit `withUnitOfWork()`, optimistic `ConcurrencyError` is never retried -- it propagates immediately. Pessimistic locking acquires the lock before the command's load phase and holds it until the **owning** unit of work settles (commit or rollback), not merely until that command's handler returns -- the write itself happens at the owning UoW's commit, so the lock has to outlive the individual command to serialize access at all. A second command targeting the same aggregate therefore queues (or times out per `lockTimeoutMs`) until the enclosing `withUnitOfWork()` call has committed or rolled back.
 
 ## Built-in In-Memory Implementations
 

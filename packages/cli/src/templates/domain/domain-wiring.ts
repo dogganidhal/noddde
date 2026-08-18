@@ -167,7 +167,7 @@ const main = async () => {
       commandBus: new InMemoryCommandBus(),
       eventBus: new RabbitMqEventBus({
         url: "amqp://localhost:5672",
-        queuePrefix: "${ctx.name}",
+        queuePrefix: "${ctx.kebabName}",
       }),
       queryBus: new InMemoryQueryBus(),
     }),

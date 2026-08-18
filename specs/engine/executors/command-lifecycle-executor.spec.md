@@ -141,10 +141,12 @@ class CommandLifecycleExecutor {
     - After successful commit, all returned events are dispatched sequentially via `for (const e of events) { await eventBus.dispatch(e); }` to preserve causal ordering.
 
 12. **Explicit UoW (existing UoW in storage)** -- When a UoW is already in the `AsyncLocalStorage` (via `withUnitOfWork` or saga handling):
-    - The concurrency strategy wraps only the lifecycle execution (not UoW creation/commit).
     - The lifecycle enlists persistence and defers events on the existing UoW.
-    - The attempt callback returns `[]` (no events to dispatch; the owning UoW handles commit and event publishing).
-    - No snapshot save occurs in this path.
+    - No events are dispatched by the executor itself; the owning UoW (the code that eventually calls `uow.commit()` -- `Domain.withUnitOfWork` or `SagaExecutor`) handles commit and event publishing.
+    - **Locking is held across the owning commit, not just the lifecycle.** If `concurrencyStrategy.acquireForUow` is defined (see requirement 12a), the executor calls it instead of wrapping the lifecycle in `concurrencyStrategy.execute()`. This acquires whatever guard the strategy provides (e.g. a pessimistic lock) and defers its release until the _owning_ UoW settles -- not until this method returns. This closes the gap where a pessimistic lock protected only the load-and-enlist phase while the actual write happened later, unprotected, at the owning UoW's commit. If the strategy has no `acquireForUow` (e.g. `OptimisticConcurrencyStrategy`, which holds nothing to release), the executor falls back to the pre-existing behavior of wrapping the lifecycle in `concurrencyStrategy.execute()` -- optimistic concurrency has no lock to hold across commit; the version check on `save()` remains the safety net regardless of UoW ownership.
+    - **Snapshot save is deferred to the owning commit, not dropped.** If the snapshot strategy triggers during the explicit-UoW lifecycle (see requirement 10), the pending snapshot is registered via `onUowCommitted(existingUow, ...)` (requirement 14a) instead of being silently discarded. It is saved, best-effort, only if and when the owning UoW actually commits.
+
+12a. **`ConcurrencyStrategy.acquireForUow` (optional strategy hook)** -- `packages/engine/src/concurrency-strategy.ts` defines an optional method on `ConcurrencyStrategy`: `acquireForUow(aggregateName, aggregateId, uow): Promise<void>`. `PessimisticConcurrencyStrategy` implements it: acquires the lock via `this.locker.acquire(...)`, then registers `() => this.locker.release(...)` via `onUowSettled(uow, ...)` (requirement 14a) instead of releasing in a `finally` block. `OptimisticConcurrencyStrategy` does not implement it (nothing to hold). `PerAggregateConcurrencyStrategy` always implements it, delegating to the resolved per-aggregate strategy's `acquireForUow` when present, and no-op otherwise -- so composite configurations route correctly regardless of which concrete strategy backs a given aggregate. `acquireForUow` performs no retry (matching `PessimisticConcurrencyStrategy.execute`'s no-retry contract); the caller (`CommandLifecycleExecutor`) runs the lifecycle exactly once after acquiring.
 
 ### Concurrency Delegation
 
@@ -158,12 +160,15 @@ class CommandLifecycleExecutor {
 
 16. **Post-dispatch callback (best-effort)** -- After dispatching all events in the implicit UoW path, if `onEventsDispatched` is provided, call `onEventsDispatched(events)`. Errors from this callback are silently swallowed. This enables the Domain to mark outbox entries as published after successful dispatch.
 
+14a. **`onUowCommitted` / `onUowSettled` (completion hooks module)** -- `packages/engine/src/uow-completion-hooks.ts` exports a small `WeakMap<UnitOfWork, ...>`-keyed registry with three functions: `onUowCommitted(uow, hook)` (runs `hook` only if the UoW commits successfully), `onUowSettled(uow, hook)` (runs `hook` unconditionally, whether the UoW commits or rolls back), and `runUowCompletionHooks(uow, committed)` (invoked exactly once by whichever code owns that UoW's commit/rollback -- `Domain.withUnitOfWork` and `SagaExecutor`, both covered under `specs/engine/domain.spec.md` and `specs/engine/executors/saga-executor.spec.md` -- after the UoW has settled; runs `onCommitted` hooks first, only if `committed` is `true`, then `onSettled` hooks always; registration for a given UoW is cleared after this runs). This module is engine-internal (not exported from `@noddde/engine`) and exists so that code registering explicit-UoW work (a deferred lock release, a deferred snapshot save) does not need the owning UoW's commit call site to know about that work's specifics -- it just calls `runUowCompletionHooks` generically. A UoW nobody registered hooks on is a no-op lookup.
+
 ## Invariants
 
 - The lifecycle phases always execute in order: load, execute, normalize, evolve, enrich, enlist, defer, snapshot evaluation.
 - Events are enriched before being enlisted for persistence (enriched events are what gets persisted).
 - Events are published only after successful UoW commit (never before).
-- Snapshot save never causes a command to fail (errors are swallowed).
+- Snapshot save never causes a command to fail (errors are swallowed), whether saved directly (implicit UoW) or via a deferred `onUowCommitted` hook (explicit UoW).
+- A pessimistic lock acquired for an explicit-UoW command is released exactly once, when the owning UoW settles -- never before, never twice, and never leaked (it releases on rollback too, via `onUowSettled`).
 - UoW rollback errors are swallowed (the original error is re-thrown).
 - The concurrency strategy always wraps the attempt -- even with 0 retries, the strategy is called.
 - `execute` is always async and returns `Promise<void>`.
@@ -179,7 +184,8 @@ class CommandLifecycleExecutor {
 - **Snapshot store configured but no strategy** -- No snapshot evaluation occurs.
 - **Snapshot strategy configured but no store** -- No snapshot evaluation occurs. Both must be present.
 - **State-stored persistence** -- Snapshot evaluation is skipped entirely (only applies to event-sourced).
-- **Explicit UoW with pessimistic strategy** -- Lock is still acquired/released around the lifecycle (protects the load phase), but UoW commit happens elsewhere.
+- **Explicit UoW with pessimistic strategy** -- The lock is acquired before the lifecycle runs and held until the _owning_ UoW settles (commit or rollback) via `onUowSettled`, not released when this method returns. A second command targeting the same aggregate cannot acquire the lock until the first one's owning UoW has actually committed or rolled back -- this is what "serialized access" means for pessimistic concurrency, and it now holds for the explicit-UoW path exactly as it already did for the implicit path.
+- **Explicit UoW with a snapshot strategy that triggers** -- The pending snapshot is registered via `onUowCommitted` and saved (best-effort) only after the owning UoW's commit succeeds -- not dropped, and not saved if the owning UoW rolls back.
 - **UoW commit fails** -- Rollback is attempted. Original error propagates. No events published, no snapshot saved.
 - **PartialEventLoad optimization** -- Only loads events after snapshot version, avoiding full stream replay.
 - **Persistence load returns null for state-stored** -- Uses `aggregate.initialState` and `version = 0`.
@@ -195,6 +201,8 @@ class CommandLifecycleExecutor {
 - **SnapshotStore / SnapshotStrategy** -- Optional. Used for snapshot-aware loading and post-command snapshot evaluation.
 - **EventBus** -- Events are dispatched after implicit UoW commit.
 - **Domain** -- Constructs the executor during `init()` and calls `execute` for each aggregate command dispatch.
+- **`uow-completion-hooks.ts`** -- `onUowCommitted`/`onUowSettled` are called during the explicit-UoW path to defer snapshot saves and lock releases to the owning UoW's actual settlement; `runUowCompletionHooks` is called by the owner (`Domain.withUnitOfWork`, `SagaExecutor`), not by this executor.
+- **`ConcurrencyStrategy.acquireForUow`** -- Optional hook checked at the top of the explicit-UoW branch; see requirement 12a.
 
 ## Test Scenarios
 
@@ -849,6 +857,257 @@ describe("CommandLifecycleExecutor", () => {
     const stored = await persistence.load("FailingAggregate", "f1");
     expect(stored).toHaveLength(0);
     expect(publishedEvents).toHaveLength(0);
+  });
+});
+```
+
+### explicit UoW: pessimistic lock is held until the owning UoW settles, not released early
+
+```ts
+import { AsyncLocalStorage } from "node:async_hooks";
+import { describe, it, expect } from "vitest";
+import { defineAggregate } from "@noddde/core";
+import type {
+  AggregateLocker,
+  AggregateTypes,
+  DefineCommands,
+  DefineEvents,
+  ID,
+  Infrastructure,
+  UnitOfWork,
+} from "@noddde/core";
+import {
+  InMemoryEventSourcedAggregatePersistence,
+  InMemoryCommandBus,
+  EventEmitterEventBus,
+  InMemoryQueryBus,
+  createInMemoryUnitOfWork,
+} from "@noddde/engine";
+import { CommandLifecycleExecutor } from "../../../executors/command-lifecycle-executor";
+import { MetadataEnricher } from "../../../executors/metadata-enricher";
+import type { MetadataContext } from "../../../domain";
+import { PessimisticConcurrencyStrategy } from "../../../concurrency-strategy";
+import { runUowCompletionHooks } from "../../../uow-completion-hooks";
+import { GlobalAggregatePersistenceResolver } from "../../../aggregate-persistence-resolver";
+
+type LockState = { count: number };
+type LockEvent = DefineEvents<{ Bumped: {} }>;
+type LockCommand = DefineCommands<{ Bump: void }>;
+type LockTypes = AggregateTypes & {
+  state: LockState;
+  events: LockEvent;
+  commands: LockCommand;
+  infrastructure: Infrastructure;
+};
+
+const Counter = defineAggregate<LockTypes>({
+  initialState: { count: 0 },
+  decide: { Bump: () => ({ name: "Bumped", payload: {} }) },
+  evolve: { Bumped: (_p, s) => ({ count: s.count + 1 }) },
+});
+
+describe("CommandLifecycleExecutor", () => {
+  it("should not release a pessimistic lock until the owning UoW settles", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+    const infrastructure = {
+      commandBus: new InMemoryCommandBus(),
+      eventBus: new EventEmitterEventBus(),
+      queryBus: new InMemoryQueryBus(),
+    };
+    const uowStorage = new AsyncLocalStorage<UnitOfWork>();
+    const metadataStorage = new AsyncLocalStorage<MetadataContext>();
+    const enricher = new MetadataEnricher(metadataStorage);
+
+    const acquired: string[] = [];
+    const released: string[] = [];
+    let locked = false;
+    const locker: AggregateLocker = {
+      async acquire(aggregateName: string, aggregateId: ID) {
+        if (locked) throw new Error("already locked");
+        locked = true;
+        acquired.push(`${aggregateName}:${aggregateId}`);
+      },
+      async release(aggregateName: string, aggregateId: ID) {
+        locked = false;
+        released.push(`${aggregateName}:${aggregateId}`);
+      },
+    };
+    const strategy = new PessimisticConcurrencyStrategy(locker);
+
+    const executor = new CommandLifecycleExecutor(
+      new GlobalAggregatePersistenceResolver(persistence),
+      infrastructure,
+      createInMemoryUnitOfWork,
+      strategy,
+      uowStorage,
+      enricher,
+    );
+
+    const uow = createInMemoryUnitOfWork();
+    await uowStorage.run(uow, async () => {
+      await executor.execute("Counter", Counter, {
+        name: "Bump",
+        payload: undefined,
+        targetAggregateId: "c1",
+      });
+    });
+
+    // The lock is acquired but the owning UoW hasn't committed yet --
+    // it must still be held.
+    expect(acquired).toEqual(["Counter:c1"]);
+    expect(released).toEqual([]);
+
+    // A second attempt on the same aggregate must fail to acquire while
+    // the first command's owning UoW is still open.
+    await expect(
+      uowStorage.run(createInMemoryUnitOfWork(), () =>
+        executor.execute("Counter", Counter, {
+          name: "Bump",
+          payload: undefined,
+          targetAggregateId: "c1",
+        }),
+      ),
+    ).rejects.toThrow("already locked");
+
+    // The owning UoW now settles (simulating Domain.withUnitOfWork / SagaExecutor).
+    await uow.commit();
+    await runUowCompletionHooks(uow, true);
+
+    expect(released).toEqual(["Counter:c1"]);
+  });
+});
+```
+
+### explicit UoW: pending snapshot is saved after the owning UoW commits, not dropped
+
+```ts
+import { AsyncLocalStorage } from "node:async_hooks";
+import { describe, it, expect } from "vitest";
+import { defineAggregate, everyNEvents } from "@noddde/core";
+import type {
+  AggregateTypes,
+  DefineCommands,
+  DefineEvents,
+  Infrastructure,
+  UnitOfWork,
+} from "@noddde/core";
+import {
+  InMemoryEventSourcedAggregatePersistence,
+  InMemoryCommandBus,
+  EventEmitterEventBus,
+  InMemoryQueryBus,
+  InMemorySnapshotStore,
+  createInMemoryUnitOfWork,
+} from "@noddde/engine";
+import { CommandLifecycleExecutor } from "../../../executors/command-lifecycle-executor";
+import { MetadataEnricher } from "../../../executors/metadata-enricher";
+import type { MetadataContext } from "../../../domain";
+import { OptimisticConcurrencyStrategy } from "../../../concurrency-strategy";
+import { runUowCompletionHooks } from "../../../uow-completion-hooks";
+import { GlobalAggregatePersistenceResolver } from "../../../aggregate-persistence-resolver";
+
+type AccState = { total: number };
+type AccEvent = DefineEvents<{ Added: { n: number } }>;
+type AccCommand = DefineCommands<{ Add: { n: number } }>;
+type AccTypes = AggregateTypes & {
+  state: AccState;
+  events: AccEvent;
+  commands: AccCommand;
+  infrastructure: Infrastructure;
+};
+
+const Accumulator = defineAggregate<AccTypes>({
+  initialState: { total: 0 },
+  decide: {
+    Add: (command) => ({ name: "Added", payload: { n: command.payload.n } }),
+  },
+  evolve: {
+    Added: (payload, state) => ({ total: state.total + payload.n }),
+  },
+});
+
+describe("CommandLifecycleExecutor", () => {
+  it("should defer the snapshot save to the owning UoW's commit in the explicit-UoW path", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+    const infrastructure = {
+      commandBus: new InMemoryCommandBus(),
+      eventBus: new EventEmitterEventBus(),
+      queryBus: new InMemoryQueryBus(),
+    };
+    const uowStorage = new AsyncLocalStorage<UnitOfWork>();
+    const metadataStorage = new AsyncLocalStorage<MetadataContext>();
+    const enricher = new MetadataEnricher(metadataStorage);
+    const strategy = new OptimisticConcurrencyStrategy(0);
+    const snapshotStore = new InMemorySnapshotStore();
+    const snapshotStrategy = everyNEvents(1); // trigger on every command
+
+    const executor = new CommandLifecycleExecutor(
+      new GlobalAggregatePersistenceResolver(persistence),
+      infrastructure,
+      createInMemoryUnitOfWork,
+      strategy,
+      uowStorage,
+      enricher,
+      () => ({ store: snapshotStore, strategy: snapshotStrategy }),
+    );
+
+    const uow = createInMemoryUnitOfWork();
+    await uowStorage.run(uow, async () => {
+      await executor.execute("Accumulator", Accumulator, {
+        name: "Add",
+        payload: { n: 5 },
+        targetAggregateId: "acc1",
+      });
+    });
+
+    // Not saved yet -- the owning UoW hasn't committed.
+    expect(await snapshotStore.load("Accumulator", "acc1")).toBeNull();
+
+    await uow.commit();
+    await runUowCompletionHooks(uow, true);
+
+    const snapshot = await snapshotStore.load("Accumulator", "acc1");
+    expect(snapshot).not.toBeNull();
+    expect(snapshot!.state).toEqual({ total: 5 });
+  });
+
+  it("should NOT save the deferred snapshot if the owning UoW rolls back", async () => {
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+    const infrastructure = {
+      commandBus: new InMemoryCommandBus(),
+      eventBus: new EventEmitterEventBus(),
+      queryBus: new InMemoryQueryBus(),
+    };
+    const uowStorage = new AsyncLocalStorage<UnitOfWork>();
+    const metadataStorage = new AsyncLocalStorage<MetadataContext>();
+    const enricher = new MetadataEnricher(metadataStorage);
+    const strategy = new OptimisticConcurrencyStrategy(0);
+    const snapshotStore = new InMemorySnapshotStore();
+    const snapshotStrategy = everyNEvents(1);
+
+    const executor = new CommandLifecycleExecutor(
+      new GlobalAggregatePersistenceResolver(persistence),
+      infrastructure,
+      createInMemoryUnitOfWork,
+      strategy,
+      uowStorage,
+      enricher,
+      () => ({ store: snapshotStore, strategy: snapshotStrategy }),
+    );
+
+    const uow = createInMemoryUnitOfWork();
+    await uowStorage.run(uow, async () => {
+      await executor.execute("Accumulator", Accumulator, {
+        name: "Add",
+        payload: { n: 5 },
+        targetAggregateId: "acc1",
+      });
+    });
+
+    await uow.rollback();
+    await runUowCompletionHooks(uow, false);
+
+    expect(await snapshotStore.load("Accumulator", "acc1")).toBeNull();
   });
 });
 ```

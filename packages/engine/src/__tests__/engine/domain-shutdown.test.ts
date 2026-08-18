@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   wireDomain,
   DomainShutdownError,
@@ -406,5 +406,32 @@ describe("Domain.shutdown outbox relay", () => {
 
     const remaining = await outboxStore.loadUnpublished();
     expect(remaining).toHaveLength(0);
+  });
+});
+
+describe("Domain.shutdown deadline timer cleanup", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("should not leave a pending timer after a fast shutdown resolves", async () => {
+    const domain = await wireDomain(
+      defineDomain({
+        writeModel: { aggregates: {} },
+        readModel: { projections: {} },
+      }),
+    );
+
+    vi.useFakeTimers();
+
+    const shutdownPromise = domain.shutdown({ timeoutMs: 30_000 });
+    // Nothing is in-flight and no outbox is configured, so both drain
+    // phases resolve on their own during the same microtask flush --
+    // let fake timers process any microtasks/timers created so far.
+    await vi.advanceTimersByTimeAsync(0);
+    await shutdownPromise;
+
+    // The 30s deadline timer(s) must already be cleared -- none pending.
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

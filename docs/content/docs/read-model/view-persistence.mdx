@@ -502,7 +502,8 @@ The engine validates projection configuration during `wireDomain()`:
 
 - **`on` entry without `id` when `viewStore` configured**: Throws at init. Each `on` entry must have an `id` function when a view store is provided.
 - **`viewStore` configured but no `on` entries with `id`**: Valid only if `on` is empty — then the projection is query-only.
-- **`consistency: "strong"` without `viewStore` in config**: Silently ignored -- treated as eventual.
+- **`consistency: "strong"` without `viewStore` in config**: Throws at init, naming the projection. A strong-consistency projection cannot function without a view store, so a missing one is always a wiring mistake rather than something to silently downgrade to eventual.
+- **`consistency: "eventual"` (or unset) without `viewStore` in config**: Logs a `warn` at init and proceeds. The projection receives no live events -- it may be legitimately unused in this deployment, so this is a warning, not an error.
 
 ## Optional Fields
 

@@ -208,15 +208,8 @@ The method executes these steps in order. Steps 1–6 are validation (steps abov
 8. **Logger setup** — Resolves the logger as `options.logger ?? domain.infrastructure.logger.child("projection-rebuild")`. Logs `info` start (`"rebuilding <name>"`).
 9. **Subscription detach** — For every event name in `projection.on`, the method removes the projection's specific subscription handler from the event bus. The Domain maintains an internal registry of `(projectionName, eventName) → handler` populated during `init()`'s eventual-consistency wiring so the rebuild can detach precisely these handlers without disturbing sagas or other projections.
 10. **Truncate** — Calls `await baseStore.truncate()`. If `truncate()` throws, the method propagates the error; subscriptions remain detached and MUST be re-attached in the `finally` block (see step 14).
-11. **Replay loop** — Iterates `for await (const event of reader.read())`:
-    - Increments `eventsRead`.
-    - Looks up `handler = projection.on[event.name]`. If `undefined`, continues (skipping).
-    - Computes `viewId = handler.id ? handler.id(event) : event.metadata?.aggregateId`. If both are `undefined`, throws `Error("rebuildProjection: cannot derive viewId for event '<name>'; projection.on['<name>'].id is required")`.
-    - Loads `current = (await baseStore.load(viewId)) ?? projection.initialView`.
-    - Computes `next = await handler.reduce(event, current)`.
-    - If `next === DeleteView`: calls `await baseStore.delete(viewId)`, increments `viewsDeleted`, increments `eventsApplied`.
-    - Else: calls `await baseStore.save(viewId, next)`, increments `eventsApplied`.
-    - If `eventsApplied % progressInterval === 0`: invokes `await onProgress?.({ eventsApplied })`.
+11. **Replay loop** — Iterates `for await (const event of reader.read())`: - Increments `eventsRead`. - **Upcasts the event** before any handler lookup: resolves `event.metadata?.aggregateName`, looks it up in a domain-wide `eventName → upcaster chain` table built once per rebuild by unioning every aggregate's `Aggregate.upcasters` keyed by their owning aggregate name (see requirement 11a), and — if a chain matches `event.metadata.aggregateName` + `event.name` — replaces `event` with the result of applying that chain (same semantics as `upcastEvents` on the aggregate-replay path). Events with no matching aggregate name, or whose aggregate declares no upcaster for that event name, replay unchanged. - Looks up `handler = projection.on[event.name]` (using the possibly-upcasted event's name — an upcaster chain may rename an event across versions). If `undefined`, continues (skipping). - Computes `viewId = handler.id ? handler.id(event) : event.metadata?.aggregateId`. If both are `undefined`, throws `Error("rebuildProjection: cannot derive viewId for event '<name>'; projection.on['<name>'].id is required")`. - Loads `current = (await baseStore.load(viewId)) ?? projection.initialView`. - Computes `next = await handler.reduce(event, current)` — `event` here is the upcasted event, so reducers always see the latest schema version, exactly like aggregate command handlers do. - If `next === DeleteView`: calls `await baseStore.delete(viewId)`, increments `viewsDeleted`, increments `eventsApplied`. - Else: calls `await baseStore.save(viewId, next)`, increments `eventsApplied`. - If `eventsApplied % progressInterval === 0`: invokes `await onProgress?.({ eventsApplied })`.
+    11a. **Upcaster table construction** — Before the replay loop starts, the rebuild helper builds a `Map<string, Map<string, EventUpcaster[]>>` keyed `aggregateName → eventName → upcaster chain`, sourced from `definition.writeModel.aggregates[aggregateName].upcasters` for every aggregate in the domain (the same `upcasters` shape consumed by `upcastEvents` on the command-lifecycle path — no new core type). `Domain.rebuildProjection` threads this table into the (internal, non-exported) `RebuildContext` alongside the existing fields; it costs one pass over the aggregate map, done once per rebuild call, not per event. An aggregate with no `upcasters` contributes no entries.
 12. **Result accumulation** — Tracks `durationMs` from validation-end to subscription-reattach.
 13. **Subscription re-attach** — In a `finally` block, re-subscribes every previously detached handler on the event bus. The re-attach uses the SAME handler functions originally registered by `Domain.init()` — the registry stores the function references, not just metadata.
 14. **Logger completion** — Logs `info` completion with the final counters.
@@ -267,6 +260,8 @@ The method executes these steps in order. Steps 1–6 are validation (steps abov
 - **Domain shutting down** — `rebuildProjection` called after `shutdown()` throws `DomainShutdownError` (same as `dispatchCommand`/`dispatchQuery`). Validation does NOT proceed.
 - **EventReader yields events with no `metadata`** — Handlers with explicit `id` work; handlers without `id` AND without `event.metadata.aggregateId` throw per requirement 11.
 - **`progressInterval = 1`** — `onProgress` fires for every applied event. Acceptable but slow.
+- **Stored event predates an upcaster chain (schema evolution)** — The event is upcasted to the latest shape (requirement 11) before the reducer runs, so the rebuilt view matches what a fresh aggregate replay would produce. Without a matching aggregate name or upcaster entry, the event passes through unchanged — this is only a corruption risk if the projection's reducer actually depends on the newer shape for that event, which is a modeling error in the projection itself, not a rebuild bug.
+- **Event has no `metadata.aggregateName`** (e.g., hand-crafted or produced by a standalone command handler) — No upcaster chain can be resolved; the event replays unchanged, matching pre-upcast behavior.
 
 ## Integration Points
 
@@ -278,6 +273,8 @@ The method executes these steps in order. Steps 1–6 are validation (steps abov
 - **`DeleteView`** — recognized during replay exactly as in the live event flow.
 - **`projection.consistency`** — only `"eventual"` is supported in v1.
 - **Logger** — Operations are logged at `info`/`debug`/`error` levels, mirroring the rest of the engine.
+- **`Aggregate.upcasters`** — read (not written) by rebuild to build the upcaster table (requirement 11a). This is the ONLY additional read-model consumer of upcasters as of this spec.
+- **Scope note — upcasting is NOT applied on every event path.** Only `rebuildProjection`'s replay loop and the aggregate command-lifecycle load path (`specs/engine/executors/command-lifecycle-executor.spec.md`) apply upcasters as of this version. Live event-bus delivery to projection subscriptions (`Domain.init()` step 10) and any broker-backed consumer replay stored events at their original schema version — callers relying on upcasting for those paths must upcast themselves or wait for a future domain-level upcaster registration. This is a known, documented gap, not an oversight.
 
 ## CLI Template Maintenance
 
@@ -1309,6 +1306,141 @@ describe("rebuildProjection: onProgress callback", () => {
 
     expect(result.eventsApplied).toBe(5);
     expect(ticks).toEqual([2, 4]); // tick at applied=2 and applied=4
+  });
+});
+```
+
+### Replay applies the aggregate's upcaster chain before reducing
+
+```ts
+import { describe, it, expect } from "vitest";
+import {
+  defineAggregate,
+  defineDomain,
+  defineProjection,
+  type DefineEvents,
+  type DefineCommands,
+  type DefineQueries,
+} from "@noddde/core";
+import {
+  wireDomain,
+  InMemoryViewStoreFactory,
+  InMemoryEventSourcedAggregatePersistence,
+} from "@noddde/engine";
+
+describe("rebuildProjection: upcasting", () => {
+  it("should upcast stored V1 events before invoking the reducer", async () => {
+    // V2 shape: `name` was split into `firstName`/`lastName`. A projection
+    // written against V2 must never see raw V1 payloads during rebuild.
+    type UserView = { id: string; firstName: string; lastName: string };
+    type UserEvent = DefineEvents<{
+      UserRegistered: { id: string; firstName: string; lastName: string };
+    }>;
+    type UserCommand = DefineCommands<{
+      RegisterUser: { id: string; firstName: string; lastName: string };
+    }>;
+    type UserQuery = DefineQueries<{
+      GetUser: { payload: { id: string }; result: UserView | null };
+    }>;
+
+    const User = defineAggregate<{
+      state: UserView | null;
+      commands: UserCommand;
+      events: UserEvent;
+      infrastructure: {};
+    }>({
+      name: "User",
+      initialState: () => null,
+      decide: {
+        RegisterUser: (cmd) => ({
+          name: "UserRegistered",
+          payload: cmd.payload,
+        }),
+      },
+      evolve: {
+        UserRegistered: (p) => ({
+          id: p.id,
+          firstName: p.firstName,
+          lastName: p.lastName,
+        }),
+      },
+      upcasters: {
+        // Upcaster chain steps transform the event PAYLOAD only (per
+        // UpcasterMap in @noddde/core), not the full event envelope.
+        UserRegistered: [
+          // V1 -> V2: `name: "Ada Lovelace"` becomes firstName/lastName.
+          (payload: any) => {
+            if ("name" in payload) {
+              const [firstName, ...rest] = payload.name.split(" ");
+              return { id: payload.id, firstName, lastName: rest.join(" ") };
+            }
+            return payload;
+          },
+        ],
+      },
+    });
+
+    const UserSummary = defineProjection<{
+      events: UserEvent;
+      queries: UserQuery;
+      view: UserView;
+      infrastructure: {};
+    }>({
+      on: {
+        UserRegistered: {
+          id: (e) => e.payload.id,
+          // A V1 payload with no firstName/lastName would silently write
+          // `undefined` here if rebuild did not upcast first.
+          reduce: (e) => ({
+            id: e.payload.id,
+            firstName: e.payload.firstName,
+            lastName: e.payload.lastName,
+          }),
+        },
+      },
+      queryHandlers: {},
+    });
+
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+    const factory = new InMemoryViewStoreFactory<UserView>();
+    const def = defineDomain({
+      writeModel: { aggregates: { User } },
+      readModel: { projections: { UserSummary } },
+    });
+    const domain = await wireDomain(def, {
+      aggregates: { persistence: () => persistence },
+      projections: { UserSummary: { viewStore: factory } },
+    });
+
+    // Write a raw V1 event directly to the store, bypassing the aggregate's
+    // decide/evolve (which only knows the current, V2 shape) — this
+    // simulates events written before the schema evolved.
+    await persistence.save(
+      "User",
+      "u-1",
+      [
+        {
+          name: "UserRegistered",
+          payload: { id: "u-1", name: "Ada Lovelace" } as any,
+          metadata: {
+            eventId: "evt-1",
+            aggregateName: "User",
+            aggregateId: "u-1",
+          } as any,
+        },
+      ],
+      0,
+    );
+
+    const result = await domain.rebuildProjection("UserSummary");
+
+    expect(result.eventsApplied).toBe(1);
+    const view = await factory.getForContext().load("u-1");
+    expect(view).toEqual({
+      id: "u-1",
+      firstName: "Ada",
+      lastName: "Lovelace",
+    });
   });
 });
 ```

@@ -410,12 +410,17 @@ export function definePersistenceContract(
               0,
             );
             const [loaded] = await ctx.eventSourced.load("Order", id);
+            // -0 is not JSON-representable (JSON.stringify(-0) === "0"), so
+            // it comes back as +0 — normalize the expectation through the
+            // same JSON round-trip rather than comparing against the raw
+            // generated payload.
+            const normalizedPayload = JSON.parse(JSON.stringify(payload));
             if (lossy) {
               expect(roundForLossyCompare(loaded?.payload)).toEqual(
-                roundForLossyCompare(payload),
+                roundForLossyCompare(normalizedPayload),
               );
             } else {
-              expect(loaded?.payload).toEqual(payload);
+              expect(loaded?.payload).toEqual(normalizedPayload);
             }
           }),
           { numRuns: 40 },

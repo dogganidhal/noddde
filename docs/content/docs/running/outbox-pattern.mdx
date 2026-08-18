@@ -171,6 +171,10 @@ The outbox guarantees events are delivered **at least once**, not exactly once. 
 
 Consumers must be **idempotent**. Projections in noddde are naturally idempotent (pure reducers). Sagas should check `event.metadata.eventId` to detect duplicates.
 
+The guarantee is scoped to what the event bus reports back to the relay: an entry is marked published only when `dispatch()` resolves without throwing. A broker-backed bus that fails to deliver rejects, so the relay retries the entry on the next poll. An in-process bus that isolates handler errors and always resolves (such as `EventEmitterEventBus`) never reports a handler failure, so the entry is marked published anyway — at-least-once then holds at the transport level, not against in-process handler failures.
+
+A transient failure while polling (for example a dropped database connection in `loadUnpublished`) is logged at `error` level and treated as "this poll did nothing"; the relay keeps its timer and retries on the next tick.
+
 ## Integration with Unit of Work
 
 The outbox integrates seamlessly with all UoW scenarios:

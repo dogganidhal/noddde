@@ -2,9 +2,11 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { describe, it, expect, vi } from "vitest";
 import { defineAggregate, everyNEvents } from "@noddde/core";
 import type {
+  AggregateLocker,
   AggregateTypes,
   DefineCommands,
   DefineEvents,
+  ID,
   Infrastructure,
   UnitOfWork,
   Event,
@@ -23,9 +25,11 @@ import { MetadataEnricher } from "../../../executors/metadata-enricher";
 import type { MetadataContext } from "../../../domain";
 import {
   OptimisticConcurrencyStrategy,
+  PessimisticConcurrencyStrategy,
   type ConcurrencyStrategy,
 } from "../../../concurrency-strategy";
 import { GlobalAggregatePersistenceResolver } from "../../../aggregate-persistence-resolver";
+import { runUowCompletionHooks } from "../../../uow-completion-hooks";
 
 // ============================================================
 // Shared aggregate definitions
@@ -517,6 +521,224 @@ describe("CommandLifecycleExecutor", () => {
     const stored = await persistence.load("FailingAggregate", "f1");
     expect(stored).toHaveLength(0);
     expect(publishedEvents).toHaveLength(0);
+  });
+
+  // ============================================================
+  // Explicit UoW: deferred lock release / deferred snapshot save
+  // ============================================================
+
+  it("should not release a pessimistic lock until the owning UoW settles", async () => {
+    type LockState = { count: number };
+    type LockEvent = DefineEvents<{ Bumped: {} }>;
+    type LockCommand = DefineCommands<{ Bump: void }>;
+    type LockTypes = AggregateTypes & {
+      state: LockState;
+      events: LockEvent;
+      commands: LockCommand;
+      infrastructure: Infrastructure;
+    };
+
+    const Counter = defineAggregate<LockTypes>({
+      initialState: { count: 0 },
+      decide: { Bump: () => ({ name: "Bumped", payload: {} }) },
+      evolve: { Bumped: (_p, s) => ({ count: s.count + 1 }) },
+    });
+
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+    const infrastructure = {
+      commandBus: new InMemoryCommandBus(),
+      eventBus: new EventEmitterEventBus(),
+      queryBus: new InMemoryQueryBus(),
+    };
+    const uowStorage = new AsyncLocalStorage<UnitOfWork>();
+    const metadataStorage = new AsyncLocalStorage<MetadataContext>();
+    const enricher = new MetadataEnricher(metadataStorage);
+
+    const acquired: string[] = [];
+    const released: string[] = [];
+    let locked = false;
+    const locker: AggregateLocker = {
+      async acquire(aggregateName: string, aggregateId: ID) {
+        if (locked) throw new Error("already locked");
+        locked = true;
+        acquired.push(`${aggregateName}:${aggregateId}`);
+      },
+      async release(aggregateName: string, aggregateId: ID) {
+        locked = false;
+        released.push(`${aggregateName}:${aggregateId}`);
+      },
+    };
+    const strategy = new PessimisticConcurrencyStrategy(locker);
+
+    const executor = new CommandLifecycleExecutor(
+      new GlobalAggregatePersistenceResolver(persistence),
+      infrastructure,
+      createInMemoryUnitOfWork,
+      strategy,
+      uowStorage,
+      enricher,
+    );
+
+    const uow = createInMemoryUnitOfWork();
+    await uowStorage.run(uow, async () => {
+      await executor.execute("Counter", Counter, {
+        name: "Bump",
+        payload: undefined,
+        targetAggregateId: "c1",
+      });
+    });
+
+    // The lock is acquired but the owning UoW hasn't committed yet --
+    // it must still be held.
+    expect(acquired).toEqual(["Counter:c1"]);
+    expect(released).toEqual([]);
+
+    // A second attempt on the same aggregate must fail to acquire while
+    // the first command's owning UoW is still open.
+    await expect(
+      uowStorage.run(createInMemoryUnitOfWork(), () =>
+        executor.execute("Counter", Counter, {
+          name: "Bump",
+          payload: undefined,
+          targetAggregateId: "c1",
+        }),
+      ),
+    ).rejects.toThrow("already locked");
+
+    // The owning UoW now settles (simulating Domain.withUnitOfWork / SagaExecutor).
+    await uow.commit();
+    await runUowCompletionHooks(uow, true);
+
+    expect(released).toEqual(["Counter:c1"]);
+  });
+
+  it("should defer the snapshot save to the owning UoW's commit in the explicit-UoW path", async () => {
+    type AccState = { total: number };
+    type AccEvent = DefineEvents<{ Added: { n: number } }>;
+    type AccCommand = DefineCommands<{ Add: { n: number } }>;
+    type AccTypes = AggregateTypes & {
+      state: AccState;
+      events: AccEvent;
+      commands: AccCommand;
+      infrastructure: Infrastructure;
+    };
+
+    const Accumulator = defineAggregate<AccTypes>({
+      initialState: { total: 0 },
+      decide: {
+        Add: (command) => ({
+          name: "Added",
+          payload: { n: command.payload.n },
+        }),
+      },
+      evolve: {
+        Added: (payload, state) => ({ total: state.total + payload.n }),
+      },
+    });
+
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+    const infrastructure = {
+      commandBus: new InMemoryCommandBus(),
+      eventBus: new EventEmitterEventBus(),
+      queryBus: new InMemoryQueryBus(),
+    };
+    const uowStorage = new AsyncLocalStorage<UnitOfWork>();
+    const metadataStorage = new AsyncLocalStorage<MetadataContext>();
+    const enricher = new MetadataEnricher(metadataStorage);
+    const strategy = new OptimisticConcurrencyStrategy(0);
+    const snapshotStore = new InMemorySnapshotStore();
+    const snapshotStrategy = everyNEvents(1); // trigger on every command
+
+    const executor = new CommandLifecycleExecutor(
+      new GlobalAggregatePersistenceResolver(persistence),
+      infrastructure,
+      createInMemoryUnitOfWork,
+      strategy,
+      uowStorage,
+      enricher,
+      () => ({ store: snapshotStore, strategy: snapshotStrategy }),
+    );
+
+    const uow = createInMemoryUnitOfWork();
+    await uowStorage.run(uow, async () => {
+      await executor.execute("Accumulator", Accumulator, {
+        name: "Add",
+        payload: { n: 5 },
+        targetAggregateId: "acc1",
+      });
+    });
+
+    // Not saved yet -- the owning UoW hasn't committed.
+    expect(await snapshotStore.load("Accumulator", "acc1")).toBeNull();
+
+    await uow.commit();
+    await runUowCompletionHooks(uow, true);
+
+    const snapshot = await snapshotStore.load("Accumulator", "acc1");
+    expect(snapshot).not.toBeNull();
+    expect(snapshot!.state).toEqual({ total: 5 });
+  });
+
+  it("should NOT save the deferred snapshot if the owning UoW rolls back", async () => {
+    type AccState = { total: number };
+    type AccEvent = DefineEvents<{ Added: { n: number } }>;
+    type AccCommand = DefineCommands<{ Add: { n: number } }>;
+    type AccTypes = AggregateTypes & {
+      state: AccState;
+      events: AccEvent;
+      commands: AccCommand;
+      infrastructure: Infrastructure;
+    };
+
+    const Accumulator = defineAggregate<AccTypes>({
+      initialState: { total: 0 },
+      decide: {
+        Add: (command) => ({
+          name: "Added",
+          payload: { n: command.payload.n },
+        }),
+      },
+      evolve: {
+        Added: (payload, state) => ({ total: state.total + payload.n }),
+      },
+    });
+
+    const persistence = new InMemoryEventSourcedAggregatePersistence();
+    const infrastructure = {
+      commandBus: new InMemoryCommandBus(),
+      eventBus: new EventEmitterEventBus(),
+      queryBus: new InMemoryQueryBus(),
+    };
+    const uowStorage = new AsyncLocalStorage<UnitOfWork>();
+    const metadataStorage = new AsyncLocalStorage<MetadataContext>();
+    const enricher = new MetadataEnricher(metadataStorage);
+    const strategy = new OptimisticConcurrencyStrategy(0);
+    const snapshotStore = new InMemorySnapshotStore();
+    const snapshotStrategy = everyNEvents(1);
+
+    const executor = new CommandLifecycleExecutor(
+      new GlobalAggregatePersistenceResolver(persistence),
+      infrastructure,
+      createInMemoryUnitOfWork,
+      strategy,
+      uowStorage,
+      enricher,
+      () => ({ store: snapshotStore, strategy: snapshotStrategy }),
+    );
+
+    const uow = createInMemoryUnitOfWork();
+    await uowStorage.run(uow, async () => {
+      await executor.execute("Accumulator", Accumulator, {
+        name: "Add",
+        payload: { n: 5 },
+        targetAggregateId: "acc1",
+      });
+    });
+
+    await uow.rollback();
+    await runUowCompletionHooks(uow, false);
+
+    expect(await snapshotStore.load("Accumulator", "acc1")).toBeNull();
   });
 
   // ============================================================

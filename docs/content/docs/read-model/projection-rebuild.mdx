@@ -97,16 +97,21 @@ The rebuild pipeline, in order:
 1. **Validate.** Resolve the projection by name, reject `consistency: "strong"`, resolve the view store factory, resolve an `EventReader` (see below), check that the view store has a `truncate()` method.
 2. **Detach subscriptions.** Remove the projection's specific event-bus handlers so they don't fire mid-replay.
 3. **Truncate.** Call `viewStore.truncate()` to clear the view universe atomically.
-4. **Replay.** Iterate the full event log (via `EventReader.read()`). For each event whose name appears in the projection's `on` map: derive `viewId`, load the current view (or use `initialView`), run the reducer, save or delete the new view, tick `onProgress` every `progressInterval` events.
+4. **Replay.** Iterate the full event log (via `EventReader.read()`). Each event is first upcasted (see below). For each event whose name appears in the projection's `on` map: derive `viewId`, load the current view (or use `initialView`), run the reducer, save or delete the new view, tick `onProgress` every `progressInterval` events.
 5. **Re-attach subscriptions.** Always — in a `finally` block, even on failure — so live event flow resumes.
 
 A successful rebuild leaves the view store in a state equivalent to running the same event log through the projection from scratch. A failed rebuild leaves subscriptions re-attached but the view store partially rebuilt — callers should retry the rebuild (after halting writes).
+
+### Upcasting during replay
+
+Replayed events pass through the owning aggregate's upcaster chain before the reducer sees them, mirroring the aggregate rehydration path. The rebuild reads `event.metadata.aggregateName`, looks up that aggregate's `upcasters` map, and applies the chain registered for the event's name — so a reducer written against the current payload shape never sees a stale payload from an older schema version. Events with no `aggregateName`, or whose aggregate declares no chain for that event name, replay unchanged. See [Event Versioning & Upcasters](/docs/modeling/event-versioning).
 
 ### What rebuild explicitly does **not** do
 
 - **It does not pause aggregate writes.** v1 of the API requires the **caller** to ensure no commands are dispatched while a rebuild is in flight. Concurrent writes during a rebuild produce undefined results — the truncate races the in-flight UoW, the replay races new events being persisted, and the post-rebuild views can drift from the log. The framework's roadmap includes serialized rebuild and per-projection pause primitives; v1 is intentionally simple.
 - **It does not rebuild strong-consistency projections.** Strong-consistency projections write inside the aggregate's UoW; rebuilding them safely requires holding write locks across the entire log. v1 throws `StrongConsistencyRebuildError` before any I/O for these projections. To migrate a strong-consistency projection, switch it to eventual consistency for the rebuild window, rebuild, then switch back — or do it during a maintenance window with all writers stopped.
 - **It does not serialize concurrent rebuilds of the same projection.** Calling `rebuildProjection("X")` twice in parallel is undefined. Rebuilds of _different_ projections are independent and safe to run concurrently.
+- **It does not upcast events outside the replay loop.** Upcaster chains are applied on exactly two paths: rebuild replay and aggregate rehydration. Events delivered to projections and sagas through the live event bus — including a broker-backed consumer replaying stored events — arrive at their stored schema version. This is a known limitation, tracked separately from rebuild.
 - **It does not enforce idempotency.** Rebuild does not consult `idempotencyStore` — it's replaying persisted history, not re-handling commands. Reducers must already be deterministic (they were when the projection was running).
 
 ## Halting Writes
