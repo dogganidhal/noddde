@@ -1,6 +1,6 @@
 {
   "name": "@noddde/drizzle",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0-rc.2",
   "description": "Drizzle ORM persistence adapter for noddde",
   "license": "MIT",
   "author": "Nidhal Dogga",
@@ -84,7 +84,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@noddde/core": "^1.0.0-rc.1"
+    "@noddde/core": "^1.0.0-rc.2"
   },
   "peerDependencies": {
     "drizzle-orm": ">=0.30.0 <0.46.0"

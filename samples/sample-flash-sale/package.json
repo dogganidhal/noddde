@@ -1,6 +1,6 @@
 {
   "name": "@noddde/sample-flash-sale",
-  "version": "0.0.2-rc.1",
+  "version": "0.0.2-rc.2",
   "private": true,
   "scripts": {
     "build": "tsc",
@@ -11,11 +11,11 @@
     "start": "tsx src/main.ts"
   },
   "dependencies": {
-    "@noddde/core": "1.0.0-rc.1",
-    "@noddde/engine": "1.0.0-rc.1",
-    "@noddde/typeorm": "1.0.0-rc.1",
-    "@noddde/nats": "1.0.0-rc.1",
-    "@noddde/testing": "1.0.0-rc.1",
+    "@noddde/core": "1.0.0-rc.2",
+    "@noddde/engine": "1.0.0-rc.2",
+    "@noddde/typeorm": "1.0.0-rc.2",
+    "@noddde/nats": "1.0.0-rc.2",
+    "@noddde/testing": "1.0.0-rc.2",
     "nats": "^2.0.0",
     "typeorm": "^0.3.20",
     "pg": "^8.13.0",

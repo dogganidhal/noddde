@@ -1,6 +1,6 @@
 {
   "name": "@noddde/typeorm",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0-rc.2",
   "description": "TypeORM persistence adapter for noddde",
   "license": "MIT",
   "author": "Nidhal Dogga",
@@ -54,7 +54,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@noddde/core": "^1.0.0-rc.1"
+    "@noddde/core": "^1.0.0-rc.2"
   },
   "peerDependencies": {
     "typeorm": ">=0.3.0 <0.4.0"

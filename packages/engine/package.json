@@ -1,6 +1,6 @@
 {
   "name": "@noddde/engine",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0-rc.2",
   "description": "Runtime engine for noddde: domain orchestration and in-memory implementations for DDD, CQRS, and Event Sourcing",
   "license": "MIT",
   "author": "Nidhal Dogga",
@@ -55,7 +55,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@noddde/core": "^1.0.0-rc.1"
+    "@noddde/core": "^1.0.0-rc.2"
   },
   "peerDependencies": {
     "@opentelemetry/api": "^1.0.0"

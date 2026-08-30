@@ -22,11 +22,21 @@
     "@noddde/sample-hotel-booking": "0.0.1"
   },
   "changesets": [
+    "cli-golden-path-and-release-engineering",
+    "core-api-freeze",
+    "drizzle-saga-persistence-contract",
+    "engine-lifecycle-reliability-132-133",
     "fix-adapter-bugs-from-integration-tests",
     "fix-robustness-bugs-102-103-112-115",
+    "kafka-consumer-crash-restart",
+    "messaging-multi-instance-and-safety",
+    "nestjs-metadata-propagation-and-packaging",
+    "prisma-typeorm-saga-persistence-contract",
     "robustness-warmup-idempotency-nats-benchmark",
     "saga-atomicity-core",
     "saga-atomicity-engine",
+    "sql-adapter-concurrency-and-schemas",
+    "testing-domain-harness-error-swallow",
     "typeorm-state-stored-concurrent-create",
     "v1-0-0-rc"
   ]
